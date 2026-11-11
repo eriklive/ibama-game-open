@@ -1,0 +1,52 @@
+<main class="start">
+  <header class="title">
+    <div class="badge" aria-hidden="true">
+      <svg viewBox="0 0 100 100"><polygon points="25,6 75,6 98,50 75,94 25,94 2,50" /></svg>
+    </div>
+    <h1>Jogo do Ibama</h1>
+    <p>Operações táticas contra crimes ambientais</p>
+  </header>
+
+  <section class="maps" aria-labelledby="maps-title">
+    <h2 id="maps-title">Escolha o mapa</h2>
+    <ul role="list">
+      @for (map of maps; track map.id) {
+        <li>
+          <button
+            type="button"
+            class="map-card"
+            [class.selected]="selectedId() === map.id"
+            [class.locked]="!map.available"
+            [disabled]="!map.available"
+            [attr.aria-pressed]="selectedId() === map.id"
+            (click)="choose(map)">
+            <span class="thumb" aria-hidden="true">
+              @for (i of [0, 1, 2, 3, 4, 5, 6]; track i) {
+                <span class="mini-hex"></span>
+              }
+            </span>
+            <span class="info">
+              <span class="name">{{ map.name }}</span>
+              <span class="sub">{{ map.subtitle }}</span>
+            </span>
+            <span class="state">
+              @if (!map.available) {
+                Bloqueado
+              } @else if (selectedId() === map.id) {
+                Selecionado
+              } @else {
+                Tocar para escolher
+              }
+            </span>
+          </button>
+        </li>
+      }
+    </ul>
+  </section>
+
+  <footer class="actions">
+    <button type="button" class="btn btn-primary start-btn" [disabled]="!selectedId()" (click)="start()">
+      Iniciar
+    </button>
+  </footer>
+</main>

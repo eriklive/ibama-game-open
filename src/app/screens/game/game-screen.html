@@ -1,0 +1,54 @@
+<div class="game">
+  <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono azul-claro para escolher o destino."></canvas>
+
+  <header class="hud-top">
+    <button type="button" class="btn btn-ghost back" (click)="exit()" aria-label="Voltar ao início">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+    </button>
+    <div class="mission">
+      <span class="mission-name">{{ map?.name }}</span>
+      <span class="mission-sub">Teste de movimentação</span>
+    </div>
+    <div class="moves" role="status" [attr.aria-label]="'Movimentos feitos: ' + movesDone() + ' de ' + totalMoves">
+      <span class="moves-label">Movimentos</span>
+      <span class="pips">
+        @for (i of pips; track i) {
+          <span class="pip" [class.done]="i < movesDone()" [class.current]="i === movesDone()">{{ i + 1 }}</span>
+        }
+      </span>
+    </div>
+  </header>
+
+  @if (!finished()) {
+    <footer class="hud-bottom">
+      @if (moving()) {
+        <div class="hint">Movendo…</div>
+      } @else if (selected(); as s) {
+        <div class="hint">
+          <strong>Destino escolhido</strong>
+          <span>{{ selectedDistance() }} {{ selectedDistance() === 1 ? 'hexágono' : 'hexágonos' }} de distância</span>
+        </div>
+        <div class="buttons">
+          <button type="button" class="btn btn-ghost" (click)="cancel()">Cancelar</button>
+          <button type="button" class="btn btn-primary confirm" (click)="confirm()">Confirmar</button>
+        </div>
+      } @else {
+        <div class="hint">
+          <strong>Toque num hexágono claro</strong>
+          <span>Anda até {{ range }} hexágonos em qualquer direção · arraste para mover a câmera</span>
+        </div>
+      }
+    </footer>
+  } @else {
+    <div class="overlay" role="dialog" aria-modal="true" aria-labelledby="done-title">
+      <div class="card">
+        <h2 id="done-title">Teste concluído</h2>
+        <p>Você fez {{ totalMoves }} movimentos no {{ map?.name }}.</p>
+        <div class="buttons">
+          <button type="button" class="btn btn-ghost" (click)="exit()">Início</button>
+          <button type="button" class="btn btn-primary" (click)="restart()">Jogar de novo</button>
+        </div>
+      </div>
+    </div>
+  }
+</div>
