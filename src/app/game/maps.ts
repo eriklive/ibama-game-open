@@ -6,8 +6,25 @@ export interface GameMap {
   rows: number;
   /** Disponível para jogar agora. */
   available: boolean;
-  start: { col: number; row: number };
+  /** Posições iniciais, uma por personagem (na ordem de `CHARACTERS`). */
+  starts: { col: number; row: number }[];
 }
+
+export interface Character {
+  id: string;
+  name: string;
+  /** Letra exibida no retrato da interface. */
+  initial: string;
+  /** Cor do corpo da peça no tabuleiro e do retrato (hex RGB). */
+  color: number;
+}
+
+/** Os agentes jogáveis, na ordem dos turnos. */
+export const CHARACTERS: Character[] = [
+  { id: 'ana', name: 'Ana', initial: 'A', color: 0x2f9e57 },
+  { id: 'bruno', name: 'Bruno', initial: 'B', color: 0xe0712c },
+  { id: 'clara', name: 'Clara', initial: 'C', color: 0x9b5bd6 },
+];
 
 export const MAPS: GameMap[] = [
   {
@@ -17,7 +34,7 @@ export const MAPS: GameMap[] = [
     cols: 12,
     rows: 12,
     available: true,
-    start: { col: 5, row: 6 },
+    starts: [{ col: 5, row: 6 }, { col: 4, row: 7 }, { col: 6, row: 7 }],
   },
   {
     id: 'missao-1-hangar',
@@ -26,13 +43,12 @@ export const MAPS: GameMap[] = [
     cols: 27,
     rows: 11,
     available: false,
-    start: { col: 2, row: 6 },
+    starts: [{ col: 2, row: 6 }, { col: 1, row: 5 }, { col: 1, row: 7 }],
   },
 ];
 
 export const findMap = (id: string | null | undefined): GameMap | undefined =>
   MAPS.find((m) => m.id === id && m.available);
 
-/** Regras do teste de movimentação. */
-export const MOVE_RANGE = 2;
-export const MOVES_PER_TEST = 3;
+/** Regras de movimento: no início de cada turno o personagem rola 2d4 e anda a soma. */
+export const MOVE_DICE = { count: 2, sides: 4 } as const;

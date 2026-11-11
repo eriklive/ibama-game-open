@@ -92,3 +92,61 @@ export function hexToWorld(h: HexCoord, size: number): { x: number; z: number } 
     z: size * Math.sqrt(3) * (h.row + 0.5 * (h.col & 1)),
   };
 }
+
+/** Os 6 vizinhos de um hexágono (podem cair fora do mapa). */
+export function hexNeighbors(h: HexCoord): HexCoord[] {
+  const c = toCube(h);
+  const dirs: [number, number, number][] = [
+    [1, -1, 0], [1, 0, -1], [0, 1, -1], [-1, 1, 0], [-1, 0, 1], [0, -1, 1],
+  ];
+  return dirs.map(([dx, dy, dz]) => fromCube({ x: c.x + dx, y: c.y + dy, z: c.z + dz }));
+}
+
+const inside = (h: HexCoord, cols: number, rows: number): boolean =>
+  h.col >= 0 && h.row >= 0 && h.col < cols && h.row < rows;
+
+/**
+ * Busca em largura a partir de `from`, sem atravessar hexágonos bloqueados.
+ * Devolve, para cada hexágono atingível em até `steps` passos (exceto a origem),
+ * o custo e o hexágono anterior no caminho mais curto.
+ */
+export function reachableHexes(
+  from: HexCoord,
+  steps: number,
+  cols: number,
+  rows: number,
+  blocked: ReadonlySet<string> = new Set(),
+): Map<string, { coord: HexCoord; cost: number; prev: string }> {
+  const out = new Map<string, { coord: HexCoord; cost: number; prev: string }>();
+  const startKey = hexKey(from);
+  const seen = new Set([startKey]);
+  let frontier = [from];
+  for (let cost = 1; cost <= steps && frontier.length; cost++) {
+    const next: HexCoord[] = [];
+    for (const h of frontier) {
+      for (const n of hexNeighbors(h)) {
+        const k = hexKey(n);
+        if (seen.has(k) || !inside(n, cols, rows) || blocked.has(k)) continue;
+        seen.add(k);
+        out.set(k, { coord: n, cost, prev: hexKey(h) });
+        next.push(n);
+      }
+    }
+    frontier = next;
+  }
+  return out;
+}
+
+/** Reconstrói o caminho (sem a origem) até `to` a partir do resultado de `reachableHexes`. */
+export function pathTo(
+  reach: ReadonlyMap<string, { coord: HexCoord; prev: string }>,
+  to: HexCoord,
+): HexCoord[] {
+  const path: HexCoord[] = [];
+  let node = reach.get(hexKey(to));
+  while (node) {
+    path.unshift(node.coord);
+    node = reach.get(node.prev);
+  }
+  return path;
+}
