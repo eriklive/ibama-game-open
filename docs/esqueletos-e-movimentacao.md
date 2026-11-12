@@ -35,9 +35,13 @@ Ossos **obrigatórios** (o resto — dedos, twist, IK helpers — é opcional e 
 | Grupo  | Ossos                                                                 |
 |--------|-----------------------------------------------------------------------|
 | Raiz   | `root` (no chão, entre os pés, sem animação de translação)            |
-| Tronco | `pelvis`, `spine_01`, `spine_02`, `spine_03`, `neck_01`, `head`       |
+| Tronco | `pelvis`, `spine_01`, `spine_02`, `spine_03`, `neck_01`, `Head`       |
 | Braços | `clavicle_l/r`, `upperarm_l/r`, `lowerarm_l/r`, `hand_l/r`            |
 | Pernas | `thigh_l/r`, `calf_l/r`, `foot_l/r`, `ball_l/r`                       |
+
+Conferido no rig baixado (fase 1): são 65 ossos, com dedos, e a cabeça se chama `Head`, com H
+maiúsculo, no corpo e na biblioteca de clipes. Mantemos o nome como veio para não quebrar o vínculo
+dos clipes.
 
 Regras:
 
@@ -63,7 +67,7 @@ Sockets são **nós vazios filhos de ossos**, exportados no GLB com prefixo `soc
 |-------------------|-----------|--------------------------------------------------|
 | `socket_hand_r`   | `hand_r`  | ferramenta principal (rádio, GPS, câmera, arma)   |
 | `socket_hand_l`   | `hand_l`  | item secundário (prancheta, lanterna)             |
-| `socket_head`     | `head`    | chapéu, capacete, boné do Ibama                   |
+| `socket_head`     | `Head`    | chapéu, capacete, boné do Ibama                   |
 | `socket_back`     | `spine_03`| mochila, colete                                   |
 
 Se um modelo vier sem sockets, o código cria o nó em runtime sob o osso com um offset padrão
@@ -407,7 +411,7 @@ flutuação/giro em unidades **sem** rig.
 
 ## 5. Roteiro em fases
 
-1. **Um GLB no lugar de uma peça.** Baixar um humanoide CC0 da Quaternius já no esqueleto UAL,
+1. **Um GLB no lugar de uma peça.** ✅ Feito: ver "Estado da fase 1" abaixo. Baixar um humanoide CC0 da Quaternius já no esqueleto UAL,
    colocar em `public/assets/characters/ana/`, registrar em `LICENSES.md`. `GLTFLoader` +
    `SkeletonUtils.clone`, escala normalizada, só `idle` tocando. Bruno e Clara seguem como peças.
 2. **Biblioteca de clipes + máquina de estados.** `anims/humanoid-base.glb` com o conjunto mínimo,
@@ -423,6 +427,25 @@ flutuação/giro em unidades **sem** rig.
    (`rigid`, rodas procedurais) no mapa do Hangar, usando a mesma máquina de estados.
 7. **Terreno com altura.** `height` por hex no `GameMap`, `step_up/step_down`, regra de desnível
    no `reachableHexes`.
+
+### Estado da fase 1
+
+- **Ana** usa o corpo `Superhero_Female` dos Universal Base Characters com o cabelo `Hair_Buns`
+  ligado aos mesmos ossos: `public/assets/characters/ana/ana.glb`, ~650 KB, ~18k triângulos (corpo 12,8k + cabelo 3,3k + olhos e sobrancelhas).
+- Os clipes `idle`, `walk` e `run` da Universal Animation Library estão em
+  `public/assets/anims/humanoid-base.glb` (~170 KB). Tocam no corpo porque os nomes dos ossos
+  batem; não precisou retarget.
+- Código: `src/app/game/character-model.ts` (`CharacterRig`). No `HexBoard`, a peça vira base do
+  modelo e o personagem corre em linha reta de hexágono em hexágono, virando para onde vai.
+  Bruno e Clara seguem como peças.
+- O build dos dois GLBs está em `tools/assets/` (ver o README de lá).
+- **A versão grátis é menor que a anunciada:** traz só 2 dos 6 corpos (Super-herói masc./fem.)
+  e 43 das 120+ animações. Os outros corpos e animações estão na versão Source, que é paga.
+- **Velocidade dos clipes** (medida no arquivo com root motion): `walk` 0,97 m/s, `run` (trote)
+  5,36 m/s. Na escala do tabuleiro, andando, um deslocamento de 8 hexágonos levaria uns 20 s.
+  Por isso o deslocamento usa o trote a ~1,9 hex/s, com `timeScale` casado.
+- O orçamento de 3–6k triângulos da seção 2.4 não cabe nesses corpos (~13k). Com 3 personagens
+  roda bem; para muitos NPCs vamos precisar de uma versão simplificada.
 
 ---
 

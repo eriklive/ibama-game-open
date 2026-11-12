@@ -16,7 +16,9 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
    enquanto sobrar movimento; o custo é o número de passos.
 5. Quando o movimento acaba, a vez passa sozinha; **Passar a vez** encerra antes.
 6. Toque numa peça no tabuleiro ou num retrato no topo para ver aquele personagem. Quem
-   está na vez flutua com um anel amarelo e o retrato fica destacado como **Na vez**.
+   está na vez ganha um anel amarelo e o retrato fica destacado como **Na vez**.
+7. A Ana já é um personagem 3D animado (fica parada respirando e corre pelo caminho); Bruno e
+   Clara ainda são peças, que flutuam quando estão na vez.
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
@@ -27,6 +29,9 @@ Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 - Grid hexagonal "flat-top" com offset odd-q (`src/app/game/hex.ts`)
 - Mapas, personagens e regras em `src/app/game/maps.ts` (`CHARACTERS`, `MOVE_DICE`)
 - Dados em `src/app/game/dice.ts`; alcance com obstáculos em `hex.ts` (`reachableHexes`, `pathTo`)
+- Personagens 3D em `src/app/game/character-model.ts` (GLB + animações); modelos em `public/assets/`
+  (licenças em `public/assets/LICENSES.md`, build em `tools/assets/`). Proposta completa em
+  `docs/esqueletos-e-movimentacao.md`
 
 ## Desenvolvimento
 

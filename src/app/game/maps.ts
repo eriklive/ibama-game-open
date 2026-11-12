@@ -1,3 +1,5 @@
+import { HUMAN_HEIGHT, HUMANOID_ANIMS, ModelDef } from './character-model';
+
 export interface GameMap {
   id: string;
   name: string;
@@ -17,11 +19,19 @@ export interface Character {
   initial: string;
   /** Cor do corpo da peça no tabuleiro e do retrato (hex RGB). */
   color: number;
+  /** Modelo 3D do personagem; sem ele, o tabuleiro mostra a peça simples. */
+  model?: ModelDef;
 }
 
 /** Os agentes jogáveis, na ordem dos turnos. */
 export const CHARACTERS: Character[] = [
-  { id: 'ana', name: 'Ana', initial: 'A', color: 0x2f9e57 },
+  {
+    id: 'ana',
+    name: 'Ana',
+    initial: 'A',
+    color: 0x2f9e57,
+    model: { url: 'assets/characters/ana/ana.glb', anims: HUMANOID_ANIMS, height: HUMAN_HEIGHT },
+  },
   { id: 'bruno', name: 'Bruno', initial: 'B', color: 0xe0712c },
   { id: 'clara', name: 'Clara', initial: 'C', color: 0x9b5bd6 },
 ];
