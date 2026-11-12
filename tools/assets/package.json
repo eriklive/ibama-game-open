@@ -1,0 +1,16 @@
+{
+  "name": "ibama-game-assets",
+  "private": true,
+  "type": "module",
+  "description": "Build dos modelos 3D do jogo (separado do app para não pesar o npm install principal)",
+  "scripts": {
+    "build": "node build-assets.mjs"
+  },
+  "dependencies": {
+    "@gltf-transform/core": "^4.5.1",
+    "@gltf-transform/extensions": "^4.5.1",
+    "@gltf-transform/functions": "^4.5.1",
+    "meshoptimizer": "^1.3.0",
+    "sharp": "^0.35.5"
+  }
+}

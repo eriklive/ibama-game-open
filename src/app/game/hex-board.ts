@@ -1,10 +1,16 @@
 import * as THREE from 'three';
 import { GameMap } from './maps';
 import { HexCoord, hexKey, hexToWorld, sameHex, worldToHex } from './hex';
+import { CharacterRig, ModelDef } from './character-model';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
 const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa uma fresta entre os hexágonos
+
+/** Peças com modelo 3D: velocidade da corrida entre hexágonos (unidades do mundo/s ≈ 1,9 hex/s). */
+const RUN_SPEED = 3.2;
+/** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
+const BASE_TOP = 0.07;
 
 const COLORS = {
   background: 0x123039,
@@ -34,6 +40,8 @@ export interface BoardUnit {
   id: string;
   color: number;
   start: HexCoord;
+  /** Modelo 3D; enquanto carrega (ou se falhar) a peça simples continua no lugar. */
+  model?: ModelDef;
 }
 
 export interface BoardEnemy {
@@ -58,6 +66,11 @@ interface UnitView extends Mover {
   hitbox: THREE.Mesh;
   /** 0 = parado, 1 = flutuando (personagem da vez); interpolado para suavizar a troca. */
   lift: number;
+  /** Peças da miniatura que somem quando o modelo 3D chega (miolo e alça de frente). */
+  pieceOnly: THREE.Object3D[];
+  rig?: CharacterRig;
+  /** Direção para onde o modelo olha (rad em torno de Y; 0 = +Z, de frente para a câmera). */
+  yaw: number;
 }
 
 interface EnemyView extends Mover {
@@ -128,6 +141,7 @@ export class HexBoard {
   private focusId: string | null = null;
   private moving = false;
   private inputEnabled = true;
+  private disposed = false;
 
   // câmera
   private readonly camTarget = new THREE.Vector3();
@@ -340,15 +354,18 @@ export class HexBoard {
     this.path = path.map(hexKey);
     this.reachable.clear();
     this.paintTiles();
+    u.rig?.matchSpeed('run', RUN_SPEED);
+    u.rig?.play('run', 0.15);
     const epoch = u.epoch;
     for (const step of path) {
-      await this.hopTo(u, step);
+      await (u.rig ? this.runTo(u, step) : this.hopTo(u, step));
       if (u.epoch !== epoch) break;
       u.hex = step;
       this.path.shift();
       this.paintTiles();
       onStep?.(step);
     }
+    u.rig?.play('idle', 0.3);
     this.selected = null;
     this.path = [];
     this.paintTiles();
@@ -356,7 +373,9 @@ export class HexBoard {
   }
 
   dispose(): void {
+    this.disposed = true;
     cancelAnimationFrame(this.frameId);
+    for (const u of this.units.values()) u.rig?.dispose();
     this.resizeObserver.disconnect();
     this.unbindInput();
     this.scene.traverse((obj) => {
@@ -612,7 +631,35 @@ export class HexBoard {
 
     const p = this.worldOf(unit.start);
     group.position.set(p.x, 0.3, p.z);
-    this.units.set(unit.id, { id: unit.id, hex: { ...unit.start }, group, shadow, hitbox, lift: 0, hop: 0, epoch: 0 });
+    const view: UnitView = {
+      id: unit.id, hex: { ...unit.start }, group, shadow, hitbox, lift: 0, hop: 0, epoch: 0,
+      pieceOnly: [dot, nub], yaw: 0,
+    };
+    this.units.set(unit.id, view);
+    if (unit.model) this.attachModel(view, unit.model);
+  }
+
+  /** Troca o miolo da peça pelo personagem animado, que fica de pé sobre o disco. */
+  private async attachModel(u: UnitView, def: ModelDef): Promise<void> {
+    let rig: CharacterRig;
+    try {
+      rig = await CharacterRig.load(def);
+    } catch (err) {
+      console.warn(`Modelo de ${u.id} não carregou; mantendo a peça simples.`, err);
+      return;
+    }
+    if (this.disposed) {
+      rig.dispose();
+      return;
+    }
+    rig.object.position.y = BASE_TOP;
+    u.group.add(rig.object);
+    for (const o of u.pieceOnly) o.visible = false;
+    // a área de toque passa a cobrir o corpo todo
+    u.hitbox.scale.set(0.8, def.height / 0.6, 0.8);
+    u.hitbox.position.y = def.height / 2;
+    rig.play(this.moving ? 'run' : 'idle', 0);
+    u.rig = rig;
   }
 
   private buildMarker(color: number, radius: number, tube: number): THREE.Mesh {
@@ -680,6 +727,35 @@ export class HexBoard {
     });
   }
 
+  /** Corre em linha reta até o hexágono, em velocidade constante, virando para onde vai. */
+  private runTo(u: UnitView, h: HexCoord): Promise<void> {
+    const from = u.group.position.clone();
+    const to = this.worldOf(h);
+    this.camGoal.copy(to);
+    this.clampGoal();
+    u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
+    const duration = (Math.hypot(to.x - from.x, to.z - from.z) / RUN_SPEED) * 1000;
+    const start = performance.now();
+    const epoch = u.epoch;
+    return new Promise((resolve) => {
+      const step = (now: number) => {
+        if (u.epoch !== epoch) return resolve();
+        const t = this.disposed ? 1 : Math.min(1, (now - start) / duration);
+        u.group.position.x = from.x + (to.x - from.x) * t;
+        u.group.position.z = from.z + (to.z - from.z) * t;
+        if (t < 1) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  /** Altura do topo do hexágono sob um ponto (os hexágonos do caminho flutuam). */
+  private groundAt(x: number, z: number): number {
+    const tile = this.tiles.get(hexKey(worldToHex(x, z, HEX_SIZE)));
+    return tile ? tile.mesh.position.y : 0;
+  }
+
   // ---------- câmera / loop ----------
 
   private boardCenter(): THREE.Vector3 {
@@ -723,6 +799,18 @@ export class HexBoard {
     const lk = 1 - Math.exp(-dt * 8);
     for (const u of this.units.values()) {
       const active = u.id === this.activeId;
+      if (u.rig) {
+        // personagem com modelo: fica de pé sobre o hexágono (acompanha a flutuação do caminho)
+        // e vira suavemente para onde vai; quem está na vez é marcado só pelo anel
+        u.rig.update(dt);
+        const ground = this.groundAt(u.group.position.x, u.group.position.z);
+        u.group.position.y += (ground + BASE_TOP - u.group.position.y) * (1 - Math.exp(-dt * 14));
+        const turn = Math.atan2(Math.sin(u.yaw - u.group.rotation.y), Math.cos(u.yaw - u.group.rotation.y));
+        u.group.rotation.y += turn * (1 - Math.exp(-dt * 12));
+        u.shadow.position.set(u.group.position.x, u.group.position.y - BASE_TOP + 0.01, u.group.position.z);
+        u.shadow.scale.setScalar(1.1);
+        continue;
+      }
       u.lift += ((active ? 1 : 0) - u.lift) * lk;
       // quem está na vez flutua e gira; os outros descansam baixos e parados
       const float = 0.3 + u.lift * (0.45 + bob);

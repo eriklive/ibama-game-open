@@ -138,7 +138,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board = new HexBoard(
       this.canvasRef().nativeElement,
       this.map,
-      CHARACTERS.map((c, i) => ({ id: c.id, color: c.color, start: this.map!.starts[i] })),
+      CHARACTERS.map((c, i) => ({
+        id: c.id,
+        color: c.color,
+        model: c.model,
+        start: this.map!.starts[i],
+      })),
       {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.focusCharacter(id),
