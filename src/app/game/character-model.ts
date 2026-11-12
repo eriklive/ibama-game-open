@@ -12,7 +12,10 @@ export interface ModelDef {
   url: string;
   /** GLB só com clipes, no mesmo esqueleto. */
   anims: string;
-  /** Altura final no tabuleiro, em unidades do mundo (raio do hexágono = 1; ver `METER`). */
+  /**
+   * Altura do corpo no tabuleiro, em unidades do mundo (raio do hexágono = 1; ver `METER`).
+   * Chapéu e cabelo ficam por cima disso: quem usa chapéu não encolhe.
+   */
   height: number;
   /** Cor que tinge a roupa/corpo (olhos e cabelo ficam como são), para distinguir cópias do mesmo modelo. */
   tint?: number;
@@ -40,6 +43,32 @@ export const heightOf = (meters: number): number => meters * METER * CHARACTER_S
  * velocidade da animação com a velocidade real da peça, sem os pés "patinarem".
  */
 const CLIP_SPEED: Partial<Record<ClipName, number>> = { walk: 0.97, run: 5.36 };
+
+/** Do osso da cabeça ao topo do crânio, em metros, nos corpos da Quaternius. */
+const HEAD_TOP = 0.21;
+
+/** Modelo em `public/assets/characters/<id>/<id>.glb`, com a altura da pessoa em metros. */
+const human = (id: string, meters: number): ModelDef => ({
+  url: `assets/characters/${id}/${id}.glb`,
+  anims: HUMANOID_ANIMS,
+  height: heightOf(meters),
+});
+
+/**
+ * Catálogo de modelos de personagem (gerados por `tools/assets`, a partir de
+ * `tools/assets/characters.mjs`). Quem usa cada um fica em `maps.ts`.
+ */
+export const MODELS = {
+  // agentes do Ibama
+  ana: human('ana', 1.7),
+  bruno: human('bruno', 1.78),
+  clara: human('clara', 1.68),
+  kaua: human('kaua', 1.76),
+  // inimigos
+  madeireiro: human('madeireiro', 1.8),
+  garimpeiro: human('garimpeiro', 1.72),
+  cacador: human('cacador', 1.78),
+} satisfies Record<string, ModelDef>;
 
 /** Quanto da cor de `tint` entra no material (0 = nada, 1 = cor cheia). */
 const TINT_STRENGTH = 0.6;
@@ -101,8 +130,14 @@ export class CharacterRig {
       mesh.frustumCulled = false;
     });
     const box = new THREE.Box3().setFromObject(inner);
-    const size = box.getSize(new THREE.Vector3());
-    const scale = def.height / (size.y || 1);
+    // a altura do corpo vem do esqueleto (osso da cabeça), não da caixa da malha: assim
+    // chapéu, coque e mochila não mudam o tamanho de ninguém
+    inner.updateWorldMatrix(true, true);
+    const head = inner.getObjectByName('Head');
+    const bodyHeight = head
+      ? head.getWorldPosition(new THREE.Vector3()).y - box.min.y + HEAD_TOP
+      : box.getSize(new THREE.Vector3()).y;
+    const scale = def.height / (bodyHeight || 1);
     inner.scale.setScalar(scale);
     inner.position.y = -box.min.y * scale;
     const root = new THREE.Group();

@@ -438,9 +438,8 @@ flutuação/giro em unidades **sem** rig.
   batem; não precisou retarget.
 - Código: `src/app/game/character-model.ts` (`CharacterRig`). No `HexBoard`, a peça vira base do
   modelo e o personagem corre em linha reta de hexágono em hexágono, virando para onde vai.
-  Bruno e os inimigos usam o corpo masculino (`Superhero_Male`), Clara o feminino com outro
-  cabelo; os inimigos levam um tingimento vermelho (`ModelDef.tint`). Inimigo rendido toca o
-  clipe `crouch`. Os pacotes de origem estão listados em `public/assets/README.md`.
+  Todos os agentes e inimigos têm modelo próprio (ver "Elenco" abaixo). Inimigo rendido toca o
+  clipe `crouch`. `ModelDef.tint` continua disponível para tingir cópias de um mesmo modelo. Os pacotes de origem estão listados em `public/assets/README.md`.
 - O build dos dois GLBs está em `tools/assets/` (ver o README de lá).
 - **A versão grátis é menor que a anunciada:** traz só 2 dos 6 corpos (Super-herói masc./fem.)
   e 43 das 120+ animações. Os outros corpos e animações estão na versão Source, que é paga.
@@ -449,6 +448,20 @@ flutuação/giro em unidades **sem** rig.
   Por isso o deslocamento usa o trote a ~1,9 hex/s, com `timeScale` casado.
 - O orçamento de 3–6k triângulos da seção 2.4 não cabe nesses corpos (~13k). Com 3 personagens
   roda bem; para muitos NPCs vamos precisar de uma versão simplificada.
+
+### Elenco (depois da fase 1)
+
+- Sete modelos: Ana, Bruno, Clara e Kauã (agentes) e madeireiro, garimpeiro e caçador
+  (inimigos), de 290 a 390 KB e de 15k a 18,5k triângulos cada.
+- Os corpos grátis vêm só de roupa íntima. O build (`tools/assets`) pinta a roupa na textura
+  por região do corpo, engrossa a malha sob o tecido e gera os acessórios por código. O elenco
+  fica em `tools/assets/characters.mjs`.
+- Cada inimigo tem o seu modelo (`EnemySpawn.model`, em `maps.ts`), no lugar do modelo único
+  tingido de vermelho; a cor de estado fica só na base.
+- A altura no tabuleiro passou a ser medida pelo osso da cabeça, não pela caixa da malha, para
+  chapéu e coque não encolherem o personagem.
+- Continuam valendo os limites da fase 1: só dois corpos (musculosos) e três clipes. Com seis
+  personagens em cena são ~100k triângulos, perto do teto de 150k da seção 2.4.
 
 ---
 

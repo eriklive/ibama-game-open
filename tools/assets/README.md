@@ -19,19 +19,34 @@ node build-assets.mjs \
   ../../public/assets
 ```
 
+Para refazer só alguns personagens, acrescente `--only=ana,cacador` ao comando.
+
 ## O que o script faz
 
-- **Personagens (`characters/<id>/<id>.glb`)**, conforme a lista `CHARACTERS` do script:
-  - Junta um corpo (`Superhero_Female_FullBody` ou `Superhero_Male_FullBody`) com os penteados
-    (cabelo, barba), religando-os aos ossos do corpo.
+- **Personagens (`characters/<id>/<id>.glb`)**, um por entrada de `characters.mjs`:
+  - Parte de um dos dois corpos grátis (`Superhero_Female_FullBody` ou `Superhero_Male_FullBody`)
+    e junta os penteados pedidos, religando o cabelo aos ossos do corpo. Penteado feito para a
+    outra cabeça é ajustado à cabeça do corpo escolhido.
+  - **Veste o corpo** (`lib/bake.mjs`). Os corpos vêm só de roupa íntima. Cada ponto da textura
+    sabe onde fica no corpo, e as camadas do figurino (calça, camisa, colete, botas, xadrez,
+    camuflagem, lama, pintura facial) decidem a cor dali. Onde há roupa, a malha é alisada e
+    engrossada, para não parecer pintura no corpo. A pele é repintada no tom do personagem.
+  - **Acessórios** (`lib/gear.mjs`): boné, chapéu, capacete, mochila, rádio, colar, motosserra,
+    bateia e espingarda são geometria simples gerada por código, colorida por vértice e presa a
+    um osso. Com chapéu, o cabelo acima da aba é removido.
   - Tinge o cabelo. A textura original é neutra, porque a versão paga tinge por shader.
-  - Remove cores de vértice e UVs extras. A cor de vértice faria o three.js tingir o modelo.
-  - Reduz as texturas para 1024 px em JPEG.
-  - Comprime a malha com meshopt.
+  - Remove mapas de normal e de rugosidade, cores de vértice do corpo e UVs extras.
+  - Textura do corpo em 1024 px (JPEG); cabelo em 512 px; malha comprimida com meshopt.
 - **Clipes (`anims/humanoid-base.glb`):**
   - Pega `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop` e `Crouch_Idle_Loop` do arquivo sem root motion.
   - Renomeia para `idle`, `walk`, `run` e `crouch`.
   - Descarta o boneco e comprime as curvas.
+
+## Criar ou mudar um personagem
+
+Edite `characters.mjs`: corpo, tom de pele, penteado e cor, camadas do figurino e acessórios.
+Rode o build e registre o modelo novo em `MODELS` (`src/app/game/character-model.ts`) e em
+`public/assets/LICENSES.md`.
 
 A lista dos pacotes e do que usamos de cada um está em `public/assets/README.md`.
 
