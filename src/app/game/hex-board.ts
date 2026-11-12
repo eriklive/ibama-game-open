@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GameMap } from './maps';
-import { HexCoord, hexKey, hexLine, hexToWorld, hexesInRange, sameHex } from './hex';
+import { HexCoord, hexKey, hexToWorld, sameHex } from './hex';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -14,9 +14,26 @@ const COLORS = {
   hexC: 0x3482cf,
   reachable: 0xa9e4ff,
   selected: 0xffd23f,
-  playerBody: 0x2f6b3f,
-  playerRing: 0xffd23f,
+  activeRing: 0xffd23f,
+  focusRing: 0xffffff,
 };
+
+export interface BoardUnit {
+  id: string;
+  color: number;
+  start: HexCoord;
+}
+
+interface UnitView {
+  id: string;
+  hex: HexCoord;
+  group: THREE.Group;
+  shadow: THREE.Mesh;
+  hitbox: THREE.Mesh;
+  /** 0 = parado, 1 = flutuando (personagem da vez); interpolado para suavizar a troca. */
+  lift: number;
+  hop: number;
+}
 
 interface HexTile {
   coord: HexCoord;
@@ -26,15 +43,18 @@ interface HexTile {
 }
 
 export interface HexBoardCallbacks {
-  /** Chamado quando o jogador toca num hexágono válido (ou limpa a seleção com `null`). */
-  onSelect(hex: HexCoord | null): void;
+  /** Toque num hexágono vazio (ou fora do tabuleiro, com `null`). */
+  onHexTap(hex: HexCoord | null): void;
+  /** Toque numa peça de personagem (ou no hexágono em que ela está). */
+  onUnitTap(id: string): void;
 }
 
 /**
  * Cena 3D do tabuleiro: hexágonos em prisma, câmera em perspectiva inclinada
- * (vista "de cima e de trás", como nos tabuleiros de For the King), um
- * jogador flutuante e entrada por toque/mouse (tocar seleciona, arrastar move
- * a câmera, pinça ou roda do mouse aproxima).
+ * (vista "de cima e de trás"), peças dos personagens e entrada por toque/mouse
+ * (tocar seleciona, arrastar move a câmera, pinça ou roda do mouse aproxima).
+ *
+ * O tabuleiro só desenha e anima: as regras (turnos, dados, alcance) ficam na tela.
  */
 export class HexBoard {
   private readonly renderer: THREE.WebGLRenderer;
@@ -43,15 +63,17 @@ export class HexBoard {
   private readonly raycaster = new THREE.Raycaster();
   private readonly tiles = new Map<string, HexTile>();
   private readonly pickables: THREE.Object3D[] = [];
-  private readonly player = new THREE.Group();
-  private readonly playerShadow: THREE.Mesh;
+  private readonly units = new Map<string, UnitView>();
+  private readonly activeMarker: THREE.Mesh;
+  private readonly focusMarker: THREE.Mesh;
   private readonly clock = new THREE.Clock();
   private readonly resizeObserver: ResizeObserver;
   private frameId = 0;
 
-  private playerHex: HexCoord;
   private reachable = new Set<string>();
   private selected: HexCoord | null = null;
+  private activeId: string | null = null;
+  private focusId: string | null = null;
   private moving = false;
   private inputEnabled = true;
 
@@ -70,7 +92,7 @@ export class HexBoard {
   constructor(
     private readonly canvas: HTMLCanvasElement,
     private readonly map: GameMap,
-    private readonly range: number,
+    units: BoardUnit[],
     private readonly callbacks: HexBoardCallbacks,
   ) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -83,13 +105,14 @@ export class HexBoard {
 
     this.setupLights();
     this.buildBoard();
-    this.playerShadow = this.buildPlayer();
+    for (const u of units) this.buildUnit(u);
+    this.activeMarker = this.buildMarker(COLORS.activeRing, 0.62, 0.09);
+    this.focusMarker = this.buildMarker(COLORS.focusRing, 0.72, 0.05);
 
-    this.playerHex = { ...map.start };
-    this.placePlayer(this.playerHex);
-    this.camTarget.copy(this.worldOf(this.playerHex));
+    const first = units[0]?.start ?? { col: 0, row: 0 };
+    this.camTarget.copy(this.worldOf(first));
     this.camGoal.copy(this.camTarget);
-    this.refreshReachable();
+    this.paintTiles();
 
     this.bindInput();
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -108,36 +131,58 @@ export class HexBoard {
     this.inputEnabled = enabled;
   }
 
-  clearSelection(): void {
-    this.select(null);
+  /** Personagem da vez: flutua e ganha o anel amarelo. */
+  setActive(id: string | null): void {
+    this.activeId = id;
   }
 
-  /** Move o jogador até o hexágono selecionado. Resolve quando a animação termina. */
-  async confirmMove(): Promise<HexCoord | null> {
-    const target = this.selected;
-    if (!target || this.moving) return null;
+  /** Personagem em foco (anel branco) — a câmera vai até ele. */
+  focus(id: string | null, moveCamera = true): void {
+    this.focusId = id;
+    const u = id ? this.units.get(id) : undefined;
+    if (u && moveCamera) {
+      this.camGoal.copy(this.worldOf(u.hex));
+      this.clampGoal();
+    }
+  }
+
+  /** Hexágonos destacados como destino possível. */
+  setReachable(keys: Iterable<string>): void {
+    this.reachable = new Set(keys);
+    this.paintTiles();
+  }
+
+  setSelected(hex: HexCoord | null): void {
+    this.selected = hex;
+    this.paintTiles();
+  }
+
+  /** Coloca todas as peças nas posições dadas (sem animação). */
+  placeUnits(positions: ReadonlyMap<string, HexCoord>): void {
+    for (const [id, hex] of positions) {
+      const u = this.units.get(id);
+      if (!u) continue;
+      u.hex = { ...hex };
+      const p = this.worldOf(hex);
+      u.group.position.x = p.x;
+      u.group.position.z = p.z;
+    }
+    if (this.focusId) this.focus(this.focusId);
+  }
+
+  /** Anda com a peça pelo caminho (passo a passo, sem a origem). Resolve ao terminar. */
+  async moveUnit(id: string, path: HexCoord[]): Promise<void> {
+    const u = this.units.get(id);
+    if (!u || this.moving || !path.length) return;
     this.moving = true;
-    this.select(null, false);
+    this.selected = null;
     this.reachable.clear();
     this.paintTiles();
-
-    const path = hexLine(this.playerHex, target).slice(1);
     for (const step of path) {
-      await this.hopTo(step);
-      this.playerHex = step;
+      await this.hopTo(u, step);
+      u.hex = step;
     }
     this.moving = false;
-    this.refreshReachable();
-    return this.playerHex;
-  }
-
-  /** Volta o jogador ao início do mapa. */
-  reset(): void {
-    this.playerHex = { ...this.map.start };
-    this.placePlayer(this.playerHex);
-    this.camGoal.copy(this.worldOf(this.playerHex));
-    this.select(null, false);
-    this.refreshReachable();
   }
 
   dispose(): void {
@@ -210,49 +255,68 @@ export class HexBoard {
     this.scene.add(base);
   }
 
-  private buildPlayer(): THREE.Mesh {
+  private buildUnit(unit: BoardUnit): void {
+    const group = new THREE.Group();
+    const body = new THREE.Color(unit.color);
     const disc = new THREE.Mesh(
       new THREE.CylinderGeometry(0.42, 0.42, 0.14, 40),
-      new THREE.MeshStandardMaterial({ color: COLORS.playerBody, roughness: 0.5 }),
+      new THREE.MeshStandardMaterial({ color: body, roughness: 0.5 }),
     );
     disc.castShadow = true;
+    const light = body.clone().lerp(new THREE.Color(0xffffff), 0.55);
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(0.42, 0.07, 12, 40),
-      new THREE.MeshStandardMaterial({ color: COLORS.playerRing, roughness: 0.4 }),
+      new THREE.MeshStandardMaterial({ color: light, roughness: 0.4 }),
     );
     ring.rotation.x = Math.PI / 2;
     ring.castShadow = true;
     const dot = new THREE.Mesh(
       new THREE.CylinderGeometry(0.14, 0.14, 0.16, 24),
-      new THREE.MeshStandardMaterial({ color: COLORS.playerRing, roughness: 0.4 }),
+      new THREE.MeshStandardMaterial({ color: light, roughness: 0.4 }),
     );
-    this.player.add(disc, ring, dot);
-    this.scene.add(this.player);
+    // alça que marca a "frente" da peça — mostra a rotação de quem está na vez
+    const nub = new THREE.Mesh(
+      new THREE.BoxGeometry(0.16, 0.12, 0.22),
+      new THREE.MeshStandardMaterial({ color: light, roughness: 0.4 }),
+    );
+    nub.position.set(0, 0, 0.42);
+    group.add(disc, ring, dot, nub);
+
+    // área de toque generosa (invisível) para facilitar selecionar com o dedo
+    const hitbox = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.62, 0.62, 0.6, 12),
+      new THREE.MeshBasicMaterial({ visible: false }),
+    );
+    // o hexágono da peça também conta como toque nela (ver handleTap), então a caixa
+    // só precisa cobrir a própria peça, sem roubar toques dos hexágonos de trás
+    hitbox.userData['unitId'] = unit.id;
+    group.add(hitbox);
+    this.scene.add(group);
 
     const shadow = new THREE.Mesh(
       new THREE.CircleGeometry(0.4, 32),
       new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }),
     );
     shadow.rotation.x = -Math.PI / 2;
-    shadow.position.y = 0.01;
     this.scene.add(shadow);
-    return shadow;
+
+    const p = this.worldOf(unit.start);
+    group.position.set(p.x, 0.3, p.z);
+    this.units.set(unit.id, { id: unit.id, hex: { ...unit.start }, group, shadow, hitbox, lift: 0, hop: 0 });
+  }
+
+  private buildMarker(color: number, radius: number, tube: number): THREE.Mesh {
+    const m = new THREE.Mesh(
+      new THREE.TorusGeometry(radius, tube, 10, 48),
+      new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 }),
+    );
+    m.rotation.x = -Math.PI / 2;
+    m.visible = false;
+    this.scene.add(m);
+    return m;
   }
 
   // ---------- estado / pintura ----------
-
-  private refreshReachable(): void {
-    this.reachable = new Set(
-      hexesInRange(this.playerHex, this.range, this.map.cols, this.map.rows).map(hexKey),
-    );
-    this.paintTiles();
-  }
-
-  private select(hex: HexCoord | null, notify = true): void {
-    this.selected = hex;
-    this.paintTiles();
-    if (notify) this.callbacks.onSelect(hex);
-  }
 
   private paintTiles(): void {
     for (const [key, tile] of this.tiles) {
@@ -264,36 +328,29 @@ export class HexBoard {
     }
   }
 
-  // ---------- jogador ----------
+  // ---------- peças ----------
 
   private worldOf(h: HexCoord): THREE.Vector3 {
     const p = hexToWorld(h, HEX_SIZE);
     return new THREE.Vector3(p.x, 0, p.z);
   }
 
-  private placePlayer(h: HexCoord): void {
-    const p = this.worldOf(h);
-    this.player.position.set(p.x, 0, p.z);
-    this.playerShadow.position.set(p.x, 0.01, p.z);
-  }
-
-  private hopTo(h: HexCoord): Promise<void> {
-    const from = this.player.position.clone();
+  private hopTo(u: UnitView, h: HexCoord): Promise<void> {
+    const from = u.group.position.clone();
     const to = this.worldOf(h);
     this.camGoal.copy(to);
-    const duration = 320;
+    const duration = 260;
     const start = performance.now();
     return new Promise((resolve) => {
       const step = (now: number) => {
         const t = Math.min(1, (now - start) / duration);
         const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-        this.player.position.x = from.x + (to.x - from.x) * e;
-        this.player.position.z = from.z + (to.z - from.z) * e;
-        this.player.userData['hop'] = Math.sin(Math.PI * t) * 0.6;
-        this.playerShadow.position.set(this.player.position.x, 0.01, this.player.position.z);
+        u.group.position.x = from.x + (to.x - from.x) * e;
+        u.group.position.z = from.z + (to.z - from.z) * e;
+        u.hop = Math.sin(Math.PI * t) * 0.6;
         if (t < 1) requestAnimationFrame(step);
         else {
-          this.player.userData['hop'] = 0;
+          u.hop = 0;
           resolve();
         }
       };
@@ -341,11 +398,25 @@ export class HexBoard {
     const t = this.clock.elapsedTime;
 
     const bob = Math.sin(t * 2.4) * 0.08;
-    const hop = (this.player.userData['hop'] as number | undefined) ?? 0;
-    this.player.position.y = 0.75 + bob + hop;
-    this.player.rotation.y += dt * 0.8;
-    const s = 1 - (bob + hop) * 0.6;
-    this.playerShadow.scale.setScalar(s);
+    const lk = 1 - Math.exp(-dt * 8);
+    for (const u of this.units.values()) {
+      const active = u.id === this.activeId;
+      u.lift += ((active ? 1 : 0) - u.lift) * lk;
+      // quem está na vez flutua e gira; os outros descansam baixos e parados
+      const float = 0.3 + u.lift * (0.45 + bob);
+      u.group.position.y = float + u.hop;
+      if (active) u.group.rotation.y += dt * 0.8;
+      u.shadow.position.set(u.group.position.x, 0.01, u.group.position.z);
+      u.shadow.scale.setScalar(1 - (float - 0.3 + u.hop) * 0.6);
+    }
+
+    this.updateMarker(this.activeMarker, this.activeId, 0.03, 1 + Math.sin(t * 4) * 0.06);
+    this.updateMarker(
+      this.focusMarker,
+      this.focusId !== this.activeId ? this.focusId : null,
+      0.04,
+      1 + Math.sin(t * 5) * 0.04,
+    );
 
     // pulso suave nos hexágonos alcançáveis
     const pulse = 0.12 + Math.sin(t * 3) * 0.08;
@@ -358,6 +429,14 @@ export class HexBoard {
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
   };
+
+  private updateMarker(m: THREE.Mesh, id: string | null, y: number, scale: number): void {
+    const u = id ? this.units.get(id) : undefined;
+    m.visible = !!u;
+    if (!u) return;
+    m.position.set(u.group.position.x, y, u.group.position.z);
+    m.scale.setScalar(scale);
+  }
 
   // ---------- entrada (touch / mouse) ----------
 
@@ -457,9 +536,18 @@ export class HexBoard {
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(ndc, this.camera);
+
+    // peças primeiro: tocar perto da peça (ou no hexágono dela) seleciona o personagem
+    const hitboxes = [...this.units.values()].map((u) => u.hitbox);
+    const unitHit = this.raycaster.intersectObjects(hitboxes, false)[0];
+    if (unitHit) {
+      this.callbacks.onUnitTap(unitHit.object.userData['unitId'] as string);
+      return;
+    }
     const hit = this.raycaster.intersectObjects(this.pickables, false)[0];
     const hex = hit?.object.userData['hex'] as HexCoord | undefined;
-    if (hex && this.reachable.has(hexKey(hex))) this.select(hex);
-    else this.select(null);
+    const owner = hex && [...this.units.values()].find((u) => sameHex(u.hex, hex));
+    if (owner) this.callbacks.onUnitTap(owner.id);
+    else this.callbacks.onHexTap(hex ?? null);
   }
 }
