@@ -1,5 +1,5 @@
 <div class="game">
-  <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono azul-claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
+  <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num personagem para escolher quem age, escolha um dado e toque num hexágono azul-claro para mover; toque de novo para confirmar. Gire o mapa com dois dedos ou com os botões."></canvas>
 
   <header class="hud-top">
     <div class="top-row">
@@ -9,7 +9,7 @@
       <div class="mission">
         <span class="mission-name">{{ map?.name }}</span>
         <span class="mission-sub" data-testid="turn">
-          Rodada {{ round() }} · {{ phase() === 'enemy' ? 'Turno inimigo' : 'Turno ' + turn() }}
+          Rodada {{ round() }} · {{ phase() === 'enemy' ? 'Turno inimigo' : diceLeft() + ' de ' + pool().length + ' dados' }}
         </span>
       </div>
       <button type="button" class="btn btn-ghost restart" (click)="restart()" aria-label="Recomeçar a partida">
@@ -22,16 +22,15 @@
         <button
           type="button"
           class="chip"
-          [class.active]="c.id === active().id && phase() !== 'enemy'"
-          [class.focused]="c.id === focused().id"
-          [attr.aria-pressed]="c.id === focused().id"
-          [attr.aria-label]="c.name + (c.id === active().id ? ', na vez' : ', aguardando') + '. Toque para ver no tabuleiro.'"
+          [class.active]="c.id === active().id"
+          [attr.aria-pressed]="c.id === active().id"
+          [attr.aria-label]="c.name + (c.id === active().id ? ', escolhido' : '') + '. Toque para escolher.'"
           [attr.data-testid]="'chip-' + c.id"
-          (click)="focusCharacter(c.id)">
-          <span class="portrait" [style.background]="hexColor(c)">{{ c.initial }}</span>
+          (click)="selectCharacter(c.id)">
+          <img class="portrait" [src]="c.avatar" [style.background]="hexColor(c)" alt="" />
           <span class="chip-text">
             <span class="chip-name">{{ c.name }}</span>
-            <span class="chip-state">{{ c.id === active().id && phase() !== 'enemy' ? 'Na vez' : 'Espera' }}</span>
+            <span class="chip-state">{{ c.id === active().id ? 'Ativo' : 'Toque' }}</span>
           </span>
         </button>
       }
@@ -56,24 +55,29 @@
     }
   </header>
 
+  <div class="rotator" aria-label="Girar o mapa">
+    <button type="button" class="btn btn-ghost" (click)="rotate(-1)" aria-label="Girar o mapa para a esquerda" data-testid="rotate-left">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 1 2.4 5.7M4 20v-5h5" /></svg>
+    </button>
+    <button type="button" class="btn btn-ghost" (click)="rotate(1)" aria-label="Girar o mapa para a direita" data-testid="rotate-right">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M20 12a8 8 0 1 0-2.4 5.7M20 20v-5h-5" /></svg>
+    </button>
+  </div>
+
   @if (phase() === 'rolling') {
     <div class="roll-stage" role="status" aria-live="polite" data-testid="roll">
       <div class="roll-card">
-        <span class="roll-who">Vez de {{ active().name }}</span>
-        <div class="dice big" [class.rolling]="rolled() === 0">
-          @for (v of dice(); track $index) {
+        <span class="roll-who">Rodada {{ round() }}</span>
+        <div class="dice big" [class.rolling]="!pool().length">
+          @for (v of rollingFaces(); track $index) {
             <span class="d4" [style.animation-delay.ms]="$index * 90">
               <svg viewBox="0 0 100 92" aria-hidden="true"><polygon points="50,4 96,88 4,88" /><path d="M50 4V62L4 88M50 62L96 88" /></svg>
               <span class="d4-value">{{ v }}</span>
             </span>
           }
         </div>
-        <span class="roll-total" [class.show]="rolled() > 0">
-          @if (rolled() > 0) {
-            {{ dice().join(' + ') }} = <strong>{{ rolled() }}</strong> de movimento
-          } @else {
-            Rolando 2d{{ diceSides }}…
-          }
+        <span class="roll-total" [class.show]="pool().length">
+          @if (pool().length) { Seis movimentos para a equipe } @else { Rolando {{ pool().length || rollingFaces().length }}d{{ diceSides }}… }
         </span>
       </div>
     </div>
@@ -97,7 +101,7 @@
     } @else if (approaching()) {
       <div class="panel approach-panel" data-testid="panel">
         <div class="panel-head">
-          <span class="portrait sm" [style.background]="hexColor(active())">{{ active().initial }}</span>
+          <img class="portrait sm" [src]="active().avatar" [style.background]="hexColor(active())" alt="" />
           <div class="panel-title">
             <strong>Abordagem de {{ active().name }}</strong>
             <span>Raio de {{ approachRules.radius }} · encerra a vez</span>
@@ -116,53 +120,46 @@
           <button type="button" class="btn btn-primary confirm" (click)="confirmApproach()">Abordar!</button>
         </div>
       </div>
-    } @else if (viewingOther()) {
-      <div class="panel" data-testid="panel">
-        <div class="panel-head">
-          <span class="portrait sm" [style.background]="hexColor(focused())">{{ focused().initial }}</span>
-          <div class="panel-title">
-            <strong>{{ focused().name }}</strong>
-            <span>Aguardando a vez · Coluna {{ (positionOf(focused().id)?.col ?? 0) + 1 }}, linha {{ (positionOf(focused().id)?.row ?? 0) + 1 }}</span>
-          </div>
-        </div>
-        <button type="button" class="btn btn-primary" (click)="focusCharacter(active().id)">
-          Voltar para {{ active().name }}
-        </button>
-      </div>
     } @else {
       <div class="panel" data-testid="panel">
         <div class="panel-head">
-          <span class="portrait sm" [style.background]="hexColor(active())">{{ active().initial }}</span>
+          <img class="portrait sm" [src]="active().avatar" [style.background]="hexColor(active())" alt="" />
           <div class="panel-title">
-            <strong>Vez de {{ active().name }}</strong>
+            <strong>{{ active().name }}</strong>
             <span role="status" aria-live="polite" data-testid="hint">
               @switch (phase()) {
                 @case ('rolling') { Rolando os dados… }
                 @case ('walking') { Andando… }
-                @case ('ending') { Passando a vez… }
+                @case ('ending') { Encerrando a rodada… }
                 @default {
-                  @if (movesLeft() <= 0) {
-                    Sem movimento · aborde ou passe a vez
+                  @if (!diceLeft()) {
+                    Sem dados
                   } @else if (selected()) {
                     Destino a {{ selectedCost() }} {{ selectedCost() === 1 ? 'passo' : 'passos' }} · toque de novo para confirmar
                   } @else {
-                    Toque num hexágono claro · arraste para mover a câmera
+                    Dado de {{ movesLeft() }} · toque num hexágono claro ou em outro personagem
                   }
                 }
               }
             </span>
           </div>
-          <div class="moves" [attr.aria-label]="'Movimento restante: ' + movesLeft()" data-testid="moves">
-            <div class="dice small">
-              @for (v of dice(); track $index) {
-                <span class="d4">
-                  <svg viewBox="0 0 100 92" aria-hidden="true"><polygon points="50,4 96,88 4,88" /></svg>
-                  <span class="d4-value">{{ phase() === 'rolling' ? '?' : v }}</span>
-                </span>
-              }
-            </div>
-            <span class="moves-left"><strong>{{ phase() === 'rolling' ? '–' : movesLeft() }}</strong> restam</span>
-          </div>
+        </div>
+        <div class="pool" data-testid="pool" [attr.aria-label]="'Dados restantes: ' + diceLeft()">
+          @for (d of pool(); track $index) {
+            <button
+              type="button"
+              class="d4 pool-die"
+              [class.used]="d.used"
+              [class.picked]="$index === dieIndex() && !d.used"
+              [disabled]="d.used || phase() !== 'moving-choice'"
+              [attr.aria-pressed]="$index === dieIndex() && !d.used"
+              [attr.aria-label]="'Dado de ' + d.value + (d.used ? ', usado' : '')"
+              data-testid="die"
+              (click)="pickDie($index)">
+              <svg viewBox="0 0 100 92" aria-hidden="true"><polygon points="50,4 96,88 4,88" /></svg>
+              <span class="d4-value">{{ d.value }}</span>
+            </button>
+          }
         </div>
         <div class="buttons">
           @if (selected() && phase() === 'moving-choice') {
@@ -172,8 +169,8 @@
             <button
               type="button"
               class="btn btn-approach"
-              [disabled]="phase() !== 'moving-choice' || !canApproach()"
-              [attr.aria-label]="canApproach() ? 'Abordar inimigos no raio' : 'Abordar: nenhum inimigo no raio de ' + approachRules.radius"
+              [disabled]="phase() !== 'moving-choice' || !canApproach() || !diceLeft()"
+              [attr.aria-label]="canApproach() ? 'Abordar inimigos no raio (gasta um dado)' : 'Abordar: nenhum inimigo no raio de ' + approachRules.radius"
               data-testid="approach"
               (click)="startApproach()">
               Abordar
@@ -185,8 +182,8 @@
               type="button"
               class="btn btn-ghost"
               [disabled]="phase() !== 'moving-choice'"
-              (click)="endTurn()">
-              Passar a vez
+              (click)="endRound()">
+              Encerrar rodada
             </button>
           }
         </div>

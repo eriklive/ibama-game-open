@@ -9,7 +9,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { rollDice, rollDie, sum } from '../../game/dice';
+import { rollDice, rollDie } from '../../game/dice';
 import { HexBoard } from '../../game/hex-board';
 import {
   APPROACH_RULES,
@@ -30,6 +30,12 @@ import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, sa
 import { CHARACTERS, Character, GameMap, MOVE_DICE, findMap } from '../../game/maps';
 
 type Phase = 'rolling' | 'moving-choice' | 'walking' | 'ending' | 'enemy';
+
+/** Um dado da reserva da rodada: um movimento (ou uma ação) para qualquer personagem. */
+interface Die {
+  value: number;
+  used: boolean;
+}
 
 const namesOf = (es: readonly EnemyState[]): string => {
   const names = es.map((e) => e.name);
@@ -58,23 +64,31 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly characters = CHARACTERS;
   private readonly walls = new Set((this.map?.walls ?? []).map(hexKey));
   protected readonly diceSides = MOVE_DICE.sides;
+  protected readonly rotateStep = Math.PI / 4;
 
   protected readonly positions = signal<ReadonlyMap<string, HexCoord>>(this.initialPositions());
-  protected readonly activeIndex = signal(0);
-  /** Turno global: aumenta a cada vez que um personagem começa a jogar. */
-  protected readonly turn = signal(1);
+  protected readonly round = signal(1);
   protected readonly phase = signal<Phase>('rolling');
-  /** Valores mostrados nos dados (mudam durante a animação). */
-  protected readonly dice = signal<number[]>(Array(MOVE_DICE.count).fill(1));
-  protected readonly rolled = signal(0);
-  protected readonly movesLeft = signal(0);
+  /** Reserva de dados da rodada (seis com três agentes). */
+  protected readonly pool = signal<Die[]>([]);
+  /** Dado escolhido para o próximo movimento ou ação. */
+  protected readonly dieIndex = signal(0);
+  /** Valores mostrados durante a animação da rolagem. */
+  protected readonly rollingFaces = signal<number[]>([]);
   protected readonly selected = signal<HexCoord | null>(null);
-  /** Personagem em foco na interface (tocado no tabuleiro ou no retrato). */
-  protected readonly focusedId = signal<string>(CHARACTERS[0].id);
+  /** Personagem escolhido: é ele quem anda ou age com o dado. */
+  protected readonly activeId = signal<string>(CHARACTERS[0].id);
   protected readonly enemies = signal<readonly EnemyState[]>(this.initialEnemies());
   /** Último acontecimento com inimigos (avistou, correu, fugiu…), mostrado num aviso. */
   protected readonly notice = signal<{ text: string; tone: 'alert' | 'info' } | null>(null);
   private noticeTimer?: ReturnType<typeof setTimeout>;
+
+  protected readonly diceLeft = computed(() => this.pool().filter((d) => !d.used).length);
+  /** Passos do dado escolhido (0 se acabaram os dados). */
+  protected readonly movesLeft = computed(() => {
+    const d = this.pool()[this.dieIndex()];
+    return d && !d.used ? d.value : 0;
+  });
 
   protected readonly enemyCounts = computed(() => {
     const es = this.enemies();
@@ -104,12 +118,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     () => this.approachPlan().surrender.length + this.approachPlan().flee.length > 0,
   );
 
-  protected readonly active = computed<Character>(() => CHARACTERS[this.activeIndex()]);
-  protected readonly focused = computed<Character>(
-    () => CHARACTERS.find((c) => c.id === this.focusedId()) ?? this.active(),
+  protected readonly active = computed<Character>(
+    () => CHARACTERS.find((c) => c.id === this.activeId()) ?? CHARACTERS[0],
   );
-  protected readonly viewingOther = computed(() => this.focusedId() !== this.active().id);
-  protected readonly round = computed(() => Math.floor((this.turn() - 1) / CHARACTERS.length) + 1);
 
   /** Alcance do personagem da vez com o movimento que ainda resta (contornando os outros). */
   private readonly reach = computed(() => {
@@ -146,7 +157,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       })),
       {
         onHexTap: (hex) => this.tapHex(hex),
-        onUnitTap: (id) => this.focusCharacter(id),
+        onUnitTap: (id) => this.selectCharacter(id),
       },
       {
         walls: this.map.walls,
@@ -159,7 +170,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       },
     );
     this.refreshVision();
-    this.startTurn();
+    this.startRound();
   }
 
   ngOnDestroy(): void {
@@ -169,35 +180,30 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.dispose();
   }
 
-  // ---------- turnos ----------
+  // ---------- rodadas ----------
 
-  private startTurn(): void {
-    const active = this.active();
+  /** Rola a reserva da rodada (2d4 por personagem) com animação; os dados ficam à disposição de todos. */
+  private startRound(): void {
     this.closeApproach();
     this.selected.set(null);
-    this.focusedId.set(active.id);
-    this.board?.setActive(active.id);
-    this.board?.focus(active.id);
     this.board?.setSelected(null);
     this.board?.setReachable([]);
-    this.roll();
-  }
-
-  /** Rola 2d4 com animação; ao parar, a soma vira o movimento do turno. */
-  private roll(): void {
+    this.board?.setActive(this.activeId());
     this.phase.set('rolling');
-    this.rolled.set(0);
-    const final = rollDice(MOVE_DICE.count, MOVE_DICE.sides);
+    const count = CHARACTERS.length * MOVE_DICE.count;
+    const final = rollDice(count, MOVE_DICE.sides);
+    this.pool.set([]);
+    this.rollingFaces.set(Array(count).fill(1));
     const duration = reducedMotion() ? 250 : 1100;
     this.rollTicker = setInterval(
-      () => this.dice.set(final.map(() => rollDie(MOVE_DICE.sides))),
+      () => this.rollingFaces.set(final.map(() => rollDie(MOVE_DICE.sides))),
       reducedMotion() ? 250 : 70,
     );
     this.later(duration, () => {
       clearInterval(this.rollTicker);
-      this.dice.set(final);
-      this.rolled.set(sum(final));
-      this.movesLeft.set(sum(final));
+      this.rollingFaces.set(final);
+      this.pool.set(final.map((value) => ({ value, used: false })));
+      this.dieIndex.set(0);
       // mostra o resultado um instante antes de liberar o movimento
       this.later(reducedMotion() ? 150 : 650, () => this.beginChoosing());
     });
@@ -208,22 +214,45 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.refreshBoard();
   }
 
-  protected endTurn(): void {
+  /** Escolhe qual dado da reserva será usado a seguir. */
+  protected pickDie(index: number): void {
+    if (this.phase() !== 'moving-choice' || this.pool()[index]?.used) return;
+    this.dieIndex.set(index);
+    this.selected.set(null);
+    if (this.approaching()) this.closeApproach();
+    this.refreshBoard();
+  }
+
+  /** Marca o dado escolhido como gasto e passa para o próximo; sem dados, a rodada acaba. */
+  private spendDie(): void {
+    const i = this.dieIndex();
+    this.pool.update((p) => p.map((d, j) => (j === i ? { ...d, used: true } : d)));
+    const next = this.pool().findIndex((d) => !d.used);
+    if (next >= 0) {
+      this.dieIndex.set(next);
+      this.beginChoosing();
+    } else {
+      this.phase.set('ending');
+      this.later(reducedMotion() ? 200 : 700, () => this.endRound());
+    }
+  }
+
+  /** Fim da rodada (dados gastos ou "Encerrar rodada"): os inimigos agem e uma nova rodada começa. */
+  protected endRound(): void {
     if (this.phase() === 'walking' || this.phase() === 'rolling' || this.phase() === 'enemy') return;
     this.clearTimers();
     this.phase.set('ending');
     this.closeApproach();
-    if (this.activeIndex() === CHARACTERS.length - 1 && this.actingEnemies().length) {
+    if (this.actingEnemies().length) {
       void this.enemyTurn();
       return;
     }
-    this.nextCharacter();
+    this.nextRound();
   }
 
-  private nextCharacter(): void {
-    this.activeIndex.update((i) => (i + 1) % CHARACTERS.length);
-    this.turn.update((t) => t + 1);
-    this.startTurn();
+  private nextRound(): void {
+    this.round.update((r) => r + 1);
+    this.startRound();
   }
 
   // ---------- turno inimigo ----------
@@ -255,7 +284,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     if (stale()) return;
     this.announceIfOver();
-    this.nextCharacter();
+    this.nextRound();
   }
 
   private async patrol(enemy: EnemyState, epoch: number): Promise<void> {
@@ -338,7 +367,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.cancelApproach();
       return;
     }
-    if (this.viewingOther()) this.focusCharacter(this.active().id);
     if (hex && this.reach().has(hexKey(hex))) {
       // segundo toque no mesmo hexágono confirma o movimento
       if (sameHex(hex, this.selected())) {
@@ -352,14 +380,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(this.selected(), this.selectedPath());
   }
 
-  protected focusCharacter(id: string): void {
-    if (id !== this.active().id) this.cancelApproach();
-    this.focusedId.set(id);
-    this.board?.focus(id);
-    if (id !== this.active().id) {
-      this.selected.set(null);
-      this.board?.setSelected(null);
+  /** Tocar num personagem (no tabuleiro ou no retrato) o escolhe para andar ou agir. */
+  protected selectCharacter(id: string): void {
+    if (this.phase() !== 'moving-choice') {
+      this.board?.focus(id);
+      return;
     }
+    if (id !== this.activeId()) {
+      this.closeApproach();
+      this.activeId.set(id);
+      this.board?.setActive(id);
+      this.selected.set(null);
+    }
+    this.board?.focus(id);
+    this.refreshBoard();
   }
 
   protected async confirm(): Promise<void> {
@@ -378,28 +412,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     });
     if (this.destroyed || this.epoch !== epoch) return;
     this.positions.update((m) => new Map(m).set(id, target));
-    this.movesLeft.update((n) => n - path.length);
-    if (this.movesLeft() <= 0 && this.canApproach()) {
-      // sem movimento, mas com inimigos no raio: espera para poder abordar
-      this.beginChoosing();
-    } else if (this.movesLeft() <= 0) {
-      // sem movimento: passa a vez automaticamente após um instante
-      this.phase.set('ending');
-      this.later(reducedMotion() ? 200 : 700, () => this.endTurn());
-    } else {
-      this.beginChoosing();
-    }
+    // o dado inteiro é gasto, mesmo que o personagem ande menos passos
+    this.spendDie();
   }
 
   // ---------- abordagem ----------
 
   /** Primeiro passo: mostra o raio e quem se renderia ou correria. */
   protected startApproach(): void {
-    if (this.phase() !== 'moving-choice' || !this.canApproach()) return;
+    if (this.phase() !== 'moving-choice' || !this.canApproach() || !this.diceLeft()) return;
     const map = this.map;
     const from = this.positions().get(this.active().id);
     if (!map || !from) return;
-    this.focusCharacter(this.active().id);
+    this.board?.focus(this.activeId());
     this.selected.set(null);
     this.approaching.set(true);
     this.board?.setSelected(null);
@@ -444,9 +469,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       flee.length && `${namesOf(flee)} ${flee.length === 1 ? 'vai tentar correr' : 'vão tentar correr'}`,
     ].filter(Boolean);
     this.say(`Ibama! ${parts.join(' · ')}`, 'alert');
-    this.phase.set('ending');
     if (!this.actingEnemies().length) this.later(1400, () => this.announceIfOver());
-    this.later(reducedMotion() ? 400 : 1600, () => this.endTurn());
+    // agir também gasta um dado, mas a rodada segue para os outros
+    this.spendDie();
   }
 
   private closeApproach(): void {
@@ -469,9 +494,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.placeEnemies(this.enemies().map((e) => ({ ...e, alert: false, surrendered: false, gone: false })));
     this.refreshVision();
     this.notice.set(null);
-    this.activeIndex.set(0);
-    this.turn.set(1);
-    this.startTurn();
+    this.activeId.set(CHARACTERS[0].id);
+    this.round.set(1);
+    this.startRound();
+  }
+
+  /** Gira o mapa (positivo = sentido horário). */
+  protected rotate(direction: 1 | -1): void {
+    this.board?.rotate(direction * this.rotateStep);
   }
 
   protected exit(): void {

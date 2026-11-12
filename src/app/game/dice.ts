@@ -8,3 +8,4 @@ export const rollDice = (count: number, sides: number, rng: Rng = Math.random): 
   Array.from({ length: count }, () => rollDie(sides, rng));
 
 export const sum = (values: readonly number[]): number => values.reduce((a, b) => a + b, 0);
+

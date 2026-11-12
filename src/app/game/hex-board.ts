@@ -155,6 +155,9 @@ export class HexBoard {
   private readonly camTarget = new THREE.Vector3();
   private readonly camGoal = new THREE.Vector3();
   private zoom = 1;
+  /** Giro da câmera em torno do tabuleiro (radianos); `yawGoal` é para onde ela vai. */
+  private yaw = 0;
+  private yawGoal = 0;
   private readonly bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
 
   // ponteiros
@@ -162,6 +165,7 @@ export class HexBoard {
   private tapStart: { x: number; y: number; t: number } | null = null;
   private dragged = false;
   private pinchDist = 0;
+  private pinchAngle = 0;
 
   constructor(
     private readonly canvas: HTMLCanvasElement,
@@ -221,6 +225,11 @@ export class HexBoard {
       this.camGoal.copy(this.worldOf(u.hex));
       this.clampGoal();
     }
+  }
+
+  /** Gira o mapa (positivo = sentido horário visto de cima). */
+  rotate(radians: number): void {
+    this.yawGoal += radians;
   }
 
   /** Hexágonos destacados como destino possível. */
@@ -831,19 +840,25 @@ export class HexBoard {
   private updateCamera(dt: number): void {
     const k = 1 - Math.exp(-dt * 6);
     this.camTarget.lerp(this.camGoal, k);
+    this.yaw += (this.yawGoal - this.yaw) * k;
+    const sy = Math.sin(this.yaw);
+    const cy = Math.cos(this.yaw);
     // Em retrato a câmera recua para enxergar o mesmo número de colunas.
     const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
     const dist = 11.5 * this.zoom * Math.min(portrait, 2.3);
     const pitch = THREE.MathUtils.degToRad(55);
+    const back = Math.cos(pitch) * dist;
     this.camera.position.set(
-      this.camTarget.x,
+      this.camTarget.x + sy * back,
       this.camTarget.y + Math.sin(pitch) * dist,
-      this.camTarget.z + Math.cos(pitch) * dist,
+      this.camTarget.z + cy * back,
     );
     // mira um pouco "abaixo" do jogador: ele fica acima do centro e o painel inferior não cobre o alcance
     const lead = this.camera.aspect < 1 ? 1.4 : 0.3;
-    this.camera.position.z += lead;
-    this.camera.lookAt(this.camTarget.x, this.camTarget.y, this.camTarget.z + lead);
+    // "à frente" da câmera no chão é (-sin, -cos); o foco fica um pouco atrás do alvo
+    this.camera.position.x += sy * lead;
+    this.camera.position.z += cy * lead;
+    this.camera.lookAt(this.camTarget.x + sy * lead, this.camTarget.y, this.camTarget.z + cy * lead);
   }
 
   private loop = (): void => {
@@ -969,6 +984,7 @@ export class HexBoard {
     } else {
       this.tapStart = null;
       this.pinchDist = this.currentPinchDistance();
+      this.pinchAngle = this.currentPinchAngle();
     }
   };
 
@@ -982,6 +998,10 @@ export class HexBoard {
       const d = this.currentPinchDistance();
       if (this.pinchDist > 0 && d > 0) this.setZoom(this.zoom * (this.pinchDist / d));
       this.pinchDist = d;
+      // girar os dois dedos gira o mapa junto
+      const a = this.currentPinchAngle();
+      this.yawGoal += angleDelta(this.pinchAngle, a);
+      this.pinchAngle = a;
       return;
     }
 
@@ -992,8 +1012,13 @@ export class HexBoard {
       // arrastar desloca a câmera (proporcional à distância atual)
       const h = this.canvas.clientHeight || 1;
       const scale = (22 * this.zoom) / h;
-      this.camGoal.x -= (cur.x - prev.x) * scale;
-      this.camGoal.z -= (cur.y - prev.y) * scale * 1.3;
+      const dx = (cur.x - prev.x) * scale;
+      const dy = (cur.y - prev.y) * scale * 1.3;
+      const sy = Math.sin(this.yawGoal);
+      const cy = Math.cos(this.yawGoal);
+      // direita da tela = (cos, -sin); "para cima" da tela = (-sin, -cos)
+      this.camGoal.x += -dx * cy - dy * sy;
+      this.camGoal.z += dx * sy - dy * cy;
       this.clampGoal();
     }
   };
@@ -1020,6 +1045,11 @@ export class HexBoard {
   private currentPinchDistance(): number {
     const pts = [...this.pointers.values()];
     return pts.length < 2 ? 0 : Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y);
+  }
+
+  private currentPinchAngle(): number {
+    const pts = [...this.pointers.values()];
+    return pts.length < 2 ? 0 : Math.atan2(pts[1].y - pts[0].y, pts[1].x - pts[0].x);
   }
 
   private setZoom(z: number): void {

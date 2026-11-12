@@ -20,8 +20,8 @@ export interface GameMap {
 export interface Character {
   id: string;
   name: string;
-  /** Letra exibida no retrato da interface. */
-  initial: string;
+  /** Retrato (rosto) exibido na interface. */
+  avatar: string;
   /** Cor do corpo da peça no tabuleiro e do retrato (hex RGB). */
   color: number;
   /** Modelo 3D do personagem; sem ele, o tabuleiro mostra a peça simples. */
@@ -30,9 +30,9 @@ export interface Character {
 
 /** Os agentes jogáveis, na ordem dos turnos. */
 export const CHARACTERS: Character[] = [
-  { id: 'ana', name: 'Ana', initial: 'A', color: 0x2f9e57, model: MODELS.ana },
-  { id: 'bruno', name: 'Bruno', initial: 'B', color: 0xe0712c, model: MODELS.bruno },
-  { id: 'clara', name: 'Clara', initial: 'C', color: 0x9b5bd6, model: MODELS.clara },
+  { id: 'ana', name: 'Ana', avatar: 'assets/avatars/ana.png', color: 0x2f9e57, model: MODELS.ana },
+  { id: 'bruno', name: 'Bruno', avatar: 'assets/avatars/bruno.png', color: 0xe0712c, model: MODELS.bruno },
+  { id: 'clara', name: 'Clara', avatar: 'assets/avatars/clara.png', color: 0x9b5bd6, model: MODELS.clara },
 ];
 
 export const MAPS: GameMap[] = [
@@ -81,5 +81,9 @@ export const MAPS: GameMap[] = [
 export const findMap = (id: string | null | undefined): GameMap | undefined =>
   MAPS.find((m) => m.id === id && m.available);
 
-/** Regras de movimento: no início de cada turno o personagem rola 2d4 e anda a soma. */
+/**
+ * Regras de movimento: a cada rodada a equipe rola `count` dados por personagem (2d4 cada: seis
+ * dados com três agentes). Cada dado é um movimento, e qualquer personagem usa qualquer dado,
+ * em qualquer ordem.
+ */
 export const MOVE_DICE = { count: 2, sides: 4 } as const;
