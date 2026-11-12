@@ -53,9 +53,10 @@ Regras:
   Three.js isso significa que `rotation.y = atan2(dx, dz)` faz o personagem olhar para a direção
   `(dx, dz)` — a mesma convenção da "alça" (`nub` em `z = +0.42`) da peça atual.
 - **Altura no tabuleiro**: o hexágono tem raio 1 (`HEX_SIZE`), distância entre centros vizinhos
-  √3 ≈ 1,73. Um humano de 1,8 m fica grande demais; normalizamos na carga para **~1,15 unidade**
-  de altura (escala calculada pela bounding box do bind pose e guardada no manifesto, ver §2).
-  Proporções "chunky" (cabeça grande) ajudam a leitura nessa escala.
+  √3 ≈ 1,73. A referência é o hexágono caber num quadrado de **1,5 m × 1,5 m** (1,5 m de ponta a
+  ponta), então 1 m = 2 / 1,5 ≈ 1,33 unidade (`METER`). Os personagens ganham mais 15% por cima disso
+  (`CHARACTER_SCALE`, exagero de miniatura): um humano de 1,70 m fica com **~2,61 unidades** de
+  altura (`heightOf`; escala calculada pela bounding box do bind pose).
 - **Origem** do modelo no chão, centrada entre os pés; o bind pose pode ser T ou A, mas **todo o
   catálogo usa o mesmo** (A-pose da UAL).
 
@@ -346,7 +347,7 @@ export interface ModelDef {
   clipMap: Partial<Record<ClipName, string>>;
   /** Velocidade nativa (unidades/s) dos clipes de locomoção, para casar o timeScale. */
   clipSpeed?: Partial<Record<'walk' | 'run', number>>;
-  heightInUnits: number;                       // altura final no tabuleiro (ex.: 1.15)
+  heightInUnits: number;                       // altura final no tabuleiro (ex.: 2.61)
   sockets?: Partial<Record<SocketName, { bone: string; offset?: [number, number, number] }>>;
   tint?: string[];                             // nomes de materiais que recebem Character.color
 }
@@ -437,7 +438,8 @@ flutuação/giro em unidades **sem** rig.
   batem; não precisou retarget.
 - Código: `src/app/game/character-model.ts` (`CharacterRig`). No `HexBoard`, a peça vira base do
   modelo e o personagem corre em linha reta de hexágono em hexágono, virando para onde vai.
-  Bruno e Clara seguem como peças.
+  Todos os agentes e inimigos têm modelo próprio (ver "Elenco" abaixo). Inimigo rendido toca o
+  clipe `crouch`. `ModelDef.tint` continua disponível para tingir cópias de um mesmo modelo. Os pacotes de origem estão listados em `public/assets/README.md`.
 - O build dos dois GLBs está em `tools/assets/` (ver o README de lá).
 - **A versão grátis é menor que a anunciada:** traz só 2 dos 6 corpos (Super-herói masc./fem.)
   e 43 das 120+ animações. Os outros corpos e animações estão na versão Source, que é paga.
@@ -447,11 +449,25 @@ flutuação/giro em unidades **sem** rig.
 - O orçamento de 3–6k triângulos da seção 2.4 não cabe nesses corpos (~13k). Com 3 personagens
   roda bem; para muitos NPCs vamos precisar de uma versão simplificada.
 
+### Elenco (depois da fase 1)
+
+- Sete modelos: Ana, Bruno, Clara e Kauã (agentes) e madeireiro, garimpeiro e caçador
+  (inimigos), de 290 a 390 KB e de 15k a 18,5k triângulos cada.
+- Os corpos grátis vêm só de roupa íntima. O build (`tools/assets`) pinta a roupa na textura
+  por região do corpo, engrossa a malha sob o tecido e gera os acessórios por código. O elenco
+  fica em `tools/assets/characters.mjs`.
+- Cada inimigo tem o seu modelo (`EnemySpawn.model`, em `maps.ts`), no lugar do modelo único
+  tingido de vermelho; a cor de estado fica só na base.
+- A altura no tabuleiro passou a ser medida pelo osso da cabeça, não pela caixa da malha, para
+  chapéu e coque não encolherem o personagem.
+- Continuam valendo os limites da fase 1: só dois corpos (musculosos) e três clipes. Com seis
+  personagens em cena são ~100k triângulos, perto do teto de 150k da seção 2.4.
+
 ---
 
 ## 6. Perguntas em aberto
 
-- **Escala**: 1,15 unidade de altura para humanos lê bem com a câmera atual? Fauna grande (onça,
+- **Escala**: Fauna grande (onça,
   anta) e veículos ocupam 1 hex ou precisamos de unidades multi-hex (afeta `reachableHexes` e
   `blocked`)?
 - **Curva ou pulinho como padrão?** O pulinho por hex é mais "tabuleiro" e legível para contar

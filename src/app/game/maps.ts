@@ -1,4 +1,4 @@
-import { HUMAN_HEIGHT, HUMANOID_ANIMS, ModelDef } from './character-model';
+import { ModelDef, MODELS } from './character-model';
 import { EnemySpawn } from './enemies';
 
 export interface GameMap {
@@ -30,15 +30,9 @@ export interface Character {
 
 /** Os agentes jogáveis, na ordem dos turnos. */
 export const CHARACTERS: Character[] = [
-  {
-    id: 'ana',
-    name: 'Ana',
-    initial: 'A',
-    color: 0x2f9e57,
-    model: { url: 'assets/characters/ana/ana.glb', anims: HUMANOID_ANIMS, height: HUMAN_HEIGHT },
-  },
-  { id: 'bruno', name: 'Bruno', initial: 'B', color: 0xe0712c },
-  { id: 'clara', name: 'Clara', initial: 'C', color: 0x9b5bd6 },
+  { id: 'ana', name: 'Ana', initial: 'A', color: 0x2f9e57, model: MODELS.ana },
+  { id: 'bruno', name: 'Bruno', initial: 'B', color: 0xe0712c, model: MODELS.bruno },
+  { id: 'clara', name: 'Clara', initial: 'C', color: 0x9b5bd6, model: MODELS.clara },
 ];
 
 export const MAPS: GameMap[] = [
@@ -61,9 +55,14 @@ export const MAPS: GameMap[] = [
       { col: 4, row: 9 }, { col: 5, row: 10 },
     ],
     enemies: [
-      { id: 'madeireiro', name: 'Madeireiro', patrol: [{ col: 2, row: 2 }, { col: 9, row: 2 }] },
-      { id: 'garimpeiro', name: 'Garimpeiro', patrol: [{ col: 10, row: 4 }, { col: 10, row: 9 }] },
-      { id: 'cacador', name: 'Caçador', patrol: [{ col: 8, row: 10 }, { col: 2, row: 10 }, { col: 1, row: 8 }] },
+      { id: 'madeireiro', name: 'Madeireiro', model: MODELS.madeireiro, patrol: [{ col: 2, row: 2 }, { col: 9, row: 2 }] },
+      { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 10, row: 4 }, { col: 10, row: 9 }] },
+      {
+        id: 'cacador',
+        name: 'Caçador',
+        model: MODELS.cacador,
+        patrol: [{ col: 8, row: 10 }, { col: 2, row: 10 }, { col: 1, row: 8 }],
+      },
     ],
   },
   {

@@ -150,7 +150,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       },
       {
         walls: this.map.walls,
-        enemies: this.enemies().map((e) => ({ id: e.id, start: e.hex, facing: e.facing })),
+        enemies: this.enemies().map((e) => ({
+          id: e.id,
+          start: e.hex,
+          facing: e.facing,
+          model: this.map!.enemies.find((s) => s.id === e.id)?.model,
+        })),
       },
     );
     this.refreshVision();
