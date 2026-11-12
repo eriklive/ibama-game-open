@@ -66,6 +66,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     return reachableHexes(from, this.movesLeft(), map.cols, map.rows, blocked);
   });
+  /** Caminho mais curto até o destino escolhido (sem a origem). */
+  private readonly selectedPath = computed(() => {
+    const s = this.selected();
+    return s ? pathTo(this.reach(), s) : [];
+  });
   protected readonly selectedCost = computed(() => {
     const s = this.selected();
     return s ? (this.reach().get(hexKey(s))?.cost ?? 0) : 0;
@@ -153,7 +158,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     } else {
       this.selected.set(null);
     }
-    this.board?.setSelected(this.selected());
+    this.board?.setSelected(this.selected(), this.selectedPath());
   }
 
   protected focusCharacter(id: string): void {
@@ -216,7 +221,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private refreshBoard(): void {
     this.board?.setReachable(this.reach().keys());
-    this.board?.setSelected(this.selected());
+    this.board?.setSelected(this.selected(), this.selectedPath());
   }
 
   private initialPositions(): Map<string, HexCoord> {

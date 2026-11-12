@@ -10,7 +10,8 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 2. Há **3 personagens** (Ana, Bruno e Clara), cada um com o seu turno, em rodadas sem fim.
 3. No início de cada turno são rolados **2d4**: a soma é o movimento daquele turno.
 4. Os hexágonos claros mostram até onde dá para ir (contornando os outros personagens).
-   Toque num hexágono para destacá-lo (fica amarelo) e **toque de novo** nele para
+   Toque num hexágono para destacá-lo (fica amarelo): o caminho até ele brilha e flutua,
+   mostrando por onde o personagem vai passar. **Toque de novo** no destino para
    confirmar — ou use o botão **Confirmar**. Dá para andar várias vezes no mesmo turno
    enquanto sobrar movimento; o custo é o número de passos.
 5. Quando o movimento acaba, a vez passa sozinha; **Passar a vez** encerra antes.

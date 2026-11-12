@@ -150,3 +150,11 @@ export function pathTo(
   }
   return path;
 }
+
+/** Hexágono que contém o ponto (x, z) do plano do mundo — inverso de `hexToWorld`. */
+export function worldToHex(x: number, z: number, size: number): HexCoord {
+  const q = x / (1.5 * size);
+  const r = z / (Math.sqrt(3) * size) - q / 2;
+  const h = fromCube(roundCube(q, -q - r, r));
+  return { col: h.col + 0, row: h.row + 0 }; // + 0 troca -0 por 0
+}

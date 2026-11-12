@@ -96,3 +96,17 @@ describe('movimentação', () => {
     for (let i = 1; i < path.length; i++) expect(hexDistance(path[i - 1], path[i])).toBe(1);
   });
 });
+
+describe('toque no tabuleiro', () => {
+  it('worldToHex é o inverso de hexToWorld, inclusive perto das bordas do hexágono', async () => {
+    const { hexToWorld, worldToHex } = await import('./hex');
+    for (let col = 0; col < 12; col++) {
+      for (let row = 0; row < 12; row++) {
+        const p = hexToWorld({ col, row }, 1);
+        expect(worldToHex(p.x, p.z, 1)).toEqual({ col, row });
+        expect(worldToHex(p.x + 0.4, p.z - 0.4, 1)).toEqual({ col, row });
+        expect(worldToHex(p.x - 0.3, p.z + 0.5, 1)).toEqual({ col, row });
+      }
+    }
+  });
+});

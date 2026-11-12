@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { GameMap } from './maps';
-import { HexCoord, hexKey, hexToWorld, sameHex } from './hex';
+import { HexCoord, hexKey, hexToWorld, sameHex, worldToHex } from './hex';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -14,6 +14,7 @@ const COLORS = {
   hexC: 0x3482cf,
   reachable: 0xa9e4ff,
   selected: 0xffd23f,
+  path: 0xfff4c2,
   activeRing: 0xffd23f,
   focusRing: 0xffffff,
 };
@@ -40,6 +41,8 @@ interface HexTile {
   mesh: THREE.Mesh;
   material: THREE.MeshStandardMaterial;
   baseColor: THREE.Color;
+  /** Altura-alvo do hexágono (a animação aproxima `mesh.position.y` dela). */
+  lift: number;
 }
 
 export interface HexBoardCallbacks {
@@ -72,6 +75,8 @@ export class HexBoard {
 
   private reachable = new Set<string>();
   private selected: HexCoord | null = null;
+  /** Caminho até o destino (sem a origem, com o destino), na ordem em que será percorrido. */
+  private path: string[] = [];
   private activeId: string | null = null;
   private focusId: string | null = null;
   private moving = false;
@@ -152,8 +157,10 @@ export class HexBoard {
     this.paintTiles();
   }
 
-  setSelected(hex: HexCoord | null): void {
+  /** Destino escolhido e o caminho até ele (sem a origem), que brilha e flutua. */
+  setSelected(hex: HexCoord | null, path: HexCoord[] = []): void {
     this.selected = hex;
+    this.path = hex ? path.map(hexKey) : [];
     this.paintTiles();
   }
 
@@ -175,13 +182,20 @@ export class HexBoard {
     const u = this.units.get(id);
     if (!u || this.moving || !path.length) return;
     this.moving = true;
-    this.selected = null;
+    // o caminho continua aceso durante a caminhada e cada hexágono "pousa" quando a peça passa
+    this.selected = path[path.length - 1];
+    this.path = path.map(hexKey);
     this.reachable.clear();
     this.paintTiles();
     for (const step of path) {
       await this.hopTo(u, step);
       u.hex = step;
+      this.path.shift();
+      this.paintTiles();
     }
+    this.selected = null;
+    this.path = [];
+    this.paintTiles();
     this.moving = false;
   }
 
@@ -236,7 +250,7 @@ export class HexBoard {
         mesh.add(new THREE.LineSegments(edges, lineMat));
         this.scene.add(mesh);
         this.pickables.push(mesh);
-        this.tiles.set(hexKey(coord), { coord, mesh, material, baseColor });
+        this.tiles.set(hexKey(coord), { coord, mesh, material, baseColor, lift: 0 });
       }
     }
 
@@ -321,10 +335,13 @@ export class HexBoard {
   private paintTiles(): void {
     for (const [key, tile] of this.tiles) {
       const isSel = sameHex(tile.coord, this.selected);
+      const onPath = !isSel && this.path.includes(key);
       const isReach = this.reachable.has(key);
-      tile.material.color.set(isSel ? COLORS.selected : isReach ? COLORS.reachable : tile.baseColor);
-      tile.material.emissive.set(isSel ? 0x6b5200 : 0x000000);
-      tile.mesh.position.y = isSel ? 0.12 : 0;
+      tile.material.color.set(
+        isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? COLORS.reachable : tile.baseColor,
+      );
+      tile.material.emissive.set(isSel ? 0x6b5200 : onPath ? 0x5a4a14 : 0x000000);
+      tile.lift = isSel ? 0.2 : onPath ? 0.1 : 0;
     }
   }
 
@@ -420,10 +437,24 @@ export class HexBoard {
 
     // pulso suave nos hexágonos alcançáveis
     const pulse = 0.12 + Math.sin(t * 3) * 0.08;
+    const tk = 1 - Math.exp(-dt * 12);
     for (const [key, tile] of this.tiles) {
-      if (this.reachable.has(key) && !sameHex(tile.coord, this.selected)) {
-        tile.material.emissive.setRGB(pulse * 0.3, pulse * 0.6, pulse);
+      const step = this.path.indexOf(key);
+      const isSel = sameHex(tile.coord, this.selected);
+      if (step >= 0 && !isSel) {
+        // caminho: brilho quente que "corre" da peça até o destino, e uma onda de flutuação
+        const wave = Math.sin(t * 5 - step * 0.9);
+        const glow = 0.4 + wave * 0.12;
+        tile.material.emissive.setRGB(glow, glow * 0.8, glow * 0.25);
+        tile.mesh.position.y += (tile.lift + wave * 0.035 - tile.mesh.position.y) * tk;
+        continue;
       }
+      if (isSel) {
+        tile.mesh.position.y += (tile.lift + Math.sin(t * 3) * 0.03 - tile.mesh.position.y) * tk;
+        continue;
+      }
+      if (this.reachable.has(key)) tile.material.emissive.setRGB(pulse * 0.3, pulse * 0.6, pulse);
+      tile.mesh.position.y += (tile.lift - tile.mesh.position.y) * tk;
     }
 
     this.updateCamera(dt);
@@ -544,8 +575,16 @@ export class HexBoard {
       this.callbacks.onUnitTap(unitHit.object.userData['unitId'] as string);
       return;
     }
+    // Os hexágonos do caminho flutuam: o toque vale tanto para onde o hexágono aparece
+    // (malha) quanto para onde ele fica em repouso (plano y = 0). O destino já escolhido
+    // ganha o desempate, para o segundo toque confirmar mesmo na borda do hexágono.
     const hit = this.raycaster.intersectObjects(this.pickables, false)[0];
-    const hex = hit?.object.userData['hex'] as HexCoord | undefined;
+    const meshHex = hit?.object.userData['hex'] as HexCoord | undefined;
+    const ground = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+    const groundHex = ground ? worldToHex(ground.x, ground.z, HEX_SIZE) : undefined;
+    const onBoard = (h?: HexCoord) => !!h && this.tiles.has(hexKey(h));
+    const hex = [meshHex, groundHex].find((h) => onBoard(h) && sameHex(h!, this.selected)) ??
+      (onBoard(groundHex) ? groundHex : meshHex);
     const owner = hex && [...this.units.values()].find((u) => sameHex(u.hex, hex));
     if (owner) this.callbacks.onUnitTap(owner.id);
     else this.callbacks.onHexTap(hex ?? null);
