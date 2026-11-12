@@ -1,4 +1,5 @@
 import { HUMAN_HEIGHT, HUMANOID_ANIMS, ModelDef } from './character-model';
+import { EnemySpawn } from './enemies';
 
 export interface GameMap {
   id: string;
@@ -10,6 +11,10 @@ export interface GameMap {
   available: boolean;
   /** Posições iniciais, uma por personagem (na ordem de `CHARACTERS`). */
   starts: { col: number; row: number }[];
+  /** Hexágonos com parede: bloqueiam passagem e visão. */
+  walls: { col: number; row: number }[];
+  /** Inimigos e suas rotas de patrulha. */
+  enemies: EnemySpawn[];
 }
 
 export interface Character {
@@ -45,6 +50,21 @@ export const MAPS: GameMap[] = [
     rows: 12,
     available: true,
     starts: [{ col: 5, row: 6 }, { col: 4, row: 7 }, { col: 6, row: 7 }],
+    walls: [
+      // muro ao norte, entre o madeireiro e os agentes
+      { col: 4, row: 3 }, { col: 5, row: 4 }, { col: 6, row: 3 }, { col: 7, row: 4 },
+      // pedras a oeste
+      { col: 2, row: 6 }, { col: 2, row: 7 },
+      // barreira a leste
+      { col: 8, row: 6 }, { col: 8, row: 7 }, { col: 9, row: 8 },
+      // tronco ao sul
+      { col: 4, row: 9 }, { col: 5, row: 10 },
+    ],
+    enemies: [
+      { id: 'madeireiro', name: 'Madeireiro', patrol: [{ col: 2, row: 2 }, { col: 9, row: 2 }] },
+      { id: 'garimpeiro', name: 'Garimpeiro', patrol: [{ col: 10, row: 4 }, { col: 10, row: 9 }] },
+      { id: 'cacador', name: 'Caçador', patrol: [{ col: 8, row: 10 }, { col: 2, row: 10 }, { col: 1, row: 8 }] },
+    ],
   },
   {
     id: 'missao-1-hangar',
@@ -54,6 +74,8 @@ export const MAPS: GameMap[] = [
     rows: 11,
     available: false,
     starts: [{ col: 2, row: 6 }, { col: 1, row: 5 }, { col: 1, row: 7 }],
+    walls: [],
+    enemies: [],
   },
 ];
 

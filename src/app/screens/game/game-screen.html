@@ -8,7 +8,9 @@
       </button>
       <div class="mission">
         <span class="mission-name">{{ map?.name }}</span>
-        <span class="mission-sub" data-testid="turn">Rodada {{ round() }} · Turno {{ turn() }}</span>
+        <span class="mission-sub" data-testid="turn">
+          Rodada {{ round() }} · {{ phase() === 'enemy' ? 'Turno inimigo' : 'Turno ' + turn() }}
+        </span>
       </div>
       <button type="button" class="btn btn-ghost restart" (click)="restart()" aria-label="Recomeçar a partida">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 12a8 8 0 1 0 2.4-5.7M4 4v5h5" /></svg>
@@ -20,7 +22,7 @@
         <button
           type="button"
           class="chip"
-          [class.active]="c.id === active().id"
+          [class.active]="c.id === active().id && phase() !== 'enemy'"
           [class.focused]="c.id === focused().id"
           [attr.aria-pressed]="c.id === focused().id"
           [attr.aria-label]="c.name + (c.id === active().id ? ', na vez' : ', aguardando') + '. Toque para ver no tabuleiro.'"
@@ -29,11 +31,29 @@
           <span class="portrait" [style.background]="hexColor(c)">{{ c.initial }}</span>
           <span class="chip-text">
             <span class="chip-name">{{ c.name }}</span>
-            <span class="chip-state">{{ c.id === active().id ? 'Na vez' : 'Espera' }}</span>
+            <span class="chip-state">{{ c.id === active().id && phase() !== 'enemy' ? 'Na vez' : 'Espera' }}</span>
           </span>
         </button>
       }
     </nav>
+
+    @if (enemies().length) {
+      <div class="foes" data-testid="foes" aria-label="Inimigos">
+        @for (e of enemies(); track e.id) {
+          <span [class]="'foe ' + e.status">
+            <span class="foe-dot" aria-hidden="true">{{ e.status === 'alert' ? '!' : e.status === 'surrendered' ? '✓' : '' }}</span>
+            {{ e.name }}
+            <em>{{ statusLabel[e.status] }}</em>
+          </span>
+        }
+      </div>
+    }
+
+    @if (notice(); as n) {
+      <div class="notice" [class.alert]="n.tone === 'alert'" role="status" aria-live="assertive" data-testid="notice">
+        {{ n.text }}
+      </div>
+    }
   </header>
 
   @if (phase() === 'rolling') {
@@ -60,7 +80,43 @@
   }
 
   <footer class="hud-bottom">
-    @if (viewingOther()) {
+    @if (phase() === 'enemy') {
+      <div class="panel enemy-panel" data-testid="panel">
+        <div class="panel-head">
+          <span class="portrait sm foe-portrait">!</span>
+          <div class="panel-title">
+            <strong>Turno inimigo</strong>
+            <span>
+              {{ enemyCounts().patrol }} em patrulha · {{ enemyCounts().alert }} em fuga ·
+              {{ enemyCounts().surrendered }} {{ enemyCounts().surrendered === 1 ? 'rendido' : 'rendidos' }} ·
+              {{ enemyCounts().fled }} {{ enemyCounts().fled === 1 ? 'fugiu' : 'fugiram' }}
+            </span>
+          </div>
+        </div>
+      </div>
+    } @else if (approaching()) {
+      <div class="panel approach-panel" data-testid="panel">
+        <div class="panel-head">
+          <span class="portrait sm" [style.background]="hexColor(active())">{{ active().initial }}</span>
+          <div class="panel-title">
+            <strong>Abordagem de {{ active().name }}</strong>
+            <span>Raio de {{ approachRules.radius }} · encerra a vez</span>
+          </div>
+        </div>
+        <ul class="approach-list" data-testid="approach-list">
+          @for (e of approachPlan().surrender; track e.id) {
+            <li class="surrender"><span class="zone-swatch"></span>{{ e.name }} <em>se rende (até {{ approachRules.surrenderRange }})</em></li>
+          }
+          @for (e of approachPlan().flee; track e.id) {
+            <li class="flee"><span class="zone-swatch"></span>{{ e.name }} <em>vai tentar correr</em></li>
+          }
+        </ul>
+        <div class="buttons">
+          <button type="button" class="btn btn-ghost" (click)="cancelApproach()">Cancelar</button>
+          <button type="button" class="btn btn-primary confirm" (click)="confirmApproach()">Abordar!</button>
+        </div>
+      </div>
+    } @else if (viewingOther()) {
       <div class="panel" data-testid="panel">
         <div class="panel-head">
           <span class="portrait sm" [style.background]="hexColor(focused())">{{ focused().initial }}</span>
@@ -83,9 +139,11 @@
               @switch (phase()) {
                 @case ('rolling') { Rolando os dados… }
                 @case ('walking') { Andando… }
-                @case ('ending') { Sem movimento · passando a vez… }
+                @case ('ending') { Passando a vez… }
                 @default {
-                  @if (selected()) {
+                  @if (movesLeft() <= 0) {
+                    Sem movimento · aborde ou passe a vez
+                  } @else if (selected()) {
                     Destino a {{ selectedCost() }} {{ selectedCost() === 1 ? 'passo' : 'passos' }} · toque de novo para confirmar
                   } @else {
                     Toque num hexágono claro · arraste para mover a câmera
@@ -111,6 +169,18 @@
             <button type="button" class="btn btn-ghost" (click)="cancel()">Cancelar</button>
             <button type="button" class="btn btn-primary confirm" (click)="confirm()">Confirmar</button>
           } @else {
+            <button
+              type="button"
+              class="btn btn-approach"
+              [disabled]="phase() !== 'moving-choice' || !canApproach()"
+              [attr.aria-label]="canApproach() ? 'Abordar inimigos no raio' : 'Abordar: nenhum inimigo no raio de ' + approachRules.radius"
+              data-testid="approach"
+              (click)="startApproach()">
+              Abordar
+              @if (canApproach()) {
+                <span class="badge">{{ approachPlan().surrender.length + approachPlan().flee.length }}</span>
+              }
+            </button>
             <button
               type="button"
               class="btn btn-ghost"

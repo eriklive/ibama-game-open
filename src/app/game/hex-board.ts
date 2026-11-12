@@ -23,7 +23,18 @@ const COLORS = {
   path: 0xfff4c2,
   activeRing: 0xffd23f,
   focusRing: 0xffffff,
+  wall: 0x56626a,
+  wallTop: 0x7d8a90,
+  vision: 0xd8735f,
+  visionReach: 0xf3b7a4,
+  enemy: 0xc8323c,
+  enemyAlert: 0xff8a1f,
+  enemySurrendered: 0xe9eef0,
+  approachSurrender: 0x8fe08a,
+  approachFlee: 0xffb067,
 };
+
+const WALL_HEIGHT = 0.9;
 
 export interface BoardUnit {
   id: string;
@@ -33,21 +44,53 @@ export interface BoardUnit {
   model?: ModelDef;
 }
 
-interface UnitView {
+export interface BoardEnemy {
   id: string;
+  start: HexCoord;
+  /** Ângulo para onde olha, no plano XZ (atan2(dz, dx)). */
+  facing: number;
+}
+
+/** Peça que anda pelo tabuleiro (agente ou inimigo). */
+interface Mover {
   hex: HexCoord;
   group: THREE.Group;
   shadow: THREE.Mesh;
+  hop: number;
+  /** Muda quando a peça é recolocada à força: interrompe a animação em curso. */
+  epoch: number;
+}
+
+interface UnitView extends Mover {
+  id: string;
   hitbox: THREE.Mesh;
   /** 0 = parado, 1 = flutuando (personagem da vez); interpolado para suavizar a troca. */
   lift: number;
-  hop: number;
   /** Peças da miniatura que somem quando o modelo 3D chega (miolo e alça de frente). */
   pieceOnly: THREE.Object3D[];
   rig?: CharacterRig;
   /** Direção para onde o modelo olha (rad em torno de Y; 0 = +Z, de frente para a câmera). */
   yaw: number;
 }
+
+interface EnemyView extends Mover {
+  id: string;
+  /** Para onde a peça aponta agora e para onde está girando. */
+  facing: number;
+  facingGoal: number;
+  alert: boolean;
+  surrendered: boolean;
+  bodyMaterial: THREE.MeshStandardMaterial;
+  alertSprite: THREE.Sprite;
+  flagSprite: THREE.Sprite;
+  /** 1 = no tabuleiro, 0 = sumiu (fugiu); anima a saída. */
+  presence: number;
+  gone: boolean;
+}
+
+/** Diferença angular em (-π, π]. */
+const angleDelta = (from: number, to: number): number =>
+  Math.atan2(Math.sin(to - from), Math.cos(to - from));
 
 interface HexTile {
   coord: HexCoord;
@@ -80,6 +123,7 @@ export class HexBoard {
   private readonly tiles = new Map<string, HexTile>();
   private readonly pickables: THREE.Object3D[] = [];
   private readonly units = new Map<string, UnitView>();
+  private readonly enemies = new Map<string, EnemyView>();
   private readonly activeMarker: THREE.Mesh;
   private readonly focusMarker: THREE.Mesh;
   private readonly clock = new THREE.Clock();
@@ -87,6 +131,9 @@ export class HexBoard {
   private frameId = 0;
 
   private reachable = new Set<string>();
+  private vision = new Set<string>();
+  /** Pré-visualização da abordagem: zona de rendição e zona de fuga. */
+  private approach: { surrender: Set<string>; flee: Set<string> } | null = null;
   private selected: HexCoord | null = null;
   /** Caminho até o destino (sem a origem, com o destino), na ordem em que será percorrido. */
   private path: string[] = [];
@@ -113,6 +160,7 @@ export class HexBoard {
     private readonly map: GameMap,
     units: BoardUnit[],
     private readonly callbacks: HexBoardCallbacks,
+    extras: { walls?: HexCoord[]; enemies?: BoardEnemy[] } = {},
   ) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -124,7 +172,9 @@ export class HexBoard {
 
     this.setupLights();
     this.buildBoard();
+    this.buildWalls(extras.walls ?? []);
     for (const u of units) this.buildUnit(u);
+    for (const e of extras.enemies ?? []) this.buildEnemy(e);
     this.activeMarker = this.buildMarker(COLORS.activeRing, 0.62, 0.09);
     this.focusMarker = this.buildMarker(COLORS.focusRing, 0.72, 0.05);
 
@@ -178,11 +228,111 @@ export class HexBoard {
     this.paintTiles();
   }
 
+  /** Hexágonos vistos pelos inimigos (pintados de vermelho). */
+  setVision(keys: Iterable<string>): void {
+    this.vision = new Set(keys);
+    this.paintTiles();
+  }
+
+  /** Mostra (ou esconde, com `null`) as zonas da abordagem. */
+  setApproachZones(zones: { surrender: Iterable<string>; flee: Iterable<string> } | null): void {
+    this.approach = zones && { surrender: new Set(zones.surrender), flee: new Set(zones.flee) };
+    this.paintTiles();
+  }
+
+  /** Leva a câmera até um hexágono. */
+  focusHex(hex: HexCoord): void {
+    this.camGoal.copy(this.worldOf(hex));
+    this.clampGoal();
+  }
+
+  /** Recoloca os inimigos (sem animação): posição, direção, alerta e presença. */
+  placeEnemies(
+    states: Iterable<{ id: string; hex: HexCoord; facing: number; alert: boolean; surrendered: boolean; gone: boolean }>,
+  ): void {
+    for (const st of states) {
+      const e = this.enemies.get(st.id);
+      if (!e) continue;
+      e.epoch++;
+      e.hop = 0;
+      e.hex = { ...st.hex };
+      const p = this.worldOf(st.hex);
+      e.group.position.x = p.x;
+      e.group.position.z = p.z;
+      e.facing = e.facingGoal = st.facing;
+      e.gone = st.gone;
+      e.presence = st.gone ? 0 : 1;
+      this.setEnemyAlert(st.id, st.alert);
+      this.setEnemySurrendered(st.id, st.surrendered);
+    }
+  }
+
+  /** Vira o inimigo para um ângulo (com animação). */
+  setEnemyFacing(id: string, facing: number): void {
+    const e = this.enemies.get(id);
+    if (e) e.facingGoal = facing;
+  }
+
+  /** Inimigo em alerta: fica laranja e mostra um "!" sobre a cabeça. */
+  setEnemyAlert(id: string, alert: boolean): void {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    e.alert = alert;
+    if (alert) e.surrendered = false;
+    this.paintEnemy(e);
+  }
+
+  /** Inimigo rendido: fica branco, abaixado, com uma bandeira branca. */
+  setEnemySurrendered(id: string, surrendered: boolean): void {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    e.surrendered = surrendered;
+    if (surrendered) e.alert = false;
+    this.paintEnemy(e);
+  }
+
+  private paintEnemy(e: EnemyView): void {
+    e.bodyMaterial.color.set(e.surrendered ? COLORS.enemySurrendered : e.alert ? COLORS.enemyAlert : COLORS.enemy);
+    e.alertSprite.visible = e.alert;
+    e.flagSprite.visible = e.surrendered;
+  }
+
+  /**
+   * Anda com o inimigo pelo caminho, virando para cada passo. `onStep` roda a cada
+   * hexágono alcançado; se devolver `false` o inimigo para ali.
+   */
+  async moveEnemy(id: string, path: HexCoord[], onStep?: (hex: HexCoord) => boolean | void, speed = 1): Promise<void> {
+    const e = this.enemies.get(id);
+    if (!e || this.moving || !path.length) return;
+    this.moving = true;
+    const epoch = e.epoch;
+    for (const step of path) {
+      const from = this.worldOf(e.hex);
+      const to = this.worldOf(step);
+      e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
+      await this.hopTo(e, step, 300 / speed);
+      if (e.epoch !== epoch) break;
+      e.hex = step;
+      if (onStep?.(step) === false) break;
+    }
+    this.moving = false;
+  }
+
+  /** O inimigo sai do tabuleiro (fugiu). */
+  async removeEnemy(id: string): Promise<void> {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    e.gone = true;
+    await new Promise((r) => setTimeout(r, 450));
+  }
+
   /** Coloca todas as peças nas posições dadas (sem animação). */
   placeUnits(positions: ReadonlyMap<string, HexCoord>): void {
     for (const [id, hex] of positions) {
       const u = this.units.get(id);
       if (!u) continue;
+      u.epoch++;
+      u.hop = 0;
       u.hex = { ...hex };
       const p = this.worldOf(hex);
       u.group.position.x = p.x;
@@ -191,8 +341,11 @@ export class HexBoard {
     if (this.focusId) this.focus(this.focusId);
   }
 
-  /** Anda com a peça pelo caminho (passo a passo, sem a origem). Resolve ao terminar. */
-  async moveUnit(id: string, path: HexCoord[]): Promise<void> {
+  /**
+   * Anda com a peça pelo caminho (passo a passo, sem a origem). Resolve ao terminar.
+   * `onStep` roda a cada hexágono alcançado.
+   */
+  async moveUnit(id: string, path: HexCoord[], onStep?: (hex: HexCoord) => void): Promise<void> {
     const u = this.units.get(id);
     if (!u || this.moving || !path.length) return;
     this.moving = true;
@@ -203,11 +356,14 @@ export class HexBoard {
     this.paintTiles();
     u.rig?.matchSpeed('run', RUN_SPEED);
     u.rig?.play('run', 0.15);
+    const epoch = u.epoch;
     for (const step of path) {
       await (u.rig ? this.runTo(u, step) : this.hopTo(u, step));
+      if (u.epoch !== epoch) break;
       u.hex = step;
       this.path.shift();
       this.paintTiles();
+      onStep?.(step);
     }
     u.rig?.play('idle', 0.3);
     this.selected = null;
@@ -288,6 +444,146 @@ export class HexBoard {
     this.scene.add(base);
   }
 
+  private buildWalls(walls: HexCoord[]): void {
+    if (!walls.length) return;
+    const r = HEX_SIZE * HEX_GAP * 0.92;
+    const geo = new THREE.CylinderGeometry(r * 0.9, r, WALL_HEIGHT, 6);
+    geo.rotateY(Math.PI / 6);
+    geo.translate(0, WALL_HEIGHT / 2, 0);
+    const edges = new THREE.EdgesGeometry(geo);
+    const lineMat = new THREE.LineBasicMaterial({ color: COLORS.outline });
+    const mats = [
+      new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
+      new THREE.MeshStandardMaterial({ color: COLORS.wallTop, roughness: 0.9 }),
+      new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
+    ];
+    for (const h of walls) {
+      const tile = this.tiles.get(hexKey(h));
+      if (!tile) continue;
+      tile.baseColor.set(0x3b4a50);
+      const wall = new THREE.Mesh(geo, mats);
+      wall.castShadow = true;
+      wall.receiveShadow = true;
+      wall.add(new THREE.LineSegments(edges, lineMat));
+      // um pouco de variação de altura para parecer pedra/tronco
+      wall.scale.y = 0.85 + ((h.col * 13 + h.row * 7) % 5) * 0.07;
+      tile.mesh.add(wall);
+    }
+  }
+
+  private buildEnemy(enemy: BoardEnemy): void {
+    const group = new THREE.Group();
+    const bodyMaterial = new THREE.MeshStandardMaterial({ color: COLORS.enemy, roughness: 0.5 });
+    const dark = new THREE.MeshStandardMaterial({ color: 0x3a1014, roughness: 0.6 });
+    // corpo hexagonal + "cabeça" e um nariz apontando para onde olha (+X local)
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.42, 0.3, 6), bodyMaterial);
+    body.castShadow = true;
+    const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 20, 14), bodyMaterial);
+    head.position.y = 0.3;
+    head.castShadow = true;
+    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.34, 16), dark);
+    nose.rotation.z = -Math.PI / 2;
+    nose.position.set(0.42, 0.08, 0);
+    nose.castShadow = true;
+    const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.24), dark);
+    eyes.position.set(0.18, 0.34, 0);
+    group.add(body, head, nose, eyes);
+
+    const alertSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.bangTexture(), depthTest: false }));
+    alertSprite.scale.set(0.6, 0.6, 1);
+    alertSprite.position.y = 1.05;
+    alertSprite.visible = false;
+    alertSprite.renderOrder = 10;
+    const flagSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flagTexture(), depthTest: false }));
+    flagSprite.scale.set(0.7, 0.7, 1);
+    flagSprite.position.y = 1.0;
+    flagSprite.visible = false;
+    flagSprite.renderOrder = 10;
+    group.add(alertSprite, flagSprite);
+    this.scene.add(group);
+
+    const shadow = new THREE.Mesh(
+      new THREE.CircleGeometry(0.4, 32),
+      new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.35, depthWrite: false }),
+    );
+    shadow.rotation.x = -Math.PI / 2;
+    this.scene.add(shadow);
+
+    const p = this.worldOf(enemy.start);
+    group.position.set(p.x, 0.15, p.z);
+    this.enemies.set(enemy.id, {
+      id: enemy.id,
+      hex: { ...enemy.start },
+      group,
+      shadow,
+      hop: 0,
+      epoch: 0,
+      facing: enemy.facing,
+      facingGoal: enemy.facing,
+      alert: false,
+      surrendered: false,
+      bodyMaterial,
+      alertSprite,
+      flagSprite,
+      presence: 1,
+      gone: false,
+    });
+  }
+
+  /** Bandeira branca (desenhada num canvas). */
+  private flagTexture(): THREE.Texture {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    if (g) {
+      g.lineJoin = 'round';
+      g.strokeStyle = '#0b1d24';
+      g.lineWidth = 10;
+      // mastro
+      g.beginPath();
+      g.moveTo(34, 14);
+      g.lineTo(34, 118);
+      g.stroke();
+      // pano ondulado
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.moveTo(34, 16);
+      g.bezierCurveTo(60, 4, 80, 30, 112, 18);
+      g.lineTo(112, 66);
+      g.bezierCurveTo(80, 78, 60, 52, 34, 64);
+      g.closePath();
+      g.fill();
+      g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /** Balão amarelo com "!" (desenhado num canvas). */
+  private bangTexture(): THREE.Texture {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    if (g) {
+      g.fillStyle = '#ffd23f';
+      g.strokeStyle = '#0b1d24';
+      g.lineWidth = 10;
+      g.beginPath();
+      g.arc(64, 64, 52, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      g.fillStyle = '#0b1d24';
+      g.font = 'bold 84px sans-serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText('!', 64, 70);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
   private buildUnit(unit: BoardUnit): void {
     const group = new THREE.Group();
     const body = new THREE.Color(unit.color);
@@ -336,7 +632,7 @@ export class HexBoard {
     const p = this.worldOf(unit.start);
     group.position.set(p.x, 0.3, p.z);
     const view: UnitView = {
-      id: unit.id, hex: { ...unit.start }, group, shadow, hitbox, lift: 0, hop: 0,
+      id: unit.id, hex: { ...unit.start }, group, shadow, hitbox, lift: 0, hop: 0, epoch: 0,
       pieceOnly: [dot, nub], yaw: 0,
     };
     this.units.set(unit.id, view);
@@ -384,8 +680,15 @@ export class HexBoard {
       const isSel = sameHex(tile.coord, this.selected);
       const onPath = !isSel && this.path.includes(key);
       const isReach = this.reachable.has(key);
+      const seen = this.vision.has(key);
+      const reachColor = seen ? COLORS.visionReach : COLORS.reachable;
+      const zone = this.approach?.surrender.has(key)
+        ? COLORS.approachSurrender
+        : this.approach?.flee.has(key)
+          ? COLORS.approachFlee
+          : null;
       tile.material.color.set(
-        isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? COLORS.reachable : tile.baseColor,
+        zone ?? (isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? reachColor : seen ? COLORS.vision : tile.baseColor),
       );
       tile.material.emissive.set(isSel ? 0x6b5200 : onPath ? 0x5a4a14 : 0x000000);
       tile.lift = isSel ? 0.2 : onPath ? 0.1 : 0;
@@ -399,14 +702,16 @@ export class HexBoard {
     return new THREE.Vector3(p.x, 0, p.z);
   }
 
-  private hopTo(u: UnitView, h: HexCoord): Promise<void> {
+  private hopTo(u: Mover, h: HexCoord, duration = 260): Promise<void> {
     const from = u.group.position.clone();
     const to = this.worldOf(h);
     this.camGoal.copy(to);
-    const duration = 260;
+    this.clampGoal();
     const start = performance.now();
+    const epoch = u.epoch;
     return new Promise((resolve) => {
       const step = (now: number) => {
+        if (u.epoch !== epoch) return resolve();
         const t = Math.min(1, (now - start) / duration);
         const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
         u.group.position.x = from.x + (to.x - from.x) * e;
@@ -427,11 +732,14 @@ export class HexBoard {
     const from = u.group.position.clone();
     const to = this.worldOf(h);
     this.camGoal.copy(to);
+    this.clampGoal();
     u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
     const duration = (Math.hypot(to.x - from.x, to.z - from.z) / RUN_SPEED) * 1000;
     const start = performance.now();
+    const epoch = u.epoch;
     return new Promise((resolve) => {
       const step = (now: number) => {
+        if (u.epoch !== epoch) return resolve();
         const t = this.disposed ? 1 : Math.min(1, (now - start) / duration);
         u.group.position.x = from.x + (to.x - from.x) * t;
         u.group.position.z = from.z + (to.z - from.z) * t;
@@ -512,6 +820,23 @@ export class HexBoard {
       u.shadow.scale.setScalar(1 - (float - 0.3 + u.hop) * 0.6);
     }
 
+    for (const e of this.enemies.values()) {
+      e.facing += angleDelta(e.facing, e.facingGoal) * (1 - Math.exp(-dt * 12));
+      e.group.rotation.y = -e.facing;
+      e.presence += ((e.gone ? 0 : 1) - e.presence) * (1 - Math.exp(-dt * 7));
+      const visible = e.presence > 0.02;
+      e.group.visible = e.shadow.visible = visible;
+      // ao fugir, a peça encolhe e afunda
+      e.group.scale.setScalar(Math.max(0.001, e.presence));
+      const jitter = e.alert ? Math.abs(Math.sin(t * 9)) * 0.06 : 0;
+      // rendido fica abaixado
+      const crouch = e.surrendered ? -0.08 : 0;
+      e.group.position.y = 0.15 + crouch + e.hop + jitter - (1 - e.presence) * 0.5;
+      e.alertSprite.position.y = 1.05 + Math.sin(t * 6) * 0.06;
+      e.shadow.position.set(e.group.position.x, 0.01, e.group.position.z);
+      e.shadow.scale.setScalar(Math.max(0.001, e.presence * (1 - e.hop * 0.6)));
+    }
+
     this.updateMarker(this.activeMarker, this.activeId, 0.03, 1 + Math.sin(t * 4) * 0.06);
     this.updateMarker(
       this.focusMarker,
@@ -538,7 +863,13 @@ export class HexBoard {
         tile.mesh.position.y += (tile.lift + Math.sin(t * 3) * 0.03 - tile.mesh.position.y) * tk;
         continue;
       }
-      if (this.reachable.has(key)) tile.material.emissive.setRGB(pulse * 0.3, pulse * 0.6, pulse);
+      if (this.approach && (this.approach.surrender.has(key) || this.approach.flee.has(key))) {
+        const g = 0.08 + Math.sin(t * 4) * 0.06;
+        tile.material.emissive.setRGB(g, g * 0.8, g * 0.3);
+      } else if (this.reachable.has(key)) {
+        if (this.vision.has(key)) tile.material.emissive.setRGB(pulse, pulse * 0.4, pulse * 0.3);
+        else tile.material.emissive.setRGB(pulse * 0.3, pulse * 0.6, pulse);
+      }
       tile.mesh.position.y += (tile.lift - tile.mesh.position.y) * tk;
     }
 
