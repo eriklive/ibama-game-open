@@ -54,8 +54,9 @@ Regras:
   `(dx, dz)` — a mesma convenção da "alça" (`nub` em `z = +0.42`) da peça atual.
 - **Altura no tabuleiro**: o hexágono tem raio 1 (`HEX_SIZE`), distância entre centros vizinhos
   √3 ≈ 1,73. A referência é o hexágono caber num quadrado de **1,5 m × 1,5 m** (1,5 m de ponta a
-  ponta), então 1 m = 2 / 1,5 ≈ 1,33 unidade (`METER`) e um humano de 1,70 m fica com **~2,27
-  unidades** de altura (`HUMAN_HEIGHT`; escala calculada pela bounding box do bind pose).
+  ponta), então 1 m = 2 / 1,5 ≈ 1,33 unidade (`METER`). Os personagens ganham mais 15% por cima disso
+  (`CHARACTER_SCALE`, exagero de miniatura): um humano de 1,70 m fica com **~2,61 unidades** de
+  altura (`heightOf`; escala calculada pela bounding box do bind pose).
 - **Origem** do modelo no chão, centrada entre os pés; o bind pose pode ser T ou A, mas **todo o
   catálogo usa o mesmo** (A-pose da UAL).
 
@@ -346,7 +347,7 @@ export interface ModelDef {
   clipMap: Partial<Record<ClipName, string>>;
   /** Velocidade nativa (unidades/s) dos clipes de locomoção, para casar o timeScale. */
   clipSpeed?: Partial<Record<'walk' | 'run', number>>;
-  heightInUnits: number;                       // altura final no tabuleiro (ex.: 2.27)
+  heightInUnits: number;                       // altura final no tabuleiro (ex.: 2.61)
   sockets?: Partial<Record<SocketName, { bone: string; offset?: [number, number, number] }>>;
   tint?: string[];                             // nomes de materiais que recebem Character.color
 }
@@ -437,8 +438,9 @@ flutuação/giro em unidades **sem** rig.
   batem; não precisou retarget.
 - Código: `src/app/game/character-model.ts` (`CharacterRig`). No `HexBoard`, a peça vira base do
   modelo e o personagem corre em linha reta de hexágono em hexágono, virando para onde vai.
-  Bruno, Clara e os inimigos usam o mesmo corpo, tingido (`ModelDef.tint`), até terem modelos
-  próprios.
+  Bruno e os inimigos usam o corpo masculino (`Superhero_Male`), Clara o feminino com outro
+  cabelo; os inimigos levam um tingimento vermelho (`ModelDef.tint`). Inimigo rendido toca o
+  clipe `crouch`. Os pacotes de origem estão listados em `public/assets/README.md`.
 - O build dos dois GLBs está em `tools/assets/` (ver o README de lá).
 - **A versão grátis é menor que a anunciada:** traz só 2 dos 6 corpos (Super-herói masc./fem.)
   e 43 das 120+ animações. Os outros corpos e animações estão na versão Source, que é paga.

@@ -1,4 +1,4 @@
-import { HUMAN_HEIGHT, HUMANOID_ANIMS, ModelDef } from './character-model';
+import { HUMANOID_ANIMS, ModelDef, heightOf } from './character-model';
 import { EnemySpawn } from './enemies';
 
 export interface GameMap {
@@ -28,8 +28,13 @@ export interface Character {
   model?: ModelDef;
 }
 
-/** Corpo humanoide base (por enquanto, o único modelo do jogo). */
-const HUMAN_MODEL: ModelDef = { url: 'assets/characters/ana/ana.glb', anims: HUMANOID_ANIMS, height: HUMAN_HEIGHT };
+/** Modelo em `public/assets/characters/<id>/<id>.glb`, com a altura da pessoa em metros. */
+const humanModel = (id: string, meters: number, tint?: number): ModelDef => ({
+  url: `assets/characters/${id}/${id}.glb`,
+  anims: HUMANOID_ANIMS,
+  height: heightOf(meters),
+  tint,
+});
 
 /** Os agentes jogáveis, na ordem dos turnos. */
 export const CHARACTERS: Character[] = [
@@ -38,15 +43,14 @@ export const CHARACTERS: Character[] = [
     name: 'Ana',
     initial: 'A',
     color: 0x2f9e57,
-    model: HUMAN_MODEL,
+    model: humanModel('ana', 1.7),
   },
-  // Bruno e Clara ainda não têm modelo próprio: usam o corpo base tingido com a cor de cada um
-  { id: 'bruno', name: 'Bruno', initial: 'B', color: 0xe0712c, model: { ...HUMAN_MODEL, tint: 0xe0712c } },
-  { id: 'clara', name: 'Clara', initial: 'C', color: 0x9b5bd6, model: { ...HUMAN_MODEL, tint: 0x9b5bd6 } },
+  { id: 'bruno', name: 'Bruno', initial: 'B', color: 0xe0712c, model: humanModel('bruno', 1.78) },
+  { id: 'clara', name: 'Clara', initial: 'C', color: 0x9b5bd6, model: humanModel('clara', 1.68) },
 ];
 
-/** Modelo dos inimigos (provisório: o mesmo corpo base, tingido de vermelho). */
-export const ENEMY_MODEL: ModelDef = { ...HUMAN_MODEL, tint: 0xc8323c };
+/** Modelo dos inimigos: corpo masculino de barba, levemente tingido de vermelho. */
+export const ENEMY_MODEL: ModelDef = humanModel('inimigo', 1.78, 0xc8323c);
 
 export const MAPS: GameMap[] = [
   {

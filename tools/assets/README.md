@@ -21,17 +21,19 @@ node build-assets.mjs \
 
 ## O que o script faz
 
-- **Personagem (`characters/ana/ana.glb`):**
-  - Junta o corpo `Superhero_Female_FullBody` com o cabelo `Hair_Buns`, religando o cabelo aos
-    ossos do corpo.
-  - Tinge o cabelo de castanho. A textura original é neutra, porque a versão paga tinge por shader.
+- **Personagens (`characters/<id>/<id>.glb`)**, conforme a lista `CHARACTERS` do script:
+  - Junta um corpo (`Superhero_Female_FullBody` ou `Superhero_Male_FullBody`) com os penteados
+    (cabelo, barba), religando-os aos ossos do corpo.
+  - Tinge o cabelo. A textura original é neutra, porque a versão paga tinge por shader.
   - Remove cores de vértice e UVs extras. A cor de vértice faria o three.js tingir o modelo.
   - Reduz as texturas para 1024 px em JPEG.
   - Comprime a malha com meshopt.
 - **Clipes (`anims/humanoid-base.glb`):**
-  - Pega `Idle_Loop`, `Walk_Loop` e `Jog_Fwd_Loop` do arquivo sem root motion.
-  - Renomeia para `idle`, `walk` e `run`.
+  - Pega `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop` e `Crouch_Idle_Loop` do arquivo sem root motion.
+  - Renomeia para `idle`, `walk`, `run` e `crouch`.
   - Descarta o boneco e comprime as curvas.
+
+A lista dos pacotes e do que usamos de cada um está em `public/assets/README.md`.
 
 O jogo carrega os GLBs comprimidos com o `MeshoptDecoder` do three.js (ver
 `src/app/game/character-model.ts`).

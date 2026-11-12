@@ -4,7 +4,7 @@ import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.j
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 
 /** Clipes da biblioteca humanoide (`public/assets/anims/humanoid-base.glb`). */
-export type ClipName = 'idle' | 'walk' | 'run';
+export type ClipName = 'idle' | 'walk' | 'run' | 'crouch';
 
 /** Modelo 3D de um personagem (ver docs/esqueletos-e-movimentacao.md). */
 export interface ModelDef {
@@ -26,8 +26,13 @@ export const HUMANOID_ANIMS = 'assets/anims/humanoid-base.glb';
  */
 export const HEX_WIDTH_METERS = 1.5;
 export const METER = 2 / HEX_WIDTH_METERS;
-/** Altura de um humano adulto no tabuleiro (1,70 m ≈ 2,27 unidades). */
-export const HUMAN_HEIGHT = 1.7 * METER;
+/**
+ * Exagero de miniatura: os personagens ficam 15% maiores que a escala real, para lerem
+ * melhor de cima. Só a altura dos modelos usa isso; distâncias e velocidades seguem `METER`.
+ */
+export const CHARACTER_SCALE = 1.15;
+/** Altura no tabuleiro de uma pessoa com `meters` de altura (1,70 m ≈ 2,61 unidades). */
+export const heightOf = (meters: number): number => meters * METER * CHARACTER_SCALE;
 
 /**
  * Velocidade de deslocamento de cada clipe de locomoção no tamanho original (m/s),

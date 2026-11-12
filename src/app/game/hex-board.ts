@@ -90,8 +90,10 @@ interface EnemyView extends Mover {
   gone: boolean;
   /** Altura de repouso do grupo (muda quando o modelo 3D substitui a peça). */
   baseY: number;
-  /** Altura dos avisos ("!" e bandeira) sobre a cabeça. */
+  /** Altura do "!" sobre a cabeça. */
   signY: number;
+  /** Correndo entre hexágonos: o clipe de corrida tem prioridade sobre o do estado. */
+  running?: boolean;
 }
 
 /** Diferença angular em (-π, π]. */
@@ -298,6 +300,8 @@ export class HexBoard {
   }
 
   private paintEnemy(e: EnemyView): void {
+    // com modelo 3D, o rendido se agacha (a peça simples só afunda um pouco)
+    if (!e.running) e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
     e.bodyMaterial.color.set(e.surrendered ? COLORS.enemySurrendered : e.alert ? COLORS.enemyAlert : COLORS.enemy);
     e.alertSprite.visible = e.alert;
     e.flagSprite.visible = e.surrendered;
@@ -312,6 +316,7 @@ export class HexBoard {
     if (!e || this.moving || !path.length) return;
     this.moving = true;
     const epoch = e.epoch;
+    e.running = true;
     for (const step of path) {
       const from = this.worldOf(e.hex);
       const to = this.worldOf(step);
@@ -325,7 +330,8 @@ export class HexBoard {
       e.hex = step;
       if (onStep?.(step) === false) break;
     }
-    e.rig?.play('idle', 0.3);
+    e.running = false;
+    e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
     this.moving = false;
   }
 
@@ -573,8 +579,9 @@ export class HexBoard {
     e.signY = BASE_TOP + def.height + 0.45;
     e.alertSprite.scale.set(0.9, 0.9, 1);
     e.flagSprite.scale.set(1, 1, 1);
-    e.flagSprite.position.y = e.signY;
-    rig.play('idle', 0);
+    // a bandeira só aparece com o inimigo agachado, então fica mais baixa que o "!"
+    e.flagSprite.position.y = BASE_TOP + def.height * 0.68 + 0.45;
+    rig.play(e.surrendered ? 'crouch' : 'idle', 0);
     e.rig = rig;
   }
 
