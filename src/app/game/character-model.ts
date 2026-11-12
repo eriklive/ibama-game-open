@@ -12,7 +12,10 @@ export interface ModelDef {
   url: string;
   /** GLB só com clipes, no mesmo esqueleto. */
   anims: string;
-  /** Altura final no tabuleiro, em unidades do mundo (raio do hexágono = 1). */
+  /**
+   * Altura do corpo no tabuleiro, em unidades do mundo (raio do hexágono = 1). Chapéu e
+   * cabelo ficam por cima disso: quem usa chapéu não encolhe.
+   */
   height: number;
 }
 
@@ -20,6 +23,30 @@ export interface ModelDef {
 export const HUMANOID_ANIMS = 'assets/anims/humanoid-base.glb';
 /** Altura de um humano adulto no tabuleiro. */
 export const HUMAN_HEIGHT = 1.15;
+/** Do osso da cabeça ao topo do crânio, em metros, nos corpos da Quaternius. */
+const HEAD_TOP = 0.21;
+
+const human = (id: string): ModelDef => ({
+  url: `assets/characters/${id}/${id}.glb`,
+  anims: HUMANOID_ANIMS,
+  height: HUMAN_HEIGHT,
+});
+
+/**
+ * Catálogo de modelos de personagem (gerados por `tools/assets`, a partir de
+ * `tools/assets/characters.mjs`). Quem usa cada um fica em `maps.ts`.
+ */
+export const MODELS = {
+  // agentes do Ibama
+  ana: human('ana'),
+  bruno: human('bruno'),
+  clara: human('clara'),
+  kaua: human('kaua'),
+  // inimigos
+  madeireiro: human('madeireiro'),
+  garimpeiro: human('garimpeiro'),
+  cacador: human('cacador'),
+} satisfies Record<string, ModelDef>;
 
 /**
  * Velocidade de deslocamento de cada clipe de locomoção no tamanho original (m/s),
@@ -73,8 +100,14 @@ export class CharacterRig {
       mesh.frustumCulled = false;
     });
     const box = new THREE.Box3().setFromObject(inner);
-    const size = box.getSize(new THREE.Vector3());
-    const scale = def.height / (size.y || 1);
+    // a altura do corpo vem do esqueleto (osso da cabeça), não da caixa da malha: assim
+    // chapéu, coque e mochila não mudam o tamanho de ninguém
+    inner.updateWorldMatrix(true, true);
+    const head = inner.getObjectByName('Head');
+    const bodyHeight = head
+      ? head.getWorldPosition(new THREE.Vector3()).y - box.min.y + HEAD_TOP
+      : box.getSize(new THREE.Vector3()).y;
+    const scale = def.height / (bodyHeight || 1);
     inner.scale.setScalar(scale);
     inner.position.y = -box.min.y * scale;
     const root = new THREE.Group();

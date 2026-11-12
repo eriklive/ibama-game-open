@@ -17,18 +17,19 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 5. Quando o movimento acaba, a vez passa sozinha; **Passar a vez** encerra antes.
 6. Toque numa peça no tabuleiro ou num retrato no topo para ver aquele personagem. Quem
    está na vez ganha um anel amarelo e o retrato fica destacado como **Na vez**.
-7. A Ana já é um personagem 3D animado (fica parada respirando e corre pelo caminho); Bruno e
-   Clara ainda são peças, que flutuam quando estão na vez.
+7. Ana, Bruno e Clara são personagens 3D animados (ficam parados respirando e correm pelo
+   caminho), de pé sobre um disco com a cor de cada um.
 
 ## Inimigos (primeira iteração)
 
 O mapa de teste tem **paredes** (prismas cinza: ninguém passa e ninguém enxerga através
-delas) e **três inimigos** (peças vermelhas, com um "nariz" que mostra para onde olham).
+delas) e **três inimigos** (madeireiro, garimpeiro e caçador, cada um com seu modelo 3D sobre
+uma base vermelha; o corpo mostra para onde olham).
 
 - Depois da Clara vem o **turno inimigo**: quem está em patrulha anda 2 passos pela rota.
 - Os hexágonos **avermelhados** são o cone de visão dos inimigos em patrulha (3
   hexágonos, 120° à frente). Entrar nele — mesmo só de passagem — ou ser alcançado por
-  ele faz o inimigo **avistar** o agente: ele fica laranja com um **!** e para.
+  ele faz o inimigo **avistar** o agente: a base fica laranja, aparece um **!** e ele para.
 - Em alerta, no turno inimigo ele **corre** 4 passos rumo à borda mais próxima. Se
   chegar a uma borda, **foge** do mapa. Agentes, paredes e outros inimigos bloqueiam o
   caminho: cercando as saídas, ele fica **encurralado**.
@@ -40,7 +41,7 @@ abordagem antes de confirmar: hexágonos **verdes** são a zona de rendição (a
 hexágonos) e os **laranja**, o resto do raio (até 4). O painel lista quem se rende e quem
 vai tentar correr. **Abordar!** confirma; tocar no tabuleiro ou em **Cancelar** desiste.
 
-- Inimigos a até 2 hexágonos **se rendem**: ficam brancos, com bandeira branca, param de
+- Inimigos a até 2 hexágonos **se rendem**: a base fica branca, com bandeira branca, param de
   agir e continuam ocupando o hexágono. Vale também para quem já estava em alerta.
 - Inimigos entre 3 e 4 hexágonos são **alertados** e tentam correr no turno inimigo.
 - A distância é em linha reta: por enquanto, paredes não abafam o grito.
@@ -52,6 +53,15 @@ Os números ficam em `ENEMY_RULES` e `APPROACH_RULES` (`src/app/game/enemies.ts`
 rotas de patrulha ficam no mapa (`maps.ts`).
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
+
+## Modelos dos personagens
+
+Há sete modelos em `public/assets/characters/`: quatro agentes do Ibama (Ana, Bruno, Clara e
+Kauã) e três inimigos (madeireiro, garimpeiro e caçador). Todos saem de `tools/assets`, a partir
+dos corpos CC0 da Quaternius: o elenco (corpo, pele, cabelo, roupa, acessórios) fica em
+`tools/assets/characters.mjs` e o catálogo usado pelo jogo, em `MODELS`
+(`src/app/game/character-model.ts`). O Kauã está no catálogo, mas ainda não entra na partida:
+para isso falta uma entrada em `CHARACTERS` e uma posição inicial por mapa (`maps.ts`).
 
 ## Tecnologia
 

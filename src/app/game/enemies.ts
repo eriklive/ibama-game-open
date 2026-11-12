@@ -1,3 +1,4 @@
+import type { ModelDef } from './character-model';
 import { HexCoord, hexDistance, hexKey, hexLine, hexToWorld, hexesInRange, pathTo, reachableHexes } from './hex';
 
 /**
@@ -41,6 +42,8 @@ export interface EnemySpawn {
   name: string;
   /** Rota de patrulha (ida e volta pelos pontos). O primeiro é a posição inicial. */
   patrol: HexCoord[];
+  /** Modelo 3D do inimigo; sem ele, o tabuleiro mostra a peça simples. */
+  model?: ModelDef;
 }
 
 export interface EnemyState {
