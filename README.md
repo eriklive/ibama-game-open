@@ -18,6 +18,22 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 6. Toque numa peça no tabuleiro ou num retrato no topo para ver aquele personagem. Quem
    está na vez flutua com um anel amarelo e o retrato fica destacado como **Na vez**.
 
+## Inimigos (primeira iteração)
+
+O mapa de teste tem **paredes** (prismas cinza: ninguém passa e ninguém enxerga através
+delas) e **três inimigos** (peças vermelhas, com um "nariz" que mostra para onde olham).
+
+- Depois da Clara vem o **turno inimigo**: quem está em patrulha anda 2 passos pela rota.
+- Os hexágonos **avermelhados** são o cone de visão dos inimigos em patrulha (3
+  hexágonos, 120° à frente). Entrar nele — mesmo só de passagem — ou ser alcançado por
+  ele faz o inimigo **avistar** o agente: ele fica laranja com um **!** e para.
+- Em alerta, no turno inimigo ele **corre** 4 passos rumo à borda mais próxima. Se
+  chegar a uma borda, **foge** do mapa. Agentes, paredes e outros inimigos bloqueiam o
+  caminho: cercando as saídas, ele fica **encurralado**.
+
+Os números ficam em `ENEMY_RULES` (`src/app/game/enemies.ts`); paredes e rotas de patrulha
+ficam no mapa (`maps.ts`).
+
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
 ## Tecnologia
@@ -27,6 +43,7 @@ Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 - Grid hexagonal "flat-top" com offset odd-q (`src/app/game/hex.ts`)
 - Mapas, personagens e regras em `src/app/game/maps.ts` (`CHARACTERS`, `MOVE_DICE`)
 - Dados em `src/app/game/dice.ts`; alcance com obstáculos em `hex.ts` (`reachableHexes`, `pathTo`)
+- Inimigos (visão, patrulha, fuga) em `src/app/game/enemies.ts`, como funções puras testadas
 
 ## Desenvolvimento
 

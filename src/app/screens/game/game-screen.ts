@@ -11,10 +11,21 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { rollDice, rollDie, sum } from '../../game/dice';
 import { HexBoard } from '../../game/hex-board';
+import {
+  ENEMY_RULES,
+  EnemyState,
+  facingBetween,
+  isBorder,
+  planFlee,
+  planPatrol,
+  spawnEnemy,
+  spotted,
+  visionHexes,
+} from '../../game/enemies';
 import { HexCoord, hexKey, pathTo, reachableHexes, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, findMap } from '../../game/maps';
 
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'ending';
+type Phase = 'rolling' | 'moving-choice' | 'walking' | 'ending' | 'enemy';
 
 const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -31,9 +42,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private timers: ReturnType<typeof setTimeout>[] = [];
   private rollTicker?: ReturnType<typeof setInterval>;
   private destroyed = false;
+  /** Muda a cada "Recomeçar": animações antigas param de mexer no estado. */
+  private epoch = 0;
 
   protected readonly map: GameMap | undefined = findMap(inject(ActivatedRoute).snapshot.paramMap.get('mapId'));
   protected readonly characters = CHARACTERS;
+  private readonly walls = new Set((this.map?.walls ?? []).map(hexKey));
   protected readonly diceSides = MOVE_DICE.sides;
 
   protected readonly positions = signal<ReadonlyMap<string, HexCoord>>(this.initialPositions());
@@ -48,6 +62,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly selected = signal<HexCoord | null>(null);
   /** Personagem em foco na interface (tocado no tabuleiro ou no retrato). */
   protected readonly focusedId = signal<string>(CHARACTERS[0].id);
+  protected readonly enemies = signal<readonly EnemyState[]>(this.initialEnemies());
+  /** Último acontecimento com inimigos (avistou, correu, fugiu…), mostrado num aviso. */
+  protected readonly notice = signal<{ text: string; tone: 'alert' | 'info' } | null>(null);
+  private noticeTimer?: ReturnType<typeof setTimeout>;
+
+  protected readonly enemyCounts = computed(() => {
+    const es = this.enemies();
+    return {
+      patrol: es.filter((e) => e.status === 'patrol').length,
+      alert: es.filter((e) => e.status === 'alert').length,
+      fled: es.filter((e) => e.status === 'fled').length,
+    };
+  });
 
   protected readonly active = computed<Character>(() => CHARACTERS[this.activeIndex()]);
   protected readonly focused = computed<Character>(
@@ -61,9 +88,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const map = this.map;
     const from = this.positions().get(this.active().id);
     if (!map || !from || this.phase() !== 'moving-choice') return new Map();
-    const blocked = new Set(
-      [...this.positions()].filter(([id]) => id !== this.active().id).map(([, h]) => hexKey(h)),
-    );
+    const blocked = new Set([
+      ...[...this.positions()].filter(([id]) => id !== this.active().id).map(([, h]) => hexKey(h)),
+      ...this.walls,
+      ...this.activeEnemies().map((e) => hexKey(e.hex)),
+    ]);
     return reachableHexes(from, this.movesLeft(), map.cols, map.rows, blocked);
   });
   /** Caminho mais curto até o destino escolhido (sem a origem). */
@@ -86,13 +115,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.focusCharacter(id),
       },
+      {
+        walls: this.map.walls,
+        enemies: this.enemies().map((e) => ({ id: e.id, start: e.hex, facing: e.facing })),
+      },
     );
+    this.refreshVision();
     this.startTurn();
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
     this.clearTimers();
+    clearTimeout(this.noticeTimer);
     this.board?.dispose();
   }
 
@@ -135,12 +170,124 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected endTurn(): void {
-    if (this.phase() === 'walking' || this.phase() === 'rolling') return;
+    if (this.phase() === 'walking' || this.phase() === 'rolling' || this.phase() === 'enemy') return;
     this.clearTimers();
     this.phase.set('ending');
+    if (this.activeIndex() === CHARACTERS.length - 1 && this.activeEnemies().length) {
+      void this.enemyTurn();
+      return;
+    }
+    this.nextCharacter();
+  }
+
+  private nextCharacter(): void {
     this.activeIndex.update((i) => (i + 1) % CHARACTERS.length);
     this.turn.update((t) => t + 1);
     this.startTurn();
+  }
+
+  // ---------- turno inimigo ----------
+
+  /** Cada inimigo age em sequência: quem está em alerta corre para a borda, os outros patrulham. */
+  private async enemyTurn(): Promise<void> {
+    const map = this.map;
+    const board = this.board;
+    if (!map || !board) return;
+    this.phase.set('enemy');
+    this.selected.set(null);
+    board.setActive(null);
+    board.setSelected(null);
+    board.setReachable([]);
+    const epoch = this.epoch;
+    const stale = () => this.destroyed || this.epoch !== epoch;
+    this.say('Turno inimigo', 'info');
+    await this.wait(700);
+
+    for (const { id } of this.enemies()) {
+      if (stale()) return;
+      const enemy = this.enemy(id);
+      if (!enemy || enemy.status === 'fled') continue;
+      board.focusHex(enemy.hex);
+      await this.wait(350);
+      if (enemy.status === 'alert') await this.flee(enemy, epoch);
+      else await this.patrol(enemy, epoch);
+      await this.wait(300);
+    }
+    if (stale()) return;
+    if (!this.activeEnemies().length) this.say('Todos os inimigos fugiram do mapa', 'alert');
+    this.nextCharacter();
+  }
+
+  private async patrol(enemy: EnemyState, epoch: number): Promise<void> {
+    const map = this.map!;
+    const plan = planPatrol(enemy, ENEMY_RULES.patrolSteps, map.cols, map.rows, this.blockedFor(enemy.id));
+    this.updateEnemy(enemy.id, { waypoint: plan.waypoint, dir: plan.dir });
+    if (!plan.path.length) {
+      this.say(`${enemy.name} espera: o caminho está bloqueado`, 'info');
+      return;
+    }
+    await this.board!.moveEnemy(enemy.id, plan.path, (hex) => {
+      if (this.epoch !== epoch) return false;
+      const prev = this.enemy(enemy.id)!.hex;
+      this.updateEnemy(enemy.id, { hex, facing: facingBetween(prev, hex) });
+      this.refreshVision();
+      // ao avistar alguém, para onde está
+      return !this.checkSpotted(enemy.id);
+    });
+    // dá tempo de ver o "!" antes de seguir
+    if (this.enemy(enemy.id)?.status === 'alert') await this.wait(900);
+  }
+
+  private async flee(enemy: EnemyState, epoch: number): Promise<void> {
+    const map = this.map!;
+    const agents = [...this.positions().values()];
+    const plan = planFlee(enemy.hex, ENEMY_RULES.fleeSteps, map.cols, map.rows, this.blockedFor(enemy.id), agents);
+    if (plan.cornered) {
+      this.say(`${enemy.name} está encurralado!`, 'info');
+      return;
+    }
+    if (plan.path.length) {
+      this.say(`${enemy.name} corre para a borda!`, 'alert');
+      await this.board!.moveEnemy(
+        enemy.id,
+        plan.path,
+        (hex) => {
+          if (this.epoch !== epoch) return false;
+          this.updateEnemy(enemy.id, { hex, facing: facingBetween(this.enemy(enemy.id)!.hex, hex) });
+          return true;
+        },
+        1.8,
+      );
+    }
+    if (this.epoch !== epoch) return;
+    if (isBorder(this.enemy(enemy.id)!.hex, map.cols, map.rows)) {
+      this.updateEnemy(enemy.id, { status: 'fled' });
+      this.say(`${enemy.name} fugiu do mapa!`, 'alert');
+      await this.board!.removeEnemy(enemy.id);
+    }
+  }
+
+  /** Se o inimigo em patrulha enxerga algum agente, entra em alerta. Devolve se avistou. */
+  private checkSpotted(enemyId: string, agents: ReadonlyMap<string, HexCoord> = this.positions()): boolean {
+    const map = this.map;
+    const enemy = this.enemy(enemyId);
+    if (!map || !enemy) return false;
+    const who = spotted(enemy, agents, map.cols, map.rows, this.walls);
+    if (!who) return false;
+    const agent = agents.get(who)!;
+    // vira para quem viu
+    this.updateEnemy(enemyId, { status: 'alert', facing: facingBetween(enemy.hex, agent) });
+    this.board?.setEnemyFacing(enemyId, facingBetween(enemy.hex, agent));
+    this.board?.setEnemyAlert(enemyId, true);
+    this.refreshVision();
+    const name = CHARACTERS.find((c) => c.id === who)?.name ?? who;
+    this.say(`${enemy.name} avistou ${name}! Vai correr para a borda.`, 'alert');
+    return true;
+  }
+
+  /** Confere todos os inimigos (usado a cada passo de um agente). */
+  private checkAllSpotted(agents: ReadonlyMap<string, HexCoord>): void {
+    for (const e of this.enemies()) if (e.status === 'patrol') this.checkSpotted(e.id, agents);
   }
 
   // ---------- seleção e movimento ----------
@@ -176,10 +323,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const path = pathTo(this.reach(), target);
     if (!path.length) return;
     const id = this.active().id;
+    const epoch = this.epoch;
     this.phase.set('walking');
     this.selected.set(null);
-    await this.board.moveUnit(id, path);
-    if (this.destroyed) return;
+    await this.board.moveUnit(id, path, (hex) => {
+      if (this.epoch !== epoch) return;
+      // quem entra no cone de visão é avistado na hora, mesmo só de passagem
+      this.checkAllSpotted(new Map(this.positions()).set(id, hex));
+    });
+    if (this.destroyed || this.epoch !== epoch) return;
     this.positions.update((m) => new Map(m).set(id, target));
     this.movesLeft.update((n) => n - path.length);
     if (this.movesLeft() <= 0) {
@@ -197,9 +349,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected restart(): void {
+    this.epoch++;
     this.clearTimers();
     this.positions.set(this.initialPositions());
     this.board?.placeUnits(this.positions());
+    this.enemies.set(this.initialEnemies());
+    this.board?.placeEnemies(this.enemies().map((e) => ({ ...e, alert: false, gone: false })));
+    this.refreshVision();
+    this.notice.set(null);
     this.activeIndex.set(0);
     this.turn.set(1);
     this.startTurn();
@@ -222,6 +379,51 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private refreshBoard(): void {
     this.board?.setReachable(this.reach().keys());
     this.board?.setSelected(this.selected(), this.selectedPath());
+  }
+
+  private initialEnemies(): EnemyState[] {
+    return (this.map?.enemies ?? []).map(spawnEnemy);
+  }
+
+  private enemy(id: string): EnemyState | undefined {
+    return this.enemies().find((e) => e.id === id);
+  }
+
+  private activeEnemies(): EnemyState[] {
+    return this.enemies().filter((e) => e.status !== 'fled');
+  }
+
+  private updateEnemy(id: string, patch: Partial<EnemyState>): void {
+    this.enemies.update((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  }
+
+  /** Hexágonos que um inimigo não pode atravessar: paredes, agentes e os outros inimigos. */
+  private blockedFor(enemyId: string): Set<string> {
+    return new Set([
+      ...this.walls,
+      ...[...this.positions().values()].map(hexKey),
+      ...this.activeEnemies().filter((e) => e.id !== enemyId).map((e) => hexKey(e.hex)),
+    ]);
+  }
+
+  /** Pinta no tabuleiro o que os inimigos em patrulha enxergam. */
+  private refreshVision(): void {
+    const map = this.map;
+    if (!map) return;
+    const keys = this.enemies()
+      .filter((e) => e.status === 'patrol')
+      .flatMap((e) => visionHexes(e, map.cols, map.rows, this.walls).map(hexKey));
+    this.board?.setVision(keys);
+  }
+
+  private say(text: string, tone: 'alert' | 'info'): void {
+    this.notice.set({ text, tone });
+    clearTimeout(this.noticeTimer);
+    this.noticeTimer = setTimeout(() => this.notice.set(null), 2600);
+  }
+
+  private wait(ms: number): Promise<void> {
+    return new Promise((r) => this.later(reducedMotion() ? Math.min(ms, 150) : ms, r));
   }
 
   private initialPositions(): Map<string, HexCoord> {

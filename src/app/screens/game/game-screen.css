@@ -58,6 +58,39 @@
 .chip.active .portrait { animation: pulse 1.4s ease-in-out infinite; }
 .portrait.sm { width: 42px; height: 42px; }
 
+/* inimigos e avisos */
+.foes { display: flex; flex-wrap: wrap; gap: 6px; max-width: 560px; }
+.foe {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px 3px 4px;
+  background: var(--panel); border: 3px solid var(--ink); border-radius: 999px;
+  font-size: 12px; color: var(--text);
+}
+.foe em { font-style: normal; color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .3px; }
+.foe-dot {
+  width: 16px; height: 16px; border-radius: 50%; border: 2px solid var(--ink);
+  background: #c8323c; display: grid; place-items: center;
+  font-family: var(--display); font-size: 11px; color: var(--dark-text);
+}
+.foe.alert { border-color: #ff8a1f; }
+.foe.alert .foe-dot { background: var(--yellow); }
+.foe.alert em { color: #ffb067; }
+.foe.fled { opacity: .5; }
+.foe.fled .foe-dot { background: #56626a; }
+
+.notice {
+  align-self: center; max-width: 100%;
+  padding: 8px 14px;
+  background: var(--panel); border: 4px solid var(--ink); border-radius: 14px;
+  box-shadow: 0 4px 0 var(--ink);
+  font-family: var(--display); font-size: 16px; text-align: center;
+  animation: land .3s ease-out both;
+}
+.notice.alert { background: #5a2420; border-color: #ff8a1f; color: #fff; }
+
+.enemy-panel { border-color: #c8323c; }
+.foe-portrait { background: #c8323c; color: var(--dark-text); }
+
 /* ---------- painel inferior ---------- */
 .hud-bottom {
   position: absolute;
@@ -132,7 +165,7 @@
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .dice.big.rolling .d4, .chip.active .portrait { animation: none; }
+  .dice.big.rolling .d4, .chip.active .portrait, .notice { animation: none; }
 }
 
 @media (max-width: 400px) {
