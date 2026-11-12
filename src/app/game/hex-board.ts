@@ -23,6 +23,9 @@ const COLORS = {
   visionReach: 0xf3b7a4,
   enemy: 0xc8323c,
   enemyAlert: 0xff8a1f,
+  enemySurrendered: 0xe9eef0,
+  approachSurrender: 0x8fe08a,
+  approachFlee: 0xffb067,
 };
 
 const WALL_HEIGHT = 0.9;
@@ -63,8 +66,10 @@ interface EnemyView extends Mover {
   facing: number;
   facingGoal: number;
   alert: boolean;
+  surrendered: boolean;
   bodyMaterial: THREE.MeshStandardMaterial;
   alertSprite: THREE.Sprite;
+  flagSprite: THREE.Sprite;
   /** 1 = no tabuleiro, 0 = sumiu (fugiu); anima a saída. */
   presence: number;
   gone: boolean;
@@ -114,6 +119,8 @@ export class HexBoard {
 
   private reachable = new Set<string>();
   private vision = new Set<string>();
+  /** Pré-visualização da abordagem: zona de rendição e zona de fuga. */
+  private approach: { surrender: Set<string>; flee: Set<string> } | null = null;
   private selected: HexCoord | null = null;
   /** Caminho até o destino (sem a origem, com o destino), na ordem em que será percorrido. */
   private path: string[] = [];
@@ -213,6 +220,12 @@ export class HexBoard {
     this.paintTiles();
   }
 
+  /** Mostra (ou esconde, com `null`) as zonas da abordagem. */
+  setApproachZones(zones: { surrender: Iterable<string>; flee: Iterable<string> } | null): void {
+    this.approach = zones && { surrender: new Set(zones.surrender), flee: new Set(zones.flee) };
+    this.paintTiles();
+  }
+
   /** Leva a câmera até um hexágono. */
   focusHex(hex: HexCoord): void {
     this.camGoal.copy(this.worldOf(hex));
@@ -220,7 +233,9 @@ export class HexBoard {
   }
 
   /** Recoloca os inimigos (sem animação): posição, direção, alerta e presença. */
-  placeEnemies(states: Iterable<{ id: string; hex: HexCoord; facing: number; alert: boolean; gone: boolean }>): void {
+  placeEnemies(
+    states: Iterable<{ id: string; hex: HexCoord; facing: number; alert: boolean; surrendered: boolean; gone: boolean }>,
+  ): void {
     for (const st of states) {
       const e = this.enemies.get(st.id);
       if (!e) continue;
@@ -234,6 +249,7 @@ export class HexBoard {
       e.gone = st.gone;
       e.presence = st.gone ? 0 : 1;
       this.setEnemyAlert(st.id, st.alert);
+      this.setEnemySurrendered(st.id, st.surrendered);
     }
   }
 
@@ -248,8 +264,23 @@ export class HexBoard {
     const e = this.enemies.get(id);
     if (!e) return;
     e.alert = alert;
-    e.bodyMaterial.color.set(alert ? COLORS.enemyAlert : COLORS.enemy);
-    e.alertSprite.visible = alert;
+    if (alert) e.surrendered = false;
+    this.paintEnemy(e);
+  }
+
+  /** Inimigo rendido: fica branco, abaixado, com uma bandeira branca. */
+  setEnemySurrendered(id: string, surrendered: boolean): void {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    e.surrendered = surrendered;
+    if (surrendered) e.alert = false;
+    this.paintEnemy(e);
+  }
+
+  private paintEnemy(e: EnemyView): void {
+    e.bodyMaterial.color.set(e.surrendered ? COLORS.enemySurrendered : e.alert ? COLORS.enemyAlert : COLORS.enemy);
+    e.alertSprite.visible = e.alert;
+    e.flagSprite.visible = e.surrendered;
   }
 
   /**
@@ -444,7 +475,12 @@ export class HexBoard {
     alertSprite.position.y = 1.05;
     alertSprite.visible = false;
     alertSprite.renderOrder = 10;
-    group.add(alertSprite);
+    const flagSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.flagTexture(), depthTest: false }));
+    flagSprite.scale.set(0.7, 0.7, 1);
+    flagSprite.position.y = 1.0;
+    flagSprite.visible = false;
+    flagSprite.renderOrder = 10;
+    group.add(alertSprite, flagSprite);
     this.scene.add(group);
 
     const shadow = new THREE.Mesh(
@@ -466,11 +502,43 @@ export class HexBoard {
       facing: enemy.facing,
       facingGoal: enemy.facing,
       alert: false,
+      surrendered: false,
       bodyMaterial,
       alertSprite,
+      flagSprite,
       presence: 1,
       gone: false,
     });
+  }
+
+  /** Bandeira branca (desenhada num canvas). */
+  private flagTexture(): THREE.Texture {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    if (g) {
+      g.lineJoin = 'round';
+      g.strokeStyle = '#0b1d24';
+      g.lineWidth = 10;
+      // mastro
+      g.beginPath();
+      g.moveTo(34, 14);
+      g.lineTo(34, 118);
+      g.stroke();
+      // pano ondulado
+      g.fillStyle = '#ffffff';
+      g.beginPath();
+      g.moveTo(34, 16);
+      g.bezierCurveTo(60, 4, 80, 30, 112, 18);
+      g.lineTo(112, 66);
+      g.bezierCurveTo(80, 78, 60, 52, 34, 64);
+      g.closePath();
+      g.fill();
+      g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
 
   /** Balão amarelo com "!" (desenhado num canvas). */
@@ -567,8 +635,13 @@ export class HexBoard {
       const isReach = this.reachable.has(key);
       const seen = this.vision.has(key);
       const reachColor = seen ? COLORS.visionReach : COLORS.reachable;
+      const zone = this.approach?.surrender.has(key)
+        ? COLORS.approachSurrender
+        : this.approach?.flee.has(key)
+          ? COLORS.approachFlee
+          : null;
       tile.material.color.set(
-        isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? reachColor : seen ? COLORS.vision : tile.baseColor,
+        zone ?? (isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? reachColor : seen ? COLORS.vision : tile.baseColor),
       );
       tile.material.emissive.set(isSel ? 0x6b5200 : onPath ? 0x5a4a14 : 0x000000);
       tile.lift = isSel ? 0.2 : onPath ? 0.1 : 0;
@@ -668,7 +741,9 @@ export class HexBoard {
       // ao fugir, a peça encolhe e afunda
       e.group.scale.setScalar(Math.max(0.001, e.presence));
       const jitter = e.alert ? Math.abs(Math.sin(t * 9)) * 0.06 : 0;
-      e.group.position.y = 0.15 + e.hop + jitter - (1 - e.presence) * 0.5;
+      // rendido fica abaixado
+      const crouch = e.surrendered ? -0.08 : 0;
+      e.group.position.y = 0.15 + crouch + e.hop + jitter - (1 - e.presence) * 0.5;
       e.alertSprite.position.y = 1.05 + Math.sin(t * 6) * 0.06;
       e.shadow.position.set(e.group.position.x, 0.01, e.group.position.z);
       e.shadow.scale.setScalar(Math.max(0.001, e.presence * (1 - e.hop * 0.6)));
@@ -700,7 +775,10 @@ export class HexBoard {
         tile.mesh.position.y += (tile.lift + Math.sin(t * 3) * 0.03 - tile.mesh.position.y) * tk;
         continue;
       }
-      if (this.reachable.has(key)) {
+      if (this.approach && (this.approach.surrender.has(key) || this.approach.flee.has(key))) {
+        const g = 0.08 + Math.sin(t * 4) * 0.06;
+        tile.material.emissive.setRGB(g, g * 0.8, g * 0.3);
+      } else if (this.reachable.has(key)) {
         if (this.vision.has(key)) tile.material.emissive.setRGB(pulse, pulse * 0.4, pulse * 0.3);
         else tile.material.emissive.setRGB(pulse * 0.3, pulse * 0.6, pulse);
       }

@@ -12,20 +12,29 @@ import { ActivatedRoute, Router } from '@angular/router';
 import { rollDice, rollDie, sum } from '../../game/dice';
 import { HexBoard } from '../../game/hex-board';
 import {
+  APPROACH_RULES,
   ENEMY_RULES,
   EnemyState,
+  canAct,
   facingBetween,
   isBorder,
+  onBoard,
   planFlee,
   planPatrol,
+  resolveApproach,
   spawnEnemy,
   spotted,
   visionHexes,
 } from '../../game/enemies';
-import { HexCoord, hexKey, pathTo, reachableHexes, sameHex } from '../../game/hex';
+import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, findMap } from '../../game/maps';
 
 type Phase = 'rolling' | 'moving-choice' | 'walking' | 'ending' | 'enemy';
+
+const namesOf = (es: readonly EnemyState[]): string => {
+  const names = es.map((e) => e.name);
+  return names.length > 1 ? `${names.slice(0, -1).join(', ')} e ${names.at(-1)}` : names[0];
+};
 
 const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -72,9 +81,28 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return {
       patrol: es.filter((e) => e.status === 'patrol').length,
       alert: es.filter((e) => e.status === 'alert').length,
+      surrendered: es.filter((e) => e.status === 'surrendered').length,
       fled: es.filter((e) => e.status === 'fled').length,
     };
   });
+
+  /** Pré-visualizando a abordagem (zonas pintadas, aguardando confirmação). */
+  protected readonly approaching = signal(false);
+  protected readonly approachRules = APPROACH_RULES;
+  protected readonly statusLabel: Record<EnemyState['status'], string> = {
+    patrol: 'patrulha',
+    alert: 'em fuga',
+    surrendered: 'rendido',
+    fled: 'fugiu',
+  };
+  /** Quem se renderia e quem tentaria correr se o agente da vez abordasse agora. */
+  protected readonly approachPlan = computed(() => {
+    const from = this.positions().get(this.active().id);
+    return from ? resolveApproach(from, this.enemies()) : { surrender: [], flee: [] };
+  });
+  protected readonly canApproach = computed(
+    () => this.approachPlan().surrender.length + this.approachPlan().flee.length > 0,
+  );
 
   protected readonly active = computed<Character>(() => CHARACTERS[this.activeIndex()]);
   protected readonly focused = computed<Character>(
@@ -91,7 +119,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const blocked = new Set([
       ...[...this.positions()].filter(([id]) => id !== this.active().id).map(([, h]) => hexKey(h)),
       ...this.walls,
-      ...this.activeEnemies().map((e) => hexKey(e.hex)),
+      ...this.onBoardEnemies().map((e) => hexKey(e.hex)),
     ]);
     return reachableHexes(from, this.movesLeft(), map.cols, map.rows, blocked);
   });
@@ -135,6 +163,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private startTurn(): void {
     const active = this.active();
+    this.closeApproach();
     this.selected.set(null);
     this.focusedId.set(active.id);
     this.board?.setActive(active.id);
@@ -173,7 +202,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.phase() === 'walking' || this.phase() === 'rolling' || this.phase() === 'enemy') return;
     this.clearTimers();
     this.phase.set('ending');
-    if (this.activeIndex() === CHARACTERS.length - 1 && this.activeEnemies().length) {
+    this.closeApproach();
+    if (this.activeIndex() === CHARACTERS.length - 1 && this.actingEnemies().length) {
       void this.enemyTurn();
       return;
     }
@@ -206,7 +236,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const { id } of this.enemies()) {
       if (stale()) return;
       const enemy = this.enemy(id);
-      if (!enemy || enemy.status === 'fled') continue;
+      if (!enemy || !canAct(enemy)) continue;
       board.focusHex(enemy.hex);
       await this.wait(350);
       if (enemy.status === 'alert') await this.flee(enemy, epoch);
@@ -214,7 +244,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       await this.wait(300);
     }
     if (stale()) return;
-    if (!this.activeEnemies().length) this.say('Todos os inimigos fugiram do mapa', 'alert');
+    this.announceIfOver();
     this.nextCharacter();
   }
 
@@ -294,6 +324,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private tapHex(hex: HexCoord | null): void {
     if (this.phase() !== 'moving-choice') return;
+    if (this.approaching()) {
+      this.cancelApproach();
+      return;
+    }
     if (this.viewingOther()) this.focusCharacter(this.active().id);
     if (hex && this.reach().has(hexKey(hex))) {
       // segundo toque no mesmo hexágono confirma o movimento
@@ -309,6 +343,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected focusCharacter(id: string): void {
+    if (id !== this.active().id) this.cancelApproach();
     this.focusedId.set(id);
     this.board?.focus(id);
     if (id !== this.active().id) {
@@ -334,13 +369,80 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.destroyed || this.epoch !== epoch) return;
     this.positions.update((m) => new Map(m).set(id, target));
     this.movesLeft.update((n) => n - path.length);
-    if (this.movesLeft() <= 0) {
+    if (this.movesLeft() <= 0 && this.canApproach()) {
+      // sem movimento, mas com inimigos no raio: espera para poder abordar
+      this.beginChoosing();
+    } else if (this.movesLeft() <= 0) {
       // sem movimento: passa a vez automaticamente após um instante
       this.phase.set('ending');
       this.later(reducedMotion() ? 200 : 700, () => this.endTurn());
     } else {
       this.beginChoosing();
     }
+  }
+
+  // ---------- abordagem ----------
+
+  /** Primeiro passo: mostra o raio e quem se renderia ou correria. */
+  protected startApproach(): void {
+    if (this.phase() !== 'moving-choice' || !this.canApproach()) return;
+    const map = this.map;
+    const from = this.positions().get(this.active().id);
+    if (!map || !from) return;
+    this.focusCharacter(this.active().id);
+    this.selected.set(null);
+    this.approaching.set(true);
+    this.board?.setSelected(null);
+    this.board?.setReachable([]);
+    const zone = (min: number, max: number) =>
+      hexesInRange(from, max, map.cols, map.rows)
+        .filter((h) => !this.walls.has(hexKey(h)))
+        .filter((h) => hexDistance(from, h) > min)
+        .map(hexKey);
+    this.board?.setApproachZones({
+      surrender: zone(0, APPROACH_RULES.surrenderRange),
+      flee: zone(APPROACH_RULES.surrenderRange, APPROACH_RULES.radius),
+    });
+  }
+
+  protected cancelApproach(): void {
+    this.closeApproach();
+    if (this.phase() === 'moving-choice') this.refreshBoard();
+  }
+
+  /** Confirma: rendições e alertas acontecem na hora, e a vez do agente acaba. */
+  protected confirmApproach(): void {
+    if (!this.approaching() || this.phase() !== 'moving-choice') return;
+    const from = this.positions().get(this.active().id)!;
+    const { surrender, flee } = this.approachPlan();
+    for (const e of surrender) {
+      const facing = facingBetween(e.hex, from);
+      this.updateEnemy(e.id, { status: 'surrendered', facing });
+      this.board?.setEnemyFacing(e.id, facing);
+      this.board?.setEnemySurrendered(e.id, true);
+    }
+    for (const e of flee) {
+      const facing = facingBetween(e.hex, from);
+      this.updateEnemy(e.id, { status: 'alert', facing });
+      this.board?.setEnemyFacing(e.id, facing);
+      this.board?.setEnemyAlert(e.id, true);
+    }
+    this.closeApproach();
+    this.refreshVision();
+    const parts = [
+      surrender.length && `${namesOf(surrender)} ${surrender.length === 1 ? 'se rendeu' : 'se renderam'}`,
+      flee.length && `${namesOf(flee)} ${flee.length === 1 ? 'vai tentar correr' : 'vão tentar correr'}`,
+    ].filter(Boolean);
+    this.say(`Ibama! ${parts.join(' · ')}`, 'alert');
+    this.phase.set('ending');
+    if (!this.actingEnemies().length) this.later(1400, () => this.announceIfOver());
+    this.later(reducedMotion() ? 400 : 1600, () => this.endTurn());
+  }
+
+  private closeApproach(): void {
+    if (!this.approaching()) return;
+    this.approaching.set(false);
+    this.board?.setApproachZones(null);
   }
 
   protected cancel(): void {
@@ -354,7 +456,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.positions.set(this.initialPositions());
     this.board?.placeUnits(this.positions());
     this.enemies.set(this.initialEnemies());
-    this.board?.placeEnemies(this.enemies().map((e) => ({ ...e, alert: false, gone: false })));
+    this.board?.placeEnemies(this.enemies().map((e) => ({ ...e, alert: false, surrendered: false, gone: false })));
     this.refreshVision();
     this.notice.set(null);
     this.activeIndex.set(0);
@@ -389,8 +491,24 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return this.enemies().find((e) => e.id === id);
   }
 
-  private activeEnemies(): EnemyState[] {
-    return this.enemies().filter((e) => e.status !== 'fled');
+  /** Inimigos que ocupam hexágono (inclusive rendidos). */
+  private onBoardEnemies(): EnemyState[] {
+    return this.enemies().filter(onBoard);
+  }
+
+  /** Inimigos que ainda agem no turno inimigo. */
+  private actingEnemies(): EnemyState[] {
+    return this.enemies().filter(canAct);
+  }
+
+  /** Quando não sobra ninguém agindo, mostra o resultado da missão. */
+  private announceIfOver(): void {
+    if (this.actingEnemies().length || !this.enemies().length) return;
+    const { surrendered, fled } = this.enemyCounts();
+    this.say(
+      `Fim da abordagem: ${surrendered} ${surrendered === 1 ? 'rendido' : 'rendidos'}, ${fled} ${fled === 1 ? 'fugiu' : 'fugiram'}`,
+      'info',
+    );
   }
 
   private updateEnemy(id: string, patch: Partial<EnemyState>): void {
@@ -402,7 +520,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return new Set([
       ...this.walls,
       ...[...this.positions().values()].map(hexKey),
-      ...this.activeEnemies().filter((e) => e.id !== enemyId).map((e) => hexKey(e.hex)),
+      ...this.onBoardEnemies().filter((e) => e.id !== enemyId).map((e) => hexKey(e.hex)),
     ]);
   }
 

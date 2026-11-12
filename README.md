@@ -31,8 +31,23 @@ delas) e **três inimigos** (peças vermelhas, com um "nariz" que mostra para on
   chegar a uma borda, **foge** do mapa. Agentes, paredes e outros inimigos bloqueiam o
   caminho: cercando as saídas, ele fica **encurralado**.
 
-Os números ficam em `ENEMY_RULES` (`src/app/game/enemies.ts`); paredes e rotas de patrulha
-ficam no mapa (`maps.ts`).
+### Abordagem
+
+Na vez de um agente, o botão **Abordar** (com o número de inimigos no raio) mostra a
+abordagem antes de confirmar: hexágonos **verdes** são a zona de rendição (até 2
+hexágonos) e os **laranja**, o resto do raio (até 4). O painel lista quem se rende e quem
+vai tentar correr. **Abordar!** confirma; tocar no tabuleiro ou em **Cancelar** desiste.
+
+- Inimigos a até 2 hexágonos **se rendem**: ficam brancos, com bandeira branca, param de
+  agir e continuam ocupando o hexágono. Vale também para quem já estava em alerta.
+- Inimigos entre 3 e 4 hexágonos são **alertados** e tentam correr no turno inimigo.
+- A distância é em linha reta: por enquanto, paredes não abafam o grito.
+- Abordar **encerra a vez** do agente. Se o movimento acabar com inimigos no raio, a vez
+  não passa sozinha, para dar tempo de abordar.
+- Quando ninguém mais age (todos rendidos ou fugidos), aparece o resultado.
+
+Os números ficam em `ENEMY_RULES` e `APPROACH_RULES` (`src/app/game/enemies.ts`); paredes e
+rotas de patrulha ficam no mapa (`maps.ts`).
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 

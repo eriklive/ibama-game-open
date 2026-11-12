@@ -21,7 +21,19 @@ export const ENEMY_RULES = {
   visionAngle: 120,
 } as const;
 
-export type EnemyStatus = 'patrol' | 'alert' | 'fled';
+/**
+ * Abordagem: o agente da vez anuncia a abordagem ("Ibama! Parados!") e todos os
+ * inimigos no raio reagem. Quem está a até `surrenderRange` hexágonos se rende; quem
+ * está mais longe, mas dentro de `radius`, entra em alerta e tenta correr no turno
+ * inimigo. A distância é em linha reta (paredes não abafam o grito, por enquanto).
+ * Abordar encerra a vez do agente.
+ */
+export const APPROACH_RULES = {
+  radius: 4,
+  surrenderRange: 2,
+} as const;
+
+export type EnemyStatus = 'patrol' | 'alert' | 'surrendered' | 'fled';
 
 /** Inimigo como definido no mapa. */
 export interface EnemySpawn {
@@ -178,4 +190,27 @@ export function planFlee(
   const full = pathTo(reach, best.coord);
   const path = full.slice(0, steps);
   return { path, full, escapes: path.length === full.length, cornered: false };
+}
+
+/** Ainda no tabuleiro (ocupa um hexágono): em patrulha, em alerta ou rendido. */
+export const onBoard = (e: Pick<EnemyState, 'status'>): boolean => e.status !== 'fled';
+
+/** Ainda age no turno inimigo: em patrulha ou em alerta. */
+export const canAct = (e: Pick<EnemyState, 'status'>): boolean => e.status === 'patrol' || e.status === 'alert';
+
+/** Quem se rende e quem tenta correr se o agente em `from` iniciar uma abordagem. */
+export function resolveApproach(
+  from: HexCoord,
+  enemies: readonly EnemyState[],
+  rules: { radius: number; surrenderRange: number } = APPROACH_RULES,
+): { surrender: EnemyState[]; flee: EnemyState[] } {
+  const surrender: EnemyState[] = [];
+  const flee: EnemyState[] = [];
+  for (const e of enemies) {
+    if (!canAct(e)) continue;
+    const d = hexDistance(from, e.hex);
+    if (d <= rules.surrenderRange) surrender.push(e);
+    else if (d <= rules.radius) flee.push(e);
+  }
+  return { surrender, flee };
 }

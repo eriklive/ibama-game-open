@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import {
+  APPROACH_RULES,
   ENEMY_RULES,
+  canAct,
+  resolveApproach,
   facingBetween,
   isBorder,
   lineOfSight,
@@ -121,5 +124,32 @@ describe('mapa de teste', () => {
   it('no começo nenhum inimigo vê os agentes', () => {
     const agents = new Map(CHARACTERS.map((c, i) => [c.id, map.starts[i]]));
     for (const e of map.enemies.map(spawnEnemy)) expect(spotted(e, agents, map.cols, map.rows, walls)).toBeNull();
+  });
+});
+
+describe('abordagem', () => {
+  const at = (id: string, col: number, row: number, status: 'patrol' | 'alert' | 'surrendered' | 'fled' = 'patrol') => ({
+    ...spawnEnemy({ id, name: id, patrol: [{ col, row }] }),
+    status,
+  });
+  const rules = { radius: 4, surrenderRange: 2 };
+
+  it('perto se rende, no raio tenta correr, fora do raio nem percebe', () => {
+    const from = { col: 5, row: 5 };
+    const r = resolveApproach(from, [at('perto', 5, 7), at('medio', 5, 9), at('longe', 5, 10)], rules);
+    expect(r.surrender.map((e) => e.id)).toEqual(['perto']);
+    expect(r.flee.map((e) => e.id)).toEqual(['medio']);
+  });
+
+  it('inimigo já em alerta também pode se render; rendidos e fugidos não contam', () => {
+    const from = { col: 5, row: 5 };
+    const r = resolveApproach(from, [at('a', 5, 6, 'alert'), at('r', 5, 4, 'surrendered'), at('f', 6, 5, 'fled')], rules);
+    expect(r.surrender.map((e) => e.id)).toEqual(['a']);
+    expect(r.flee).toEqual([]);
+  });
+
+  it('as regras padrão têm a rendição dentro do raio', () => {
+    expect(APPROACH_RULES.surrenderRange).toBeLessThan(APPROACH_RULES.radius);
+    expect(canAct(at('x', 1, 1, 'surrendered'))).toBe(false);
   });
 });

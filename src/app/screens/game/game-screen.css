@@ -89,6 +89,25 @@
 .notice.alert { background: #5a2420; border-color: #ff8a1f; color: #fff; }
 
 .enemy-panel { border-color: #c8323c; }
+
+.foe.surrendered { border-color: #8fe08a; }
+.foe.surrendered .foe-dot { background: #e9eef0; }
+.foe.surrendered em { color: #b8f0b4; }
+
+/* abordagem */
+.btn-approach { background: #c8323c; color: #fff; display: inline-flex; align-items: center; justify-content: center; gap: 6px; }
+.btn-approach .badge {
+  min-width: 22px; height: 22px; padding: 0 6px; border-radius: 999px;
+  background: var(--yellow); color: var(--dark-text); border: 2px solid var(--ink);
+  font-size: 13px; line-height: 18px;
+}
+.approach-panel { border-color: #ff8a1f; }
+.approach-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 4px; }
+.approach-list li { display: flex; align-items: center; gap: 8px; font-family: var(--display); font-size: 16px; }
+.approach-list em { font-family: inherit; font-style: normal; font-size: 13px; color: var(--muted); }
+.zone-swatch { width: 14px; height: 14px; border-radius: 4px; border: 2px solid var(--ink); flex: none; }
+.surrender .zone-swatch { background: #8fe08a; }
+.flee .zone-swatch { background: #ffb067; }
 .foe-portrait { background: #c8323c; color: var(--dark-text); }
 
 /* ---------- painel inferior ---------- */
