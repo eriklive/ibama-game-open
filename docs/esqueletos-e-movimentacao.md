@@ -53,9 +53,9 @@ Regras:
   Three.js isso significa que `rotation.y = atan2(dx, dz)` faz o personagem olhar para a direção
   `(dx, dz)` — a mesma convenção da "alça" (`nub` em `z = +0.42`) da peça atual.
 - **Altura no tabuleiro**: o hexágono tem raio 1 (`HEX_SIZE`), distância entre centros vizinhos
-  √3 ≈ 1,73. Um humano de 1,8 m fica grande demais; normalizamos na carga para **~1,15 unidade**
-  de altura (escala calculada pela bounding box do bind pose e guardada no manifesto, ver §2).
-  Proporções "chunky" (cabeça grande) ajudam a leitura nessa escala.
+  √3 ≈ 1,73. A referência é o hexágono caber num quadrado de **1,5 m × 1,5 m** (1,5 m de ponta a
+  ponta), então 1 m = 2 / 1,5 ≈ 1,33 unidade (`METER`) e um humano de 1,70 m fica com **~2,27
+  unidades** de altura (`HUMAN_HEIGHT`; escala calculada pela bounding box do bind pose).
 - **Origem** do modelo no chão, centrada entre os pés; o bind pose pode ser T ou A, mas **todo o
   catálogo usa o mesmo** (A-pose da UAL).
 
@@ -346,7 +346,7 @@ export interface ModelDef {
   clipMap: Partial<Record<ClipName, string>>;
   /** Velocidade nativa (unidades/s) dos clipes de locomoção, para casar o timeScale. */
   clipSpeed?: Partial<Record<'walk' | 'run', number>>;
-  heightInUnits: number;                       // altura final no tabuleiro (ex.: 1.15)
+  heightInUnits: number;                       // altura final no tabuleiro (ex.: 2.27)
   sockets?: Partial<Record<SocketName, { bone: string; offset?: [number, number, number] }>>;
   tint?: string[];                             // nomes de materiais que recebem Character.color
 }
@@ -437,7 +437,8 @@ flutuação/giro em unidades **sem** rig.
   batem; não precisou retarget.
 - Código: `src/app/game/character-model.ts` (`CharacterRig`). No `HexBoard`, a peça vira base do
   modelo e o personagem corre em linha reta de hexágono em hexágono, virando para onde vai.
-  Bruno e Clara seguem como peças.
+  Bruno, Clara e os inimigos usam o mesmo corpo, tingido (`ModelDef.tint`), até terem modelos
+  próprios.
 - O build dos dois GLBs está em `tools/assets/` (ver o README de lá).
 - **A versão grátis é menor que a anunciada:** traz só 2 dos 6 corpos (Super-herói masc./fem.)
   e 43 das 120+ animações. Os outros corpos e animações estão na versão Source, que é paga.
@@ -451,7 +452,7 @@ flutuação/giro em unidades **sem** rig.
 
 ## 6. Perguntas em aberto
 
-- **Escala**: 1,15 unidade de altura para humanos lê bem com a câmera atual? Fauna grande (onça,
+- **Escala**: Fauna grande (onça,
   anta) e veículos ocupam 1 hex ou precisamos de unidades multi-hex (afeta `reachableHexes` e
   `blocked`)?
 - **Curva ou pulinho como padrão?** O pulinho por hex é mais "tabuleiro" e legível para contar

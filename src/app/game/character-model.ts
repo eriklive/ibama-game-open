@@ -12,14 +12,22 @@ export interface ModelDef {
   url: string;
   /** GLB só com clipes, no mesmo esqueleto. */
   anims: string;
-  /** Altura final no tabuleiro, em unidades do mundo (raio do hexágono = 1). */
+  /** Altura final no tabuleiro, em unidades do mundo (raio do hexágono = 1; ver `METER`). */
   height: number;
+  /** Cor que tinge a roupa/corpo (olhos e cabelo ficam como são), para distinguir cópias do mesmo modelo. */
+  tint?: number;
 }
 
 /** Biblioteca de clipes do esqueleto humanoide padrão (nomes de ossos da Quaternius UAL). */
 export const HUMANOID_ANIMS = 'assets/anims/humanoid-base.glb';
-/** Altura de um humano adulto no tabuleiro. */
-export const HUMAN_HEIGHT = 1.15;
+/**
+ * Escala do tabuleiro: o hexágono cabe num quadrado de 1,5 m × 1,5 m, isto é, mede 1,5 m de
+ * ponta a ponta (2 × raio). Com raio 1, um metro vale 2 / 1,5 ≈ 1,33 unidade do mundo.
+ */
+export const HEX_WIDTH_METERS = 1.5;
+export const METER = 2 / HEX_WIDTH_METERS;
+/** Altura de um humano adulto no tabuleiro (1,70 m ≈ 2,27 unidades). */
+export const HUMAN_HEIGHT = 1.7 * METER;
 
 /**
  * Velocidade de deslocamento de cada clipe de locomoção no tamanho original (m/s),
@@ -27,6 +35,9 @@ export const HUMAN_HEIGHT = 1.15;
  * velocidade da animação com a velocidade real da peça, sem os pés "patinarem".
  */
 const CLIP_SPEED: Partial<Record<ClipName, number>> = { walk: 0.97, run: 5.36 };
+
+/** Quanto da cor de `tint` entra no material (0 = nada, 1 = cor cheia). */
+const TINT_STRENGTH = 0.6;
 
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const cache = new Map<string, Promise<GLTF>>();
@@ -56,6 +67,8 @@ export class CharacterRig {
     /** Fator entre o modelo original (metros) e o tabuleiro. */
     readonly scale: number,
     clips: THREE.AnimationClip[],
+    /** Materiais tingidos, só desta instância. */
+    private readonly ownMaterials: THREE.Material[] = [],
   ) {
     this.mixer = new THREE.AnimationMixer(object);
     for (const clip of clips) this.actions.set(clip.name as ClipName, this.mixer.clipAction(clip));
@@ -64,9 +77,19 @@ export class CharacterRig {
   static async load(def: ModelDef): Promise<CharacterRig> {
     const [model, anims] = await Promise.all([loadGltf(def.url), loadGltf(def.anims)]);
     const inner = cloneSkinned(model.scene);
+    const tint = def.tint === undefined ? null : new THREE.Color(0xffffff).lerp(new THREE.Color(def.tint), TINT_STRENGTH);
+    const owned: THREE.Material[] = [];
     inner.traverse((o) => {
       const mesh = o as THREE.SkinnedMesh;
       if (!mesh.isMesh) return;
+      const mat = mesh.material as THREE.MeshStandardMaterial;
+      if (tint && !Array.isArray(mat) && !/eye|hair/i.test(mat.name)) {
+        // material próprio desta cópia: os clones dividem os materiais do modelo em cache
+        const own = mat.clone();
+        own.color.multiply(tint);
+        mesh.material = own;
+        owned.push(own);
+      }
       mesh.castShadow = true;
       // a caixa de colisão da malha é a da pose de repouso; animada, ela pode sair
       // dela e sumir na borda da tela
@@ -80,7 +103,7 @@ export class CharacterRig {
     const root = new THREE.Group();
     root.name = 'character';
     root.add(inner);
-    return new CharacterRig(root, scale, anims.animations);
+    return new CharacterRig(root, scale, anims.animations, owned);
   }
 
   /** Toca um clipe em loop, com crossfade a partir do atual. */
@@ -107,5 +130,6 @@ export class CharacterRig {
   dispose(): void {
     this.mixer.stopAllAction();
     this.mixer.uncacheRoot(this.object);
+    for (const m of this.ownMaterials) m.dispose();
   }
 }

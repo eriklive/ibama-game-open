@@ -27,7 +27,7 @@ import {
   visionHexes,
 } from '../../game/enemies';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, MOVE_DICE, findMap } from '../../game/maps';
+import { CHARACTERS, Character, ENEMY_MODEL, GameMap, MOVE_DICE, findMap } from '../../game/maps';
 
 type Phase = 'rolling' | 'moving-choice' | 'walking' | 'ending' | 'enemy';
 
@@ -150,7 +150,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       },
       {
         walls: this.map.walls,
-        enemies: this.enemies().map((e) => ({ id: e.id, start: e.hex, facing: e.facing })),
+        enemies: this.enemies().map((e) => ({ id: e.id, start: e.hex, facing: e.facing, model: ENEMY_MODEL })),
       },
     );
     this.refreshVision();

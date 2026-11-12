@@ -1,14 +1,14 @@
 import * as THREE from 'three';
 import { GameMap } from './maps';
 import { HexCoord, hexKey, hexToWorld, sameHex, worldToHex } from './hex';
-import { CharacterRig, ModelDef } from './character-model';
+import { CharacterRig, METER, ModelDef } from './character-model';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
 const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa uma fresta entre os hexágonos
 
-/** Peças com modelo 3D: velocidade da corrida entre hexágonos (unidades do mundo/s ≈ 1,9 hex/s). */
-const RUN_SPEED = 3.2;
+/** Peças com modelo 3D: velocidade da corrida entre hexágonos (3,6 m/s ≈ 2,8 hex/s). */
+const RUN_SPEED = 3.6 * METER;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
 const BASE_TOP = 0.07;
 
@@ -49,6 +49,8 @@ export interface BoardEnemy {
   start: HexCoord;
   /** Ângulo para onde olha, no plano XZ (atan2(dz, dx)). */
   facing: number;
+  /** Modelo 3D; enquanto carrega (ou se falhar) a peça simples continua no lugar. */
+  model?: ModelDef;
 }
 
 /** Peça que anda pelo tabuleiro (agente ou inimigo). */
@@ -59,6 +61,7 @@ interface Mover {
   hop: number;
   /** Muda quando a peça é recolocada à força: interrompe a animação em curso. */
   epoch: number;
+  rig?: CharacterRig;
 }
 
 interface UnitView extends Mover {
@@ -68,7 +71,6 @@ interface UnitView extends Mover {
   lift: number;
   /** Peças da miniatura que somem quando o modelo 3D chega (miolo e alça de frente). */
   pieceOnly: THREE.Object3D[];
-  rig?: CharacterRig;
   /** Direção para onde o modelo olha (rad em torno de Y; 0 = +Z, de frente para a câmera). */
   yaw: number;
 }
@@ -86,6 +88,10 @@ interface EnemyView extends Mover {
   /** 1 = no tabuleiro, 0 = sumiu (fugiu); anima a saída. */
   presence: number;
   gone: boolean;
+  /** Altura de repouso do grupo (muda quando o modelo 3D substitui a peça). */
+  baseY: number;
+  /** Altura dos avisos ("!" e bandeira) sobre a cabeça. */
+  signY: number;
 }
 
 /** Diferença angular em (-π, π]. */
@@ -310,11 +316,16 @@ export class HexBoard {
       const from = this.worldOf(e.hex);
       const to = this.worldOf(step);
       e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
-      await this.hopTo(e, step, 300 / speed);
+      if (e.rig) {
+        e.rig.matchSpeed('run', RUN_SPEED * speed);
+        e.rig.play('run', 0.15);
+        await this.runTo(e, step, RUN_SPEED * speed);
+      } else await this.hopTo(e, step, 300 / speed);
       if (e.epoch !== epoch) break;
       e.hex = step;
       if (onStep?.(step) === false) break;
     }
+    e.rig?.play('idle', 0.3);
     this.moving = false;
   }
 
@@ -358,7 +369,12 @@ export class HexBoard {
     u.rig?.play('run', 0.15);
     const epoch = u.epoch;
     for (const step of path) {
-      await (u.rig ? this.runTo(u, step) : this.hopTo(u, step));
+      if (u.rig) {
+        const from = u.group.position;
+        const to = this.worldOf(step);
+        u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
+        await this.runTo(u, step, RUN_SPEED);
+      } else await this.hopTo(u, step);
       if (u.epoch !== epoch) break;
       u.hex = step;
       this.path.shift();
@@ -375,7 +391,7 @@ export class HexBoard {
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.frameId);
-    for (const u of this.units.values()) u.rig?.dispose();
+    for (const u of [...this.units.values(), ...this.enemies.values()]) u.rig?.dispose();
     this.resizeObserver.disconnect();
     this.unbindInput();
     this.scene.traverse((obj) => {
@@ -488,6 +504,11 @@ export class HexBoard {
     const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.24), dark);
     eyes.position.set(0.18, 0.34, 0);
     group.add(body, head, nose, eyes);
+    // base redonda que aparece sob o modelo 3D e mostra a cor do estado (alerta, rendido)
+    const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, BASE_TOP * 2, 40), bodyMaterial);
+    disc.castShadow = true;
+    disc.visible = false;
+    group.add(disc);
 
     const alertSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.bangTexture(), depthTest: false }));
     alertSprite.scale.set(0.6, 0.6, 1);
@@ -527,7 +548,45 @@ export class HexBoard {
       flagSprite,
       presence: 1,
       gone: false,
+      baseY: 0.15,
+      signY: 1.05,
     });
+    if (enemy.model) this.attachEnemyModel(this.enemies.get(enemy.id)!, enemy.model, [body, head, nose, eyes], disc);
+  }
+
+  /** Troca a peça do inimigo pelo personagem animado, de pé sobre uma base da cor do estado. */
+  private async attachEnemyModel(
+    e: EnemyView,
+    def: ModelDef,
+    piece: THREE.Object3D[],
+    disc: THREE.Object3D,
+  ): Promise<void> {
+    const rig = await this.loadRig(e.id, def);
+    if (!rig) return;
+    // o grupo aponta +X para onde o inimigo olha; o modelo tem a frente em +Z
+    rig.object.rotation.y = Math.PI / 2;
+    rig.object.position.y = BASE_TOP;
+    e.group.add(rig.object);
+    for (const o of piece) o.visible = false;
+    disc.visible = true;
+    e.baseY = BASE_TOP;
+    e.signY = BASE_TOP + def.height + 0.45;
+    e.alertSprite.scale.set(0.9, 0.9, 1);
+    e.flagSprite.scale.set(1, 1, 1);
+    e.flagSprite.position.y = e.signY;
+    rig.play('idle', 0);
+    e.rig = rig;
+  }
+
+  private async loadRig(id: string, def: ModelDef): Promise<CharacterRig | null> {
+    try {
+      const rig = await CharacterRig.load(def);
+      if (!this.disposed) return rig;
+      rig.dispose();
+    } catch (err) {
+      console.warn(`Modelo de ${id} não carregou; mantendo a peça simples.`, err);
+    }
+    return null;
   }
 
   /** Bandeira branca (desenhada num canvas). */
@@ -641,24 +700,15 @@ export class HexBoard {
 
   /** Troca o miolo da peça pelo personagem animado, que fica de pé sobre o disco. */
   private async attachModel(u: UnitView, def: ModelDef): Promise<void> {
-    let rig: CharacterRig;
-    try {
-      rig = await CharacterRig.load(def);
-    } catch (err) {
-      console.warn(`Modelo de ${u.id} não carregou; mantendo a peça simples.`, err);
-      return;
-    }
-    if (this.disposed) {
-      rig.dispose();
-      return;
-    }
+    const rig = await this.loadRig(u.id, def);
+    if (!rig) return;
     rig.object.position.y = BASE_TOP;
     u.group.add(rig.object);
     for (const o of u.pieceOnly) o.visible = false;
     // a área de toque passa a cobrir o corpo todo
     u.hitbox.scale.set(0.8, def.height / 0.6, 0.8);
     u.hitbox.position.y = def.height / 2;
-    rig.play(this.moving ? 'run' : 'idle', 0);
+    rig.play('idle', 0);
     u.rig = rig;
   }
 
@@ -727,14 +777,13 @@ export class HexBoard {
     });
   }
 
-  /** Corre em linha reta até o hexágono, em velocidade constante, virando para onde vai. */
-  private runTo(u: UnitView, h: HexCoord): Promise<void> {
+  /** Corre em linha reta até o hexágono, em velocidade constante (quem chama vira a peça). */
+  private runTo(u: Mover, h: HexCoord, speed: number): Promise<void> {
     const from = u.group.position.clone();
     const to = this.worldOf(h);
     this.camGoal.copy(to);
     this.clampGoal();
-    u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
-    const duration = (Math.hypot(to.x - from.x, to.z - from.z) / RUN_SPEED) * 1000;
+    const duration = (Math.hypot(to.x - from.x, to.z - from.z) / speed) * 1000;
     const start = performance.now();
     const epoch = u.epoch;
     return new Promise((resolve) => {
@@ -821,6 +870,7 @@ export class HexBoard {
     }
 
     for (const e of this.enemies.values()) {
+      e.rig?.update(dt);
       e.facing += angleDelta(e.facing, e.facingGoal) * (1 - Math.exp(-dt * 12));
       e.group.rotation.y = -e.facing;
       e.presence += ((e.gone ? 0 : 1) - e.presence) * (1 - Math.exp(-dt * 7));
@@ -830,9 +880,9 @@ export class HexBoard {
       e.group.scale.setScalar(Math.max(0.001, e.presence));
       const jitter = e.alert ? Math.abs(Math.sin(t * 9)) * 0.06 : 0;
       // rendido fica abaixado
-      const crouch = e.surrendered ? -0.08 : 0;
-      e.group.position.y = 0.15 + crouch + e.hop + jitter - (1 - e.presence) * 0.5;
-      e.alertSprite.position.y = 1.05 + Math.sin(t * 6) * 0.06;
+      const crouch = e.surrendered && !e.rig ? -0.08 : 0;
+      e.group.position.y = e.baseY + crouch + e.hop + jitter - (1 - e.presence) * 0.5;
+      e.alertSprite.position.y = e.signY + Math.sin(t * 6) * 0.06;
       e.shadow.position.set(e.group.position.x, 0.01, e.group.position.z);
       e.shadow.scale.setScalar(Math.max(0.001, e.presence * (1 - e.hop * 0.6)));
     }
