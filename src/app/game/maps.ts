@@ -79,28 +79,37 @@ export const blockedHexes = (map: GameMap): Set<string> =>
 
 /**
  * Aeroporto clandestino: o terminal fica ao norte, com a entrada da frente (2 hexágonos)
- * virada para o pátio e a pista, e duas portas nos fundos. A equipe chega pelo sul, do
- * outro lado da pista; os corredores entre o terminal e a mata levam às portas de trás.
+ * virada para o pátio e a pista, e duas portas nos fundos. O resto é mata fechada, cortada
+ * por trilhas e clareiras: a equipe chega pelo sul, do outro lado da pista, e os corredores
+ * entre o terminal e a mata levam às portas de trás.
  */
 const AEROPORTO = parseLayout([
-  'TT....................TT',
-  'T...T..............T...T',
-  '..TT....#D####D#....TT..',
-  '.TTT....#______#....TTT.',
-  '..TT....#______#....TT..',
-  '.TT.....#______#.....TT.',
-  '........###DD###........',
-  '..T...::::::::::::...T..',
-  '......::::::::::::......',
-  '.======================.',
-  '.======================.',
-  '.======================.',
-  '........................',
-  '..TT......T.......TT....',
-  '.TTT.....TT......TTT....',
-  '..T...........T.....T...',
-  '......T.............TT..',
-  'TT.....................T',
+  'TTTTTT..TTTTTTTTTTTTTTTT..TTTTTT',
+  'TTTT....TTT..........TTT....TTTT',
+  'TTT...TTTT............TTTT...TTT',
+  'TT...TTTT..............TTTT...TT',
+  'TT..TTTT....#D####D#....TTTT..TT',
+  'T...TTT.....#______#.....TTT...T',
+  'T..TTTT.....#______#.....TTTT..T',
+  'T...TTT.....#______#.....TTT...T',
+  'TT..TT......###DD###......TT..TT',
+  'TT.......::::::::::::::.......TT',
+  'T........::::::::::::::........T',
+  '.==============================.',
+  '.==============================.',
+  '.==============================.',
+  'T..............................T',
+  'TTT..TTTTT...TTTT..TTTT...TTT.TT',
+  'TTTT..TTTTT..TTT....TTT..TTTT..T',
+  'TTT...TTTT...TT..TT..TT...TTT..T',
+  'TT..T..TT...TTT.TTTT.TTT...T..TT',
+  'TT.TTT.....TTTT..TT..TTTT....TTT',
+  'T..TTTT...TTTT........TTTT..TTTT',
+  'TT..TTT..TTTT....TT....TTT..TTTT',
+  'TTT..T...TTT....TTTT....T...TTTT',
+  'TTTT....TTTT............TT..TTTT',
+  'TTTTT..TTTTT...TTTTTT...TTTTTTTT',
+  'TTTTTTTTTTTTT.TTTTTTTT.TTTTTTTTT',
 ]);
 
 export const MAPS: GameMap[] = [
@@ -136,17 +145,17 @@ export const MAPS: GameMap[] = [
   {
     id: 'aeroporto',
     name: 'Aeroporto',
-    subtitle: 'Mapa 24×18 · pista, terminal e mata',
+    subtitle: 'Mapa 32×26 · pista, terminal e mata',
     ...AEROPORTO,
     available: true,
-    starts: [{ col: 11, row: 15 }, { col: 10, row: 16 }, { col: 12, row: 16 }],
+    starts: [{ col: 15, row: 22 }, { col: 14, row: 23 }, { col: 16, row: 23 }],
     enemies: [
       // dentro do terminal
-      { id: 'madeireiro', name: 'Madeireiro', model: MODELS.madeireiro, patrol: [{ col: 9, row: 4 }, { col: 14, row: 4 }] },
+      { id: 'madeireiro', name: 'Madeireiro', model: MODELS.madeireiro, patrol: [{ col: 13, row: 6 }, { col: 18, row: 6 }] },
       // no pátio, em frente à entrada
-      { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 7, row: 8 }, { col: 16, row: 8 }] },
+      { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 10, row: 10 }, { col: 21, row: 10 }] },
       // nos fundos, entre as duas portas
-      { id: 'cacador', name: 'Caçador', model: MODELS.cacador, patrol: [{ col: 6, row: 1 }, { col: 17, row: 1 }] },
+      { id: 'cacador', name: 'Caçador', model: MODELS.cacador, patrol: [{ col: 11, row: 2 }, { col: 20, row: 2 }] },
     ],
   },
   {

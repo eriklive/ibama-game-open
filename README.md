@@ -54,9 +54,10 @@ rotas de patrulha ficam no mapa (`maps.ts`).
 
 ### Mapa do aeroporto
 
-O mapa **Aeroporto** (24×18) é o primeiro mapa "de verdade": o terminal fica ao norte, com a
+O mapa **Aeroporto** (32×26) é o primeiro mapa "de verdade": o terminal fica ao norte, com a
 entrada da frente virada para o pátio e para a pista longa, e duas portas nos fundos. A equipe
-começa ao sul, do outro lado da pista. Os blocos de **árvores** funcionam como paredes: ninguém
+começa ao sul, do outro lado da pista, e avança por trilhas e clareiras na mata. Os blocos de
+**árvores** (de vários tipos e tamanhos) funcionam como paredes: ninguém
 passa e os inimigos não enxergam através deles.
 
 O mapa é desenhado em texto em `maps.ts` (`parseLayout`): `.` grama, `T` árvores, `#` parede,

@@ -32,11 +32,18 @@ describe('mapas', () => {
 
   it('aeroporto: só se entra no terminal pelas três portas', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
-    const inside = { col: 11, row: 4 };
-    const doors = [{ col: 9, row: 2 }, { col: 14, row: 2 }, { col: 11, row: 6 }, { col: 12, row: 6 }];
+    const inside = { col: 15, row: 6 };
+    const doors = [{ col: 13, row: 4 }, { col: 18, row: 4 }, { col: 15, row: 8 }, { col: 16, row: 8 }];
     const open = reachableHexes(map.starts[0], 999, map.cols, map.rows, blockedHexes(map));
     expect(open.has(hexKey(inside))).toBe(true);
     const sealed = new Set([...blockedHexes(map), ...doors.map(hexKey)]);
     expect(reachableHexes(map.starts[0], 999, map.cols, map.rows, sealed).has(hexKey(inside))).toBe(false);
+  });
+
+  it('aeroporto: todo hexágono livre é alcançável (nenhuma clareira isolada)', () => {
+    const map = MAPS.find((m) => m.id === 'aeroporto')!;
+    const blocked = blockedHexes(map);
+    const reach = reachableHexes(map.starts[0], 9999, map.cols, map.rows, blocked);
+    expect(reach.size + 1).toBe(map.cols * map.rows - blocked.size);
   });
 });
