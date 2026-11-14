@@ -29,7 +29,10 @@ import {
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap } from '../../game/maps';
 
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'ending' | 'enemy';
+/** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
+const MISSION_DEADLINE = 5;
+
+type Phase ='rolling' | 'moving-choice' | 'walking' | 'ending' | 'enemy';
 
 const namesOf = (es: readonly EnemyState[]): string => {
   const names = es.map((e) => e.name);
@@ -91,11 +94,31 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly approaching = signal(false);
   protected readonly approachRules = APPROACH_RULES;
   protected readonly statusLabel: Record<EnemyState['status'], string> = {
-    patrol: 'patrulha',
-    alert: 'em fuga',
+    patrol: 'vigiando',
+    alert: 'em fuga!',
     surrendered: 'rendido',
     fled: 'fugiu',
   };
+
+  /** Linha do tempo da fita no topo: no último turno o carro foge. */
+  protected readonly deadline = MISSION_DEADLINE;
+  protected readonly timeline = Array.from({ length: MISSION_DEADLINE }, (_, i) => i + 1);
+  protected readonly late = computed(() => this.round() > MISSION_DEADLINE);
+  /** Inclinação dos papéis (fotos e fichas), para não ficarem alinhados demais. */
+  protected readonly tilts = [-3, 2, -1, 1.5];
+
+  protected onTurn(c: Character): boolean {
+    return c.id === this.active().id && this.phase() !== 'enemy';
+  }
+
+  /** Cor da silhueta na foto 3x4: a cor do agente escurecida. */
+  protected shade(c: Character): string {
+    const k = 0.62;
+    const r = Math.round(((c.color >> 16) & 255) * k);
+    const g = Math.round(((c.color >> 8) & 255) * k);
+    const b = Math.round((c.color & 255) * k);
+    return `rgb(${r}, ${g}, ${b})`;
+  }
   /** Quem se renderia e quem tentaria correr se o agente da vez abordasse agora. */
   protected readonly approachPlan = computed(() => {
     const from = this.positions().get(this.active().id);
