@@ -52,6 +52,16 @@ vai tentar correr. **Abordar!** confirma; tocar no tabuleiro ou em **Cancelar** 
 Os números ficam em `ENEMY_RULES` e `APPROACH_RULES` (`src/app/game/enemies.ts`); paredes e
 rotas de patrulha ficam no mapa (`maps.ts`).
 
+### Mapa do aeroporto
+
+O mapa **Aeroporto** (24×18) é o primeiro mapa "de verdade": o terminal fica ao norte, com a
+entrada da frente virada para o pátio e para a pista longa, e duas portas nos fundos. A equipe
+começa ao sul, do outro lado da pista. Os blocos de **árvores** funcionam como paredes: ninguém
+passa e os inimigos não enxergam através deles.
+
+O mapa é desenhado em texto em `maps.ts` (`parseLayout`): `.` grama, `T` árvores, `#` parede,
+`_` piso, `D` porta, `=` pista e `:` pátio — basta editar as linhas para mudar o terreno.
+
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
 ## Modelos dos personagens

@@ -27,7 +27,7 @@ import {
   visionHexes,
 } from '../../game/enemies';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, MOVE_DICE, findMap } from '../../game/maps';
+import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap } from '../../game/maps';
 
 type Phase = 'rolling' | 'moving-choice' | 'walking' | 'ending' | 'enemy';
 
@@ -56,7 +56,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   protected readonly map: GameMap | undefined = findMap(inject(ActivatedRoute).snapshot.paramMap.get('mapId'));
   protected readonly characters = CHARACTERS;
-  private readonly walls = new Set((this.map?.walls ?? []).map(hexKey));
+  /** Paredes e árvores: bloqueiam passagem e visão. */
+  private readonly walls = this.map ? blockedHexes(this.map) : new Set<string>();
   protected readonly diceSides = MOVE_DICE.sides;
 
   protected readonly positions = signal<ReadonlyMap<string, HexCoord>>(this.initialPositions());

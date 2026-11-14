@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { GameMap } from './maps';
+import { GameMap, Ground } from './maps';
 import { HexCoord, hexKey, hexToWorld, sameHex, worldToHex } from './hex';
 import { CharacterRig, METER, ModelDef } from './character-model';
 
@@ -35,6 +35,14 @@ const COLORS = {
 };
 
 const WALL_HEIGHT = 0.9;
+
+/** Tons do chão por tipo de terreno (três variações, sorteadas pela posição). */
+const GROUND: Record<Ground, [number, number, number]> = {
+  grass: [0x4f9a4a, 0x478f44, 0x57a552],
+  runway: [0x4a5258, 0x444c52, 0x50585e],
+  apron: [0x8d9498, 0x858c90, 0x959ca0],
+  floor: [0xc9b48f, 0xc1ac87, 0xd1bc97],
+};
 
 export interface BoardUnit {
   id: string;
@@ -181,6 +189,7 @@ export class HexBoard {
     this.setupLights();
     this.buildBoard();
     this.buildWalls(extras.walls ?? []);
+    this.buildTrees(map.trees ?? []);
     for (const u of units) this.buildUnit(u);
     for (const e of extras.enemies ?? []) this.buildEnemy(e);
     this.activeMarker = this.buildMarker(COLORS.activeRing, 0.62, 0.09);
@@ -417,7 +426,7 @@ export class HexBoard {
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
     sun.position.set(-8, 16, 6);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(2048, 2048);
     const ext = Math.max(this.map.cols, this.map.rows) * HEX_SIZE * 1.2;
     Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 1, far: 60 });
     const center = this.boardCenter();
@@ -437,7 +446,8 @@ export class HexBoard {
     for (let col = 0; col < this.map.cols; col++) {
       for (let row = 0; row < this.map.rows; row++) {
         const coord = { col, row };
-        const baseColor = new THREE.Color(palette[(col * 31 + row * 17) % 3]);
+        const ground = this.map.ground?.get(hexKey(coord));
+        const baseColor = new THREE.Color((ground ? GROUND[ground] : palette)[(col * 31 + row * 17) % 3]);
         const material = new THREE.MeshStandardMaterial({ color: baseColor, roughness: 0.85, metalness: 0 });
         const mesh = new THREE.Mesh(geo, material);
         const p = hexToWorld(coord, HEX_SIZE);
@@ -450,6 +460,7 @@ export class HexBoard {
         this.tiles.set(hexKey(coord), { coord, mesh, material, baseColor, lift: 0 });
       }
     }
+    this.buildRunwayMarks();
 
     const last = hexToWorld({ col: this.map.cols - 1, row: this.map.rows - 1 }, HEX_SIZE);
     Object.assign(this.bounds, { minX: 0, maxX: last.x, minZ: 0, maxZ: last.z + HEX_SIZE });
@@ -490,6 +501,62 @@ export class HexBoard {
       // um pouco de variação de altura para parecer pedra/tronco
       wall.scale.y = 0.85 + ((h.col * 13 + h.row * 7) % 5) * 0.07;
       tile.mesh.add(wall);
+    }
+  }
+
+  /** Faixa central da pista: traços brancos nas colunas pares da fileira do meio. */
+  private buildRunwayMarks(): void {
+    const ground = this.map.ground;
+    if (!ground) return;
+    const isRunway = (col: number, row: number) => ground.get(hexKey({ col, row })) === 'runway';
+    const geo = new THREE.BoxGeometry(HEX_SIZE * 1.1, 0.02, 0.14);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xe9eef0, roughness: 0.9 });
+    for (const tile of this.tiles.values()) {
+      const { col, row } = tile.coord;
+      if (col % 2 || !isRunway(col, row) || !isRunway(col, row - 1) || !isRunway(col, row + 1)) continue;
+      const dash = new THREE.Mesh(geo, mat);
+      dash.position.y = 0.011;
+      dash.receiveShadow = true;
+      tile.mesh.add(dash);
+    }
+  }
+
+  /** Bloco de mata: três árvores por hexágono, variando com a posição. */
+  private buildTrees(trees: HexCoord[]): void {
+    if (!trees.length) return;
+    const trunkGeo = new THREE.CylinderGeometry(0.07, 0.11, 1, 6);
+    trunkGeo.translate(0, 0.5, 0);
+    const crownGeo = new THREE.IcosahedronGeometry(0.5, 1);
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1 });
+    const crownMats = [0x1f6b33, 0x2a7a3a, 0x195c2c].map(
+      (color) => new THREE.MeshStandardMaterial({ color, roughness: 0.95, flatShading: true }),
+    );
+    for (const h of trees) {
+      const tile = this.tiles.get(hexKey(h));
+      if (!tile) continue;
+      tile.baseColor.set(0x2f6b35);
+      const seed = h.col * 13 + h.row * 7;
+      const turn = (seed % 6) * (Math.PI / 3);
+      // uma árvore maior e duas menores, giradas em volta do centro
+      [
+        { r: 0.12, a: 0, s: 1.15 },
+        { r: 0.5, a: 2.2, s: 0.8 },
+        { r: 0.48, a: 4.3, s: 0.9 },
+      ].forEach(({ r, a, s }, i) => {
+        const tree = new THREE.Group();
+        const height = 0.55 + ((seed + i * 3) % 4) * 0.06;
+        const trunk = new THREE.Mesh(trunkGeo, trunkMat);
+        trunk.scale.y = height;
+        const crown = new THREE.Mesh(crownGeo, crownMats[(seed + i) % 3]);
+        crown.position.y = height + 0.3;
+        crown.scale.y = 0.85;
+        crown.rotation.y = seed + i;
+        trunk.castShadow = crown.castShadow = true;
+        tree.add(trunk, crown);
+        tree.position.set(Math.cos(a + turn) * r, 0, Math.sin(a + turn) * r);
+        tree.scale.setScalar(s);
+        tile.mesh.add(tree);
+      });
     }
   }
 

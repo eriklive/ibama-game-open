@@ -4,9 +4,9 @@ import { hexDistance, hexKey, hexLine, hexNeighbors, hexesInRange, pathTo, reach
 import { CHARACTERS, MAPS, MOVE_DICE } from './maps';
 
 describe('mapas e personagens', () => {
-  it('o mapa de teste é 12x12 e é o único disponível', () => {
+  it('o mapa de teste é 12x12 e vem primeiro entre os disponíveis', () => {
     const available = MAPS.filter((m) => m.available);
-    expect(available.length).toBe(1);
+    expect(available.map((m) => m.id)).toEqual(['teste-12x12', 'aeroporto']);
     expect(available[0].cols).toBe(12);
     expect(available[0].rows).toBe(12);
   });

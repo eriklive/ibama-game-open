@@ -1,5 +1,9 @@
 import { ModelDef, MODELS } from './character-model';
 import { EnemySpawn } from './enemies';
+import { HexCoord, hexKey } from './hex';
+
+/** Tipo de chão de um hexágono (só muda a aparência; quem bloqueia são paredes e árvores). */
+export type Ground = 'grass' | 'runway' | 'apron' | 'floor';
 
 export interface GameMap {
   id: string;
@@ -13,6 +17,10 @@ export interface GameMap {
   starts: { col: number; row: number }[];
   /** Hexágonos com parede: bloqueiam passagem e visão. */
   walls: { col: number; row: number }[];
+  /** Hexágonos com árvores: bloqueiam passagem e visão, como as paredes. */
+  trees?: HexCoord[];
+  /** Chão de cada hexágono (chave de `hexKey`); sem isso, o tabuleiro azul de teste. */
+  ground?: ReadonlyMap<string, Ground>;
   /** Inimigos e suas rotas de patrulha. */
   enemies: EnemySpawn[];
 }
@@ -34,6 +42,66 @@ export const CHARACTERS: Character[] = [
   { id: 'bruno', name: 'Bruno', initial: 'B', color: 0xe0712c, model: MODELS.bruno },
   { id: 'clara', name: 'Clara', initial: 'C', color: 0x9b5bd6, model: MODELS.clara },
 ];
+
+/**
+ * Monta as partes "desenháveis" de um mapa a partir de um esboço em texto: uma string
+ * por linha, um caractere por coluna (lembrando que as colunas ímpares ficam meio
+ * hexágono mais abaixo).
+ *
+ * `.` grama · `T` árvores · `#` parede · `_` piso interno · `D` porta (piso, passa)
+ * `=` pista · `:` pátio
+ */
+export function parseLayout(
+  layout: readonly string[],
+): Pick<GameMap, 'cols' | 'rows' | 'walls' | 'trees' | 'ground'> {
+  const cols = layout[0].length;
+  const walls: HexCoord[] = [];
+  const trees: HexCoord[] = [];
+  const ground = new Map<string, Ground>();
+  const kinds: Record<string, Ground> = { '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', '=': 'runway', ':': 'apron' };
+  layout.forEach((line, row) => {
+    if (line.length !== cols) throw new Error(`Linha ${row} do mapa tem ${line.length} colunas (esperado: ${cols})`);
+    [...line].forEach((ch, col) => {
+      const kind = kinds[ch];
+      if (!kind) throw new Error(`Caractere "${ch}" desconhecido no mapa (${col},${row})`);
+      const h = { col, row };
+      ground.set(hexKey(h), kind);
+      if (ch === '#') walls.push(h);
+      if (ch === 'T') trees.push(h);
+    });
+  });
+  return { cols, rows: layout.length, walls, trees, ground };
+}
+
+/** Hexágonos em que ninguém entra e através dos quais ninguém enxerga: paredes e árvores. */
+export const blockedHexes = (map: GameMap): Set<string> =>
+  new Set([...map.walls, ...(map.trees ?? [])].map(hexKey));
+
+/**
+ * Aeroporto clandestino: o terminal fica ao norte, com a entrada da frente (2 hexágonos)
+ * virada para o pátio e a pista, e duas portas nos fundos. A equipe chega pelo sul, do
+ * outro lado da pista; os corredores entre o terminal e a mata levam às portas de trás.
+ */
+const AEROPORTO = parseLayout([
+  'TT....................TT',
+  'T...T..............T...T',
+  '..TT....#D####D#....TT..',
+  '.TTT....#______#....TTT.',
+  '..TT....#______#....TT..',
+  '.TT.....#______#.....TT.',
+  '........###DD###........',
+  '..T...::::::::::::...T..',
+  '......::::::::::::......',
+  '.======================.',
+  '.======================.',
+  '.======================.',
+  '........................',
+  '..TT......T.......TT....',
+  '.TTT.....TT......TTT....',
+  '..T...........T.....T...',
+  '......T.............TT..',
+  'TT.....................T',
+]);
 
 export const MAPS: GameMap[] = [
   {
@@ -63,6 +131,22 @@ export const MAPS: GameMap[] = [
         model: MODELS.cacador,
         patrol: [{ col: 8, row: 10 }, { col: 2, row: 10 }, { col: 1, row: 8 }],
       },
+    ],
+  },
+  {
+    id: 'aeroporto',
+    name: 'Aeroporto',
+    subtitle: 'Mapa 24×18 · pista, terminal e mata',
+    ...AEROPORTO,
+    available: true,
+    starts: [{ col: 11, row: 15 }, { col: 10, row: 16 }, { col: 12, row: 16 }],
+    enemies: [
+      // dentro do terminal
+      { id: 'madeireiro', name: 'Madeireiro', model: MODELS.madeireiro, patrol: [{ col: 9, row: 4 }, { col: 14, row: 4 }] },
+      // no pátio, em frente à entrada
+      { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 7, row: 8 }, { col: 16, row: 8 }] },
+      // nos fundos, entre as duas portas
+      { id: 'cacador', name: 'Caçador', model: MODELS.cacador, patrol: [{ col: 6, row: 1 }, { col: 17, row: 1 }] },
     ],
   },
   {
