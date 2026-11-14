@@ -1,7 +1,8 @@
 import * as THREE from 'three';
-import { GameMap } from './maps';
+import { GameMap, Ground } from './maps';
 import { HexCoord, hexKey, hexToWorld, sameHex, worldToHex } from './hex';
 import { CharacterRig, METER, ModelDef } from './character-model';
+import { buildHangar, buildPlane } from './scenery';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -35,6 +36,14 @@ const COLORS = {
 };
 
 const WALL_HEIGHT = 0.9;
+
+/** Tons do chão por tipo de terreno (três variações, sorteadas pela posição). */
+const GROUND: Record<Ground, [number, number, number]> = {
+  grass: [0x4f9a4a, 0x478f44, 0x57a552],
+  runway: [0x4a5258, 0x444c52, 0x50585e],
+  apron: [0x8d9498, 0x858c90, 0x959ca0],
+  floor: [0xc9b48f, 0xc1ac87, 0xd1bc97],
+};
 
 export interface BoardUnit {
   id: string;
@@ -181,6 +190,8 @@ export class HexBoard {
     this.setupLights();
     this.buildBoard();
     this.buildWalls(extras.walls ?? []);
+    this.buildTrees(map.trees ?? []);
+    this.buildPlane(map.plane ?? []);
     for (const u of units) this.buildUnit(u);
     for (const e of extras.enemies ?? []) this.buildEnemy(e);
     this.activeMarker = this.buildMarker(COLORS.activeRing, 0.62, 0.09);
@@ -417,7 +428,7 @@ export class HexBoard {
     const sun = new THREE.DirectionalLight(0xffffff, 2.2);
     sun.position.set(-8, 16, 6);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(1024, 1024);
+    sun.shadow.mapSize.set(2048, 2048);
     const ext = Math.max(this.map.cols, this.map.rows) * HEX_SIZE * 1.2;
     Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 1, far: 60 });
     const center = this.boardCenter();
@@ -437,7 +448,8 @@ export class HexBoard {
     for (let col = 0; col < this.map.cols; col++) {
       for (let row = 0; row < this.map.rows; row++) {
         const coord = { col, row };
-        const baseColor = new THREE.Color(palette[(col * 31 + row * 17) % 3]);
+        const ground = this.map.ground?.get(hexKey(coord));
+        const baseColor = new THREE.Color((ground ? GROUND[ground] : palette)[(col * 31 + row * 17) % 3]);
         const material = new THREE.MeshStandardMaterial({ color: baseColor, roughness: 0.85, metalness: 0 });
         const mesh = new THREE.Mesh(geo, material);
         const p = hexToWorld(coord, HEX_SIZE);
@@ -450,6 +462,7 @@ export class HexBoard {
         this.tiles.set(hexKey(coord), { coord, mesh, material, baseColor, lift: 0 });
       }
     }
+    this.buildRunwayMarks();
 
     const last = hexToWorld({ col: this.map.cols - 1, row: this.map.rows - 1 }, HEX_SIZE);
     Object.assign(this.bounds, { minX: 0, maxX: last.x, minZ: 0, maxZ: last.z + HEX_SIZE });
@@ -479,10 +492,15 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wallTop, roughness: 0.9 }),
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
+    const hangar = this.map.hangar;
+    if (hangar) this.scene.add(buildHangar(hangar, new Set(walls.map(hexKey)), HEX_SIZE));
+    const inHangar = (h: HexCoord): boolean =>
+      !!hangar && h.col >= hangar.cols[0] && h.col <= hangar.cols[1] && h.row >= hangar.rows[0] && h.row <= hangar.rows[1];
     for (const h of walls) {
       const tile = this.tiles.get(hexKey(h));
       if (!tile) continue;
       tile.baseColor.set(0x3b4a50);
+      if (inHangar(h)) continue; // a parede do hangar é desenhada inteira, não por hexágono
       const wall = new THREE.Mesh(geo, mats);
       wall.castShadow = true;
       wall.receiveShadow = true;
@@ -491,6 +509,125 @@ export class HexBoard {
       wall.scale.y = 0.85 + ((h.col * 13 + h.row * 7) % 5) * 0.07;
       tile.mesh.add(wall);
     }
+  }
+
+  /** Avião estacionado: centrado nos hexágonos que ocupa, com o nariz para o sul (o portão). */
+  private buildPlane(hexes: HexCoord[]): void {
+    if (!hexes.length) return;
+    const center = new THREE.Vector3();
+    for (const h of hexes) {
+      center.add(this.worldOf(h));
+      this.tiles.get(hexKey(h))?.baseColor.set(0x9c8c70);
+    }
+    const plane = buildPlane();
+    plane.position.copy(center.divideScalar(hexes.length));
+    this.scene.add(plane);
+  }
+
+  /** Faixa central da pista: traços brancos nas colunas pares da fileira do meio. */
+  private buildRunwayMarks(): void {
+    const ground = this.map.ground;
+    if (!ground) return;
+    const isRunway = (col: number, row: number) => ground.get(hexKey({ col, row })) === 'runway';
+    const geo = new THREE.BoxGeometry(HEX_SIZE * 1.1, 0.02, 0.14);
+    const mat = new THREE.MeshStandardMaterial({ color: 0xe9eef0, roughness: 0.9 });
+    for (const tile of this.tiles.values()) {
+      const { col, row } = tile.coord;
+      if (col % 2 || !isRunway(col, row) || !isRunway(col, row - 1) || !isRunway(col, row + 1)) continue;
+      const dash = new THREE.Mesh(geo, mat);
+      dash.position.y = 0.011;
+      dash.receiveShadow = true;
+      tile.mesh.add(dash);
+    }
+  }
+
+  /**
+   * Mata: cada hexágono sorteia (pela posição) um arranjo de árvores — copa redonda,
+   * pinheiro, árvore alta e fina, arbusto — com tamanhos e tons diferentes. Tudo vai em
+   * três malhas instanciadas, para o mapa grande não pesar.
+   */
+  private buildTrees(trees: HexCoord[]): void {
+    if (!trees.length) return;
+    type Kind = 'round' | 'pine' | 'tall' | 'bush';
+    const ARRANGEMENTS: { kind: Kind; r: number; a: number; s: number }[][] = [
+      [{ kind: 'round', r: 0.1, a: 0, s: 1.25 }, { kind: 'bush', r: 0.55, a: 2.6, s: 1 }],
+      [{ kind: 'round', r: 0.35, a: 0.4, s: 0.95 }, { kind: 'round', r: 0.38, a: 3.4, s: 0.8 }],
+      [{ kind: 'pine', r: 0.2, a: 1, s: 1.2 }, { kind: 'pine', r: 0.5, a: 4, s: 0.75 }],
+      [{ kind: 'tall', r: 0.15, a: 5, s: 1.1 }, { kind: 'round', r: 0.5, a: 2, s: 0.7 }, { kind: 'bush', r: 0.5, a: 3.8, s: 0.9 }],
+      [{ kind: 'pine', r: 0.4, a: 0, s: 0.85 }, { kind: 'round', r: 0.42, a: 2.1, s: 0.75 }, { kind: 'tall', r: 0.4, a: 4.2, s: 0.8 }],
+      [{ kind: 'tall', r: 0.3, a: 0.8, s: 1 }, { kind: 'tall', r: 0.35, a: 3.6, s: 0.8 }],
+      [{ kind: 'round', r: 0, a: 0, s: 1.05 }],
+    ];
+    const LEAVES = [0x2f6d3a, 0x3c7a42, 0x27603a, 0x4d8246, 0x5a8a4a, 0x356b55, 0x6b8f4a];
+    const NEEDLES = [0x1f5238, 0x285a40, 0x2f6648];
+    // pseudoaleatório estável por posição
+    const rnd = (h: HexCoord, i: number): number => {
+      const x = Math.sin(h.col * 127.1 + h.row * 311.7 + i * 74.7) * 43758.5453;
+      return x - Math.floor(x);
+    };
+
+    const trunks: { m: THREE.Matrix4 }[] = [];
+    const blobs: { m: THREE.Matrix4; color: number }[] = [];
+    const cones: { m: THREE.Matrix4; color: number }[] = [];
+    const dummy = new THREE.Object3D();
+    const place = (x: number, y: number, z: number, sx: number, sy: number, sz: number, rot = 0): THREE.Matrix4 => {
+      dummy.position.set(x, y, z);
+      dummy.scale.set(sx, sy, sz);
+      dummy.rotation.set(0, rot, 0);
+      dummy.updateMatrix();
+      return dummy.matrix.clone();
+    };
+
+    for (const h of trees) {
+      const tile = this.tiles.get(hexKey(h));
+      if (!tile) continue;
+      tile.baseColor.set([0x33683a, 0x2e6035, 0x386f3e][Math.floor(rnd(h, 0) * 3)]);
+      const c = hexToWorld(h, HEX_SIZE);
+      const turn = Math.floor(rnd(h, 1) * 6) * (Math.PI / 3);
+      const arrangement = ARRANGEMENTS[Math.floor(rnd(h, 2) * ARRANGEMENTS.length)];
+      arrangement.forEach(({ kind, r, a, s: size }, i) => {
+        const s = size * (0.88 + rnd(h, 10 + i) * 0.24);
+        const x = c.x + Math.cos(a + turn) * r;
+        const z = c.z + Math.sin(a + turn) * r;
+        const rot = rnd(h, 20 + i) * Math.PI * 2;
+        const leaf = LEAVES[Math.floor(rnd(h, 30 + i) * LEAVES.length)];
+        if (kind === 'bush') {
+          blobs.push({ m: place(x, 0.16 * s, z, 0.55 * s, 0.4 * s, 0.55 * s, rot), color: leaf });
+        } else if (kind === 'round') {
+          trunks.push({ m: place(x, 0, z, s, 0.6 * s, s) });
+          blobs.push({ m: place(x, 0.9 * s, z, s, 0.85 * s, s, rot), color: leaf });
+        } else if (kind === 'tall') {
+          trunks.push({ m: place(x, 0, z, 0.7 * s, 1.25 * s, 0.7 * s) });
+          blobs.push({ m: place(x, 1.4 * s, z, 0.72 * s, 0.5 * s, 0.72 * s, rot), color: leaf });
+        } else {
+          trunks.push({ m: place(x, 0, z, 0.8 * s, 0.35 * s, 0.8 * s) });
+          const color = NEEDLES[Math.floor(rnd(h, 30 + i) * NEEDLES.length)];
+          cones.push({ m: place(x, 0.3 * s, z, s, s, s, rot), color });
+          cones.push({ m: place(x, 0.85 * s, z, 0.7 * s, 0.75 * s, 0.7 * s, rot), color });
+        }
+      });
+    }
+
+    const trunkGeo = new THREE.CylinderGeometry(0.07, 0.11, 1, 6);
+    trunkGeo.translate(0, 0.5, 0);
+    const coneGeo = new THREE.ConeGeometry(0.42, 1, 7);
+    coneGeo.translate(0, 0.5, 0);
+    const add = (geo: THREE.BufferGeometry, mat: THREE.Material, items: { m: THREE.Matrix4; color?: number }[]): void => {
+      if (!items.length) return;
+      const mesh = new THREE.InstancedMesh(geo, mat, items.length);
+      const color = new THREE.Color();
+      items.forEach((it, i) => {
+        mesh.setMatrixAt(i, it.m);
+        if (it.color !== undefined) mesh.setColorAt(i, color.set(it.color));
+      });
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.frustumCulled = false; // as instâncias se espalham pelo mapa inteiro
+      this.scene.add(mesh);
+    };
+    add(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1 }), trunks);
+    add(new THREE.IcosahedronGeometry(0.5, 1), new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }), blobs);
+    add(coneGeo, new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }), cones);
   }
 
   private buildEnemy(enemy: BoardEnemy): void {
@@ -1023,7 +1160,12 @@ export class HexBoard {
   }
 
   private setZoom(z: number): void {
-    this.zoom = THREE.MathUtils.clamp(z, 0.55, 1.8);
+    // mapas grandes deixam afastar mais; a névoa recua junto para não encobrir o tabuleiro
+    const max = Math.max(1.8, Math.max(this.map.cols, this.map.rows) / 11);
+    this.zoom = THREE.MathUtils.clamp(z, 0.55, max);
+    const fog = this.scene.fog as THREE.Fog;
+    fog.near = 22 * Math.max(1, this.zoom);
+    fog.far = 48 * Math.max(1, this.zoom);
   }
 
   private clampGoal(): void {
