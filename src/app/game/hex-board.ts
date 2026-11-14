@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { GameMap, Ground } from './maps';
 import { HexCoord, hexKey, hexToWorld, sameHex, worldToHex } from './hex';
 import { CharacterRig, METER, ModelDef } from './character-model';
+import { buildHangar, buildPlane } from './scenery';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -190,6 +191,7 @@ export class HexBoard {
     this.buildBoard();
     this.buildWalls(extras.walls ?? []);
     this.buildTrees(map.trees ?? []);
+    this.buildPlane(map.plane ?? []);
     for (const u of units) this.buildUnit(u);
     for (const e of extras.enemies ?? []) this.buildEnemy(e);
     this.activeMarker = this.buildMarker(COLORS.activeRing, 0.62, 0.09);
@@ -490,10 +492,15 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wallTop, roughness: 0.9 }),
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
+    const hangar = this.map.hangar;
+    if (hangar) this.scene.add(buildHangar(hangar, new Set(walls.map(hexKey)), HEX_SIZE));
+    const inHangar = (h: HexCoord): boolean =>
+      !!hangar && h.col >= hangar.cols[0] && h.col <= hangar.cols[1] && h.row >= hangar.rows[0] && h.row <= hangar.rows[1];
     for (const h of walls) {
       const tile = this.tiles.get(hexKey(h));
       if (!tile) continue;
       tile.baseColor.set(0x3b4a50);
+      if (inHangar(h)) continue; // a parede do hangar é desenhada inteira, não por hexágono
       const wall = new THREE.Mesh(geo, mats);
       wall.castShadow = true;
       wall.receiveShadow = true;
@@ -502,6 +509,19 @@ export class HexBoard {
       wall.scale.y = 0.85 + ((h.col * 13 + h.row * 7) % 5) * 0.07;
       tile.mesh.add(wall);
     }
+  }
+
+  /** Avião estacionado: centrado nos hexágonos que ocupa, com o nariz para o sul (o portão). */
+  private buildPlane(hexes: HexCoord[]): void {
+    if (!hexes.length) return;
+    const center = new THREE.Vector3();
+    for (const h of hexes) {
+      center.add(this.worldOf(h));
+      this.tiles.get(hexKey(h))?.baseColor.set(0x9c8c70);
+    }
+    const plane = buildPlane();
+    plane.position.copy(center.divideScalar(hexes.length));
+    this.scene.add(plane);
   }
 
   /** Faixa central da pista: traços brancos nas colunas pares da fileira do meio. */

@@ -30,14 +30,28 @@ describe('mapas', () => {
     });
   }
 
-  it('aeroporto: só se entra no terminal pelas três portas', () => {
+  it('aeroporto: só se entra no hangar pelo portão e pelas duas portas dos fundos', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
-    const inside = { col: 15, row: 6 };
-    const doors = [{ col: 13, row: 4 }, { col: 18, row: 4 }, { col: 15, row: 8 }, { col: 16, row: 8 }];
+    const inside = { col: 15, row: 9 };
+    const doors = [{ col: 14, row: 4 }, { col: 29, row: 4 }, ...[19, 20, 21, 22, 23, 24].map((col) => ({ col, row: 14 }))];
     const open = reachableHexes(map.starts[0], 999, map.cols, map.rows, blockedHexes(map));
     expect(open.has(hexKey(inside))).toBe(true);
     const sealed = new Set([...blockedHexes(map), ...doors.map(hexKey)]);
     expect(reachableHexes(map.starts[0], 999, map.cols, map.rows, sealed).has(hexKey(inside))).toBe(false);
+  });
+
+  it('aeroporto: o hangar comporta duas fileiras de quatro aviões e tem um no meio', () => {
+    const map = MAPS.find((m) => m.id === 'aeroporto')!;
+    const [c0, c1] = map.hangar!.cols;
+    const [r0, r1] = map.hangar!.rows;
+    // por dentro das paredes: 4 vagas de 4 colunas e 2 fileiras de 3, com um corredor no meio
+    expect(c1 - c0 - 1).toBeGreaterThanOrEqual(4 * 4);
+    expect(r1 - r0 - 1).toBeGreaterThanOrEqual(2 * 3 + 1);
+    const cols = map.plane!.map((h) => h.col);
+    const rows = map.plane!.map((h) => h.row);
+    expect(map.plane!.length).toBe(12);
+    expect(Math.min(...cols) - c0).toBe(c1 - Math.max(...cols));
+    expect(Math.min(...rows) - r0).toBe(r1 - Math.max(...rows));
   });
 
   it('aeroporto: todo hexágono livre é alcançável (nenhuma clareira isolada)', () => {
