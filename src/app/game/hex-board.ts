@@ -13,21 +13,22 @@ const RUN_SPEED = 3.6 * METER;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
 const BASE_TOP = 0.07;
 
+/** Paleta "mata" (B1 · Ficha de campo). */
 const COLORS = {
-  background: 0x123039,
-  outline: 0x0b1d24,
-  hexA: 0x2f78c4,
-  hexB: 0x2a6db3,
-  hexC: 0x3482cf,
-  reachable: 0xa9e4ff,
-  selected: 0xffd23f,
+  background: 0x2f4526,
+  outline: 0x1c2a17,
+  hexA: 0x3b5530,
+  hexB: 0x425d35,
+  hexC: 0x4a663b,
+  reachable: 0x93b066,
+  selected: 0xffd43b,
   path: 0xfff4c2,
   activeRing: 0xffd23f,
   focusRing: 0xffffff,
   wall: 0x56626a,
   wallTop: 0x7d8a90,
-  vision: 0xd8735f,
-  visionReach: 0xf3b7a4,
+  vision: 0xc4513f,
+  visionReach: 0xe39a7c,
   enemy: 0xc8323c,
   enemyAlert: 0xff8a1f,
   enemySurrendered: 0xe9eef0,
@@ -471,7 +472,7 @@ export class HexBoard {
     const c = this.boardCenter();
     const base = new THREE.Mesh(
       new THREE.PlaneGeometry(last.x + 30, last.z + 30),
-      new THREE.MeshStandardMaterial({ color: 0x0e2830, roughness: 1 }),
+      new THREE.MeshStandardMaterial({ color: 0x1f2f19, roughness: 1 }),
     );
     base.rotation.x = -Math.PI / 2;
     base.position.set(c.x, -HEX_HEIGHT - 0.01, c.z);
