@@ -208,7 +208,7 @@ export const MAPS: GameMap[] = [
     available: true,
     starts: [{ col: 5, row: 6 }, { col: 4, row: 7 }, { col: 6, row: 7 }],
     walls: [
-      // muro ao norte, entre o madeireiro e os agentes
+      // muro ao norte, entre o piloto e os agentes
       { col: 4, row: 3 }, { col: 5, row: 4 }, { col: 6, row: 3 }, { col: 7, row: 4 },
       // pedras a oeste
       { col: 2, row: 6 }, { col: 2, row: 7 },
@@ -218,12 +218,12 @@ export const MAPS: GameMap[] = [
       { col: 4, row: 9 }, { col: 5, row: 10 },
     ],
     enemies: [
-      { id: 'madeireiro', name: 'Madeireiro', model: MODELS.madeireiro, patrol: [{ col: 2, row: 2 }, { col: 9, row: 2 }] },
+      { id: 'piloto', name: 'Piloto', model: MODELS.piloto, patrol: [{ col: 2, row: 2 }, { col: 9, row: 2 }] },
       { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 10, row: 4 }, { col: 10, row: 9 }] },
       {
-        id: 'cacador',
-        name: 'Caçador',
-        model: MODELS.cacador,
+        id: 'garimpeiro-pa',
+        name: 'Garimpeiro da pá',
+        model: MODELS.garimpeiroPa,
         patrol: [{ col: 8, row: 10 }, { col: 2, row: 10 }, { col: 1, row: 8 }],
       },
     ],
@@ -239,15 +239,15 @@ export const MAPS: GameMap[] = [
     enemies: [
       // dentro do hangar, dando a volta no avião
       {
-        id: 'madeireiro',
-        name: 'Madeireiro',
-        model: MODELS.madeireiro,
+        id: 'piloto',
+        name: 'Piloto',
+        model: MODELS.piloto,
         patrol: [{ col: 14, row: 6 }, { col: 29, row: 6 }, { col: 29, row: 16 }, { col: 14, row: 16 }],
       },
       // no pátio, em frente ao portão
       { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 14, row: 20 }, { col: 29, row: 20 }] },
       // nos fundos, entre as duas portas
-      { id: 'cacador', name: 'Caçador', model: MODELS.cacador, patrol: [{ col: 13, row: 2 }, { col: 30, row: 2 }] },
+      { id: 'garimpeiro-pa', name: 'Garimpeiro da pá', model: MODELS.garimpeiroPa, patrol: [{ col: 13, row: 2 }, { col: 30, row: 2 }] },
     ],
   },
   {

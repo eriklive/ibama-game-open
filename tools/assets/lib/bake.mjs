@@ -9,7 +9,7 @@ import sharp from 'sharp';
 export const PARTS = ['head', 'torso', 'uarm', 'larm', 'hand', 'thigh', 'calf', 'foot'];
 
 /** Parte do corpo de cada osso (dedos contam como mão). */
-function partOf(bone) {
+export function partOf(bone) {
   if (/^(Head|neck)/.test(bone)) return 0;
   if (/^(pelvis|spine|clavicle|root)/.test(bone)) return 1;
   if (/^upperarm/.test(bone)) return 2;
@@ -54,7 +54,7 @@ export function noise3(x, y, z) {
 const fbm = (x, y, z) => 0.65 * noise3(x, y, z) + 0.35 * noise3(x * 2.3 + 7, y * 2.3 + 3, z * 2.3 + 11);
 
 // letras 5×7 para o "IBAMA" do colete
-const FONT = {
+export const FONT = {
   I: ['11111', '00100', '00100', '00100', '00100', '00100', '11111'],
   B: ['11110', '10001', '10001', '11110', '10001', '10001', '11110'],
   A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],
@@ -340,12 +340,12 @@ function dress(layers, c) {
  * Pinta a textura do corpo e desloca os vértices.
  * @returns Buffer JPEG da nova textura.
  */
-export async function dressBody({ prim, skin, baseImage, outfit, skinTone, size = 1024, eyeY }) {
-  const M = bodyMetrics(skin);
-  M.eyeY = eyeY;
-  const layers = layersOf(outfit);
+/**
+ * Para cada texel da textura do corpo: posição 3D na pose de repouso (x, y, z) e pesos das 8
+ * partes do corpo. `hit` = 2 dentro de um triângulo, 1 na folga da borda, 0 fora do atlas.
+ */
+export function rasterize(prim, skin, size) {
   const pos = prim.getAttribute('POSITION').getArray();
-  const nor = prim.getAttribute('NORMAL').getArray();
   const uv = prim.getAttribute('TEXCOORD_0').getArray();
   const J = prim.getAttribute('JOINTS_0').getArray();
   const W = prim.getAttribute('WEIGHTS_0');
@@ -354,7 +354,6 @@ export async function dressBody({ prim, skin, baseImage, outfit, skinTone, size 
   const idx = prim.getIndices().getArray();
   const nv = pos.length / 3;
   const partIdx = skin.listJoints().map((j) => partOf(j.getName()));
-
   // pesos por parte do corpo em cada vértice
   const vp = new Float32Array(nv * 8);
   for (let i = 0; i < nv; i++) {
@@ -367,9 +366,7 @@ export async function dressBody({ prim, skin, baseImage, outfit, skinTone, size 
     if (sum > 0) for (let k = 0; k < 8; k++) vp[i * 8 + k] /= sum;
   }
 
-  // ---- textura ----
   const N = size;
-  const src = await sharp(Buffer.from(baseImage)).resize(N, N).removeAlpha().raw().toBuffer();
   const A = 11; // x, y, z + 8 partes
   const attr = new Float32Array(N * N * A);
   const hit = new Uint8Array(N * N);
@@ -398,6 +395,27 @@ export async function dressBody({ prim, skin, baseImage, outfit, skinTone, size 
     }
   }
 
+  return { vp, attr, hit, A, N };
+}
+
+export async function dressBody({ prim, skin, baseImage, outfit, skinTone, size = 1024, eyeY }) {
+  const M = bodyMetrics(skin);
+  M.eyeY = eyeY;
+  const layers = layersOf(outfit);
+  const pos = prim.getAttribute('POSITION').getArray();
+  const nor = prim.getAttribute('NORMAL').getArray();
+  const uv = prim.getAttribute('TEXCOORD_0').getArray();
+  const J = prim.getAttribute('JOINTS_0').getArray();
+  const W = prim.getAttribute('WEIGHTS_0');
+  const Wa = W.getArray();
+  const wNorm = W.getNormalized() ? (Wa instanceof Uint8Array ? 255 : 65535) : 1;
+  const idx = prim.getIndices().getArray();
+  const nv = pos.length / 3;
+  const partIdx = skin.listJoints().map((j) => partOf(j.getName()));
+
+  const { vp, attr, hit, A, N } = rasterize(prim, skin, size);
+  // ---- textura ----
+  const src = await sharp(Buffer.from(baseImage)).resize(N, N).removeAlpha().raw().toBuffer();
   // cor de referência da pele original: média nos braços (sempre nus na textura base)
   let ref = [0, 0, 0], refN = 0;
   for (let i = 0; i < N * N; i++) {
@@ -544,4 +562,57 @@ export async function dressBody({ prim, skin, baseImage, outfit, skinTone, size 
   prim.getAttribute('NORMAL').setArray(newNor);
 
   return sharp(out, { raw: { width: N, height: N, channels: 3 } }).jpeg({ quality: 86, mozjpeg: true }).toBuffer();
+}
+
+/**
+ * Repinta um corpo já vestido (a base de outro personagem) com um figurino novo, sem precisar
+ * da textura original da Quaternius. Serve para criar personagens no refit a partir de um molde.
+ *
+ * - Onde o figurino antigo (`oldOutfit`) deixava a pele à mostra, a pele é levada do tom antigo
+ *   (`oldSkin`) para o novo (`skinTone`), mantendo o desenho do rosto.
+ * - O figurino novo é pintado por cima. Ele precisa cobrir tudo o que o antigo cobria, senão a
+ *   roupa velha aparece: o retorno traz quantos texels vazaram (`leak`) para conferir.
+ */
+export async function repaintBody({ prim, skin, image, outfit, oldOutfit, oldSkin, skinTone, eyeY, size = 1024 }) {
+  const M = bodyMetrics(skin);
+  M.eyeY = eyeY;
+  const layersNew = layersOf(outfit), layersOld = layersOf(oldOutfit);
+  const { attr, hit, A, N } = rasterize(prim, skin, size);
+  const out = await sharp(Buffer.from(image)).resize(N, N).removeAlpha().raw().toBuffer();
+  const from = hex(oldSkin), to = hex(skinTone);
+  const w8 = new Float32Array(8);
+  let leak = 0;
+  for (let i = 0; i < N * N; i++) {
+    if (!hit[i]) continue;
+    const o = i * A;
+    for (let k = 0; k < 8; k++) w8[k] = attr[o + 3 + k];
+    const c = ctxOf(M, attr[o], attr[o + 1], attr[o + 2], w8);
+    const old = dress(layersOld, c), now = dress(layersNew, c);
+    if (hit[i] === 2 && old.cover > 0.1 && now.cover < 0.9) leak++;
+    for (let k = 0; k < 3; k++) {
+      let v = out[i * 3 + k];
+      // pele à mostra no molde: troca de tom (proporcional, preserva sombras e lábios)
+      if (old.cover < 0.5) v = v * (to[k] + 4) / (from[k] + 4);
+      v = v * (1 - now.cover) + now.col[k] * now.cover;
+      out[i * 3 + k] = Math.max(0, Math.min(255, Math.round(v)));
+    }
+  }
+  // espalha a borda nova para fora do atlas (mipmap sem costura)
+  const filled = hit.map((h) => (h ? 1 : 0));
+  for (let pass = 0; pass < 4; pass++) {
+    const add = [];
+    for (let y = 0; y < N; y++) for (let x = 0; x < N; x++) {
+      const i = y * N + x;
+      if (filled[i]) continue;
+      for (const [dx, dy] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
+        const xx = x + dx, yy = y + dy;
+        if (xx < 0 || yy < 0 || xx >= N || yy >= N || !filled[yy * N + xx]) continue;
+        add.push(i, yy * N + xx);
+        break;
+      }
+    }
+    for (let k = 0; k < add.length; k += 2) { out.copyWithin(add[k] * 3, add[k + 1] * 3, add[k + 1] * 3 + 3); filled[add[k]] = 1; }
+  }
+  const jpeg = await sharp(out, { raw: { width: N, height: N, channels: 3 } }).jpeg({ quality: 86, mozjpeg: true }).toBuffer();
+  return { jpeg, leak };
 }

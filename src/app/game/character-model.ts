@@ -65,9 +65,9 @@ export const MODELS = {
   clara: human('clara', 1.68),
   kaua: human('kaua', 1.76),
   // inimigos
-  madeireiro: human('madeireiro', 1.8),
   garimpeiro: human('garimpeiro', 1.72),
-  cacador: human('cacador', 1.78),
+  garimpeiroPa: human('garimpeiro-pa', 1.74),
+  piloto: human('piloto', 1.77),
 } satisfies Record<string, ModelDef>;
 
 /** Quanto da cor de `tint` entra no material (0 = nada, 1 = cor cheia). */

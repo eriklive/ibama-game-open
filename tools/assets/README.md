@@ -21,6 +21,17 @@ node build-assets.mjs \
 
 Para refazer só alguns personagens, acrescente `--only=ana,cacador` ao comando.
 
+O build grava a **base** de cada personagem (corpo, cabelo, roupa pintada, acessórios simples).
+O equipamento com volume entra num segundo passo, o **refit**:
+
+```bash
+node build-assets.mjs "<UBC>" "<UAL>" base   # só quando mudar corpo, cabelo ou roupa pintada
+node refit.mjs                               # base/ → ../../public/assets (aceita --only=ana)
+```
+
+A pasta `base/` fica no repositório. Por isso dá para mexer no kit (`lib/kit.mjs`) e rodar só o
+refit, **sem baixar os pacotes da Quaternius**.
+
 ## O que o script faz
 
 - **Personagens (`characters/<id>/<id>.glb`)**, um por entrada de `characters.mjs`:
@@ -42,10 +53,51 @@ Para refazer só alguns personagens, acrescente `--only=ana,cacador` ao comando.
   - Renomeia para `idle`, `walk`, `run` e `crouch`.
   - Descarta o boneco e comprime as curvas.
 
+## O que o refit faz (`refit.mjs` + `lib/kit.mjs`)
+
+A roupa pintada dá a cor, mas não a silhueta: de cima, o corpo de super-herói aparecia por baixo
+de tudo (glúteo, coxa, dedos do pé). O refit desfaz a quantização da base (`lib/glb-space.mjs`),
+alisa as pernas debaixo da calça e acrescenta equipamento de verdade, em estilo cartoon
+caprichado (formas gordinhas, bordas acolchoadas, luz pintada por vértice):
+
+- **Faixas** (`Contour` + `band`): o corte do tronco, da coxa, da canela ou do braço é medido,
+  alisado e vira uma casca com espessura. Placas do colete, faixa lateral, MOLLE, joelheiras,
+  punho das luvas, cano das botas, cinto. Cada vértice copia os pesos do corpo, então a peça
+  acompanha a animação.
+- **Cascas da malha** (`shell`): luvas e botas copiam a malha da mão e do pé, alisada e
+  empurrada para fora, com os pesos originais (os dedos da luva dobram junto).
+- **Peças rígidas** presas a um osso: porta-carregadores, rádio com antena e PTT, coldre com
+  pistola, bolsos cargo, bandeira do Brasil no braço, IBAMA em blocos nas costas, mochila,
+  abafador de ouvido, bandoleira de cartuchos.
+- **Proporções** (`lib/proportions.mjs`): cabeça, mãos e pés maiores e braços mais finos,
+  feitos na malha (as animações gravam a escala dos ossos, então o esqueleto não pode mudar).
+  `STYLE.proportions` em `characters.mjs` escolhe `none`, `sutil` ou `chibi` (o elenco usa `chibi`); para comparar sem
+  mexer no arquivo: `node refit.mjs --proportions=chibi --out=/tmp/teste`.
+- **Luz pintada**: cada peça clareia no topo, escurece na base e realça as quinas com um brilho
+  somado (que aparece até em peça preta), como textura pintada à mão.
+
+Peças disponíveis em `KIT` (`lib/kit.mjs`): `plateCarrier` (`style: 'vest'` para o colete de
+campo leve), `radio`, `belt`, `kneePads`, `boots`, `gloves`, `holster`, `cargoPockets`,
+`flagPatch`, `backpack`, `earMuffs`, `bandolier`, `aviators`, `headset`, `epaulets`,
+`shirtPocket`, `bandana`, `shovel`. Cada personagem lista as suas em `kit`, em
+`characters.mjs`. `KIT_DEBUG=1 node refit.mjs` mostra quantos triângulos cada peça custa.
+
+## Personagem novo sem os pacotes: moldes
+
+Um personagem com `from: '<molde>'` em `characters.mjs` não precisa de base própria: o refit abre
+a base do molde (`base/characters/<molde>`), repinta a pele e o figurino por cima
+(`repaintBody`, em `lib/bake.mjs`) e segue normalmente. Os moldes ficam em `TEMPLATES`, com a pele
+e o figurino com que foram pintados. Hoje são o madeireiro e o caçador, que saíram do jogo.
+
+O figurino novo precisa cobrir tudo o que o do molde cobria (manga pelo menos tão comprida,
+calça até o chão, luva onde havia luva), senão a roupa velha aparece; o refit avisa se sobrar
+muita coisa. O corpo do molde mantém a forma (volume da roupa antiga) e o penteado; com chapéu
+ou boné no molde, o personagem novo também precisa de um, porque o cabelo já veio cortado.
+
 ## Criar ou mudar um personagem
 
-Edite `characters.mjs`: corpo, tom de pele, penteado e cor, camadas do figurino e acessórios.
-Rode o build e registre o modelo novo em `MODELS` (`src/app/game/character-model.ts`) e em
+Edite `characters.mjs`: corpo, tom de pele, penteado e cor, camadas do figurino, acessórios e
+kit. Só o kit e os acessórios mudaram? Rode só `node refit.mjs`. Senão, rode o build e registre o modelo novo em `MODELS` (`src/app/game/character-model.ts`) e em
 `public/assets/LICENSES.md`.
 
 A lista dos pacotes e do que usamos de cada um está em `public/assets/README.md`.
