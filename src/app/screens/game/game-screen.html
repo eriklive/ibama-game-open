@@ -47,13 +47,16 @@
         [class.focused]="c.id === focused().id && !onTurn(c)"
         [style.--tilt]="tilts[i % tilts.length] + 'deg'"
         [attr.aria-pressed]="c.id === focused().id"
-        [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + '. Toque para ver no tabuleiro.'"
+        [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + '. Toque para ver no tabuleiro.'"
         [attr.data-testid]="'chip-' + c.id"
         (click)="focusCharacter(c.id)">
         <span class="photo-img" [style.background]="hexColor(c)">
           <svg viewBox="0 0 24 24" aria-hidden="true" [style.fill]="shade(c)"><circle cx="12" cy="9" r="4.5" /><path d="M3 24c0-6 4-9.5 9-9.5s9 3.5 9 9.5z" /></svg>
         </span>
         <span class="photo-name">{{ c.name }}</span>
+        @if (inGroup(c)) {
+          <span class="group-tag" aria-hidden="true">grupo</span>
+        }
         @if (onTurn(c)) {
           <span class="stamp-turn" aria-hidden="true">Na vez</span>
           <svg class="clip" viewBox="0 0 14 28" aria-hidden="true"><path d="M3 6v15a4 4 0 0 0 8 0V5a3 3 0 0 0-6 0v14" /></svg>
@@ -126,6 +129,24 @@
         <span class="stencil">Cancelar</span>
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
       </button>
+    } @else if (grouping()) {
+      <div class="slip" role="status" aria-live="polite" data-testid="group-hint">
+        <strong>Agrupar a equipe</strong>
+        @if (rallyPlan(); as plan) {
+          <span>Todos vão até o ponto: {{ plan.cost }} {{ plan.cost === 1 ? 'passo' : 'passos' }}.</span>
+        } @else {
+          <span>Toque no ponto de encontro (hexágonos claros).</span>
+        }
+        <span class="small">Juntos: +{{ groupBonus }} de movimento.</span>
+      </div>
+      <button type="button" class="stamp confirm" [disabled]="!rallyPlan()" (click)="confirmGrouping()" data-testid="group-confirm">
+        <span class="stamp-ring"><span class="stamp-text">Agrupar!</span></span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+      </button>
+      <button type="button" class="paper side" (click)="cancelGrouping()">
+        <span class="stencil">Cancelar</span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+      </button>
     } @else if (viewingOther()) {
       <button type="button" class="stamp" (click)="focusCharacter(active().id)">
         <span class="stamp-ring">
@@ -176,6 +197,22 @@
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('endTurn') }}</span> }
         </button>
       }
+      <!-- Agrupar: todos se encontram num ponto e andam juntos (+movimento) -->
+      @if (phase() === 'moving-choice' && group().size) {
+        <button type="button" class="paper group-btn" data-testid="ungroup" (click)="ungroup()"
+          [attr.aria-label]="'Desagrupar a equipe (juntos ganham +' + groupBonus + ' de movimento)'">
+          <span class="stencil">Desagrupar</span>
+          <span class="typed">juntos +{{ groupBonus }}</span>
+          @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
+        </button>
+      } @else if (phase() === 'moving-choice' && canGroup()) {
+        <button type="button" class="paper group-btn" data-testid="group" (click)="startGrouping()"
+          [attr.aria-label]="'Agrupar a equipe num ponto em comum: juntos ganham +' + groupBonus + ' de movimento'">
+          <span class="stencil">Agrupar</span>
+          <span class="typed">+{{ groupBonus }} mov.</span>
+          @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
+        </button>
+      }
       <!-- Abordar só aparece com suspeito no raio -->
       @if (phase() === 'moving-choice' && canApproach()) {
         <button
@@ -202,6 +239,7 @@
           <dt>{{ glyph('cancel') }}</dt><dd>cancelar</dd>
           <dt>{{ glyph('approach') }}</dt><dd>abordar</dd>
           <dt>{{ glyph('endTurn') }}</dt><dd>passar a vez</dd>
+          <dt>{{ glyph('group') }}</dt><dd>agrupar / desagrupar</dd>
           <dt>{{ glyph('prev') }} / {{ glyph('next') }}</dt><dd>trocar personagem</dd>
           <dt>{{ p.dualshock ? 'Touchpad' : 'R3' }}</dt><dd>voltar para quem joga</dd>
           <dt>Analógico dir.</dt><dd>mover a câmera</dd>
@@ -228,7 +266,11 @@
         </div>
         <span class="roll-total" [class.show]="rolled() > 0">
           @if (rolled() > 0) {
-            {{ dice().join(' + ') }} = <strong>{{ rolled() }}</strong> de movimento
+            @if (grouped()) {
+              {{ dice().join(' + ') }} + {{ groupBonus }} (grupo) = <strong>{{ rolled() + groupBonus }}</strong> de movimento
+            } @else {
+              {{ dice().join(' + ') }} = <strong>{{ rolled() }}</strong> de movimento
+            }
           } @else {
             Rolando 2d{{ diceSides }}…
           }

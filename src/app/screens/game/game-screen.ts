@@ -29,6 +29,7 @@ import {
   spotted,
   visionHexes,
 } from '../../game/enemies';
+import { GROUP_RULES, RallyPlan, followLeader, rallyPoints } from '../../game/group';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap } from '../../game/maps';
 
@@ -145,6 +146,32 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     fled: 'fugiu',
   };
 
+  // ---------- grupo ----------
+
+  /** Agentes agrupados (andam juntos e ganham movimento extra); vazio = cada um por si. */
+  protected readonly group = signal<ReadonlySet<string>>(new Set());
+  protected readonly groupBonus = GROUP_RULES.moveBonus;
+  /** Escolhendo o ponto de encontro do "Agrupar". */
+  protected readonly grouping = signal(false);
+  /** Ponto de encontro destacado (aguardando confirmação). */
+  protected readonly rallyHex = signal<HexCoord | null>(null);
+  protected inGroup(c: Character): boolean {
+    return this.group().has(c.id);
+  }
+  protected readonly grouped = computed(() => this.group().has(this.active().id));
+
+  /** Pontos de encontro possíveis com o movimento que resta ao agente da vez. */
+  private readonly rallyPlans = computed<Map<string, RallyPlan>>(() => {
+    const map = this.map;
+    if (!map || this.phase() !== 'moving-choice' || this.group().size) return new Map();
+    return rallyPoints(this.active().id, this.positions(), this.movesLeft(), map.cols, map.rows, this.enemyWalls());
+  });
+  protected readonly canGroup = computed(() => CHARACTERS.length > 1 && this.rallyPlans().size > 0);
+  protected readonly rallyPlan = computed(() => {
+    const h = this.rallyHex();
+    return h ? this.rallyPlans().get(hexKey(h)) : undefined;
+  });
+
   /** Linha do tempo da fita no topo: no último turno o carro foge. */
   protected readonly deadline = MISSION_DEADLINE;
   protected readonly timeline = Array.from({ length: MISSION_DEADLINE }, (_, i) => i + 1);
@@ -189,12 +216,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const map = this.map;
     const from = this.positions().get(this.active().id);
     if (!map || !from || this.phase() !== 'moving-choice') return new Map();
+    const group = this.group();
+    const leader = this.active().id;
     const blocked = new Set([
-      ...[...this.positions()].filter(([id]) => id !== this.active().id).map(([, h]) => hexKey(h)),
+      // no grupo, o líder passa por entre os companheiros (eles andam junto)
+      ...[...this.positions()]
+        .filter(([id]) => id !== leader && !(group.has(leader) && group.has(id)))
+        .map(([, h]) => hexKey(h)),
       ...this.walls,
       ...this.onBoardEnemies().map((e) => hexKey(e.hex)),
     ]);
     return reachableHexes(from, this.movesLeft(), map.cols, map.rows, blocked);
+  });
+  /** Destinos que dá para escolher: o alcance menos os hexágonos com agentes. */
+  private readonly destinations = computed(() => {
+    const occupied = new Set([...this.positions().values()].map(hexKey));
+    return new Set([...this.reach().keys()].filter((k) => !occupied.has(k)));
   });
   /** Caminho mais curto até o destino escolhido (sem a origem). */
   private readonly selectedPath = computed(() => {
@@ -253,6 +290,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private startTurn(): void {
     const active = this.active();
     this.closeApproach();
+    this.closeGrouping();
     this.selected.set(null);
     this.focusedId.set(active.id);
     this.placeCursor(this.positions().get(active.id));
@@ -277,7 +315,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       clearInterval(this.rollTicker);
       this.dice.set(final);
       this.rolled.set(sum(final));
-      this.movesLeft.set(sum(final));
+      this.movesLeft.set(sum(final) + (this.grouped() ? GROUP_RULES.moveBonus : 0));
       // mostra o resultado um instante antes de liberar o movimento
       this.later(reducedMotion() ? 150 : 650, () => this.beginChoosing());
     });
@@ -293,6 +331,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.clearTimers();
     this.phase.set('ending');
     this.closeApproach();
+    this.closeGrouping();
     if (this.activeIndex() === CHARACTERS.length - 1 && this.actingEnemies().length) {
       void this.enemyTurn();
       return;
@@ -420,8 +459,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.cancelApproach();
       return;
     }
+    if (this.grouping()) {
+      this.pickRally(hex, true);
+      return;
+    }
     if (this.viewingOther()) this.focusCharacter(this.active().id);
-    if (hex && this.reach().has(hexKey(hex))) {
+    if (hex && this.destinations().has(hexKey(hex))) {
       // segundo toque no mesmo hexágono confirma o movimento
       if (sameHex(hex, this.selected())) {
         void this.confirm();
@@ -435,7 +478,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected focusCharacter(id: string): void {
-    if (id !== this.active().id) this.cancelApproach();
+    if (id !== this.active().id) {
+      this.cancelApproach();
+      this.cancelGrouping();
+    }
     this.focusedId.set(id);
     this.board?.focus(id);
     this.placeCursor(this.positions().get(id));
@@ -451,17 +497,44 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const path = pathTo(this.reach(), target);
     if (!path.length) return;
     const id = this.active().id;
+    const paths = new Map([[id, path]]);
+    let left: string[] = [];
+    if (this.grouped()) {
+      // os companheiros seguem o rastro do líder
+      const followers = new Map([...this.positions()].filter(([o]) => o !== id && this.group().has(o)));
+      const plan = followLeader(this.positions().get(id)!, path, followers, this.map!.cols, this.map!.rows, this.enemyWalls());
+      for (const [o, p] of plan.paths) paths.set(o, p);
+      left = plan.left;
+    }
+    if (!(await this.walkUnits(id, paths))) return;
+    if (left.length) this.leaveGroup(left, 'ficou para trás');
+    this.movesLeft.update((n) => n - path.length);
+    this.afterMove();
+  }
+
+  /** Anda com um ou mais agentes ao mesmo tempo, conferindo a visão dos inimigos a cada passo. */
+  private async walkUnits(leaderId: string, paths: ReadonlyMap<string, HexCoord[]>): Promise<boolean> {
     const epoch = this.epoch;
     this.phase.set('walking');
     this.selected.set(null);
-    await this.board.moveUnit(id, path, (hex) => {
+    const live = new Map(this.positions());
+    await this.board!.moveUnits(leaderId, paths, (who, hex) => {
       if (this.epoch !== epoch) return;
+      live.set(who, hex);
       // quem entra no cone de visão é avistado na hora, mesmo só de passagem
-      this.checkAllSpotted(new Map(this.positions()).set(id, hex));
+      this.checkAllSpotted(live);
     });
-    if (this.destroyed || this.epoch !== epoch) return;
-    this.positions.update((m) => new Map(m).set(id, target));
-    this.movesLeft.update((n) => n - path.length);
+    if (this.destroyed || this.epoch !== epoch) return false;
+    this.positions.update((m) => {
+      const next = new Map(m);
+      for (const [who, p] of paths) if (p.length) next.set(who, p.at(-1)!);
+      return next;
+    });
+    return true;
+  }
+
+  /** Depois de andar: segue escolhendo, espera para abordar ou passa a vez. */
+  private afterMove(): void {
     if (this.movesLeft() <= 0 && this.canApproach()) {
       // sem movimento, mas com inimigos no raio: espera para poder abordar
       this.beginChoosing();
@@ -474,6 +547,73 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
   }
 
+  // ---------- agrupar ----------
+
+  /** Primeiro passo: mostra os pontos de encontro possíveis. */
+  protected startGrouping(): void {
+    if (this.phase() !== 'moving-choice' || !this.canGroup()) return;
+    this.focusCharacter(this.active().id);
+    this.selected.set(null);
+    this.rallyHex.set(null);
+    this.grouping.set(true);
+    this.board?.setSelected(null);
+    this.board?.setReachable(this.rallyPlans().keys());
+    this.say('Escolha o ponto de encontro', 'info');
+  }
+
+  /** Destaca um ponto de encontro (o caminho do líder brilha); tocar de novo confirma. */
+  private pickRally(hex: HexCoord | null, tapToConfirm: boolean): void {
+    const plan = hex ? this.rallyPlans().get(hexKey(hex)) : undefined;
+    if (plan && tapToConfirm && sameHex(hex, this.rallyHex())) {
+      void this.confirmGrouping();
+      return;
+    }
+    this.rallyHex.set(plan ? plan.point : null);
+    this.board?.setSelected(this.rallyHex(), plan?.paths.get(this.active().id) ?? []);
+  }
+
+  protected cancelGrouping(): void {
+    if (!this.grouping()) return;
+    this.closeGrouping();
+    if (this.phase() === 'moving-choice') this.refreshBoard();
+  }
+
+  private closeGrouping(): void {
+    if (!this.grouping()) return;
+    this.grouping.set(false);
+    this.rallyHex.set(null);
+    this.board?.setSelected(null);
+  }
+
+  /** Todos andam até o ponto de encontro e passam a andar juntos. */
+  protected async confirmGrouping(): Promise<void> {
+    const plan = this.rallyPlan();
+    if (!this.board || !plan || !this.grouping() || this.phase() !== 'moving-choice') return;
+    const id = this.active().id;
+    this.closeGrouping();
+    if (!(await this.walkUnits(id, plan.paths))) return;
+    this.group.set(new Set(CHARACTERS.map((c) => c.id)));
+    this.movesLeft.update((n) => Math.max(0, n - plan.cost));
+    this.say(`Equipe agrupada! Andando juntos: +${GROUP_RULES.moveBonus} de movimento`, 'info');
+    this.afterMove();
+  }
+
+  /** Desfaz o grupo: cada um volta a andar por conta própria. */
+  protected ungroup(): void {
+    if (this.phase() !== 'moving-choice' || !this.group().size) return;
+    this.group.set(new Set());
+    this.say('Equipe desagrupada: cada um por si', 'info');
+    this.refreshBoard();
+  }
+
+  /** Tira agentes do grupo; com menos de dois, o grupo acaba. */
+  private leaveGroup(ids: string[], why: string): void {
+    const next = new Set([...this.group()].filter((id) => !ids.includes(id)));
+    this.group.set(next.size > 1 ? next : new Set());
+    const names = ids.map((id) => CHARACTERS.find((c) => c.id === id)?.name ?? id);
+    this.say(`${names.join(' e ')} ${why}`, 'info');
+  }
+
   // ---------- abordagem ----------
 
   /** Primeiro passo: mostra o raio e quem se renderia ou correria. */
@@ -483,6 +623,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const from = this.positions().get(this.active().id);
     if (!map || !from) return;
     this.focusCharacter(this.active().id);
+    this.closeGrouping();
     this.selected.set(null);
     this.approaching.set(true);
     this.board?.setSelected(null);
@@ -548,6 +689,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.epoch++;
     this.clearTimers();
     this.positions.set(this.initialPositions());
+    this.group.set(new Set());
+    this.closeGrouping();
     this.board?.placeUnits(this.positions());
     this.enemies.set(this.initialEnemies());
     this.board?.placeEnemies(this.enemies().map((e) => ({ ...e, alert: false, surrendered: false, gone: false })));
@@ -581,12 +724,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     switch (b) {
       case 'cross':
         if (this.approaching()) this.confirmApproach();
+        else if (this.grouping()) void this.confirmGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
         else if (choosing && this.selected()) void this.confirm();
         else this.focusUnitUnderCursor();
         break;
       case 'circle':
         if (this.approaching()) this.cancelApproach();
+        else if (this.grouping()) this.cancelGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
         else if (this.selected()) {
           this.cancel();
@@ -595,7 +740,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         break;
       case 'square':
         if (this.approaching()) this.cancelApproach();
-        else this.startApproach();
+        else if (!this.grouping()) this.startApproach();
+        break;
+      case 'share':
+        // Share: agrupa (ou desagrupa) a equipe
+        if (this.grouping()) this.cancelGrouping();
+        else if (this.group().size) this.ungroup();
+        else this.startGrouping();
         break;
       case 'triangle':
         if (choosing && !this.approaching()) this.endTurn();
@@ -633,7 +784,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.focusedId.set(this.active().id);
       this.board.focus(this.active().id, false);
     }
-    this.selected.set(this.reach().has(hexKey(next)) ? next : null);
+    if (this.grouping()) {
+      this.pickRally(next, false);
+      return;
+    }
+    this.selected.set(this.destinations().has(hexKey(next)) ? next : null);
     this.board.setSelected(this.selected(), this.selectedPath());
   }
 
@@ -660,7 +815,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   // ---------- auxiliares ----------
 
   private refreshBoard(): void {
-    this.board?.setReachable(this.reach().keys());
+    this.board?.setReachable(this.destinations());
     this.board?.setSelected(this.selected(), this.selectedPath());
   }
 
@@ -694,6 +849,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private updateEnemy(id: string, patch: Partial<EnemyState>): void {
     this.enemies.update((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+  }
+
+  /** Paredes e inimigos no tabuleiro: o que bloqueia os agentes (sem contar os outros agentes). */
+  private enemyWalls(): Set<string> {
+    return new Set([...this.walls, ...this.onBoardEnemies().map((e) => hexKey(e.hex))]);
   }
 
   /** Hexágonos que um inimigo não pode atravessar: paredes, agentes e os outros inimigos. */

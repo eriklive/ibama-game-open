@@ -409,14 +409,37 @@ export class HexBoard {
    * `onStep` roda a cada hexágono alcançado.
    */
   async moveUnit(id: string, path: HexCoord[], onStep?: (hex: HexCoord) => void): Promise<void> {
-    const u = this.units.get(id);
-    if (!u || this.moving || !path.length) return;
+    await this.moveUnits(id, new Map([[id, path]]), (_, hex) => onStep?.(hex));
+  }
+
+  /**
+   * Anda com várias peças ao mesmo tempo (o grupo). O caminho aceso e a câmera acompanham
+   * o líder; `onStep` roda a cada hexágono alcançado por qualquer uma delas.
+   */
+  async moveUnits(
+    leaderId: string,
+    paths: ReadonlyMap<string, HexCoord[]>,
+    onStep?: (id: string, hex: HexCoord) => void,
+  ): Promise<void> {
+    const walks = [...paths].filter(([id, p]) => this.units.has(id) && p.length);
+    if (this.moving || !walks.length) return;
     this.moving = true;
-    // o caminho continua aceso durante a caminhada e cada hexágono "pousa" quando a peça passa
-    this.selected = path[path.length - 1];
-    this.path = path.map(hexKey);
+    // o caminho do líder continua aceso durante a caminhada e cada hexágono "pousa" quando a peça passa
+    const lead = paths.get(leaderId) ?? [];
+    this.selected = lead.at(-1) ?? null;
+    this.path = lead.map(hexKey);
     this.reachable.clear();
     this.paintTiles();
+    await Promise.all(
+      walks.map(([id, path]) => this.walk(this.units.get(id)!, path, id === leaderId, (hex) => onStep?.(id, hex))),
+    );
+    this.selected = null;
+    this.path = [];
+    this.paintTiles();
+    this.moving = false;
+  }
+
+  private async walk(u: UnitView, path: HexCoord[], leader: boolean, onStep: (hex: HexCoord) => void): Promise<void> {
     u.rig?.matchSpeed('run', RUN_SPEED);
     u.rig?.play('run', 0.15);
     const epoch = u.epoch;
@@ -425,19 +448,17 @@ export class HexBoard {
         const from = u.group.position;
         const to = this.worldOf(step);
         u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
-        await this.runTo(u, step, RUN_SPEED);
-      } else await this.hopTo(u, step);
+        await this.runTo(u, step, RUN_SPEED, leader);
+      } else await this.hopTo(u, step, 260, leader);
       if (u.epoch !== epoch) break;
       u.hex = step;
-      this.path.shift();
-      this.paintTiles();
-      onStep?.(step);
+      if (leader) {
+        this.path.shift();
+        this.paintTiles();
+      }
+      onStep(step);
     }
     u.rig?.play('idle', 0.3);
-    this.selected = null;
-    this.path = [];
-    this.paintTiles();
-    this.moving = false;
   }
 
   dispose(): void {
@@ -973,11 +994,13 @@ export class HexBoard {
     return new THREE.Vector3(p.x, 0, p.z);
   }
 
-  private hopTo(u: Mover, h: HexCoord, duration = 260): Promise<void> {
+  private hopTo(u: Mover, h: HexCoord, duration = 260, follow = true): Promise<void> {
     const from = u.group.position.clone();
     const to = this.worldOf(h);
-    this.camGoal.copy(to);
-    this.clampGoal();
+    if (follow) {
+      this.camGoal.copy(to);
+      this.clampGoal();
+    }
     const start = performance.now();
     const epoch = u.epoch;
     return new Promise((resolve) => {
@@ -999,11 +1022,13 @@ export class HexBoard {
   }
 
   /** Corre em linha reta até o hexágono, em velocidade constante (quem chama vira a peça). */
-  private runTo(u: Mover, h: HexCoord, speed: number): Promise<void> {
+  private runTo(u: Mover, h: HexCoord, speed: number, follow = true): Promise<void> {
     const from = u.group.position.clone();
     const to = this.worldOf(h);
-    this.camGoal.copy(to);
-    this.clampGoal();
+    if (follow) {
+      this.camGoal.copy(to);
+      this.clampGoal();
+    }
     const duration = (Math.hypot(to.x - from.x, to.z - from.z) / speed) * 1000;
     const start = performance.now();
     const epoch = u.epoch;
