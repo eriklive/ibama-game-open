@@ -110,8 +110,10 @@ modelos está em `tools/assets/README.md`.
 1. ~~**Proporções chibi.**~~ Feito: cabeça +30%, mãos +24%, pés +18%, braços 22% mais finos, em
    todo o elenco (`STYLE.proportions = 'chibi'`, `lib/proportions.mjs`). Falta encurtar tronco e
    pernas, o que exige tirar das animações as trilhas de posição dos ossos.
-2. **Sombreamento dos personagens.** Luz em degraus suaves e brilho de contorno só nos
-   personagens, para que se destaquem do tabuleiro.
+2. ~~**Sombreamento dos personagens.**~~ Testado e descartado: duas versões de material cartoon
+   (luz em degraus suaves, sombra verde-azulada, brilho de contorno e, numa delas, contorno
+   escuro) ficaram piores que o material original. Os personagens seguem com o mesmo material
+   do tabuleiro; a luz pintada nas cores do equipamento (`Kit.paint`) continua sendo o caminho.
 3. **Rosto e cabelo.** Sobrancelhas mais marcadas, olhos um pouco maiores, cabelo em mechas
    grossas (como o coque da Ana, mas para todos).
 4. **Contato escuro.** Escurecer o equipamento onde encosta no corpo (oclusão por vértice), como
