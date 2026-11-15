@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { followLeader, rallyPoints } from './group';
+import { followLeader, rallyPoints, suggestedRally } from './group';
 import { HexCoord, hexDistance, hexKey, hexNeighbors, rectArea } from './hex';
 
 const AREA = rectArea(10, 10);
@@ -86,5 +86,25 @@ describe('followLeader', () => {
     const followers = units([['clara', clara]]);
     const { left } = followLeader({ col: 4, row: 2 }, [{ col: 5, row: 2 }], followers, AREA, walls);
     expect(left).toEqual(['clara']);
+  });
+});
+
+describe('suggestedRally', () => {
+  const team = units([
+    ['ana', { col: 2, row: 2 }],
+    ['bruno', { col: 6, row: 2 }],
+    ['clara', { col: 4, row: 5 }],
+  ]);
+
+  it('sugere o ponto que gasta menos movimento', () => {
+    const plans = rallyPoints('ana', team, 4, AREA, new Set());
+    const best = suggestedRally(plans, 'ana')!;
+    expect(best).toBeDefined();
+    expect(plans.get(hexKey(best.point))).toBe(best);
+    for (const plan of plans.values()) expect(best.cost).toBeLessThanOrEqual(plan.cost);
+  });
+
+  it('sem pontos possíveis, não sugere nada', () => {
+    expect(suggestedRally(new Map(), 'ana')).toBeUndefined();
   });
 });

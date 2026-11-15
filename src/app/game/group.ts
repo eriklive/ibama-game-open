@@ -177,3 +177,17 @@ export function followLeader(
   }
   return { paths, left: [...waiting] };
 }
+
+/**
+ * Ponto de encontro sugerido (já vem selecionado ao abrir o "Agrupar"): o que gasta menos
+ * movimento, depois o de menos passos somados e, por fim, o mais perto do líder.
+ */
+export function suggestedRally(plans: ReadonlyMap<string, RallyPlan>, leaderId: string): RallyPlan | undefined {
+  let best: { plan: RallyPlan; score: [number, number, number] } | undefined;
+  for (const plan of plans.values()) {
+    const total = [...plan.paths.values()].reduce((a, p) => a + p.length, 0);
+    const score: [number, number, number] = [plan.cost, total, plan.paths.get(leaderId)?.length ?? 0];
+    if (!best || lexLess(score, best.score)) best = { plan, score };
+  }
+  return best?.plan;
+}

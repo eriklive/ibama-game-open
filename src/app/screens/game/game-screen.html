@@ -57,6 +57,18 @@
           </label>
         }
       </fieldset>
+      <fieldset class="menu-group">
+        <legend>Celular</legend>
+        <label class="menu-option" [class.checked]="vibration() && vibrationSupported" data-testid="vibration">
+          <input type="checkbox" [checked]="vibration()" [disabled]="!vibrationSupported" (change)="setVibration($any($event.target).checked)" />
+          <span class="menu-option-text">
+            <span class="menu-option-label">Vibração</span>
+            <span class="menu-option-hint">
+              @if (vibrationSupported) { Vibra ao rolar os dados } @else { Este aparelho ou navegador não vibra }
+            </span>
+          </span>
+        </label>
+      </fieldset>
       @if (renderStats(); as st) {
         <p class="menu-stats" data-testid="render-stats">
           Raio {{ st.loadRadius }} · visão {{ st.viewRadius }} · {{ st.chunks }} blocos
@@ -169,7 +181,8 @@
       <div class="slip" role="status" aria-live="polite" data-testid="group-hint">
         <strong>Agrupar a equipe</strong>
         @if (rallyPlan(); as plan) {
-          <span>Todos vão até o ponto: {{ plan.cost }} {{ plan.cost === 1 ? 'passo' : 'passos' }}.</span>
+          <span>Todos vão até o ponto destacado: {{ plan.cost }} {{ plan.cost === 1 ? 'passo' : 'passos' }}.</span>
+          <span class="small">Toque em outro hexágono claro para trocar.</span>
         } @else {
           <span>Toque no ponto de encontro (hexágonos claros).</span>
         }

@@ -32,7 +32,8 @@ import {
   spotted,
   visionHexes,
 } from '../../game/enemies';
-import { GROUP_RULES, RallyPlan, followLeader, rallyPoints } from '../../game/group';
+import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
+import { Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
 
@@ -59,6 +60,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly gamepad = inject(GamepadService);
   private readonly renderSettings = inject(RenderSettings);
+  private readonly haptics = inject(Haptics);
   private stopPad?: () => void;
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private board?: HexBoard;
@@ -130,6 +132,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   protected setRenderMode(mode: RenderMode): void {
     this.renderSettings.set(mode);
+  }
+
+  /** Vibração na rolagem dos dados (celular); liga/desliga no menu. */
+  protected readonly vibrationSupported = this.haptics.supported;
+  protected readonly vibration = this.haptics.enabled;
+  protected setVibration(on: boolean): void {
+    this.haptics.setEnabled(on);
+    if (on) this.haptics.vibrate(SETTLE_PATTERN);
   }
 
   constructor() {
@@ -387,7 +397,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.rolled.set(sum(final));
       this.movesLeft.set(sum(final) + (this.grouped() ? GROUP_RULES.moveBonus : 0));
       this.gamepad.rumble(0.3, 0.2, 120);
+      this.haptics.vibrate(SETTLE_PATTERN);
     };
+    // no celular, os dados "quicam" na mão (a não ser que a animação esteja reduzida)
+    if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
     if (this.diceTray) void this.diceTray.roll(final, { instant: reducedMotion() }).then(show);
     else this.later(reducedMotion() ? 150 : 700, show);
   }
@@ -635,7 +648,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.grouping.set(true);
     this.board?.setSelected(null);
     this.board?.setReachable(this.rallyPlans().keys());
-    this.say('Escolha o ponto de encontro', 'info');
+    // já deixa destacado o ponto sugerido: é só confirmar (ou tocar em outro)
+    const suggested = suggestedRally(this.rallyPlans(), this.active().id);
+    if (suggested) {
+      this.pickRally(suggested.point, false);
+      this.cursor.set({ ...suggested.point });
+      this.board?.keepInView(suggested.point);
+    }
+    this.say('Ponto de encontro sugerido: confirme ou escolha outro', 'info');
   }
 
   /** Destaca um ponto de encontro (o caminho do líder brilha); tocar de novo confirma. */
