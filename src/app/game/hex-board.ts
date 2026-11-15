@@ -275,10 +275,15 @@ export class HexBoard {
   }
 
   /** Números do carregamento por raio (para o menu). */
-  renderStats(): { chunks: number; pending: number; loadRadius: number; viewRadius: number; tiles: number } {
+  renderStats(): {
+    chunks: number; pending: number; loadRadius: number; viewRadius: number; tiles: number;
+    calls: number; triangles: number;
+  } {
     let tiles = 0;
     for (const t of this.tiles.values()) if (t.visible) tiles++;
-    return { ...this.stream.stats(), tiles };
+    // do último quadro (inclui o passe de sombras)
+    const { calls, triangles } = this.renderer.info.render;
+    return { ...this.stream.stats(), tiles, calls, triangles };
   }
 
   /** Personagem da vez: flutua e ganha o anel amarelo. */
