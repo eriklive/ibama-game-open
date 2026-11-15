@@ -117,6 +117,24 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     };
   });
 
+  /** Resumo da pilha de suspeitos: só os estados que têm alguém. */
+  protected readonly enemySummary = computed(() => {
+    const c = this.enemyCounts();
+    return [
+      c.alert && `${c.alert} em fuga!`,
+      c.patrol && `${c.patrol} vigiando`,
+      c.surrendered && `${c.surrendered} ${c.surrendered === 1 ? 'rendido' : 'rendidos'}`,
+      c.fled && `${c.fled} ${c.fled === 1 ? 'fugiu' : 'fugiram'}`,
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  });
+  /** A pilha de suspeitos aberta em lista. */
+  protected readonly suspectsOpen = signal(false);
+  protected toggleSuspects(): void {
+    this.suspectsOpen.update((v) => !v);
+  }
+
   /** Pré-visualizando a abordagem (zonas pintadas, aguardando confirmação). */
   protected readonly approaching = signal(false);
   protected readonly approachRules = APPROACH_RULES;
@@ -153,6 +171,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   });
   protected readonly canApproach = computed(
     () => this.approachPlan().surrender.length + this.approachPlan().flee.length > 0,
+  );
+
+  protected readonly approachCount = computed(
+    () => this.approachPlan().surrender.length + this.approachPlan().flee.length,
   );
 
   protected readonly active = computed<Character>(() => CHARACTERS[this.activeIndex()]);
