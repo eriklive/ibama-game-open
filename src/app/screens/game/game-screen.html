@@ -62,118 +62,125 @@
     }
   </nav>
 
-  <!-- Suspeitos: fichas presas com alfinete -->
+  <!-- Suspeitos: uma pilha de fichas que abre em lista -->
   @if (enemies().length) {
-    <ul class="suspects" data-testid="foes" aria-label="Suspeitos">
-      @for (e of enemies(); track e.id; let i = $index) {
-        <li [class]="'suspect ' + e.status" [style.--tilt]="-tilts[i % tilts.length] + 'deg'">
+    <div class="suspects" data-testid="foes">
+      <div class="pile-wrap">
+        @if (!suspectsOpen() && enemies().length > 1) {
+          <span class="sheet back" aria-hidden="true"></span>
+          <span class="sheet mid" aria-hidden="true"></span>
+        }
+        <button
+          type="button"
+          class="pile"
+          [class.alert]="enemyCounts().alert > 0"
+          [attr.aria-expanded]="suspectsOpen()"
+          [attr.aria-label]="'Suspeitos: ' + enemySummary() + '. Toque para ' + (suspectsOpen() ? 'fechar' : 'abrir') + ' a lista.'"
+          data-testid="foes-toggle"
+          (click)="toggleSuspects()">
           <span class="pin" aria-hidden="true"></span>
-          <span class="suspect-label">Suspeito</span>
-          <span class="suspect-name">{{ e.name }}</span>
-          <span class="suspect-status">{{ statusLabel[e.status] }}</span>
-        </li>
+          <span class="pile-head">
+            <span>Suspeitos</span>
+            <span class="pile-mark" [class.close]="suspectsOpen()">{{ suspectsOpen() ? 'fechar' : '×' + enemies().length }}</span>
+          </span>
+          <span class="pile-summary">{{ enemySummary() }}</span>
+        </button>
+      </div>
+      @if (suspectsOpen()) {
+        <ul class="suspect-list" aria-label="Lista de suspeitos">
+          @for (e of enemies(); track e.id; let i = $index) {
+            <li [class]="'suspect ' + e.status" [style.--tilt]="-tilts[i % tilts.length] + 'deg'">
+              <span class="suspect-name">{{ e.name }}</span>
+              <span class="suspect-status">{{ statusLabel[e.status] }}</span>
+            </li>
+          }
+        </ul>
       }
-    </ul>
+    </div>
   }
 
-  <!-- Post-it: o que fazer agora -->
-  <div class="postit" role="status" aria-live="polite" data-testid="hint">
-    @if (phase() === 'enemy') {
-      <strong>Turno inimigo!</strong>
-      {{ enemyCounts().patrol }} vigiando · {{ enemyCounts().alert }} em fuga ·
-      {{ enemyCounts().surrendered }} {{ enemyCounts().surrendered === 1 ? 'rendido' : 'rendidos' }}
-    } @else if (approaching()) {
-      <strong>Abordagem de {{ active().name }}</strong>
-      <ul class="approach-list" data-testid="approach-list">
-        @for (e of approachPlan().surrender; track e.id) {
-          <li class="surrender">{{ e.name }} se rende</li>
-        }
-        @for (e of approachPlan().flee; track e.id) {
-          <li class="flee">{{ e.name }} vai correr</li>
-        }
-      </ul>
-      <span class="small">Encerra a vez.</span>
-    } @else if (viewingOther()) {
-      {{ focused().name }} espera a vez. Coluna {{ (positionOf(focused().id)?.col ?? 0) + 1 }}, linha
-      {{ (positionOf(focused().id)?.row ?? 0) + 1 }}.
-    } @else {
-      @switch (phase()) {
-        @case ('rolling') { Rolando os dados… }
-        @case ('walking') { {{ active().name }} está andando… }
-        @case ('ending') { Passando a vez… }
-        @default {
-          @if (movesLeft() <= 0) {
-            Sem movimento. Aborde ou passe a vez!
-          } @else if (selected()) {
-            Destino a {{ selectedCost() }} {{ selectedCost() === 1 ? 'passo' : 'passos' }}. Toque de novo para confirmar.
-          } @else {
-            Leve {{ active().name }} até um hexágono claro. Fora da vista dos suspeitos!
-          }
-        }
-      }
-    }
-  </div>
-
-  <!-- Ações: carimbos -->
+  <!-- Ações: um carimbo contextual, uma aba e, na abordagem, um bilhete -->
   <div class="actions" data-testid="panel">
     @if (phase() === 'enemy') {
-      <div class="stamp big passive enemy-stamp">
+      <div class="stamp passive enemy-stamp">
         <span class="stamp-ring"><span class="stamp-text">Turno<br />inimigo</span></span>
       </div>
     } @else if (approaching()) {
-      <button type="button" class="stamp big confirm" (click)="confirmApproach()">
+      <div class="slip" role="status" aria-live="polite" data-testid="hint">
+        <strong>Abordagem de {{ active().name }}</strong>
+        <ul class="approach-list" data-testid="approach-list">
+          @for (e of approachPlan().surrender; track e.id) {
+            <li class="surrender">{{ e.name }} se rende</li>
+          }
+          @for (e of approachPlan().flee; track e.id) {
+            <li class="flee">{{ e.name }} vai correr</li>
+          }
+        </ul>
+        <span class="small">Encerra a vez.</span>
+      </div>
+      <button type="button" class="stamp confirm" (click)="confirmApproach()">
         <span class="stamp-ring"><span class="stamp-text">Abordar!</span></span>
       </button>
-      <button type="button" class="paper small-left" (click)="cancelApproach()">
+      <button type="button" class="paper side" (click)="cancelApproach()">
         <span class="stencil">Cancelar</span>
       </button>
     } @else if (viewingOther()) {
-      <button type="button" class="stamp big" (click)="focusCharacter(active().id)">
+      <button type="button" class="stamp" (click)="focusCharacter(active().id)">
         <span class="stamp-ring">
           <span class="stamp-small">voltar p/</span>
           <span class="stamp-text">{{ active().name }}</span>
         </span>
       </button>
     } @else if (selected() && phase() === 'moving-choice') {
-      <button type="button" class="stamp big confirm" (click)="confirm()">
+      <button type="button" class="stamp confirm long" (click)="confirm()">
         <span class="stamp-ring">
           <span class="stamp-small">{{ selectedCost() }} {{ selectedCost() === 1 ? 'passo' : 'passos' }}</span>
           <span class="stamp-text">Confirmar</span>
         </span>
       </button>
-      <button type="button" class="paper small-left" (click)="cancel()">
+      <button type="button" class="paper side" (click)="cancel()">
         <span class="stencil">Cancelar</span>
       </button>
     } @else {
-      <div class="stamp big passive" [attr.aria-label]="'Movimento restante: ' + movesLeft()" data-testid="moves">
-        <span class="stamp-ring">
-          <span class="dice" aria-hidden="true">
-            @for (v of dice(); track $index) {
-              <span class="d4">
-                <svg viewBox="0 0 100 92"><polygon points="50,4 96,88 4,88" /></svg>
-                <span class="d4-value">{{ phase() === 'rolling' ? '?' : v }}</span>
-              </span>
-            }
+      @if (phase() === 'moving-choice' && movesLeft() <= 0) {
+        <!-- sem movimento: o próprio carimbo passa a vez -->
+        <button type="button" class="stamp" data-testid="moves" (click)="endTurn()">
+          <span class="stamp-ring">
+            <span class="stamp-small">sem movimento</span>
+            <span class="stamp-text">Passar</span>
           </span>
-          <span class="stamp-text">Mover {{ phase() === 'rolling' ? '–' : movesLeft() }}</span>
-        </span>
-      </div>
-      <button type="button" class="paper small-left" [disabled]="phase() !== 'moving-choice'" (click)="endTurn()">
-        <span class="stencil">Passar</span>
-        <span class="typed">a vez &#8250;</span>
-      </button>
-      <button
-        type="button"
-        class="paper approach"
-        [disabled]="phase() !== 'moving-choice' || !canApproach()"
-        [attr.aria-label]="canApproach() ? 'Abordar inimigos no raio' : 'Abordar: nenhum inimigo no raio de ' + approachRules.radius"
-        data-testid="approach"
-        (click)="startApproach()">
-        <span class="approach-stamp">Abordar</span>
-        @if (canApproach()) {
-          <span class="badge">{{ approachPlan().surrender.length + approachPlan().flee.length }}</span>
-        }
-      </button>
+        </button>
+      } @else {
+        <div class="stamp passive" [attr.aria-label]="'Movimento restante: ' + movesLeft()" data-testid="moves">
+          <span class="stamp-ring">
+            <span class="dice" aria-hidden="true">
+              @for (v of dice(); track $index) {
+                <span class="d4">
+                  <svg viewBox="0 0 100 92"><polygon points="50,4 96,88 4,88" /></svg>
+                  <span class="d4-value">{{ phase() === 'rolling' ? '?' : v }}</span>
+                </span>
+              }
+            </span>
+            <span class="stamp-text">Mover {{ phase() === 'rolling' ? '–' : movesLeft() }}</span>
+          </span>
+        </div>
+        <button type="button" class="paper side" [disabled]="phase() !== 'moving-choice'" (click)="endTurn()">
+          <span class="stencil">Passar</span>
+          <span class="typed">a vez &#8250;</span>
+        </button>
+      }
+      <!-- Abordar só aparece com suspeito no raio -->
+      @if (phase() === 'moving-choice' && canApproach()) {
+        <button
+          type="button"
+          class="paper approach"
+          [attr.aria-label]="'Abordar ' + approachCount() + (approachCount() === 1 ? ' suspeito' : ' suspeitos') + ' no raio'"
+          data-testid="approach"
+          (click)="startApproach()">
+          <span class="approach-stamp">Abordar</span>
+          <span class="badge" aria-hidden="true">{{ approachCount() }}</span>
+        </button>
+      }
     }
   </div>
 
