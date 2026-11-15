@@ -289,28 +289,36 @@
   }
 
   @if (phase() === 'rolling') {
-    <div class="roll-stage" role="status" aria-live="polite" data-testid="roll">
-      <div class="roll-card">
-        <span class="roll-who">Vez de {{ active().name }}</span>
-        <div class="dice big" [class.rolling]="rolled() === 0">
-          @for (v of dice(); track $index) {
-            <span class="d4" [style.animation-delay.ms]="$index * 90">
-              <svg viewBox="0 0 100 92" aria-hidden="true"><polygon points="50,4 96,88 4,88" /><path d="M50 4V62L4 88M50 62L96 88" /></svg>
-              <span class="d4-value">{{ v }}</span>
-            </span>
-          }
-        </div>
-        <span class="roll-total" [class.show]="rolled() > 0">
-          @if (rolled() > 0) {
-            @if (grouped()) {
-              {{ dice().join(' + ') }} + {{ groupBonus }} (grupo) = <strong>{{ rolled() + groupBonus }}</strong> de movimento
-            } @else {
-              {{ dice().join(' + ') }} = <strong>{{ rolled() }}</strong> de movimento
+    <div class="roll-stage" [class.settled]="rolled() > 0" role="dialog" aria-modal="true" aria-labelledby="roll-who" data-testid="roll">
+      <div class="roll-tray" #diceHost aria-hidden="true">
+        @if (flatDice()) {
+          <div class="dice big" [class.rolling]="rolled() === 0">
+            @for (v of dice(); track $index) {
+              <span class="d4" [style.animation-delay.ms]="$index * 90">
+                <svg viewBox="0 0 100 92"><polygon points="50,4 96,88 4,88" /><path d="M50 4V62L4 88M50 62L96 88" /></svg>
+                <span class="d4-value">{{ rolled() > 0 ? v : '?' }}</span>
+              </span>
             }
-          } @else {
-            Rolando 2d{{ diceSides }}…
-          }
-        </span>
+          </div>
+        }
+      </div>
+      <header class="roll-head">
+        <span class="roll-kicker">Rolagem de movimento · {{ dice().length }}d{{ diceSides }}</span>
+        <span class="roll-who" id="roll-who">Vez de {{ active().name }}</span>
+      </header>
+      <div class="roll-result" aria-live="polite">
+        @if (rolled() > 0) {
+          <span class="roll-number">{{ movesLeft() }}</span>
+          <span class="roll-total">
+            {{ dice().join(' + ') }}@if (grouped()) { + {{ groupBonus }} (grupo)} = <strong>{{ movesLeft() }}</strong> de movimento
+          </span>
+          <button type="button" class="roll-confirm" #rollConfirm (click)="confirmRoll()" data-testid="roll-confirm">
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+            Confirmar
+          </button>
+        } @else {
+          <span class="roll-total rolling">Rolando…</span>
+        }
       </div>
     </div>
   }
