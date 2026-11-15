@@ -282,17 +282,36 @@ export const MAPS: GameMap[] = [
     available: true,
     starts: [{ col: 4, row: 34 }, { col: 3, row: 35 }, { col: 5, row: 35 }],
     enemies: [
-      // dentro do hangar, dando a volta no avião
+      // na entrada do hangar, à direita do portão, de olho no pátio
+      {
+        id: 'garimpeiro',
+        name: 'Garimpeiro',
+        model: MODELS.garimpeiro,
+        patrol: [{ col: 27, row: 19 }],
+        facing: { col: 27, row: 20 },
+      },
+      // dentro do hangar, vagueando: um na metade de oeste, outro na de leste
       {
         id: 'piloto',
         name: 'Piloto',
         model: MODELS.piloto,
-        patrol: [{ col: 14, row: 6 }, { col: 29, row: 6 }, { col: 29, row: 16 }, { col: 14, row: 16 }],
+        patrol: [{ col: 14, row: 6 }],
+        wander: { cols: [12, 21], rows: [5, 17] },
       },
-      // no pátio, em frente ao portão
-      { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 14, row: 20 }, { col: 29, row: 20 }] },
-      // nos fundos, entre as duas portas
-      { id: 'garimpeiro-pa', name: 'Garimpeiro da pá', model: MODELS.garimpeiroPa, patrol: [{ col: 13, row: 2 }, { col: 30, row: 2 }] },
+      {
+        id: 'garimpeiro-pa',
+        name: 'Garimpeiro da pá',
+        model: MODELS.garimpeiroPa,
+        patrol: [{ col: 28, row: 15 }],
+        wander: { cols: [22, 31], rows: [5, 17] },
+      },
+      // na pista de terra, indo de uma ponta à outra
+      {
+        id: 'vigia-pista',
+        name: 'Vigia da pista',
+        model: MODELS.garimpeiro,
+        patrol: [{ col: 21, row: 20 }, { col: 21, row: 36 }],
+      },
       // na casa: parado, comendo na mesa, de costas para a porta
       {
         id: 'jo',
