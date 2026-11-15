@@ -106,13 +106,36 @@ a altura de cada tipo fica em `COVER_HEIGHT` (`maps.ts`). Os modelos são montad
 `scenery.ts` (`buildCover`, `buildFuelProps`).
 
 O terreno é desenhado em texto em `maps.ts` (`parseLayout`): `.` grama, `T` árvores, `#` parede,
-`_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio, `A` avião e a carga (ver abaixo) — basta editar as linhas para mudar o mapa.
+`_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio, `A` avião, a carga (ver abaixo) e os móveis da casa (`m`, `P`) — basta editar as linhas para mudar o mapa.
 O hangar (chapa ondulada, portão, teto em arco, postes e lâmpadas) e o avião são montados por código em
 `scenery.ts`. O **teto** (chapa, oitões e arcos) cobre o hangar visto de fora e some assim que um agente entra
 (o vão do portão já conta); a carga, o avião e as lâmpadas de dentro só são desenhados quando há um agente a até
 6 hexágonos do hangar (`structureView` em `maps.ts`). O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
+
+### Casa do Garimpeiro Jô e testes de percepção (d20)
+
+A leste da pista, numa clareira, fica a **casa** dos garimpeiros: dois cômodos de 5 × 5 hexágonos, de
+tábuas e com telhado de chapa enferrujada (que some quando um agente entra, como o do hangar). Entra-se
+pela porta do oeste, que dá para a pista; uma divisória com porta separa os cômodos.
+
+- **Cômodo 1:** o **Garimpeiro Jô** come parado na mesa, **de costas para a entrada**. Ele não anda no
+  turno inimigo, mas o cone de visão dele cobre a porta do cômodo 2: entre por trás e **aborde** (a até 2
+  hexágonos ele se rende). Quem passa pela porta do meio sem rendê-lo é avistado.
+- **Cômodo 2:** ao entrar (mesmo só de passagem), cada agente rola **percepção** uma vez — um **d20** que
+  aparece numa ficha no canto esquerdo da tela. Tirando **mais que 6**, ele repara em algo na
+  **prateleira** da parede do leste, que ganha uma lupa.
+- Colado na prateleira percebida, aparece **Inspecionar** (□ no controle, quando não há ninguém para
+  abordar): rola outro d20 e, tirando **mais que 4**, acha a **arma escondida**, que é apreendida. Se
+  falhar, o botão vira **Rolar de novo**. Cada tentativa gasta **1 de movimento**.
+- Se os três agentes falharem na percepção, a arma fica sem ser encontrada.
+
+Os **objetivos** da missão (render o Jô, apreender a arma) ficam num bilhete embaixo da pilha de
+suspeitos. As regras dos testes ficam em `SEARCH_RULES` (`src/app/game/search.ts`); a casa, o esconderijo
+e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
+mesa (cobertura baixa) e `P` a prateleira (alta); os modelos são montados em `scenery.ts` (`buildHouse`).
+Um inimigo com rota de um ponto só fica parado; `facing` no mapa diz para onde ele olha.
 
 ### Mundo semiaberto: área da missão
 
@@ -163,7 +186,7 @@ símbolo correspondente.
 | Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
 | ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
 | ○ | Cancela |
-| □ | Abordar: toque abre a prévia, segurar aborda direto |
+| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: inspecionar) |
 | △ | Passar a vez |
 | Share | Agrupar / desagrupar |
 | L1 / R1 | Personagem anterior / seguinte |

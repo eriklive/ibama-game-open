@@ -188,7 +188,44 @@
           }
         </ul>
       }
+      @if (objectives().length) {
+        <section class="objectives" aria-label="Objetivos" data-testid="objectives">
+          <span class="objectives-head">Objetivos</span>
+          <ul>
+            @for (o of objectives(); track o.id) {
+              <li [class]="'objective ' + o.state" [attr.data-testid]="'objective-' + o.id">
+                <span class="tick" aria-hidden="true">{{ o.state === 'done' ? '✓' : o.state === 'failed' ? '✗' : '' }}</span>
+                <span>{{ o.text }}</span>
+                <span class="sr-only">{{ o.state === 'done' ? '(cumprido)' : o.state === 'failed' ? '(perdido)' : '(pendente)' }}</span>
+              </li>
+            }
+          </ul>
+        </section>
+      }
     </div>
+  }
+
+  <!-- Teste de d20 (percepção, inspecionar): uma ficha na lateral -->
+  @if (check(); as ck) {
+    <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
+      <span class="check-kicker">{{ ck.kind === 'notice' ? 'Percepção' : 'Inspecionar' }} · d20</span>
+      <span class="check-who">{{ ck.who }}</span>
+      <span class="d20" [class.rolling]="ck.result === null" aria-hidden="true">
+        <svg viewBox="0 0 100 100">
+          <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
+          <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
+        </svg>
+        <span class="d20-value">{{ ck.face }}</span>
+      </span>
+      <span class="check-need">precisa de mais que {{ ck.target }}</span>
+      @if (ck.pass !== null) {
+        <span class="check-result" data-testid="check-result">
+          @if (ck.kind === 'notice') { {{ ck.pass ? 'Percebeu algo!' : 'Não percebeu' }} } @else { {{ ck.pass ? 'Achou!' : 'Nada ainda' }} }
+        </span>
+      } @else {
+        <span class="sr-only">Rolando o d20…</span>
+      }
+    </aside>
   }
 
   <!-- Ações: um carimbo contextual, uma aba e, na abordagem, um bilhete -->
@@ -303,6 +340,20 @@
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
         </button>
       }
+      <!-- Inspecionar: colado no móvel em que alguém reparou (cada tentativa gasta movimento) -->
+      @if (!charging() && inspectable(); as item) {
+        <button
+          type="button"
+          class="paper inspect"
+          [disabled]="movesLeft() < searchRules.inspectCost"
+          [attr.aria-label]="(searchFails().get(item.id) ? 'Rolar de novo: inspecionar a ' : 'Inspecionar a ') + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'"
+          data-testid="inspect"
+          (click)="inspect()">
+          <span class="stencil">{{ searchFails().get(item.id) ? 'Rolar de novo' : 'Inspecionar' }}</span>
+          <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
+          @if (pad() && !canApproach()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
+        </button>
+      }
       <!-- Abordar só aparece com suspeito no raio: toque abre a prévia, segurar aborda direto -->
       @if (phase() === 'moving-choice' && canApproach()) {
         @if (charging()) {
@@ -352,7 +403,7 @@
           <dt>Direcional / analógico esq.</dt><dd>mover o cursor</dd>
           <dt>{{ glyph('confirm') }}</dt><dd>confirmar</dd>
           <dt>{{ glyph('cancel') }}</dt><dd>cancelar</dd>
-          <dt>{{ glyph('approach') }}</dt><dd>abordar</dd>
+          <dt>{{ glyph('approach') }}</dt><dd>abordar / inspecionar</dd>
           <dt>{{ glyph('endTurn') }}</dt><dd>passar a vez</dd>
           <dt>{{ glyph('group') }}</dt><dd>agrupar / desagrupar</dd>
           <dt>{{ glyph('prev') }} / {{ glyph('next') }}</dt><dd>trocar personagem</dd>
