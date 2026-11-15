@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { hexKey, reachableHexes } from './hex';
-import { COVER_HEIGHT, MAPS, blockedHexes, lowCoverHexes, parseLayout, playArea } from './maps';
+import {
+  COVER_HEIGHT, MAPS, STRUCTURE_SIGHT, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
+} from './maps';
 
 describe('parseLayout', () => {
   it('separa paredes, árvores e chão', () => {
@@ -123,5 +125,23 @@ describe('aeroporto: mundo semiaberto', () => {
     for (const c of [...cover, ...(map.props ?? [])]) {
       expect(c.col > c0 && c.col < c1 && c.row > r0 && c.row < r1, hexKey(c)).toBe(true);
     }
+  });
+
+  it('estrutura: o teto some com um agente dentro e o interior só aparece a até 6 hexágonos', () => {
+    const map = MAPS.find((m) => m.id === 'aeroporto')!;
+    const hangar = map.hangar!;
+    expect(STRUCTURE_SIGHT).toBe(6);
+    // a equipe começa longe: teto no lugar, nada de dentro desenhado
+    expect(structureView(hangar, map.starts)).toEqual({ roof: true, interior: false });
+    // descendo a pista a partir do portão (fileira 18)
+    expect(stepsToStructure({ col: 22, row: 24 }, hangar)).toBe(6);
+    expect(stepsToStructure({ col: 22, row: 25 }, hangar)).toBe(7);
+    expect(structureView(hangar, [{ col: 22, row: 25 }])).toEqual({ roof: true, interior: false });
+    // perto, mas do lado de fora: o teto fica e o interior já é desenhado
+    expect(structureView(hangar, [{ col: 22, row: 24 }])).toEqual({ roof: true, interior: true });
+    expect(structureView(hangar, [{ col: 22, row: 19 }])).toEqual({ roof: true, interior: true });
+    // basta um agente entrar (o vão do portão já conta) para o teto sumir
+    expect(structureView(hangar, [...map.starts, { col: 22, row: 18 }])).toEqual({ roof: false, interior: true });
+    expect(structureView(hangar, [{ col: 15, row: 9 }])).toEqual({ roof: false, interior: true });
   });
 });

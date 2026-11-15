@@ -1,11 +1,17 @@
 import { ModelDef, MODELS } from './character-model';
 import { EnemySpawn } from './enemies';
-import { HexArea, HexCoord, circleArea, hexKey, rectArea } from './hex';
+import { HexArea, HexCoord, circleArea, hexDistance, hexKey, rectArea } from './hex';
 import type { CoverKind } from './scenery';
 import { Terrain, openWorld } from './world';
 
 /** Tipo de chão de um hexágono (só muda a aparência; quem bloqueia são paredes e árvores). */
 export type Ground = 'grass' | 'runway' | 'apron' | 'floor' | 'dirt';
+
+/** Retângulo de hexágonos (colunas e fileiras, inclusive): a planta de uma estrutura. */
+export interface HexRect {
+  cols: [number, number];
+  rows: [number, number];
+}
 
 export interface GameMap {
   id: string;
@@ -33,7 +39,7 @@ export interface GameMap {
   /** Hexágonos ocupados pelo avião estacionado: bloqueiam passagem e visão. */
   plane?: HexCoord[];
   /** Hangar: retângulo (colunas e fileiras, inclusive) cujas paredes viram chapa reta, com telhado em arco. */
-  hangar?: { cols: [number, number]; rows: [number, number] };
+  hangar?: HexRect;
   /** Inimigos e suas rotas de patrulha. */
   enemies: EnemySpawn[];
   /**
@@ -262,6 +268,48 @@ export const MAPS: GameMap[] = [
     enemies: [],
   },
 ];
+
+/** Distância (em hexágonos) a partir da qual o interior de uma estrutura deixa de ser desenhado. */
+export const STRUCTURE_SIGHT = 6;
+
+/** O hexágono fica na planta da estrutura (paredes e portas inclusive). */
+export const inStructure = (h: HexCoord, rect: HexRect): boolean =>
+  h.col >= rect.cols[0] && h.col <= rect.cols[1] && h.row >= rect.rows[0] && h.row <= rect.rows[1];
+
+/** Passos de um hexágono até a estrutura (0 se estiver nela). */
+export function stepsToStructure(h: HexCoord, rect: HexRect): number {
+  if (inStructure(h, rect)) return 0;
+  const [c0, c1] = rect.cols;
+  const [r0, r1] = rect.rows;
+  // de fora, o hexágono mais próximo está sempre no perímetro
+  let best = Infinity;
+  for (let col = c0; col <= c1; col++) {
+    best = Math.min(best, hexDistance(h, { col, row: r0 }), hexDistance(h, { col, row: r1 }));
+  }
+  for (let row = r0; row <= r1; row++) {
+    best = Math.min(best, hexDistance(h, { col: c0, row }), hexDistance(h, { col: c1, row }));
+  }
+  return best;
+}
+
+/**
+ * O que se desenha de uma estrutura, dadas as posições dos agentes: o teto some quando
+ * algum agente entra (de fora ele fica) e o que há dentro só aparece com um agente a
+ * até `sight` hexágonos dela.
+ */
+export function structureView(
+  rect: HexRect,
+  agents: Iterable<HexCoord>,
+  sight = STRUCTURE_SIGHT,
+): { roof: boolean; interior: boolean } {
+  let roof = true;
+  let interior = false;
+  for (const a of agents) {
+    if (inStructure(a, rect)) roof = false;
+    if (stepsToStructure(a, rect) <= sight) interior = true;
+  }
+  return { roof, interior };
+}
 
 export const findMap = (id: string | null | undefined): GameMap | undefined =>
   MAPS.find((m) => m.id === id && m.available);

@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, playArea } from './maps';
+import { COVER_HEIGHT, GameMap, Ground, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { CharacterRig, METER, ModelDef } from './character-model';
-import { buildCover, buildFuelProps, buildHangar, buildPlane } from './scenery';
+import { HANGAR_INTERIOR, HANGAR_ROOF, buildCover, buildFuelProps, buildHangar, buildPlane } from './scenery';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
@@ -175,6 +175,12 @@ export class HexBoard {
   private farGround?: THREE.Mesh;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
   private readonly scenery: { object: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
+  /** Telhado da estrutura (chapa e arcos): some quando um agente entra nela. */
+  private roof?: THREE.Object3D;
+  /** O que fica dentro da estrutura (carga, avião, lâmpadas): só aparece com um agente por perto. */
+  private readonly interior: THREE.Object3D[] = [];
+  /** Posições dos agentes na última conferência da estrutura (refaz só quando alguém anda). */
+  private structureKey = '';
   private aura?: { wall: THREE.Mesh; ring: THREE.Mesh };
   /** Posições x dos sulcos da pista de terra (a continuação no mundo usa as mesmas). */
   private ruts: number[] = [];
@@ -707,9 +713,14 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
     const hangar = this.map.hangar;
-    if (hangar) this.addScenery(buildHangar(hangar, new Set(walls.map(hexKey)), HEX_SIZE));
-    const inHangar = (h: HexCoord): boolean =>
-      !!hangar && h.col >= hangar.cols[0] && h.col <= hangar.cols[1] && h.row >= hangar.rows[0] && h.row <= hangar.rows[1];
+    if (hangar) {
+      const built = buildHangar(hangar, new Set(walls.map(hexKey)), HEX_SIZE);
+      this.roof = built.getObjectByName(HANGAR_ROOF);
+      const lamps = built.getObjectByName(HANGAR_INTERIOR);
+      if (lamps) this.interior.push(lamps);
+      this.addScenery(built);
+    }
+    const inHangar = (h: HexCoord): boolean => !!hangar && inStructure(h, hangar);
     for (const h of walls) {
       const tile = this.tiles.get(hexKey(h));
       if (!tile) continue;
@@ -731,11 +742,11 @@ export class HexBoard {
       const tile = this.tiles.get(hexKey(c));
       if (!tile) continue;
       tile.baseColor.set(0xa8987a);
-      this.field.attach(tile, buildCover(c.kind, c.col * 31 + c.row * 17));
+      this.field.attach(tile, this.housed(c, buildCover(c.kind, c.col * 31 + c.row * 17)));
     }
     for (const h of this.map.props ?? []) {
       const tile = this.tiles.get(hexKey(h));
-      if (tile) this.field.attach(tile, buildFuelProps(h.col * 13 + h.row * 7));
+      if (tile) this.field.attach(tile, this.housed(h, buildFuelProps(h.col * 13 + h.row * 7)));
     }
     const low = new Set((this.map.cover ?? []).filter((c) => COVER_HEIGHT[c.kind] === 'low').map(hexKey));
     for (const key of low) {
@@ -758,8 +769,34 @@ export class HexBoard {
       this.tiles.get(hexKey(h))?.baseColor.set(0x9c8c70);
     }
     const plane = buildPlane();
-    plane.position.copy(center.divideScalar(hexes.length));
-    this.addScenery(plane);
+    const holder = this.housed(hexes[0], plane);
+    holder.position.copy(center.divideScalar(hexes.length));
+    this.addScenery(holder);
+  }
+
+  /**
+   * Objeto que fica dentro da estrutura: entra na lista do interior e vai embrulhado num
+   * grupo, para o "longe demais" não brigar com a visibilidade do raio carregado (que
+   * liga e desliga o embrulho). Fora da estrutura, devolve o próprio objeto.
+   */
+  private housed(hex: HexCoord, object: THREE.Object3D): THREE.Object3D {
+    const hangar = this.map.hangar;
+    if (!hangar || !inStructure(hex, hangar)) return object;
+    this.interior.push(object);
+    return new THREE.Group().add(object);
+  }
+
+  /** Teto e interior da estrutura conforme a posição dos agentes (ver `structureView`). */
+  private updateStructure(): void {
+    const hangar = this.map.hangar;
+    if (!hangar) return;
+    let key = '';
+    for (const u of this.units.values()) key += `${u.hex.col},${u.hex.row};`;
+    if (key === this.structureKey) return;
+    this.structureKey = key;
+    const view = structureView(hangar, [...this.units.values()].map((u) => u.hex));
+    if (this.roof) this.roof.visible = view.roof;
+    for (const o of this.interior) o.visible = view.interior;
   }
 
   private addScenery(object: THREE.Object3D): void {
@@ -1211,6 +1248,7 @@ export class HexBoard {
     const lk = 1 - Math.exp(-dt * 8);
     // monta em segundo plano o que entrou no raio (e muda o centro, se a câmera foi longe)
     this.stream.update(this.camTarget.x, this.camTarget.z, STREAM_BUDGET_MS);
+    this.updateStructure();
 
     for (const u of this.units.values()) {
       const active = u.id === this.activeId;
