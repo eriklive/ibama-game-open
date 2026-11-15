@@ -124,7 +124,8 @@ export class CharacterRig {
         mesh.material = own;
         owned.push(own);
       }
-      mesh.castShadow = true;
+      // sem sombra de verdade: a sombra do sol é estática (ver HexBoard); quem anda leva
+      // a sombra redonda de baixo
       // a caixa de colisão da malha é a da pose de repouso; animada, ela pode sair
       // dela e sumir na borda da tela
       mesh.frustumCulled = false;

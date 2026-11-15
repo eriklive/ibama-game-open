@@ -46,6 +46,8 @@ const COLORS = {
 
 /** Milissegundos por quadro que a montagem de blocos em segundo plano pode gastar. */
 const STREAM_BUDGET_MS = 4;
+/** Salto do quadro da sombra do sol, em unidades do mundo. */
+const SHADOW_STEP = 8;
 
 /** Índice estável (0..2) para sortear um dos três tons de um chão (vale para coordenadas negativas). */
 const tone = (h: HexCoord): number => (((h.col * 31 + h.row * 17) % 3) + 3) % 3;
@@ -181,6 +183,8 @@ export class HexBoard {
   private readonly interior: THREE.Object3D[] = [];
   /** Posições dos agentes na última conferência da estrutura (refaz só quando alguém anda). */
   private structureKey = '';
+  /** Estado do que faz sombra no último redesenho do mapa de sombras. */
+  private shadowKey = '';
   private aura?: { wall: THREE.Mesh; ring: THREE.Mesh };
   /** Posições x dos sulcos da pista de terra (a continuação no mundo usa as mesmas). */
   private ruts: number[] = [];
@@ -222,6 +226,7 @@ export class HexBoard {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.renderer.shadowMap.autoUpdate = false;
     this.area = playArea(map);
 
     this.scene.background = new THREE.Color(COLORS.background);
@@ -547,7 +552,8 @@ export class HexBoard {
     const sun = this.sun;
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    const ext = 30 * HEX_SIZE;
+    // cobre 30 em volta do centro da tela mesmo com o quadro atrasado meio salto
+    const ext = 30 * HEX_SIZE + SHADOW_STEP / 2;
     Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 1, far: 70 });
     this.scene.add(sun, sun.target);
   }
@@ -858,20 +864,16 @@ export class HexBoard {
     const dark = new THREE.MeshStandardMaterial({ color: 0x3a1014, roughness: 0.6 });
     // corpo hexagonal + "cabeça" e um nariz apontando para onde olha (+X local)
     const body = new THREE.Mesh(new THREE.CylinderGeometry(0.36, 0.42, 0.3, 6), bodyMaterial);
-    body.castShadow = true;
     const head = new THREE.Mesh(new THREE.SphereGeometry(0.2, 20, 14), bodyMaterial);
     head.position.y = 0.3;
-    head.castShadow = true;
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.13, 0.34, 16), dark);
     nose.rotation.z = -Math.PI / 2;
     nose.position.set(0.42, 0.08, 0);
-    nose.castShadow = true;
     const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.24), dark);
     eyes.position.set(0.18, 0.34, 0);
     group.add(body, head, nose, eyes);
     // base redonda que aparece sob o modelo 3D e mostra a cor do estado (alerta, rendido)
     const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, BASE_TOP * 2, 40), bodyMaterial);
-    disc.castShadow = true;
     disc.visible = false;
     group.add(disc);
 
@@ -1016,14 +1018,12 @@ export class HexBoard {
       new THREE.CylinderGeometry(0.42, 0.42, 0.14, 40),
       new THREE.MeshStandardMaterial({ color: body, roughness: 0.5 }),
     );
-    disc.castShadow = true;
     const light = body.clone().lerp(new THREE.Color(0xffffff), 0.55);
     const ring = new THREE.Mesh(
       new THREE.TorusGeometry(0.42, 0.07, 12, 40),
       new THREE.MeshStandardMaterial({ color: light, roughness: 0.4 }),
     );
     ring.rotation.x = Math.PI / 2;
-    ring.castShadow = true;
     const dot = new THREE.Mesh(
       new THREE.CylinderGeometry(0.14, 0.14, 0.16, 24),
       new THREE.MeshStandardMaterial({ color: light, roughness: 0.4 }),
@@ -1237,11 +1237,28 @@ export class HexBoard {
       this.camera.updateProjectionMatrix();
     }
 
-    // o sol (e o quadro da sombra) acompanha o centro da tela, em passos inteiros para a sombra não tremer
-    const sx = Math.round(this.camTarget.x);
-    const sz = Math.round(this.camTarget.z);
+    // o sol (e o quadro da sombra) acompanha o centro da tela em saltos de SHADOW_STEP:
+    // entre um salto e outro a sombra não é redesenhada (ver `shadowDue`)
+    const sx = Math.round(this.camTarget.x / SHADOW_STEP) * SHADOW_STEP;
+    const sz = Math.round(this.camTarget.z / SHADOW_STEP) * SHADOW_STEP;
     this.sun.position.set(sx - 8, 16, sz + 6);
     this.sun.target.position.set(sx, 0, sz);
+  }
+
+  /**
+   * Sol e cenário (mata, hangar, paredes) são estáticos, e quem anda não faz sombra de
+   * verdade (leva a sombra redonda): o mapa de sombras só é redesenhado quando o quadro
+   * do sol salta, quando blocos do mundo entram ou saem, ou quando o teto do hangar
+   * aparece ou some. Nos outros quadros não há passe de sombras.
+   */
+  private shadowDue(): boolean {
+    if (!this.sun.castShadow) return false;
+    const p = this.sun.target.position;
+    const key = `${p.x},${p.z};${this.stream.version};${this.roof?.visible};${this.interior[0]?.visible};${this.profile.mode}`;
+    if (key === this.shadowKey) return false;
+    this.shadowKey = key;
+    this.renderer.shadowMap.needsUpdate = true;
+    return true;
   }
 
   private loop = (): void => {
@@ -1356,7 +1373,9 @@ export class HexBoard {
     }
 
     this.updateCamera(dt);
-    this.stream.cull(this.camera, this.sun);
+    const shadow = this.shadowDue();
+    // a mata que só faz sombra (fora da tela) entra apenas no quadro que redesenha a sombra
+    this.stream.cull(this.camera, shadow ? this.sun : undefined);
     this.renderer.render(this.scene, this.camera);
   };
 

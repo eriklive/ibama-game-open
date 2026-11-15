@@ -52,6 +52,8 @@ export class WorldStream {
   private loadRadius = 65;
   private viewRadius = 40;
   readonly center = { x: 0, z: 0 };
+  /** Muda sempre que um bloco é montado ou descartado (a sombra precisa ser refeita). */
+  version = 0;
   private hasCenter = false;
   private readonly forest = new Forest();
   private readonly frusta = [new THREE.Frustum(), new THREE.Frustum()];
@@ -279,10 +281,12 @@ export class WorldStream {
     ));
     this.root.add(group);
     this.chunks.set(key, { key, cx, cy, group, full, center: { ...this.center } });
+    this.version++;
   }
 
   private disposeChunk(c: Chunk): void {
     this.forest.remove(c.key);
+    this.version++;
     c.group.removeFromParent();
     c.group.traverse((o) => {
       if (o instanceof THREE.InstancedMesh) o.dispose();
