@@ -1356,6 +1356,7 @@ export class HexBoard {
     }
 
     this.updateCamera(dt);
+    this.stream.cull(this.camera, this.sun);
     this.renderer.render(this.scene, this.camera);
   };
 

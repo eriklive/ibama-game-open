@@ -36,7 +36,8 @@ interface Chunk {
 /**
  * Renderização por raio: só existe na cena o que está a até `loadRadius` passos do
  * centro de carregamento. O mundo é dividido em blocos de 12 × 12 hexágonos; cada bloco
- * vira poucas malhas instanciadas (chão, contornos, troncos, copas, pinheiros, sulcos).
+ * vira poucas malhas instanciadas (chão, contornos, sulcos); a mata de todos os blocos é
+ * desenhada junta (ver `Forest`).
  *
  * Quando o centro da tela se afasta mais que `loadRadius - viewRadius` do centro de
  * carregamento, o centro muda para onde a câmera está: blocos que saíram do raio são
@@ -53,6 +54,8 @@ export class WorldStream {
   readonly center = { x: 0, z: 0 };
   private hasCenter = false;
   private readonly forest = new Forest();
+  private readonly frusta = [new THREE.Frustum(), new THREE.Frustum()];
+  private readonly viewProj = new THREE.Matrix4();
   private readonly groundMat = new THREE.MeshStandardMaterial({ roughness: 0.85, metalness: 0 });
   private readonly rutMat = new THREE.MeshStandardMaterial({ color: 0x6b4c2c, roughness: 1 });
   private readonly rutGeo = new THREE.BoxGeometry(1, 0.02, 1);
@@ -75,6 +78,7 @@ export class WorldStream {
     edges.dispose();
     this.outlineSegments = new Float32Array(top);
     this.root.name = 'world-stream';
+    this.root.add(this.forest.root);
   }
 
   /** Raio pré-renderizado e raio de visão, em passos. Recalcula tudo. */
@@ -107,6 +111,25 @@ export class WorldStream {
     const near = this.queue.filter((q) => q.d <= view);
     this.queue = this.queue.filter((q) => q.d > view);
     for (const q of near) this.build(q.cx, q.cy);
+  }
+
+  /**
+   * Escolhe os blocos de mata que entram no quadro: os que a câmera vê e os que o sol
+   * projeta na sombra. Chamar antes de cada `render`, depois de posicionar câmera e sol.
+   */
+  cull(camera: THREE.Camera, sun?: THREE.DirectionalLight): void {
+    camera.updateMatrixWorld();
+    this.viewProj.multiplyMatrices(camera.projectionMatrix, camera.matrixWorldInverse);
+    this.frusta[0].setFromProjectionMatrix(this.viewProj);
+    let n = 1;
+    if (sun?.castShadow) {
+      sun.updateMatrixWorld();
+      sun.target.updateMatrixWorld();
+      sun.shadow.updateMatrices(sun);
+      this.frusta[1].copy(sun.shadow.getFrustum());
+      n = 2;
+    }
+    this.forest.cull(this.frusta, n);
   }
 
   stats(): { chunks: number; pending: number; loadRadius: number; viewRadius: number } {
@@ -247,15 +270,19 @@ export class WorldStream {
         group.add(rutMesh);
       }
     }
-    for (const mesh of this.forest.build(treeHexes, s)) group.add(mesh);
-
     const old = this.chunks.get(key);
     if (old) this.disposeChunk(old);
+    const b = this.chunkBounds(cx, cy);
+    this.forest.set(key, treeHexes, s, new THREE.Box3(
+      new THREE.Vector3(b.minX, 0, b.minZ),
+      new THREE.Vector3(b.maxX, FOREST_TOP, b.maxZ),
+    ));
     this.root.add(group);
     this.chunks.set(key, { key, cx, cy, group, full, center: { ...this.center } });
   }
 
   private disposeChunk(c: Chunk): void {
+    this.forest.remove(c.key);
     c.group.removeFromParent();
     c.group.traverse((o) => {
       if (o instanceof THREE.InstancedMesh) o.dispose();
@@ -301,25 +328,143 @@ const rnd = (h: HexCoord, i: number): number => hashHex(h.col, h.row, i);
 /** Cor do chão de um hexágono com árvores (estável pela posição). */
 export const forestFloor = (h: HexCoord): number => FOREST_FLOOR[Math.floor(rnd(h, 0) * 3)];
 
+/** Altura máxima de uma árvore (topo da caixa de recorte dos blocos de mata). */
+const FOREST_TOP = 2.6;
+
+/** Instâncias de um tipo de peça (troncos, copas ou pinheiros) num bloco. */
+interface Part {
+  n: number;
+  /** Matrizes (16 números por instância). */
+  m: Float32Array;
+  /** Cores (r, g, b por instância), se a peça tem cor própria. */
+  c: Float32Array | null;
+}
+
 /**
  * Mata: cada hexágono sorteia (pela posição) um arranjo de árvores — copa redonda,
- * pinheiro, árvore alta e fina, arbusto — com tamanhos e tons diferentes. Cada bloco vira
- * só três malhas instanciadas (troncos, copas e pinheiros), com geometria e materiais
- * compartilhados entre os blocos.
+ * pinheiro, árvore alta e fina, arbusto — com tamanhos e tons diferentes.
+ *
+ * Toda a mata carregada (a de fora e a de dentro da missão) é desenhada com só três
+ * malhas instanciadas — troncos, copas e pinheiros —, ou seja, três desenhos por passe
+ * (mais três no passe de sombras). Cada bloco guarda as suas instâncias; a cada quadro
+ * `cull` escolhe os blocos que a câmera vê ou que fazem sombra no quadro do sol e, só se
+ * essa lista mudou, copia as instâncias deles, em sequência, para as três malhas.
  */
 class Forest {
-  private readonly trunkGeo = new THREE.CylinderGeometry(0.07, 0.11, 1, 6).translate(0, 0.5, 0);
-  private readonly blobGeo = new THREE.IcosahedronGeometry(0.5, 1);
-  private readonly coneGeo = new THREE.ConeGeometry(0.42, 1, 7).translate(0, 0.5, 0);
-  private readonly trunkMat = new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1 });
-  private readonly blobMat = new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true });
-  private readonly coneMat = new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true });
+  readonly root = new THREE.Group();
+  private readonly geos = [
+    new THREE.CylinderGeometry(0.07, 0.11, 1, 6).translate(0, 0.5, 0),
+    new THREE.IcosahedronGeometry(0.5, 1),
+    new THREE.ConeGeometry(0.42, 1, 7).translate(0, 0.5, 0),
+  ];
+  private readonly mats = [
+    new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1 }),
+    new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }),
+    new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }),
+  ];
+  private readonly colored = [false, true, true];
+  private meshes: (THREE.InstancedMesh | null)[] = [null, null, null];
+  private readonly chunks = new Map<string, { parts: Part[]; box: THREE.Box3 }>();
+  /** Blocos copiados para as malhas no último `cull`, na ordem. */
+  private shown: string[] = [];
+  private dirty = true;
 
-  build(trees: HexCoord[], size: number): THREE.InstancedMesh[] {
-    if (!trees.length) return [];
-    const trunks: { m: THREE.Matrix4 }[] = [];
-    const blobs: { m: THREE.Matrix4; color: number }[] = [];
-    const cones: { m: THREE.Matrix4; color: number }[] = [];
+  constructor() {
+    this.root.name = 'forest';
+  }
+
+  /** (Re)define as árvores de um bloco. */
+  set(key: string, trees: HexCoord[], size: number, box: THREE.Box3): void {
+    if (!trees.length) {
+      this.remove(key);
+      return;
+    }
+    this.chunks.set(key, { parts: this.build(trees, size), box });
+    this.dirty = true;
+  }
+
+  remove(key: string): void {
+    if (this.chunks.delete(key)) this.dirty = true;
+  }
+
+  cull(frusta: THREE.Frustum[], count: number): void {
+    const visible: string[] = [];
+    for (const [key, c] of this.chunks) {
+      for (let i = 0; i < count; i++) {
+        if (frusta[i].intersectsBox(c.box)) {
+          visible.push(key);
+          break;
+        }
+      }
+    }
+    if (!this.dirty && visible.length === this.shown.length && visible.every((k, i) => k === this.shown[i])) return;
+    this.shown = visible;
+    this.dirty = false;
+    for (let k = 0; k < 3; k++) {
+      let total = 0;
+      for (const key of visible) total += this.chunks.get(key)!.parts[k].n;
+      const mesh = this.reserve(k, total);
+      const mArr = mesh.instanceMatrix.array as Float32Array;
+      const cArr = mesh.instanceColor?.array as Float32Array | undefined;
+      let at = 0;
+      for (const key of visible) {
+        const p = this.chunks.get(key)!.parts[k];
+        if (!p.n) continue;
+        mArr.set(p.m, at * 16);
+        if (cArr && p.c) cArr.set(p.c, at * 3);
+        at += p.n;
+      }
+      mesh.count = total;
+      mesh.visible = total > 0;
+      // só o trecho usado sobe para a placa de vídeo
+      mesh.instanceMatrix.clearUpdateRanges();
+      mesh.instanceMatrix.addUpdateRange(0, total * 16);
+      mesh.instanceMatrix.needsUpdate = true;
+      if (mesh.instanceColor) {
+        mesh.instanceColor.clearUpdateRanges();
+        mesh.instanceColor.addUpdateRange(0, total * 3);
+        mesh.instanceColor.needsUpdate = true;
+      }
+    }
+  }
+
+  dispose(): void {
+    for (const m of this.meshes) m?.dispose();
+    for (const g of this.geos) g.dispose();
+    for (const m of this.mats) m.dispose();
+    this.chunks.clear();
+    this.root.removeFromParent();
+  }
+
+  /** Malha do tipo `k` com espaço para `n` instâncias (cresce em potências de 2). */
+  private reserve(k: number, n: number): THREE.InstancedMesh {
+    const cur = this.meshes[k];
+    if (cur && cur.instanceMatrix.count >= n) return cur;
+    let cap = 1024;
+    while (cap < n) cap *= 2;
+    const mesh = new THREE.InstancedMesh(this.geos[k], this.mats[k], cap);
+    mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+    if (this.colored[k]) {
+      mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
+      mesh.instanceColor.setUsage(THREE.DynamicDrawUsage);
+    }
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    // o recorte é feito por bloco em `cull`
+    mesh.frustumCulled = false;
+    mesh.name = ['forest trunks', 'forest crowns', 'forest pines'][k];
+    if (cur) {
+      cur.removeFromParent();
+      cur.dispose();
+    }
+    this.meshes[k] = mesh;
+    this.root.add(mesh);
+    return mesh;
+  }
+
+  private build(trees: HexCoord[], size: number): Part[] {
+    const lists: { m: THREE.Matrix4; color?: number }[][] = [[], [], []];
+    const [trunks, blobs, cones] = lists;
     const dummy = new THREE.Object3D();
     const place = (x: number, y: number, z: number, sx: number, sy: number, sz: number, rot = 0): THREE.Matrix4 => {
       dummy.position.set(x, y, z);
@@ -354,29 +499,15 @@ class Forest {
         }
       });
     }
-    const out: THREE.InstancedMesh[] = [];
-    const add = (geo: THREE.BufferGeometry, mat: THREE.Material, items: { m: THREE.Matrix4; color?: number }[]): void => {
-      if (!items.length) return;
-      const mesh = new THREE.InstancedMesh(geo, mat, items.length);
-      const color = new THREE.Color();
+    const color = new THREE.Color();
+    return lists.map((items, k) => {
+      const m = new Float32Array(items.length * 16);
+      const c = this.colored[k] ? new Float32Array(items.length * 3) : null;
       items.forEach((it, i) => {
-        mesh.setMatrixAt(i, it.m);
-        if (it.color !== undefined) mesh.setColorAt(i, color.set(it.color));
+        it.m.toArray(m, i * 16);
+        if (c) color.set(it.color ?? 0xffffff).toArray(c, i * 3);
       });
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      // cada bloco é pequeno: a câmera descarta o que está fora da tela
-      mesh.computeBoundingSphere();
-      out.push(mesh);
-    };
-    add(this.trunkGeo, this.trunkMat, trunks);
-    add(this.blobGeo, this.blobMat, blobs);
-    add(this.coneGeo, this.coneMat, cones);
-    return out;
-  }
-
-  dispose(): void {
-    for (const g of [this.trunkGeo, this.blobGeo, this.coneGeo]) g.dispose();
-    for (const m of [this.trunkMat, this.blobMat, this.coneMat]) m.dispose();
+      return { n: items.length, m, c };
+    });
   }
 }
