@@ -10,7 +10,8 @@
 
 // Estilo do elenco todo. `proportions`: 'none' | 'sutil' | 'chibi' (lib/proportions.mjs);
 // um personagem pode ter o seu próprio `proportions`.
-export const STYLE = { proportions: 'chibi' };
+// `contactShadow`: sombra de contato gravada nas cores (lib/ao.mjs).
+export const STYLE = { proportions: 'chibi', contactShadow: false };
 
 // uniforme de campo do Ibama: verde-oliva, colete com o nome em amarelo
 const OLIVE = '#7d8856';

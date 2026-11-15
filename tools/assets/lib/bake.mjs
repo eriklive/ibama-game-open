@@ -344,7 +344,7 @@ function dress(layers, c) {
  * Para cada texel da textura do corpo: posição 3D na pose de repouso (x, y, z) e pesos das 8
  * partes do corpo. `hit` = 2 dentro de um triângulo, 1 na folga da borda, 0 fora do atlas.
  */
-function rasterize(prim, skin, size) {
+export function rasterize(prim, skin, size) {
   const pos = prim.getAttribute('POSITION').getArray();
   const uv = prim.getAttribute('TEXCOORD_0').getArray();
   const J = prim.getAttribute('JOINTS_0').getArray();

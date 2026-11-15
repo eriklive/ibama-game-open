@@ -13,7 +13,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHARACTERS } from './characters.mjs';
-import { bodyMetrics, repaintBody } from './lib/bake.mjs';
+import { bodyMetrics, repaintBody, rasterize } from './lib/bake.mjs';
+import { Density, shadeKit, shadeBodyTexture } from './lib/ao.mjs';
 import { PIECES, measure } from './lib/gear.mjs';
 import { BodyShape, Kit, KIT, relaxLegs } from './lib/kit.mjs';
 import { dequantizeSkinned } from './lib/glb-space.mjs';
@@ -26,6 +27,8 @@ const only = args.find((a) => a.startsWith('--only='))?.slice(7).split(',');
 const BASE = path.join(here, 'base');
 // --proportions=sutil|chibi|none passa por cima de characters.mjs (para comparar versões)
 const forced = args.find((a) => a.startsWith('--proportions='))?.slice(14);
+// --ao / --no-ao passam por cima de STYLE.contactShadow
+const aoFlag = args.includes('--ao') ? true : args.includes('--no-ao') ? false : null;
 const OUT = args.find((a) => a.startsWith('--out='))?.slice(6) ?? path.join(here, '../../public/assets');
 
 await MeshoptDecoder.ready;
@@ -97,6 +100,7 @@ async function refit(def) {
       }
     }
   }
+  if ((aoFlag ?? STYLE.contactShadow) && !kit.empty) await contactShadow(root, body, bodyPrim, kit);
   if (!kit.empty) {
     const armature = root.listNodes().find((n) => n.getMesh() && n.getSkin())?.getParentNode();
     const mat = doc.createMaterial('Gear').setRoughnessFactor(0.78).setMetallicFactor(0).setDoubleSided(true);
@@ -111,6 +115,20 @@ async function refit(def) {
   const tris = root.listMeshes().flatMap((m) => m.listPrimitives()).reduce((s, p) => s + p.getIndices().getCount() / 3, 0);
   const gearTris = root.listMeshes().find((m) => m.getName() === 'Gear')?.listPrimitives()[0].getIndices().getCount() / 3 || 0;
   console.log(`${def.id.padEnd(12)} ${(fs.statSync(file).size / 1024).toFixed(0).padStart(5)} KB  ${Math.round(tris)} triângulos (kit: ${Math.round(gearTris)})`);
+}
+
+/** Sombra de contato: escurece as dobras do kit e o corpo em volta das peças (lib/ao.mjs). */
+async function contactShadow(root, body, bodyPrim, kit) {
+  const P = [...body.pos, ...kit.pos];
+  const min = [0, 1, 2].map((k) => { let m = Infinity; for (let i = k; i < P.length; i += 3) m = Math.min(m, P[i]); return m; });
+  const max = [0, 1, 2].map((k) => { let m = -Infinity; for (let i = k; i < P.length; i += 3) m = Math.max(m, P[i]); return m; });
+  const gear = new Density(min, max).splat(kit.pos, kit.idx).blur(3, 2);
+  const all = new Density(min, max).splat(body.pos, body.idx).splat(kit.pos, kit.idx).blur(3, 2);
+  shadeKit(kit, all);
+  const skinNode = root.listNodes().find((n) => n.getMesh()?.listPrimitives().includes(bodyPrim));
+  const tex = bodyPrim.getMaterial().getBaseColorTexture();
+  const texels = rasterize(bodyPrim, skinNode.getSkin(), 1024);
+  tex.setImage(new Uint8Array(await shadeBodyTexture(tex.getImage(), texels, gear))).setMimeType('image/jpeg');
 }
 
 /** Pinta o figurino de `def` sobre a textura do molde e tinge o cabelo. */
