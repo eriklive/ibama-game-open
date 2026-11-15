@@ -9,7 +9,7 @@ import sharp from 'sharp';
 export const PARTS = ['head', 'torso', 'uarm', 'larm', 'hand', 'thigh', 'calf', 'foot'];
 
 /** Parte do corpo de cada osso (dedos contam como mão). */
-function partOf(bone) {
+export function partOf(bone) {
   if (/^(Head|neck)/.test(bone)) return 0;
   if (/^(pelvis|spine|clavicle|root)/.test(bone)) return 1;
   if (/^upperarm/.test(bone)) return 2;
@@ -54,7 +54,7 @@ export function noise3(x, y, z) {
 const fbm = (x, y, z) => 0.65 * noise3(x, y, z) + 0.35 * noise3(x * 2.3 + 7, y * 2.3 + 3, z * 2.3 + 11);
 
 // letras 5×7 para o "IBAMA" do colete
-const FONT = {
+export const FONT = {
   I: ['11111', '00100', '00100', '00100', '00100', '00100', '11111'],
   B: ['11110', '10001', '10001', '11110', '10001', '10001', '11110'],
   A: ['01110', '10001', '10001', '11111', '10001', '10001', '10001'],

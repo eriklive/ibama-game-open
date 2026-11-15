@@ -6,7 +6,7 @@ descritos em [README.md](README.md).
 
 | Arquivo | Origem | Autor | Licença | Alterações |
 |---|---|---|---|---|
-| `characters/ana/ana.glb` | [Universal Base Characters](https://quaternius.itch.io/universal-base-characters) (Standard): `Superhero_Female_FullBody` + `Hair_Buns` | Quaternius | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | Corpo e cabelo juntos, pele e roupas repintadas na textura, malha engrossada sob a roupa, acessórios gerados por código (`tools/assets`), texturas reduzidas, malha comprimida |
+| `characters/ana/ana.glb` | [Universal Base Characters](https://quaternius.itch.io/universal-base-characters) (Standard): `Superhero_Female_FullBody` + `Hair_Buns` | Quaternius | [CC0 1.0](https://creativecommons.org/publicdomain/zero/1.0/) | Corpo e cabelo juntos, pele e roupas repintadas na textura, malha engrossada sob a roupa, acessórios e equipamento com volume gerados por código (`tools/assets`: build + refit), pernas alisadas, texturas reduzidas, malha comprimida |
 | `characters/bruno/bruno.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Buzzed` + `Hair_Beard` | Quaternius | CC0 1.0 | Idem |
 | `characters/clara/clara.glb` | Universal Base Characters (Standard): `Superhero_Female_FullBody` + `Hair_Long` | Quaternius | CC0 1.0 | Idem |
 | `characters/kaua/kaua.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Long` | Quaternius | CC0 1.0 | Idem |
