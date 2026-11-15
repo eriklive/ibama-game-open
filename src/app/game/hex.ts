@@ -50,14 +50,14 @@ export function hexDistance(a: HexCoord, b: HexCoord): number {
   return Math.max(Math.abs(ca.x - cb.x), Math.abs(ca.y - cb.y), Math.abs(ca.z - cb.z));
 }
 
-/** Hexágonos atingíveis a partir de `from` (sem incluir a origem). */
-export function hexesInRange(from: HexCoord, range: number, cols: number, rows: number): HexCoord[] {
+/** Hexágonos até `range` passos de `from` (sem incluir a origem) que ficam dentro da área. */
+export function hexesInRange(from: HexCoord, range: number, area: HexArea): HexCoord[] {
   const out: HexCoord[] = [];
-  for (let col = 0; col < cols; col++) {
-    for (let row = 0; row < rows; row++) {
+  for (let col = from.col - range; col <= from.col + range; col++) {
+    for (let row = from.row - range; row <= from.row + range; row++) {
       const h = { col, row };
       const d = hexDistance(from, h);
-      if (d > 0 && d <= range) out.push(h);
+      if (d > 0 && d <= range && area.has(h)) out.push(h);
     }
   }
   return out;
@@ -102,8 +102,51 @@ export function hexNeighbors(h: HexCoord): HexCoord[] {
   return dirs.map(([dx, dy, dz]) => fromCube({ x: c.x + dx, y: c.y + dy, z: c.z + dz }));
 }
 
-const inside = (h: HexCoord, cols: number, rows: number): boolean =>
-  h.col >= 0 && h.row >= 0 && h.col < cols && h.row < rows;
+/** Distância entre os centros de dois vizinhos, em unidades de `hexToWorld` com tamanho 1. */
+export const HEX_STEP = Math.sqrt(3);
+
+/**
+ * Região jogável do tabuleiro: o retângulo de um mapa de teste ou o círculo de uma missão.
+ * As regras (alcance, visão, patrulha, fuga) só enxergam hexágonos de dentro dela.
+ */
+export interface HexArea {
+  /** Todos os hexágonos da área. */
+  readonly hexes: readonly HexCoord[];
+  has(h: HexCoord): boolean;
+  /** Na borda: dentro da área, com algum vizinho fora (é por ali que se foge). */
+  isEdge(h: HexCoord): boolean;
+}
+
+function makeArea(hexes: HexCoord[]): HexArea {
+  const keys = new Set(hexes.map(hexKey));
+  const has = (h: HexCoord) => keys.has(hexKey(h));
+  return { hexes, has, isEdge: (h) => has(h) && hexNeighbors(h).some((n) => !has(n)) };
+}
+
+/** Retângulo de `cols` × `rows` a partir de (0, 0). */
+export function rectArea(cols: number, rows: number): HexArea {
+  const hexes: HexCoord[] = [];
+  for (let col = 0; col < cols; col++) for (let row = 0; row < rows; row++) hexes.push({ col, row });
+  return makeArea(hexes);
+}
+
+/**
+ * Círculo de verdade (não o "hexágono" da distância em passos): entram os hexágonos cujo
+ * centro fica a até `radius` passos de `center`, medidos em linha reta no plano.
+ */
+export function circleArea(center: HexCoord, radius: number): HexArea {
+  const c = hexToWorld(center, 1);
+  const limit = radius * HEX_STEP + 1e-6;
+  const hexes: HexCoord[] = [];
+  const span = Math.ceil(radius * 1.2) + 1;
+  for (let col = center.col - span; col <= center.col + span; col++) {
+    for (let row = center.row - span; row <= center.row + span; row++) {
+      const p = hexToWorld({ col, row }, 1);
+      if (Math.hypot(p.x - c.x, p.z - c.z) <= limit) hexes.push({ col, row });
+    }
+  }
+  return makeArea(hexes);
+}
 
 /**
  * Busca em largura a partir de `from`, sem atravessar hexágonos bloqueados.
@@ -113,8 +156,7 @@ const inside = (h: HexCoord, cols: number, rows: number): boolean =>
 export function reachableHexes(
   from: HexCoord,
   steps: number,
-  cols: number,
-  rows: number,
+  area: HexArea,
   blocked: ReadonlySet<string> = new Set(),
 ): Map<string, { coord: HexCoord; cost: number; prev: string }> {
   const out = new Map<string, { coord: HexCoord; cost: number; prev: string }>();
@@ -126,7 +168,7 @@ export function reachableHexes(
     for (const h of frontier) {
       for (const n of hexNeighbors(h)) {
         const k = hexKey(n);
-        if (seen.has(k) || !inside(n, cols, rows) || blocked.has(k)) continue;
+        if (seen.has(k) || !area.has(n) || blocked.has(k)) continue;
         seen.add(k);
         out.set(k, { coord: n, cost, prev: hexKey(h) });
         next.push(n);
