@@ -101,9 +101,13 @@ genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em
 
 Há sete modelos em `public/assets/characters/`: quatro agentes do Ibama (Ana, Bruno, Clara e
 Kauã) e três inimigos (madeireiro, garimpeiro e caçador). Todos saem de `tools/assets`, a partir
-dos corpos CC0 da Quaternius: o elenco (corpo, pele, cabelo, roupa, acessórios) fica em
-`tools/assets/characters.mjs` e o catálogo usado pelo jogo, em `MODELS`
-(`src/app/game/character-model.ts`). O Kauã está no catálogo, mas ainda não entra na partida:
+dos corpos CC0 da Quaternius: o elenco (corpo, pele, cabelo, roupa, acessórios e equipamento)
+fica em `tools/assets/characters.mjs` e o catálogo usado pelo jogo, em `MODELS`
+(`src/app/game/character-model.ts`).
+
+O estilo é uma versão cartoon de agentes de campo realistas: equipamento com volume de verdade
+(colete de placas, joelheiras, luvas, botas, coldre), formas arredondadas e luz pintada à mão.
+As referências e as regras estão em `docs/direcao-de-arte.md`. O Kauã está no catálogo, mas ainda não entra na partida:
 para isso falta uma entrada em `CHARACTERS` e uma posição inicial por mapa (`maps.ts`).
 
 ## Tecnologia
