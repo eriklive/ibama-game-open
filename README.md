@@ -52,6 +52,20 @@ vai tentar correr. **Abordar!** confirma; tocar no tabuleiro ou em **Cancelar** 
 Os números ficam em `ENEMY_RULES` e `APPROACH_RULES` (`src/app/game/enemies.ts`); paredes e
 rotas de patrulha ficam no mapa (`maps.ts`).
 
+### Agrupar
+
+Na vez de um agente, o botão **Agrupar** reúne a equipe: os hexágonos claros são os **pontos de
+encontro** possíveis — lugares que todos alcançam com o movimento que resta a quem está na vez.
+Toque num ponto para ver o caminho e toque de novo (ou em **Agrupar!**) para confirmar: quem está
+na vez vai até o ponto e os outros param em volta dele. Gasta-se o caminho mais longo entre todos.
+
+- Agrupados, os agentes **andam juntos**: quando um deles anda, os outros seguem o rastro logo
+  atrás. Quem não consegue acompanhar (caminho bloqueado) sai do grupo.
+- Juntos, cada agente ganha **+2 de movimento** na rolagem do seu turno.
+- **Desagrupar** desfaz o grupo e cada um volta a andar por conta própria.
+
+O bônus fica em `GROUP_RULES` (`src/app/game/group.ts`).
+
 ### Mapa do aeroporto
 
 O mapa **Aeroporto** (desenho de 44×38, com a missão num círculo — ver abaixo) é o primeiro mapa "de verdade". O **hangar** fica ao norte, com um
@@ -138,6 +152,7 @@ símbolo correspondente.
 | ○ | Cancela |
 | □ | Abordar |
 | △ | Passar a vez |
+| Share | Agrupar / desagrupar |
 | L1 / R1 | Personagem anterior / seguinte |
 | Touchpad / R3 | Volta para quem está na vez |
 | Analógico direito | Move a câmera |
