@@ -41,6 +41,17 @@ abordagem antes de confirmar: hexágonos **verdes** são a zona de rendição (a
 hexágonos) e os **laranja**, o resto do raio (até 4). O painel lista quem se rende e quem
 vai tentar correr. **Abordar!** confirma; tocar no tabuleiro ou em **Cancelar** desiste.
 
+**Segurar para abordar:** um toque rápido no **Abordar** abre essa prévia, mas dá para
+**segurar** o botão: o raio cresce no tabuleiro anel por anel, um contorno vermelho se fecha em
+volta do botão e, quando fecha (cerca de 1 s), a abordagem é feita direto. Soltar antes desiste.
+
+Ao abordar, uma **onda de voz** sai do agente: cada hexágono do raio pula e acende quando ela
+passa, e cada suspeito leva um susto e reage (rende-se ou fica em alerta) quando a onda chega
+até ele, então quem está mais perto reage primeiro. Em seguida aparece o **auto de abordagem**:
+uma ficha com a foto de cada suspeito, carimbo verde **Rendido** ou círculo vermelho **Vai
+correr**. Ela some sozinha em uns 3 s (ou com um toque em **Fechar**) e a vez passa. Os tempos
+ficam em `APPROACH_FX` (`src/app/game/approach-fx.ts`).
+
 - Inimigos a até 2 hexágonos **se rendem**: a base fica branca, eles se agacham com uma bandeira branca, param de
   agir e continuam ocupando o hexágono. Vale também para quem já estava em alerta.
 - Inimigos entre 3 e 4 hexágonos são **alertados** e tentam correr no turno inimigo.
@@ -152,7 +163,7 @@ símbolo correspondente.
 | Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
 | ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
 | ○ | Cancela |
-| □ | Abordar |
+| □ | Abordar: toque abre a prévia, segurar aborda direto |
 | △ | Passar a vez |
 | Share | Agrupar / desagrupar |
 | L1 / R1 | Personagem anterior / seguinte |

@@ -85,6 +85,47 @@
     </div>
   }
 
+  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr; some sozinho -->
+  @if (report(); as r) {
+    <div class="report" role="status" aria-live="polite" data-testid="approach-report" (click)="closeReport()">
+      <div class="report-head">
+        <strong>Auto de abordagem</strong>
+        <span>Turno {{ round() }} · Op. {{ map?.name }}</span>
+      </div>
+      <ul class="polas">
+        @for (e of r.surrender; track e.id; let i = $index) {
+          <li class="pola ok" [style.--tilt]="tilts[i % tilts.length] + 'deg'" [style.--i]="i">
+            <span class="pola-img surrendered" aria-hidden="true">
+              <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" /><circle cx="20" cy="12" r="5.5" /><path class="pole" d="M27 24 L33 6" /><rect class="flag" x="31" y="5" width="7" height="5" /></svg>
+            </span>
+            <span class="pola-name">{{ e.name }}</span>
+            <span class="pola-stamp">Rendido</span>
+          </li>
+        }
+        @for (e of r.flee; track e.id; let i = $index) {
+          <li class="pola run" [style.--tilt]="-tilts[i % tilts.length] + 'deg'" [style.--i]="r.surrender.length + i">
+            <span class="pola-img alert" aria-hidden="true">
+              <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" transform="rotate(12 20 25)" /><circle cx="22" cy="12" r="5.5" /></svg>
+            </span>
+            <span class="pola-name">{{ e.name }}</span>
+            <span class="pola-stamp">Vai correr</span>
+            <svg class="pola-circle" viewBox="0 0 100 130" preserveAspectRatio="none" aria-hidden="true">
+              <path pathLength="100" d="M50 4 C 88 2, 98 40, 96 70 C 94 108, 70 126, 44 124 C 14 122, 2 96, 4 62 C 6 28, 22 6, 58 8" />
+            </svg>
+          </li>
+        }
+      </ul>
+      <div class="report-foot">
+        <span>{{ reportTally() }}</span>
+        <span class="sig">{{ r.agent }}</span>
+      </div>
+      <button type="button" class="report-close" (click)="$event.stopPropagation(); closeReport()">
+        Fechar &#8250;
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+      </button>
+    </div>
+  }
+
   <!-- Agentes: fotos 3x4 -->
   <nav class="agents" aria-label="Agentes">
     @for (c of characters; track c.id; let i = $index) {
@@ -262,14 +303,39 @@
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
         </button>
       }
-      <!-- Abordar só aparece com suspeito no raio -->
+      <!-- Abordar só aparece com suspeito no raio: toque abre a prévia, segurar aborda direto -->
       @if (phase() === 'moving-choice' && canApproach()) {
+        @if (charging()) {
+          <div class="slip hold-slip" role="status" aria-live="polite" data-testid="hold-hint">
+            <strong>Segure para abordar</strong>
+            <ul class="approach-list">
+              @for (e of approachPlan().surrender; track e.id) {
+                <li class="surrender">{{ e.name }} se rende</li>
+              }
+              @for (e of approachPlan().flee; track e.id) {
+                <li class="flee">{{ e.name }} vai correr</li>
+              }
+            </ul>
+            <span class="small">Solte antes para desistir.</span>
+          </div>
+        }
         <button
           type="button"
           class="paper approach"
-          [attr.aria-label]="'Abordar ' + approachCount() + (approachCount() === 1 ? ' suspeito' : ' suspeitos') + ' no raio'"
+          [class.holding]="charging()"
+          [attr.aria-label]="'Abordar ' + approachCount() + (approachCount() === 1 ? ' suspeito' : ' suspeitos') + ' no raio. Toque para ver a prévia; segure para abordar direto.'"
           data-testid="approach"
-          (click)="startApproach()">
+          (pointerdown)="approachPress($event, 'pointer')"
+          (pointerup)="approachRelease()"
+          (pointercancel)="approachRelease()"
+          (keydown)="approachKey($event, true)"
+          (keyup)="approachKey($event, false)"
+          (contextmenu)="$event.preventDefault()"
+          (click)="approachClick()">
+          <svg class="hold-ring" viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true">
+            <rect x="1.5" y="1.5" width="97" height="47" pathLength="100" vector-effect="non-scaling-stroke"
+              [attr.stroke-dashoffset]="100 - holdProgress() * 100" />
+          </svg>
           <span class="approach-stamp">Abordar</span>
           <span class="badge" aria-hidden="true">{{ approachCount() }}</span>
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }

@@ -33,7 +33,8 @@ import {
   visionHexes,
 } from '../../game/enemies';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
-import { Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
+import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
+import { APPROACH_FX, holdProgress, holdRing, waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
 
@@ -41,11 +42,6 @@ import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCo
 const MISSION_DEADLINE = 5;
 
 type Phase ='rolling' | 'moving-choice' | 'walking' | 'ending' | 'enemy';
-
-const namesOf = (es: readonly EnemyState[]): string => {
-  const names = es.map((e) => e.name);
-  return names.length > 1 ? `${names.slice(0, -1).join(', ')} e ${names.at(-1)}` : names[0];
-};
 
 const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -212,6 +208,24 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Pré-visualizando a abordagem (zonas pintadas, aguardando confirmação). */
   protected readonly approaching = signal(false);
   protected readonly approachRules = APPROACH_RULES;
+  /** Segurando o **Abordar**: progresso do anel em volta do botão (0 a 1). */
+  protected readonly holdProgress = signal(0);
+  /** Passou do toque rápido: o raio está crescendo no tabuleiro. */
+  protected readonly charging = signal(false);
+  private hold: { start: number; frame: number; ring: number; source: 'pointer' | 'key' | 'pad' } | null = null;
+  /** Quando o último gesto de segurar acabou (o clique que vem logo depois é ignorado). */
+  private holdEndedAt = -Infinity;
+  /** Auto de abordagem na tela: quem se rendeu e quem vai tentar correr. */
+  protected readonly report = signal<{ agent: string; surrender: EnemyState[]; flee: EnemyState[] } | null>(null);
+  protected readonly reportTally = computed(() => {
+    const r = this.report();
+    if (!r) return '';
+    const s = r.surrender.length;
+    const f = r.flee.length;
+    return [s && `${s} ${s === 1 ? 'rendido' : 'rendidos'}`, f && `${f} ${f === 1 ? 'alertado' : 'alertados'}`, 'vez encerrada']
+      .filter(Boolean)
+      .join(' · ');
+  });
   protected readonly statusLabel: Record<EnemyState['status'], string> = {
     patrol: 'vigiando',
     alert: 'em fuga!',
@@ -354,6 +368,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.destroyed = true;
     this.stopPad?.();
+    this.stopHold();
     this.clearTimers();
     clearTimeout(this.noticeTimer);
     clearInterval(this.statsTicker);
@@ -716,17 +731,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Primeiro passo: mostra o raio e quem se renderia ou correria. */
   protected startApproach(): void {
     if (this.phase() !== 'moving-choice' || !this.canApproach()) return;
-    const map = this.map;
-    const from = this.positions().get(this.active().id);
-    if (!map || !from) return;
-    this.focusCharacter(this.active().id);
-    this.closeGrouping();
-    this.selected.set(null);
+    if (!this.map || !this.positions().get(this.active().id)) return;
+    this.clearBoardForApproach();
     this.approaching.set(true);
-    this.board?.setSelected(null);
-    this.board?.setReachable([]);
+    this.paintApproachZones(APPROACH_RULES.radius);
+  }
+
+  /** Pinta as zonas da abordagem até o anel `upTo` (o raio cresce enquanto o botão é segurado). */
+  private paintApproachZones(upTo: number): void {
+    const from = this.positions().get(this.active().id);
+    if (!from) return;
     const zone = (min: number, max: number) =>
-      hexesInRange(from, max, this.area)
+      hexesInRange(from, Math.min(max, upTo), this.area)
         .filter((h) => !this.solid.has(hexKey(h)))
         .filter((h) => hexDistance(from, h) > min)
         .map(hexKey);
@@ -736,39 +752,141 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     });
   }
 
+  private clearBoardForApproach(): void {
+    this.focusCharacter(this.active().id);
+    this.closeGrouping();
+    this.selected.set(null);
+    this.board?.setSelected(null);
+    this.board?.setReachable([]);
+  }
+
   protected cancelApproach(): void {
     this.closeApproach();
     if (this.phase() === 'moving-choice') this.refreshBoard();
   }
 
-  /** Confirma: rendições e alertas acontecem na hora, e a vez do agente acaba. */
+  // ---------- segurar para abordar ----------
+
+  /** Apertou o **Abordar** (toque, tecla ou □): toque rápido abre a prévia; segurando, aborda. */
+  protected approachPress(ev: Event | null, source: 'pointer' | 'key' | 'pad'): void {
+    if (this.hold || this.approaching() || this.phase() !== 'moving-choice' || !this.canApproach()) return;
+    ev?.preventDefault();
+    if (ev instanceof PointerEvent) (ev.currentTarget as Element | null)?.setPointerCapture?.(ev.pointerId);
+    this.hold = { start: performance.now(), frame: 0, ring: 0, source };
+    this.holdFrame();
+  }
+
+  /** Soltou: antes do toque rápido vira prévia; depois, antes do anel fechar, desiste. */
+  protected approachRelease(): void {
+    if (!this.hold) return;
+    const tap = !this.charging();
+    this.stopHold();
+    if (tap) {
+      this.startApproach();
+      return;
+    }
+    this.board?.setApproachZones(null);
+    if (this.phase() === 'moving-choice') this.refreshBoard();
+    this.say('Abordagem cancelada: segure até o anel fechar', 'info');
+  }
+
+  protected approachKey(ev: KeyboardEvent, down: boolean): void {
+    if (ev.key !== ' ' && ev.key !== 'Enter') return;
+    ev.preventDefault();
+    if (!down) this.approachRelease();
+    else if (!ev.repeat) this.approachPress(null, 'key');
+  }
+
+  /** Clique sem toque nem tecla (leitor de tela): abre a prévia de sempre. */
+  protected approachClick(): void {
+    if (this.hold || performance.now() - this.holdEndedAt < 600) return;
+    this.startApproach();
+  }
+
+  private holdFrame = (): void => {
+    const h = this.hold;
+    if (!h) return;
+    if (this.phase() !== 'moving-choice') {
+      this.stopHold();
+      return;
+    }
+    const p = holdProgress(performance.now() - h.start);
+    if (p > 0 && !this.charging()) {
+      this.clearBoardForApproach();
+      this.charging.set(true);
+    }
+    this.holdProgress.set(p);
+    const ring = holdRing(p);
+    if (ring !== h.ring) {
+      h.ring = ring;
+      this.paintApproachZones(ring);
+      this.haptics.vibrate(12);
+      this.gamepad.rumble(0.15, 0.3, 40);
+    }
+    if (p >= 1) {
+      this.stopHold();
+      this.executeApproach();
+      return;
+    }
+    h.frame = requestAnimationFrame(this.holdFrame);
+  };
+
+  private stopHold(): void {
+    if (this.hold) cancelAnimationFrame(this.hold.frame);
+    this.hold = null;
+    this.holdEndedAt = performance.now();
+    this.charging.set(false);
+    this.holdProgress.set(0);
+  }
+
+  /** Confirma pela prévia (**Abordar!** ou ✕). */
   protected confirmApproach(): void {
     if (!this.approaching() || this.phase() !== 'moving-choice') return;
-    const from = this.positions().get(this.active().id)!;
+    this.executeApproach();
+  }
+
+  /**
+   * Aborda: rendições e alertas valem na hora, mas no tabuleiro cada suspeito reage quando
+   * a onda de voz chega até ele. Depois da onda aparece o auto de abordagem e a vez acaba.
+   */
+  private executeApproach(): void {
+    if (this.phase() !== 'moving-choice') return;
+    const from = this.positions().get(this.active().id);
     const { surrender, flee } = this.approachPlan();
-    for (const e of surrender) {
-      const facing = facingBetween(e.hex, from);
-      this.updateEnemy(e.id, { status: 'surrendered', facing });
-      this.board?.setEnemyFacing(e.id, facing);
-      this.board?.setEnemySurrendered(e.id, true);
-    }
-    for (const e of flee) {
-      const facing = facingBetween(e.hex, from);
-      this.updateEnemy(e.id, { status: 'alert', facing });
-      this.board?.setEnemyFacing(e.id, facing);
-      this.board?.setEnemyAlert(e.id, true);
-    }
-    this.closeApproach();
-    this.refreshVision();
-    const parts = [
-      surrender.length && `${namesOf(surrender)} ${surrender.length === 1 ? 'se rendeu' : 'se renderam'}`,
-      flee.length && `${namesOf(flee)} ${flee.length === 1 ? 'vai tentar correr' : 'vão tentar correr'}`,
-    ].filter(Boolean);
-    this.say(`Ibama! ${parts.join(' · ')}`, 'alert');
-    this.gamepad.rumble(1, 0.6, 320);
+    if (!from || surrender.length + flee.length === 0) return;
+    this.approaching.set(false);
+    this.paintApproachZones(APPROACH_RULES.radius);
     this.phase.set('ending');
-    if (!this.actingEnemies().length) this.later(1400, () => this.announceIfOver());
-    this.later(reducedMotion() ? 400 : 1600, () => this.endTurn());
+    const motion = !reducedMotion();
+    for (const e of surrender) this.updateEnemy(e.id, { status: 'surrendered', facing: facingBetween(e.hex, from) });
+    for (const e of flee) this.updateEnemy(e.id, { status: 'alert', facing: facingBetween(e.hex, from) });
+    this.refreshVision();
+    this.gamepad.rumble(1, 0.6, 320);
+    this.haptics.vibrate(APPROACH_PATTERN);
+    if (motion) this.board?.playApproachWave(from);
+    for (const e of [...surrender, ...flee]) {
+      const delay = motion ? waveArrival(hexDistance(from, e.hex)) * 1000 : 0;
+      this.later(delay, () => {
+        const facing = facingBetween(e.hex, from);
+        this.board?.setEnemyFacing(e.id, facing);
+        if (motion) this.board?.startleEnemy(e.id);
+        if (surrender.includes(e)) this.board?.setEnemySurrendered(e.id, true);
+        else this.board?.setEnemyAlert(e.id, true);
+      });
+    }
+    this.later(motion ? waveDuration() * 1000 : 300, () => {
+      this.board?.setApproachZones(null);
+      this.report.set({ agent: this.active().name, surrender, flee });
+      this.later(motion ? APPROACH_FX.reportMs : 1800, () => this.closeReport());
+    });
+  }
+
+  /** Fecha o auto de abordagem (sozinho ou com um toque) e passa a vez. */
+  protected closeReport(): void {
+    if (!this.report()) return;
+    this.report.set(null);
+    if (!this.actingEnemies().length) this.announceIfOver();
+    this.endTurn();
   }
 
   private closeApproach(): void {
@@ -785,6 +903,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected restart(): void {
     this.epoch++;
     this.clearTimers();
+    this.stopHold();
+    this.report.set(null);
     this.positions.set(this.initialPositions());
     this.group.set(new Set());
     this.closeGrouping();
@@ -820,7 +940,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const choosing = this.phase() === 'moving-choice';
     switch (b) {
       case 'cross':
-        if (this.phase() === 'rolling') this.confirmRoll();
+        if (this.report()) this.closeReport();
+        else if (this.phase() === 'rolling') this.confirmRoll();
         else if (this.approaching()) this.confirmApproach();
         else if (this.grouping()) void this.confirmGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
@@ -837,8 +958,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         }
         break;
       case 'square':
+        // toque rápido abre a prévia; segurando □, aborda direto
         if (this.approaching()) this.cancelApproach();
-        else if (!this.grouping()) this.startApproach();
+        else if (!this.grouping()) this.approachPress(null, 'pad');
         break;
       case 'share':
         // Share: agrupa (ou desagrupa) a equipe
@@ -892,6 +1014,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Analógico direito move a câmera; R2 aproxima e L2 afasta. */
   private padFrame(dt: number, state: PadState): void {
+    if (this.hold?.source === 'pad' && state.buttons.square < 0.5) this.approachRelease();
     if (!this.board) return;
     const r = deadzone(state.right);
     if (r.x || r.y) this.board.panBy(r.x * dt * 9, r.y * dt * 9);
