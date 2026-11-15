@@ -2,7 +2,7 @@
  * Ação "Agrupar": os agentes se encontram num ponto em comum e passam a andar juntos.
  * Aqui ficam só funções puras (testadas); a tela decide quando usá-las.
  */
-import { HexCoord, hexKey, hexNeighbors, pathTo, reachableHexes, sameHex } from './hex';
+import { HexArea, HexCoord, hexKey, hexNeighbors, pathTo, reachableHexes, sameHex } from './hex';
 
 export const GROUP_RULES = {
   /** Movimento extra de cada agente enquanto o grupo anda junto. */
@@ -19,9 +19,6 @@ export interface RallyPlan {
 }
 
 type Reach = ReturnType<typeof reachableHexes>;
-
-const inside = (h: HexCoord, cols: number, rows: number): boolean =>
-  h.col >= 0 && h.row >= 0 && h.col < cols && h.row < rows;
 
 /** Custo de `from` até `to` usando o alcance já calculado (0 se já está lá). */
 function costTo(from: HexCoord, reach: Reach, to: HexCoord): number | undefined {
@@ -53,14 +50,13 @@ export function rallyPoints(
   leaderId: string,
   units: ReadonlyMap<string, HexCoord>,
   steps: number,
-  cols: number,
-  rows: number,
+  area: HexArea,
   blocked: ReadonlySet<string>,
 ): Map<string, RallyPlan> {
   const out = new Map<string, RallyPlan>();
   const leaderFrom = units.get(leaderId);
   if (!leaderFrom || steps <= 0) return out;
-  const reaches = new Map([...units].map(([id, h]) => [id, reachableHexes(h, steps, cols, rows, blocked)]));
+  const reaches = new Map([...units].map(([id, h]) => [id, reachableHexes(h, steps, area, blocked)]));
   const occupied = new Set([...units.values()].map(hexKey));
   const followers = [...units.keys()].filter((id) => id !== leaderId);
   const leaderReach = reaches.get(leaderId)!;
@@ -70,7 +66,7 @@ export function rallyPoints(
     const ring = hexNeighbors(point);
     const free = ring
       .map((h, i) => ({ h, i }))
-      .filter(({ h }) => inside(h, cols, rows) && !blocked.has(hexKey(h)));
+      .filter(({ h }) => area.has(h) && !blocked.has(hexKey(h)));
     const best = assignSlots(followers, free, units, reaches);
     if (!best) continue;
     const paths = new Map<string, HexCoord[]>([[leaderId, pathTo(leaderReach, point)]]);
@@ -141,26 +137,25 @@ export function followLeader(
   leaderFrom: HexCoord,
   leaderPath: readonly HexCoord[],
   followers: ReadonlyMap<string, HexCoord>,
-  cols: number,
-  rows: number,
+  area: HexArea,
   blocked: ReadonlySet<string>,
 ): { paths: Map<string, HexCoord[]>; left: string[] } {
   const paths = new Map<string, HexCoord[]>();
   const end = leaderPath.at(-1) ?? leaderFrom;
   const range = leaderPath.length + 4;
-  const reaches = new Map([...followers].map(([id, h]) => [id, reachableHexes(h, range, cols, rows, blocked)]));
+  const reaches = new Map([...followers].map(([id, h]) => [id, reachableHexes(h, range, area, blocked)]));
 
   // vagas: o rastro, de trás para a frente, e depois os arredores do destino
   const slots: HexCoord[] = [];
   const seen = new Set([hexKey(end)]);
   const add = (h: HexCoord) => {
     const k = hexKey(h);
-    if (seen.has(k) || blocked.has(k) || !inside(h, cols, rows)) return;
+    if (seen.has(k) || blocked.has(k) || !area.has(h)) return;
     seen.add(k);
     slots.push(h);
   };
   [leaderFrom, ...leaderPath].reverse().forEach(add);
-  [...reachableHexes(end, 3, cols, rows, blocked).values()]
+  [...reachableHexes(end, 3, area, blocked).values()]
     .sort((a, b) => a.cost - b.cost)
     .forEach((n) => add(n.coord));
 

@@ -68,7 +68,7 @@ O bônus fica em `GROUP_RULES` (`src/app/game/group.ts`).
 
 ### Mapa do aeroporto
 
-O mapa **Aeroporto** (44×38) é o primeiro mapa "de verdade". O **hangar** fica ao norte, com um
+O mapa **Aeroporto** (desenho de 44×38, com a missão num círculo — ver abaixo) é o primeiro mapa "de verdade". O **hangar** fica ao norte, com um
 portão largo (12 hexágonos) e duas portas nos fundos. A **pista é um rastro de terra** de 6 hexágonos de
 largura, com sulcos de pneu, que sai do meio do portão e corta a mata de sul a norte. Por dentro cabem quatro aviões lado a lado (cada um ocupa
 4 colunas × 3 fileiras); por enquanto há um só, parado no meio. Dois postes de luz ficam do lado
@@ -84,6 +84,43 @@ O hangar (chapa ondulada, portão, arcos do telhado, postes e lâmpadas) e o avi
 `scenery.ts`. O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
+
+### Mundo semiaberto: área da missão
+
+No Aeroporto, a **missão é um círculo** de 26 hexágonos de raio em volta do meio do mapa, marcado
+por uma **aura verde-clara** (uma cortina de luz com uma faixa acesa no chão). Só se joga dentro
+dele: alcance, visão, patrulha e abordagem usam a área circular, e os inimigos em alerta **fogem
+pela borda do círculo**. O círculo passa um pouco do desenho em texto: o que cai fora do desenho
+continua a borda (a pista de terra segue, as trilhas avançam alguns hexágonos e somem na mata);
+as pontas dos cantos do desenho ficam de fora, como cenário.
+
+Em volta da missão há **100 hexágonos de mata** (só cenário, com clareiras e a pista de terra
+continuando para o sul) para a câmera passear. O chão de fora é um pouco mais escuro, para a área
+jogável se destacar. A área é configurada em `maps.ts` (`openWorld(..., { center, radius }, margem)`,
+em `world.ts`); o mapa de teste continua retangular (`playArea` devolve o retângulo).
+
+### Renderização por raio e menu de desempenho
+
+Só existe na cena o que está a até um **raio pré-renderizado** do centro de carregamento; a câmera
+enxerga no máximo o **raio de visão** (a névoa fecha ali e o plano de corte descarta o resto). Quando o
+centro da tela se afasta mais que *raio pré-renderizado − raio de visão* do centro de carregamento, o
+centro é recalculado: o que saiu do raio é descartado e o que entrou é montado **em segundo plano**,
+alguns blocos por quadro (até 4 ms), do mais perto para o mais longe — o bloco antigo só sai quando o
+novo está pronto, então não aparecem buracos. Além do raio fica só um chão liso de mata ("low poly").
+
+O botão **☰** (topo, à direita) abre o **menu**, com três modos (a escolha fica guardada no navegador):
+
+| Modo | Pré-renderiza (raio) | Câmera enxerga até | Extras |
+| --- | --- | --- | --- |
+| Normal | 65 hexágonos (5 do miolo + 60; diâmetro de 130) | 40 | — |
+| Desempenho | 30 | 20 | densidade de pixels até 1,5× |
+| Ultra desempenho | 20 | 10 | densidade 1×, sem sombras |
+
+O menu também mostra quantos blocos estão carregados e se ainda há algum sendo montado. Como tudo é
+desenhado em poucas malhas instanciadas — o chão da missão (cor, brilho e flutuação por hexágono),
+e cada bloco de 12 × 12 hexágonos do mundo (chão, contornos, troncos, copas, pinheiros e sulcos) —,
+o número de chamadas de desenho fica baixo mesmo com a câmera afastada. Código: `world-stream.ts`
+(blocos e fila), `tile-field.ts` (chão da missão), `render-settings.ts` (modos) e `hex-board.ts`.
 
 ### Controle (DualShock 4)
 
@@ -125,7 +162,8 @@ para isso falta uma entrada em `CHARACTERS` e uma posição inicial por mapa (`m
 
 - Angular 22 (componentes standalone, signals, zoneless)
 - Three.js para a cena 3D (`src/app/game/hex-board.ts`)
-- Grid hexagonal "flat-top" com offset odd-q (`src/app/game/hex.ts`)
+- Grid hexagonal "flat-top" com offset odd-q (`src/app/game/hex.ts`), com áreas jogáveis retangulares
+  ou circulares (`rectArea`, `circleArea`)
 - Mapas, personagens e regras em `src/app/game/maps.ts` (`CHARACTERS`, `MOVE_DICE`)
 - Dados em `src/app/game/dice.ts`; alcance com obstáculos em `hex.ts` (`reachableHexes`, `pathTo`)
 - Inimigos (visão, patrulha, fuga) em `src/app/game/enemies.ts`, como funções puras testadas
