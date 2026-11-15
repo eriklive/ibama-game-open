@@ -1,6 +1,7 @@
 import { ModelDef, MODELS } from './character-model';
 import { EnemySpawn } from './enemies';
 import { HexArea, HexCoord, circleArea, hexKey, rectArea } from './hex';
+import type { CoverKind } from './scenery';
 import { Terrain, openWorld } from './world';
 
 /** Tipo de chão de um hexágono (só muda a aparência; quem bloqueia são paredes e árvores). */
@@ -22,6 +23,13 @@ export interface GameMap {
   trees?: HexCoord[];
   /** Chão de cada hexágono (chave de `hexKey`); sem isso, o tabuleiro azul de teste. */
   ground?: ReadonlyMap<string, Ground>;
+  /**
+   * Carga empilhada que serve de cobertura (ver `COVER_HEIGHT`): a alta bloqueia passagem e
+   * visão, como parede; a baixa só bloqueia passagem e esconde quem está colado nela.
+   */
+  cover?: (HexCoord & { kind: CoverKind })[];
+  /** Hexágonos com decoração solta (galões, botijão): não bloqueiam nada. */
+  props?: HexCoord[];
   /** Hexágonos ocupados pelo avião estacionado: bloqueiam passagem e visão. */
   plane?: HexCoord[];
   /** Hangar: retângulo (colunas e fileiras, inclusive) cujas paredes viram chapa reta, com telhado em arco. */
@@ -62,16 +70,26 @@ export const CHARACTERS: Character[] = [
  *
  * `.` grama · `T` árvores · `#` parede · `_` piso interno · `D` porta (piso, passa)
  * `=` pista de asfalto · `:` pátio · `~` terra batida · `A` avião estacionado (piso, não passa)
+ *
+ * Carga no piso (cobertura, ver `COVER_HEIGHT`): `B` caixotes de madeira e `M` caixas de
+ * papelão (altas) · `S` sacos no palete e `G` gaiolas vazias (baixas) · `f` galões e botijão
+ * (só decoração, passa)
  */
 export function parseLayout(
   layout: readonly string[],
-): Pick<GameMap, 'cols' | 'rows' | 'walls' | 'trees' | 'ground' | 'plane'> {
+): Pick<GameMap, 'cols' | 'rows' | 'walls' | 'trees' | 'ground' | 'plane' | 'cover' | 'props'> {
   const cols = layout[0].length;
   const walls: HexCoord[] = [];
   const trees: HexCoord[] = [];
   const plane: HexCoord[] = [];
+  const cover: (HexCoord & { kind: CoverKind })[] = [];
+  const props: HexCoord[] = [];
   const ground = new Map<string, Ground>();
-  const kinds: Record<string, Ground> = { '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron', '~': 'dirt' };
+  const kinds: Record<string, Ground> = {
+    '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron', '~': 'dirt',
+    B: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor',
+  };
+  const coverKinds: Record<string, CoverKind> = { B: 'crates', M: 'boxes', S: 'sacks', G: 'cages' };
   layout.forEach((line, row) => {
     if (line.length !== cols) throw new Error(`Linha ${row} do mapa tem ${line.length} colunas (esperado: ${cols})`);
     [...line].forEach((ch, col) => {
@@ -82,10 +100,27 @@ export function parseLayout(
       if (ch === '#') walls.push(h);
       if (ch === 'T') trees.push(h);
       if (ch === 'A') plane.push(h);
+      if (ch === 'f') props.push(h);
+      if (coverKinds[ch]) cover.push({ ...h, kind: coverKinds[ch] });
     });
   });
-  return { cols, rows: layout.length, walls, trees, ground, plane };
+  return { cols, rows: layout.length, walls, trees, ground, plane, cover, props };
 }
+
+/**
+ * Altura de cada tipo de carga. **Alta**: ninguém passa e ninguém enxerga através (como
+ * parede). **Baixa**: ninguém passa, mas o inimigo enxerga por cima — só não vê o agente
+ * que está colado nela, do lado de lá (ver `visionHexes`).
+ */
+export const COVER_HEIGHT: Record<CoverKind, 'high' | 'low'> = {
+  crates: 'high',
+  boxes: 'high',
+  sacks: 'low',
+  cages: 'low',
+};
+
+const coverOf = (map: GameMap, height: 'high' | 'low'): HexCoord[] =>
+  (map.cover ?? []).filter((c) => COVER_HEIGHT[c.kind] === height);
 
 const areas = new WeakMap<GameMap, HexArea>();
 
@@ -99,15 +134,20 @@ export function playArea(map: GameMap): HexArea {
   return area;
 }
 
-/** Hexágonos em que ninguém entra e através dos quais ninguém enxerga: paredes, árvores e o avião. */
+/** Hexágonos em que ninguém entra e através dos quais ninguém enxerga: paredes, árvores, o avião e a carga alta. */
 export const blockedHexes = (map: GameMap): Set<string> =>
-  new Set([...map.walls, ...(map.trees ?? []), ...(map.plane ?? [])].map(hexKey));
+  new Set([...map.walls, ...(map.trees ?? []), ...(map.plane ?? []), ...coverOf(map, 'high')].map(hexKey));
+
+/** Carga baixa: ninguém entra, mas não bloqueia a visão (só esconde quem está colado nela). */
+export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map, 'low').map(hexKey));
 
 /**
  * Aeroporto clandestino: o hangar fica ao norte, com um portão largo (12 hexágonos) e duas
  * portas nos fundos. A pista é um rastro de terra de 6 hexágonos de largura que sai do meio
  * do portão e corta a mata de sul a norte, até a borda do mapa. Por dentro cabem quatro aviões lado a lado (cada um ocupa
- * 4 colunas × 3 fileiras) em mais de uma fileira; por enquanto há um só, no meio. O resto é
+ * 4 colunas × 3 fileiras) em mais de uma fileira; por enquanto há um só, no meio. A carga
+ * empilhada (cobertura) faz duas fileiras com vãos a oeste, um "L" a leste e um canto de gaiolas
+ * junto ao portão; os vãos são passagens e janelas de visão. O resto é
  * mata fechada, cortada por trilhas e clareiras: a equipe parte de uma clareira no canto sudoeste.
  */
 const AEROPORTO_LAYOUT = parseLayout([
@@ -118,17 +158,17 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTT..###D##############D###...TTTTTTTT',
   'TTTTTTTTT..#____________________#..TTT.TTTTT',
   'TTTTTT.....#____________________#.......TTTT',
-  'TTTT....T..#____________________#........TTT',
-  'TTTTT...TT.#____________________#.TTT...TTTT',
-  'TTTTT..TT..#____________________#..TTT..TTTT',
-  'TTTTTT.....#________AAAA________#.......TTTT',
-  'TT.....TT..#________AAAA________#..TTT....TT',
-  'TTT.T.TT...#________AAAA________#..TT....TTT',
-  'TTTT....T..#____________________#........TTT',
-  'TTTTT..TT..#____________________#..TTT..TTTT',
+  'TTTT....T..#_BMB_MB_____________#........TTT',
+  'TTTTT...TT.#_S____S____________f#.TTT...TTTT',
+  'TTTTT..TT..#__________________B_#..TTT..TTTT',
+  'TTTTTT.....#________AAAA______M_#.......TTTT',
+  'TT.....TT..#________AAAA______Sf#..TTT....TT',
+  'TTT.T.TT...#________AAAA______S_#..TT....TTT',
+  'TTTT....T..#____________fSBMS___#........TTT',
+  'TTTTT..TT..#_SS_MSS_____________#..TTT..TTTT',
   'T.T.T.TT...#____________________#..TT....TTT',
-  '......TTT.T#____________________#T.TTT.T....',
-  'T.T...TTT..#____________________#..TTT...TTT',
+  '......TTT.T#__________________GG#T.TTT.T....',
+  'T.T...TTT..#f_________________GG#..TTT...TTT',
   'TTTTT..TT..#####DDDDDDDDDDDD#####..TTT..TTTT',
   'TTTT...TT..........~~~~~~..........TTT..TTTT',
   'TTTTTT.TT.T........~~~~~~........T....TTTTTT',

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hexKey, reachableHexes } from './hex';
-import { MAPS, blockedHexes, parseLayout, playArea } from './maps';
+import { COVER_HEIGHT, MAPS, blockedHexes, lowCoverHexes, parseLayout, playArea } from './maps';
 
 describe('parseLayout', () => {
   it('separa paredes, árvores e chão', () => {
@@ -12,6 +12,17 @@ describe('parseLayout', () => {
     expect(m.ground?.get('2,1')).toBe('floor');
   });
 
+  it('lê a carga: alta bloqueia como parede, baixa fica à parte, decoração não bloqueia', () => {
+    const m = parseLayout(['BMSGf_']);
+    expect(m.cover?.map((c) => c.kind)).toEqual(['crates', 'boxes', 'sacks', 'cages']);
+    expect(m.cover?.map((c) => COVER_HEIGHT[c.kind])).toEqual(['high', 'high', 'low', 'low']);
+    expect(m.props).toEqual([{ col: 4, row: 0 }]);
+    const map = { ...m, id: 'x', name: 'x', subtitle: '', available: true, starts: [], enemies: [] };
+    expect([...blockedHexes(map)].sort()).toEqual(['0,0', '1,0']);
+    expect([...lowCoverHexes(map)].sort()).toEqual(['2,0', '3,0']);
+    expect(m.ground?.get('4,0')).toBe('floor');
+  });
+
   it('recusa linhas de tamanhos diferentes', () => {
     expect(() => parseLayout(['...', '..'])).toThrow();
   });
@@ -20,7 +31,7 @@ describe('parseLayout', () => {
 describe('mapas', () => {
   for (const map of MAPS.filter((m) => m.available)) {
     it(`${map.id}: pontos de partida e rotas ficam em hexágonos livres e alcançáveis`, () => {
-      const blocked = blockedHexes(map);
+      const blocked = new Set([...blockedHexes(map), ...lowCoverHexes(map)]);
       const reach = reachableHexes(map.starts[0], playArea(map).hexes.length, playArea(map), blocked);
       const points = [...map.starts.slice(1), ...map.enemies.flatMap((e) => e.patrol)];
       for (const p of points) {
@@ -61,9 +72,9 @@ describe('mapas', () => {
     expect(Math.min(...rows) - r0).toBe(r1 - Math.max(...rows));
   });
 
-  it('aeroporto: todo hexágono livre é alcançável (nenhuma clareira isolada)', () => {
+  it('aeroporto: todo hexágono livre é alcançável (nenhuma clareira isolada, nem atrás da carga)', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
-    const blocked = blockedHexes(map);
+    const blocked = new Set([...blockedHexes(map), ...lowCoverHexes(map)]);
     const area = playArea(map);
     const reach = reachableHexes(map.starts[0], 9999, area, blocked);
     expect(reach.size + 1).toBe(area.hexes.filter((h) => !blocked.has(hexKey(h))).length);
@@ -100,5 +111,17 @@ describe('aeroporto: mundo semiaberto', () => {
     const trees = sample.filter((h) => t(h).tree).length;
     expect(trees).toBeGreaterThan(200);
     expect(trees).toBeLessThan(400);
+  });
+
+  it('aeroporto: o hangar tem carga alta e baixa, toda por dentro das paredes', () => {
+    const map = MAPS.find((m) => m.id === 'aeroporto')!;
+    const [c0, c1] = map.hangar!.cols;
+    const [r0, r1] = map.hangar!.rows;
+    const cover = map.cover ?? [];
+    expect(cover.some((c) => COVER_HEIGHT[c.kind] === 'high')).toBe(true);
+    expect(cover.some((c) => COVER_HEIGHT[c.kind] === 'low')).toBe(true);
+    for (const c of [...cover, ...(map.props ?? [])]) {
+      expect(c.col > c0 && c.col < c1 && c.row > r0 && c.row < r1, hexKey(c)).toBe(true);
+    }
   });
 });

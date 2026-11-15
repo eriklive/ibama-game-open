@@ -32,7 +32,7 @@ import {
 } from '../../game/enemies';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints } from '../../game/group';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, playArea } from '../../game/maps';
+import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
 
 /** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
 const MISSION_DEADLINE = 5;
@@ -67,8 +67,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   protected readonly map: GameMap | undefined = findMap(inject(ActivatedRoute).snapshot.paramMap.get('mapId'));
   protected readonly characters = CHARACTERS;
-  /** Paredes e árvores: bloqueiam passagem e visão. */
+  /** Paredes, árvores, avião e carga alta: bloqueiam passagem e visão. */
   private readonly walls = this.map ? blockedHexes(this.map) : new Set<string>();
+  /** Carga baixa: bloqueia passagem; esconde da visão só quem está colado nela. */
+  private readonly lowCover = this.map ? lowCoverHexes(this.map) : new Set<string>();
+  /** Tudo o que ninguém atravessa (paredes e toda a carga). */
+  private readonly solid = new Set([...this.walls, ...this.lowCover]);
   /** Onde se joga: o círculo da missão (ou o retângulo do mapa de teste). */
   private readonly area = this.map ? playArea(this.map) : rectArea(0, 0);
   protected readonly diceSides = MOVE_DICE.sides;
@@ -253,7 +257,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ...[...this.positions()]
         .filter(([id]) => id !== leader && !(group.has(leader) && group.has(id)))
         .map(([, h]) => hexKey(h)),
-      ...this.walls,
+      ...this.solid,
       ...this.onBoardEnemies().map((e) => hexKey(e.hex)),
     ]);
     return reachableHexes(from, this.movesLeft(), this.area, blocked);
@@ -463,7 +467,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const map = this.map;
     const enemy = this.enemy(enemyId);
     if (!map || !enemy) return false;
-    const who = spotted(enemy, agents, this.area, this.walls);
+    const who = spotted(enemy, agents, this.area, this.walls, this.lowCover);
     if (!who) return false;
     const agent = agents.get(who)!;
     // vira para quem viu
@@ -662,7 +666,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setReachable([]);
     const zone = (min: number, max: number) =>
       hexesInRange(from, max, this.area)
-        .filter((h) => !this.walls.has(hexKey(h)))
+        .filter((h) => !this.solid.has(hexKey(h)))
         .filter((h) => hexDistance(from, h) > min)
         .map(hexKey);
     this.board?.setApproachZones({
@@ -883,15 +887,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.enemies.update((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
   }
 
-  /** Paredes e inimigos no tabuleiro: o que bloqueia os agentes (sem contar os outros agentes). */
+  /** Paredes, carga e inimigos no tabuleiro: o que bloqueia os agentes (sem contar os outros agentes). */
   private enemyWalls(): Set<string> {
-    return new Set([...this.walls, ...this.onBoardEnemies().map((e) => hexKey(e.hex))]);
+    return new Set([...this.solid, ...this.onBoardEnemies().map((e) => hexKey(e.hex))]);
   }
 
   /** Hexágonos que um inimigo não pode atravessar: paredes, agentes e os outros inimigos. */
   private blockedFor(enemyId: string): Set<string> {
     return new Set([
-      ...this.walls,
+      ...this.solid,
       ...[...this.positions().values()].map(hexKey),
       ...this.onBoardEnemies().filter((e) => e.id !== enemyId).map((e) => hexKey(e.hex)),
     ]);
@@ -903,7 +907,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!map) return;
     const keys = this.enemies()
       .filter((e) => e.status === 'patrol')
-      .flatMap((e) => visionHexes(e, this.area, this.walls).map(hexKey));
+      .flatMap((e) =>
+        visionHexes(e, this.area, this.walls, ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, this.lowCover).map(hexKey),
+      );
     this.board?.setVision(keys);
   }
 
