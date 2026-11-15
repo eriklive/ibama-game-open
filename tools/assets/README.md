@@ -69,6 +69,10 @@ caprichado (formas gordinhas, bordas acolchoadas, luz pintada por vértice):
 - **Peças rígidas** presas a um osso: porta-carregadores, rádio com antena e PTT, coldre com
   pistola, bolsos cargo, bandeira do Brasil no braço, IBAMA em blocos nas costas, mochila,
   abafador de ouvido, bandoleira de cartuchos.
+- **Proporções** (`lib/proportions.mjs`): cabeça, mãos e pés maiores e braços mais finos,
+  feitos na malha (as animações gravam a escala dos ossos, então o esqueleto não pode mudar).
+  `STYLE.proportions` em `characters.mjs` escolhe `none`, `sutil` ou `chibi`; para comparar sem
+  mexer no arquivo: `node refit.mjs --proportions=chibi --out=/tmp/teste`.
 - **Luz pintada**: cada peça clareia no topo, escurece na base e realça as quinas com um brilho
   somado (que aparece até em peça preta), como textura pintada à mão.
 

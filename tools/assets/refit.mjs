@@ -17,11 +17,15 @@ import { bodyMetrics } from './lib/bake.mjs';
 import { PIECES, measure } from './lib/gear.mjs';
 import { BodyShape, Kit, KIT, relaxLegs } from './lib/kit.mjs';
 import { dequantizeSkinned } from './lib/glb-space.mjs';
+import { PROPORTIONS, reproportion } from './lib/proportions.mjs';
+import { STYLE } from './characters.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
 const only = args.find((a) => a.startsWith('--only='))?.slice(7).split(',');
 const BASE = path.join(here, 'base');
+// --proportions=sutil|chibi|none passa por cima de characters.mjs (para comparar versões)
+const forced = args.find((a) => a.startsWith('--proportions='))?.slice(14);
 const OUT = args.find((a) => a.startsWith('--out='))?.slice(6) ?? path.join(here, '../../public/assets');
 
 await MeshoptDecoder.ready;
@@ -42,6 +46,13 @@ async function refit(def) {
   const bodyPrim = prims.find((p) => /Superhero/.test(p.getMaterial()?.getName() ?? ''));
   const brows = root.listNodes().find((n) => /Eyebrows/.test(n.getName())).getMesh().listPrimitives()[0];
   const M = bodyMetrics(skin);
+  const prop = PROPORTIONS[forced ?? def.proportions ?? STYLE.proportions];
+  if (!prop) throw new Error(`proporção desconhecida: ${forced ?? def.proportions ?? STYLE.proportions}`);
+  // cada malha da base pode ter a sua cópia da pele (mesmos ossos): vale qualquer uma
+  for (const n of root.listNodes()) {
+    if (!n.getSkin() || !n.getMesh()) continue;
+    reproportion(n.getMesh().listPrimitives(), n.getSkin().listJoints().map((j) => j.getName()), M.B, prop);
+  }
   if (def.outfit?.pants) relaxLegs(bodyPrim, joints.map((j) => j.getName()), { y0: 0.12, y1: M.waistY + 0.02 });
   const body = new BodyShape(bodyPrim, joints.map((j) => j.getName()));
   const headW = new Float32Array(body.nv), torsoW = new Float32Array(body.nv);
@@ -58,9 +69,26 @@ async function refit(def) {
     KIT[piece](kit, ctx, opts ?? {});
     if (process.env.KIT_DEBUG) console.log(`  ${piece}: ${(kit.idx.length - before) / 3} tri`);
   }
+  let hatLine = null;
   for (const [piece, opts] of def.gear ?? []) {
-    if (KIT[piece] && def.kit?.some(([k]) => k === piece)) continue;
-    PIECES[piece](kit, H, M, { ...opts, surface: opts?.surface ?? surfaceNear(body) });
+    const r = PIECES[piece](kit, H, M, { ...opts, surface: opts?.surface ?? surfaceNear(body) });
+    if (typeof r === 'number') hatLine = r;
+  }
+  // com chapéu, o cabelo acima da aba some. A base já veio cortada, mas na linha da cabeça
+  // antiga: com a cabeça maior, o cabelo que sobrou sobe e atravessaria a copa.
+  if (hatLine !== null) {
+    for (const n of root.listNodes()) {
+      if (!/^Hair_/.test(n.getName()) || !n.getMesh()) continue;
+      for (const prim of n.getMesh().listPrimitives()) {
+        const p = prim.getAttribute('POSITION').getArray(), idx = prim.getIndices().getArray();
+        const keep = [];
+        for (let t = 0; t < idx.length; t += 3) {
+          const y = (p[idx[t] * 3 + 1] + p[idx[t + 1] * 3 + 1] + p[idx[t + 2] * 3 + 1]) / 3;
+          if (y < hatLine) keep.push(idx[t], idx[t + 1], idx[t + 2]);
+        }
+        prim.getIndices().setArray(new Uint32Array(keep));
+      }
+    }
   }
   if (!kit.empty) {
     const armature = root.listNodes().find((n) => n.getMesh() && n.getSkin())?.getParentNode();

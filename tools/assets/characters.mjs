@@ -8,6 +8,10 @@
 // kit:     equipamento com volume (colete, joelheiras, luvas, botas...), aplicado por refit.mjs
 //          sobre a saída do build (ver lib/kit.mjs)
 
+// Estilo do elenco todo. `proportions`: 'none' | 'sutil' | 'chibi' (lib/proportions.mjs);
+// um personagem pode ter o seu próprio `proportions`.
+export const STYLE = { proportions: 'none' };
+
 // uniforme de campo do Ibama: verde-oliva, colete com o nome em amarelo
 const OLIVE = '#7d8856';
 const OLIVE_DARK = '#525c3c';
