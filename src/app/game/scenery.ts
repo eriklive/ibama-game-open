@@ -3,12 +3,17 @@ import { HexCoord, hexKey, hexToWorld } from './hex';
 
 /**
  * Cenário montado por código: o hangar (paredes retas de chapa ondulada, portão,
- * treliças do telhado, postes e lâmpadas) e o avião estacionado. Nada aqui tem regra de jogo — quem
+ * telhado em arco, postes e lâmpadas) e o avião estacionado. Nada aqui tem regra de jogo — quem
  * bloqueia passagem e visão são os hexágonos marcados no mapa.
  */
 
 const WALL_HEIGHT = 1.5;
 const WALL_THICKNESS = 0.18;
+
+/** Nome do grupo do telhado (chapa, oitões e arcos) dentro do hangar. */
+export const HANGAR_ROOF = 'hangar-roof';
+/** Nome do grupo do que fica dentro do hangar (lâmpadas pendentes). */
+export const HANGAR_INTERIOR = 'hangar-interior';
 
 /** Textura de chapa ondulada: faixas verticais claras e escuras. */
 function corrugatedTexture(): THREE.Texture {
@@ -52,6 +57,7 @@ function runs(indices: number[]): [number, number][] {
 
 /**
  * Hangar retangular sobre os hexágonos de parede do perímetro `cols` × `rows`.
+ * O telhado e as peças de dentro vêm em grupos com nome (`HANGAR_ROOF`, `HANGAR_INTERIOR`).
  * As paredes são retas (passam pelo meio dos hexágonos de parede) e se interrompem
  * onde o perímetro não tem parede: são as portas e o portão.
  */
@@ -138,19 +144,78 @@ export function buildHangar(
     post(bx, zFront, y + 0.14);
   }
 
-  // telhado: só as treliças em arco, para a câmera enxergar o interior
+  // telhado: treliças em arco cobertas por chapa ondulada, com os oitões fechando a frente e os
+  // fundos. Fica num grupo à parte: o tabuleiro esconde tudo quando um agente entra no hangar.
+  const roof = new THREE.Group();
+  roof.name = HANGAR_ROOF;
+  group.add(roof);
   const steel = new THREE.MeshStandardMaterial({ color: 0x2c363c, roughness: 0.6, metalness: 0.4 });
   const rise = 2.4;
+  const arcY = (t: number) => WALL_HEIGHT + Math.sin(Math.PI * t) * rise;
   const count = Math.max(2, Math.round((zFront - zBack) / 3.2) + 1);
   for (let i = 0; i < count; i++) {
     const z = zBack + ((zFront - zBack) * i) / (count - 1);
     const points = Array.from({ length: 25 }, (_, k) => {
       const t = k / 24;
-      return new THREE.Vector3(x0 + (x1 - x0) * t, WALL_HEIGHT + Math.sin(Math.PI * t) * rise, z);
+      return new THREE.Vector3(x0 + (x1 - x0) * t, arcY(t), z);
     });
     const arch = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 48, 0.07, 5), steel);
     arch.castShadow = true;
-    group.add(arch);
+    roof.add(arch);
+  }
+  // chapa: uma faixa curva de parede a parede, um pouco acima dos arcos e com beiral nas pontas
+  const SEGMENTS = 32;
+  const eave = 0.25;
+  const zA = zBack - eave;
+  const zB = zFront + eave;
+  const sheetPos: number[] = [];
+  const sheetUv: number[] = [];
+  const sheetIdx: number[] = [];
+  for (let k = 0; k <= SEGMENTS; k++) {
+    const t = k / SEGMENTS;
+    const x = x0 - 0.12 + (x1 - x0 + 0.24) * t;
+    const y = arcY(t) + 0.1;
+    sheetPos.push(x, y, zA, x, y, zB);
+    // as ondas da chapa acompanham o arco (as faixas da textura correm ao longo do comprimento)
+    sheetUv.push(0, t, (zB - zA) * 3, t);
+    if (k < SEGMENTS) {
+      const a = k * 2;
+      sheetIdx.push(a, a + 1, a + 2, a + 1, a + 3, a + 2);
+    }
+  }
+  const sheetGeo = new THREE.BufferGeometry();
+  sheetGeo.setAttribute('position', new THREE.Float32BufferAttribute(sheetPos, 3));
+  sheetGeo.setAttribute('uv', new THREE.Float32BufferAttribute(sheetUv, 2));
+  sheetGeo.setIndex(sheetIdx);
+  sheetGeo.computeVertexNormals();
+  const sheetMap = texture.clone();
+  sheetMap.wrapT = THREE.RepeatWrapping;
+  sheetMap.needsUpdate = true;
+  const sheet = new THREE.Mesh(
+    sheetGeo,
+    new THREE.MeshStandardMaterial({ map: sheetMap, color: 0xb9c0c2, roughness: 0.65, metalness: 0.3, side: THREE.DoubleSide }),
+  );
+  sheet.castShadow = true;
+  sheet.receiveShadow = true;
+  roof.add(sheet);
+  // oitões: a meia-lua entre o topo da parede e o arco, na frente e nos fundos
+  const gableShape = new THREE.Shape();
+  gableShape.moveTo(x0, WALL_HEIGHT);
+  for (let k = 0; k <= SEGMENTS; k++) {
+    const t = k / SEGMENTS;
+    gableShape.lineTo(x0 + (x1 - x0) * t, arcY(t) + 0.06);
+  }
+  gableShape.closePath();
+  const gableMap = texture.clone();
+  gableMap.repeat.set(3, 1);
+  gableMap.needsUpdate = true;
+  const gableMat = new THREE.MeshStandardMaterial({ map: gableMap, roughness: 0.6, metalness: 0.25, side: THREE.DoubleSide });
+  const gableGeo = new THREE.ShapeGeometry(gableShape, 1);
+  for (const z of [zBack, zFront]) {
+    const gable = new THREE.Mesh(gableGeo, gableMat);
+    gable.position.z = z;
+    gable.castShadow = true;
+    roof.add(gable);
   }
 
   // iluminação: dois postes do lado de fora, nos cantos da frente, e duas lâmpadas
@@ -184,17 +249,22 @@ export function buildHangar(
   const lampZ = zBack + (zFront - zBack) / 3;
   const archZ = zBack + ((zFront - zBack) * Math.round(((lampZ - zBack) / (zFront - zBack)) * (count - 1))) / (count - 1);
   const shade = new THREE.MeshStandardMaterial({ color: 0x33524a, roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide });
+  // as peças ficam num grupo à parte (somem com o resto do interior); a luz continua acesa,
+  // para a troca não mudar a contagem de luzes da cena
+  const interior = new THREE.Group();
+  interior.name = HANGAR_INTERIOR;
+  group.add(interior);
   for (const t of [0.2, 0.8]) {
     const x = x0 + (x1 - x0) * t;
-    const top = WALL_HEIGHT + Math.sin(Math.PI * t) * rise;
+    const top = arcY(t);
     const y = WALL_HEIGHT + 0.75;
-    group.add(beam(new THREE.Vector3(x, top, archZ), new THREE.Vector3(x, y + 0.2, archZ), 0.03, steel));
+    interior.add(beam(new THREE.Vector3(x, top, archZ), new THREE.Vector3(x, y + 0.2, archZ), 0.03, steel));
     const cone = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.3, 12, 1, true), shade);
     cone.position.set(x, y + 0.1, archZ);
     cone.castShadow = true;
     const globe = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), bulb);
     globe.position.set(x, y - 0.02, archZ);
-    group.add(cone, globe);
+    interior.add(cone, globe);
     glow(x, y - 0.15, archZ, 12);
   }
   return group;

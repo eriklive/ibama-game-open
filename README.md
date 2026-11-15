@@ -96,8 +96,10 @@ a altura de cada tipo fica em `COVER_HEIGHT` (`maps.ts`). Os modelos são montad
 
 O terreno é desenhado em texto em `maps.ts` (`parseLayout`): `.` grama, `T` árvores, `#` parede,
 `_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio, `A` avião e a carga (ver abaixo) — basta editar as linhas para mudar o mapa.
-O hangar (chapa ondulada, portão, arcos do telhado, postes e lâmpadas) e o avião são montados por código em
-`scenery.ts`. O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
+O hangar (chapa ondulada, portão, teto em arco, postes e lâmpadas) e o avião são montados por código em
+`scenery.ts`. O **teto** (chapa, oitões e arcos) cobre o hangar visto de fora e some assim que um agente entra
+(o vão do portão já conta); a carga, o avião e as lâmpadas de dentro só são desenhados quando há um agente a até
+6 hexágonos do hangar (`structureView` em `maps.ts`). O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
