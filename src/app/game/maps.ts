@@ -1,7 +1,8 @@
 import { ModelDef, MODELS } from './character-model';
 import { EnemySpawn } from './enemies';
-import { HexCoord, hexKey } from './hex';
+import { HexArea, HexCoord, circleArea, hexKey, rectArea } from './hex';
 import type { CoverKind } from './scenery';
+import { Terrain, openWorld } from './world';
 
 /** Tipo de chão de um hexágono (só muda a aparência; quem bloqueia são paredes e árvores). */
 export type Ground = 'grass' | 'runway' | 'apron' | 'floor' | 'dirt';
@@ -35,6 +36,13 @@ export interface GameMap {
   hangar?: { cols: [number, number]; rows: [number, number] };
   /** Inimigos e suas rotas de patrulha. */
   enemies: EnemySpawn[];
+  /**
+   * Área da missão: um círculo de `radius` passos em volta de `center`. Só se joga dentro
+   * dele; sem isso, o retângulo `cols` × `rows` inteiro é jogável.
+   */
+  mission?: { center: HexCoord; radius: number };
+  /** Mundo de cenário em volta da missão, até `radius` passos do centro dela. */
+  world?: { radius: number; terrain: (h: HexCoord) => Terrain };
 }
 
 export interface Character {
@@ -114,6 +122,18 @@ export const COVER_HEIGHT: Record<CoverKind, 'high' | 'low'> = {
 const coverOf = (map: GameMap, height: 'high' | 'low'): HexCoord[] =>
   (map.cover ?? []).filter((c) => COVER_HEIGHT[c.kind] === height);
 
+const areas = new WeakMap<GameMap, HexArea>();
+
+/** Região jogável do mapa: o círculo da missão ou, sem missão, o retângulo inteiro. */
+export function playArea(map: GameMap): HexArea {
+  let area = areas.get(map);
+  if (!area) {
+    area = map.mission ? circleArea(map.mission.center, map.mission.radius) : rectArea(map.cols, map.rows);
+    areas.set(map, area);
+  }
+  return area;
+}
+
 /** Hexágonos em que ninguém entra e através dos quais ninguém enxerga: paredes, árvores, o avião e a carga alta. */
 export const blockedHexes = (map: GameMap): Set<string> =>
   new Set([...map.walls, ...(map.trees ?? []), ...(map.plane ?? []), ...coverOf(map, 'high')].map(hexKey));
@@ -130,7 +150,7 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  * junto ao portão; os vãos são passagens e janelas de visão. O resto é
  * mata fechada, cortada por trilhas e clareiras: a equipe parte de uma clareira no canto sudoeste.
  */
-const AEROPORTO = parseLayout([
+const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTTTTTT..TTTTTTTTTTTTTTT..TTTTTTTTTTTT',
   'TTTTTTTTTT.TTT.TTTTTTT..TTTTT...TTTTTTTTTTTT',
   'TTTTTTTTT..........................TTTTTTTTT',
@@ -171,6 +191,13 @@ const AEROPORTO = parseLayout([
   'TT.....TTTTTT..TTT.~~~~~~.TTTTT..TTTTTTTTTTT',
 ]);
 
+/**
+ * Mundo semiaberto: a missão é um círculo de 26 passos centrado no meio do desenho (pega o
+ * hangar, a pista e a clareira da equipe; só as pontas dos cantos do desenho ficam de fora, como cenário).
+ * Em volta, 100 passos de mata para a câmera passear — a pista e as trilhas continuam por ela.
+ */
+const AEROPORTO = openWorld(AEROPORTO_LAYOUT, { center: { col: 22, row: 19 }, radius: 26 }, 100);
+
 export const MAPS: GameMap[] = [
   {
     id: 'teste-12x12',
@@ -204,7 +231,7 @@ export const MAPS: GameMap[] = [
   {
     id: 'aeroporto',
     name: 'Aeroporto',
-    subtitle: 'Mapa 44×38 · pista de terra, hangar e mata',
+    subtitle: 'Missão circular · pista de terra, hangar e mata',
     ...AEROPORTO,
     hangar: { cols: [11, 32], rows: [4, 18] },
     available: true,

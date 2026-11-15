@@ -14,6 +14,7 @@ import { rollDice, rollDie, sum } from '../../game/dice';
 import { HexBoard } from '../../game/hex-board';
 import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
+import { RENDER_PROFILES, RenderMode, RenderSettings } from '../../game/render-settings';
 import {
   APPROACH_RULES,
   ENEMY_RULES,
@@ -29,8 +30,8 @@ import {
   spotted,
   visionHexes,
 } from '../../game/enemies';
-import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes } from '../../game/maps';
+import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
+import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
 
 /** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
 const MISSION_DEADLINE = 5;
@@ -53,6 +54,7 @@ const reducedMotion = (): boolean =>
 export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly gamepad = inject(GamepadService);
+  private readonly renderSettings = inject(RenderSettings);
   private stopPad?: () => void;
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private board?: HexBoard;
@@ -70,6 +72,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly lowCover = this.map ? lowCoverHexes(this.map) : new Set<string>();
   /** Tudo o que ninguém atravessa (paredes e toda a carga). */
   private readonly solid = new Set([...this.walls, ...this.lowCover]);
+  /** Onde se joga: o círculo da missão (ou o retângulo do mapa de teste). */
+  private readonly area = this.map ? playArea(this.map) : rectArea(0, 0);
   protected readonly diceSides = MOVE_DICE.sides;
 
   protected readonly positions = signal<ReadonlyMap<string, HexCoord>>(this.initialPositions());
@@ -96,7 +100,33 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Legenda dos botões do controle (Options mostra/esconde). */
   protected readonly padHelp = signal(false);
 
+  /** Menu (modo de renderização e números do carregamento). */
+  protected readonly menuOpen = signal(false);
+  protected readonly renderMode = this.renderSettings.mode;
+  protected readonly renderProfiles = Object.values(RENDER_PROFILES);
+  protected readonly renderStats = signal<ReturnType<HexBoard['renderStats']> | null>(null);
+  private statsTicker?: ReturnType<typeof setInterval>;
+
+  protected toggleMenu(): void {
+    this.menuOpen.update((v) => !v);
+    clearInterval(this.statsTicker);
+    if (this.menuOpen()) {
+      const tick = () => this.renderStats.set(this.board?.renderStats() ?? null);
+      tick();
+      this.statsTicker = setInterval(tick, 250);
+    }
+  }
+
+  protected setRenderMode(mode: RenderMode): void {
+    this.renderSettings.set(mode);
+  }
+
   constructor() {
+    // troca de modo no menu: o tabuleiro remonta o mundo em segundo plano
+    effect(() => {
+      const mode = this.renderMode();
+      this.board?.setProfile(RENDER_PROFILES[mode]);
+    });
     // o cursor só aparece no tabuleiro com um controle conectado
     // (lê os sinais antes do `?.`: sem tabuleiro ainda, o effect precisa ficar inscrito neles)
     effect(() => {
@@ -198,7 +228,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ...this.solid,
       ...this.onBoardEnemies().map((e) => hexKey(e.hex)),
     ]);
-    return reachableHexes(from, this.movesLeft(), map.cols, map.rows, blocked);
+    return reachableHexes(from, this.movesLeft(), this.area, blocked);
   });
   /** Caminho mais curto até o destino escolhido (sem a origem). */
   private readonly selectedPath = computed(() => {
@@ -226,6 +256,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         onUnitTap: (id) => this.focusCharacter(id),
       },
       {
+        profile: this.renderSettings.profile(),
         walls: this.map.walls,
         enemies: this.enemies().map((e) => ({
           id: e.id,
@@ -249,6 +280,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.stopPad?.();
     this.clearTimers();
     clearTimeout(this.noticeTimer);
+    clearInterval(this.statsTicker);
     this.board?.dispose();
   }
 
@@ -344,7 +376,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private async patrol(enemy: EnemyState, epoch: number): Promise<void> {
     const map = this.map!;
-    const plan = planPatrol(enemy, ENEMY_RULES.patrolSteps, map.cols, map.rows, this.blockedFor(enemy.id));
+    const plan = planPatrol(enemy, ENEMY_RULES.patrolSteps, this.area, this.blockedFor(enemy.id));
     this.updateEnemy(enemy.id, { waypoint: plan.waypoint, dir: plan.dir });
     if (!plan.path.length) {
       this.say(`${enemy.name} espera: o caminho está bloqueado`, 'info');
@@ -365,7 +397,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async flee(enemy: EnemyState, epoch: number): Promise<void> {
     const map = this.map!;
     const agents = [...this.positions().values()];
-    const plan = planFlee(enemy.hex, ENEMY_RULES.fleeSteps, map.cols, map.rows, this.blockedFor(enemy.id), agents);
+    const plan = planFlee(enemy.hex, ENEMY_RULES.fleeSteps, this.area, this.blockedFor(enemy.id), agents);
     if (plan.cornered) {
       this.say(`${enemy.name} está encurralado!`, 'info');
       return;
@@ -384,7 +416,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       );
     }
     if (this.epoch !== epoch) return;
-    if (isBorder(this.enemy(enemy.id)!.hex, map.cols, map.rows)) {
+    if (isBorder(this.enemy(enemy.id)!.hex, this.area)) {
       this.updateEnemy(enemy.id, { status: 'fled' });
       this.say(`${enemy.name} fugiu do mapa!`, 'alert');
       await this.board!.removeEnemy(enemy.id);
@@ -396,7 +428,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const map = this.map;
     const enemy = this.enemy(enemyId);
     if (!map || !enemy) return false;
-    const who = spotted(enemy, agents, map.cols, map.rows, this.walls, this.lowCover);
+    const who = spotted(enemy, agents, this.area, this.walls, this.lowCover);
     if (!who) return false;
     const agent = agents.get(who)!;
     // vira para quem viu
@@ -492,7 +524,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(null);
     this.board?.setReachable([]);
     const zone = (min: number, max: number) =>
-      hexesInRange(from, max, map.cols, map.rows)
+      hexesInRange(from, max, this.area)
         .filter((h) => !this.solid.has(hexKey(h)))
         .filter((h) => hexDistance(from, h) > min)
         .map(hexKey);
@@ -629,7 +661,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
     const next = neighborToward(from, dir);
-    if (next.col < 0 || next.row < 0 || next.col >= map.cols || next.row >= map.rows) return;
+    if (!this.area.has(next)) return;
     this.cursor.set(next);
     this.board.keepInView(next);
     if (this.phase() !== 'moving-choice') return;
@@ -716,7 +748,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const keys = this.enemies()
       .filter((e) => e.status === 'patrol')
       .flatMap((e) =>
-        visionHexes(e, map.cols, map.rows, this.walls, ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, this.lowCover).map(hexKey),
+        visionHexes(e, this.area, this.walls, ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, this.lowCover).map(hexKey),
       );
     this.board?.setVision(keys);
   }

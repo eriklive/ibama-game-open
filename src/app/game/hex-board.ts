@@ -1,8 +1,12 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground } from './maps';
-import { HexCoord, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
+import { COVER_HEIGHT, GameMap, Ground, playArea } from './maps';
+import { HEX_STEP, HexArea, HexCoord, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { CharacterRig, METER, ModelDef } from './character-model';
 import { buildCover, buildFuelProps, buildHangar, buildPlane } from './scenery';
+import { RENDER_PROFILES, RenderProfile } from './render-settings';
+import { Terrain } from './world';
+import { WorldStream, forestFloor, rutPieces } from './world-stream';
+import { HexTile, TileField } from './tile-field';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -35,7 +39,20 @@ const COLORS = {
   enemySurrendered: 0xe9eef0,
   approachSurrender: 0x8fe08a,
   approachFlee: 0xffb067,
+  aura: 0x9dff8f,
+  /** Chão "low poly" além do raio carregado: só uma cor de mata fechada sob a névoa. */
+  farGround: 0x1f3a1c,
 };
+
+/** Milissegundos por quadro que a montagem de blocos em segundo plano pode gastar. */
+const STREAM_BUDGET_MS = 4;
+
+/** Índice estável (0..2) para sortear um dos três tons de um chão (vale para coordenadas negativas). */
+const tone = (h: HexCoord): number => (((h.col * 31 + h.row * 17) % 3) + 3) % 3;
+
+const dimmed = new THREE.Color();
+/** Escurece um tom (chão de cenário, fora da missão). */
+const dim = (hex: number): number => dimmed.set(hex).multiplyScalar(0.82).getHex();
 
 const WALL_HEIGHT = 0.9;
 
@@ -112,15 +129,6 @@ interface EnemyView extends Mover {
 const angleDelta = (from: number, to: number): number =>
   Math.atan2(Math.sin(to - from), Math.cos(to - from));
 
-interface HexTile {
-  coord: HexCoord;
-  mesh: THREE.Mesh;
-  material: THREE.MeshStandardMaterial;
-  baseColor: THREE.Color;
-  /** Altura-alvo do hexágono (a animação aproxima `mesh.position.y` dela). */
-  lift: number;
-}
-
 export interface HexBoardCallbacks {
   /** Toque num hexágono vazio (ou fora do tabuleiro, com `null`). */
   onHexTap(hex: HexCoord | null): void;
@@ -138,10 +146,13 @@ export interface HexBoardCallbacks {
 export class HexBoard {
   private readonly renderer: THREE.WebGLRenderer;
   private readonly scene = new THREE.Scene();
-  private readonly camera = new THREE.PerspectiveCamera(40, 1, 0.1, 200);
+  private readonly camera = new THREE.PerspectiveCamera(40, 1, 0.1, 400);
   private readonly raycaster = new THREE.Raycaster();
-  private readonly tiles = new Map<string, HexTile>();
-  private readonly pickables: THREE.Object3D[] = [];
+  /** Chão da missão (instanciado); `tiles` é o índice por `hexKey`. */
+  private field!: TileField;
+  private get tiles(): ReadonlyMap<string, HexTile> {
+    return this.field.tiles;
+  }
   private readonly units = new Map<string, UnitView>();
   /** Hexágonos colados em carga baixa: quem para ali fica agachado. */
   private readonly crouchSpots = new Set<string>();
@@ -154,6 +165,19 @@ export class HexBoard {
   private readonly clock = new THREE.Clock();
   private readonly resizeObserver: ResizeObserver;
   private frameId = 0;
+  /** Região jogável (círculo da missão ou retângulo do mapa de teste). */
+  private readonly area: HexArea;
+  /** Mundo por raio: blocos de chão e mata montados em volta do centro de carregamento. */
+  private readonly stream: WorldStream;
+  private profile: RenderProfile = RENDER_PROFILES.normal;
+  private readonly sun = new THREE.DirectionalLight(0xffffff, 2.2);
+  /** Chão "low poly" que acompanha o centro de carregamento (o que fica além do raio). */
+  private farGround?: THREE.Mesh;
+  /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
+  private readonly scenery: { object: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
+  private aura?: { wall: THREE.Mesh; ring: THREE.Mesh };
+  /** Posições x dos sulcos da pista de terra (a continuação no mundo usa as mesmas). */
+  private ruts: number[] = [];
 
   private reachable = new Set<string>();
   private vision = new Set<string>();
@@ -173,6 +197,8 @@ export class HexBoard {
   private readonly camGoal = new THREE.Vector3();
   private zoom = 1;
   private readonly bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
+  /** Mundo semiaberto: a câmera passeia num círculo (centro e raio no plano do mundo). */
+  private worldBounds: { x: number; z: number; r: number } | null = null;
 
   // ponteiros
   private readonly pointers = new Map<number, { x: number; y: number }>();
@@ -185,12 +211,12 @@ export class HexBoard {
     private readonly map: GameMap,
     units: BoardUnit[],
     private readonly callbacks: HexBoardCallbacks,
-    extras: { walls?: HexCoord[]; enemies?: BoardEnemy[] } = {},
+    extras: { walls?: HexCoord[]; enemies?: BoardEnemy[]; profile?: RenderProfile } = {},
   ) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
-    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    this.area = playArea(map);
 
     this.scene.background = new THREE.Color(COLORS.background);
     this.scene.fog = new THREE.Fog(COLORS.background, 22, 48);
@@ -198,9 +224,10 @@ export class HexBoard {
     this.setupLights();
     this.buildBoard();
     this.buildWalls(extras.walls ?? []);
-    this.buildTrees(map.trees ?? []);
     this.buildPlane(map.plane ?? []);
     this.buildCargo();
+    this.buildAura();
+    this.stream = this.buildStream();
     for (const u of units) this.buildUnit(u);
     for (const e of extras.enemies ?? []) this.buildEnemy(e);
     this.activeMarker = this.buildMarker(COLORS.activeRing, 0.62, 0.09);
@@ -211,6 +238,10 @@ export class HexBoard {
     this.camTarget.copy(this.worldOf(first));
     this.camGoal.copy(this.camTarget);
     this.paintTiles();
+    this.applyProfile(extras.profile ?? RENDER_PROFILES.normal);
+    // monta já o que a câmera vê; o resto do raio chega em segundo plano
+    this.stream.update(this.camTarget.x, this.camTarget.z, 0);
+    this.stream.warmUp();
 
     this.bindInput();
     this.resizeObserver = new ResizeObserver(() => this.resize());
@@ -227,6 +258,21 @@ export class HexBoard {
 
   setInputEnabled(enabled: boolean): void {
     this.inputEnabled = enabled;
+  }
+
+  /**
+   * Modo de renderização: raio pré-renderizado, raio de visão, densidade de pixels e
+   * sombras. Pode mudar no meio da partida (o mundo é remontado em segundo plano).
+   */
+  setProfile(profile: RenderProfile): void {
+    this.applyProfile(profile);
+  }
+
+  /** Números do carregamento por raio (para o menu). */
+  renderStats(): { chunks: number; pending: number; loadRadius: number; viewRadius: number; tiles: number } {
+    let tiles = 0;
+    for (const t of this.tiles.values()) if (t.visible) tiles++;
+    return { ...this.stream.stats(), tiles };
   }
 
   /** Personagem da vez: flutua e ganha o anel amarelo. */
@@ -450,6 +496,7 @@ export class HexBoard {
     for (const u of [...this.units.values(), ...this.enemies.values()]) u.rig?.dispose();
     this.resizeObserver.disconnect();
     this.unbindInput();
+    this.stream.dispose();
     this.scene.traverse((obj) => {
       const mesh = obj as THREE.Mesh;
       mesh.geometry?.dispose();
@@ -464,15 +511,12 @@ export class HexBoard {
 
   private setupLights(): void {
     this.scene.add(new THREE.HemisphereLight(0xdff4ff, 0x1a3a44, 1.6));
-    const sun = new THREE.DirectionalLight(0xffffff, 2.2);
-    sun.position.set(-8, 16, 6);
+    // o sol acompanha a câmera: a sombra cobre só a região em volta do centro da tela
+    const sun = this.sun;
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
-    const ext = Math.max(this.map.cols, this.map.rows) * HEX_SIZE * 1.2;
-    Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 1, far: 60 });
-    const center = this.boardCenter();
-    sun.position.add(center);
-    sun.target.position.copy(center);
+    const ext = 30 * HEX_SIZE;
+    Object.assign(sun.shadow.camera, { left: -ext, right: ext, top: ext, bottom: -ext, near: 1, far: 70 });
     this.scene.add(sun, sun.target);
   }
 
@@ -480,43 +524,152 @@ export class HexBoard {
     const geo = new THREE.CylinderGeometry(HEX_SIZE * HEX_GAP, HEX_SIZE * HEX_GAP, HEX_HEIGHT, 6);
     geo.rotateY(Math.PI / 6); // vértice apontando para +X → hexágono "flat-top"
     geo.translate(0, -HEX_HEIGHT / 2, 0); // topo em y = 0
-    const edges = new THREE.EdgesGeometry(geo);
-    const lineMat = new THREE.LineBasicMaterial({ color: COLORS.outline });
     const palette = [COLORS.hexA, COLORS.hexB, COLORS.hexC];
-
-    for (let col = 0; col < this.map.cols; col++) {
-      for (let row = 0; row < this.map.rows; row++) {
-        const coord = { col, row };
+    const trees = new Set((this.map.trees ?? []).map(hexKey));
+    this.field = new TileField(
+      this.area.hexes,
+      geo,
+      HEX_SIZE,
+      (coord) => {
         const ground = this.map.ground?.get(hexKey(coord));
-        const baseColor = new THREE.Color((ground ? GROUND[ground] : palette)[(col * 31 + row * 17) % 3]);
-        const material = new THREE.MeshStandardMaterial({ color: baseColor, roughness: 0.85, metalness: 0 });
-        const mesh = new THREE.Mesh(geo, material);
-        const p = hexToWorld(coord, HEX_SIZE);
-        mesh.position.set(p.x, 0, p.z);
-        mesh.receiveShadow = true;
-        mesh.userData['hex'] = coord;
-        mesh.add(new THREE.LineSegments(edges, lineMat));
-        this.scene.add(mesh);
-        this.pickables.push(mesh);
-        this.tiles.set(hexKey(coord), { coord, mesh, material, baseColor, lift: 0 });
-      }
-    }
+        return trees.has(hexKey(coord)) ? forestFloor(coord) : (ground ? GROUND[ground] : palette)[tone(coord)];
+      },
+      new THREE.LineBasicMaterial({ color: COLORS.outline }),
+    );
+    this.scene.add(this.field.root);
     this.buildRunwayMarks();
     this.buildDirtTrack();
 
     const last = hexToWorld({ col: this.map.cols - 1, row: this.map.rows - 1 }, HEX_SIZE);
     Object.assign(this.bounds, { minX: 0, maxX: last.x, minZ: 0, maxZ: last.z + HEX_SIZE });
+    const { mission, world } = this.map;
+    if (mission && world) {
+      const c = hexToWorld(mission.center, HEX_SIZE);
+      this.worldBounds = { x: c.x, z: c.z, r: world.radius * HEX_STEP * HEX_SIZE };
+    }
 
-    // "mesa" escura sob o tabuleiro
+    // "mesa" escura sob o tabuleiro; no mundo aberto, o chão "low poly" além do raio
+    // carregado (acompanha o centro de carregamento, ver `applyStreamVisibility`)
     const c = this.boardCenter();
+    const span = this.worldBounds ? 1 : Math.max(last.x, last.z) + 30;
     const base = new THREE.Mesh(
-      new THREE.PlaneGeometry(last.x + 30, last.z + 30),
-      new THREE.MeshStandardMaterial({ color: 0x1f2f19, roughness: 1 }),
+      new THREE.CircleGeometry(span, 48),
+      new THREE.MeshStandardMaterial({ color: this.worldBounds ? COLORS.farGround : 0x1f2f19, roughness: 1 }),
     );
     base.rotation.x = -Math.PI / 2;
     base.position.set(c.x, -HEX_HEIGHT - 0.01, c.z);
     base.receiveShadow = true;
     this.scene.add(base);
+    if (this.worldBounds) this.farGround = base;
+  }
+
+  /**
+   * Blocos do mundo (chão de cenário e toda a mata, inclusive a de dentro da missão),
+   * montados só dentro do raio carregado.
+   */
+  private buildStream(): WorldStream {
+    const { map } = this;
+    const trees = new Set((map.trees ?? []).map(hexKey));
+    const wb = this.worldBounds;
+    const terrain = (h: HexCoord): Terrain | null => {
+      if (wb) {
+        const p = hexToWorld(h, HEX_SIZE);
+        if (Math.hypot(p.x - wb.x, p.z - wb.z) > wb.r) return null;
+        return map.world!.terrain(h);
+      }
+      // mapa sem mundo: só o retângulo (o chão é todo da missão; aqui entram as árvores)
+      if (h.col < 0 || h.row < 0 || h.col >= map.cols || h.row >= map.rows) return null;
+      return { ground: map.ground?.get(hexKey(h)) ?? 'grass', tree: trees.has(hexKey(h)) };
+    };
+    let box = { minCol: 0, maxCol: map.cols - 1, minRow: 0, maxRow: map.rows - 1 };
+    if (wb && map.mission) {
+      const span = Math.ceil(map.world!.radius * 1.2) + 1;
+      const c = map.mission.center;
+      box = { minCol: c.col - span, maxCol: c.col + span, minRow: c.row - span, maxRow: c.row + span };
+    }
+    const stream = new WorldStream({
+      hexSize: HEX_SIZE,
+      prism: this.field.prism,
+      outline: new THREE.LineBasicMaterial({ color: COLORS.outline }),
+      terrain,
+      isMission: (h) => this.tiles.has(hexKey(h)),
+      box,
+      // fora da missão o chão fica um pouco mais escuro: a área jogável se destaca
+      groundColor: (h, t) => dim(t.tree ? forestFloor(h) : GROUND[t.ground][tone(h)]),
+      ruts: this.ruts,
+    });
+    stream.onRecenter = () => this.applyStreamVisibility();
+    this.scene.add(stream.root);
+    return stream;
+  }
+
+  /** Mostra só o que está dentro do raio carregado: hexágonos da missão, hangar, avião. */
+  private applyStreamVisibility(): void {
+    const s = this.stream;
+    for (const tile of this.field.list) this.field.setVisible(tile, s.inLoadRadius(tile.x, tile.z));
+    for (const sc of this.scenery) sc.object.visible = s.inLoadRadius(sc.center.x, sc.center.z, sc.radius / (HEX_STEP * HEX_SIZE));
+    if (this.farGround) {
+      this.farGround.position.x = s.center.x;
+      this.farGround.position.z = s.center.z;
+      const r = (this.profile.loadRadius + this.profile.viewRadius) * HEX_STEP * HEX_SIZE * 1.5;
+      this.farGround.scale.setScalar(r);
+    }
+  }
+
+  private applyProfile(profile: RenderProfile): void {
+    this.profile = profile;
+    this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, profile.maxPixelRatio));
+    this.sun.castShadow = profile.shadows;
+    this.stream?.setRadii(profile.loadRadius, profile.viewRadius);
+    this.setZoom(this.zoom);
+    this.resize();
+  }
+
+  /**
+   * Aura verde-clara em volta da área da missão: uma cortina de luz que some para cima,
+   * com uma faixa acesa no chão, marcando até onde se joga.
+   */
+  private buildAura(): void {
+    const mission = this.map.mission;
+    if (!mission) return;
+    const c = hexToWorld(mission.center, HEX_SIZE);
+    // passa por fora dos hexágonos da borda (centro a até `radius` passos + meio hexágono)
+    const r = mission.radius * HEX_STEP * HEX_SIZE + HEX_SIZE * 0.95;
+    const fade = document.createElement('canvas');
+    fade.width = 4;
+    fade.height = 128;
+    const g = fade.getContext('2d');
+    if (g) {
+      const grad = g.createLinearGradient(0, 0, 0, 128);
+      grad.addColorStop(0, '#000');
+      grad.addColorStop(0.65, '#444');
+      grad.addColorStop(1, '#fff');
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 4, 128);
+    }
+    const alphaMap = new THREE.CanvasTexture(fade);
+    const height = 2.2;
+    const wall = new THREE.Mesh(
+      new THREE.CylinderGeometry(r, r, height, 256, 1, true),
+      new THREE.MeshBasicMaterial({
+        color: COLORS.aura, alphaMap, transparent: true, opacity: 0.5, side: THREE.DoubleSide,
+        depthWrite: false, blending: THREE.AdditiveBlending,
+      }),
+    );
+    wall.position.set(c.x, height / 2 - 0.05, c.z);
+    wall.renderOrder = 5;
+    const ring = new THREE.Mesh(
+      new THREE.RingGeometry(r - 0.35, r + 0.2, 256),
+      new THREE.MeshBasicMaterial({
+        color: COLORS.aura, transparent: true, opacity: 0.55, depthWrite: false, blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
+      }),
+    );
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(c.x, 0.03, c.z);
+    ring.renderOrder = 5;
+    this.scene.add(wall, ring);
+    this.aura = { wall, ring };
   }
 
   private buildWalls(walls: HexCoord[]): void {
@@ -533,7 +686,7 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
     const hangar = this.map.hangar;
-    if (hangar) this.scene.add(buildHangar(hangar, new Set(walls.map(hexKey)), HEX_SIZE));
+    if (hangar) this.addScenery(buildHangar(hangar, new Set(walls.map(hexKey)), HEX_SIZE));
     const inHangar = (h: HexCoord): boolean =>
       !!hangar && h.col >= hangar.cols[0] && h.col <= hangar.cols[1] && h.row >= hangar.rows[0] && h.row <= hangar.rows[1];
     for (const h of walls) {
@@ -547,7 +700,7 @@ export class HexBoard {
       wall.add(new THREE.LineSegments(edges, lineMat));
       // um pouco de variação de altura para parecer pedra/tronco
       wall.scale.y = 0.85 + ((h.col * 13 + h.row * 7) % 5) * 0.07;
-      tile.mesh.add(wall);
+      this.field.attach(tile, wall);
     }
   }
 
@@ -557,9 +710,12 @@ export class HexBoard {
       const tile = this.tiles.get(hexKey(c));
       if (!tile) continue;
       tile.baseColor.set(0xa8987a);
-      tile.mesh.add(buildCover(c.kind, c.col * 31 + c.row * 17));
+      this.field.attach(tile, buildCover(c.kind, c.col * 31 + c.row * 17));
     }
-    for (const h of this.map.props ?? []) this.tiles.get(hexKey(h))?.mesh.add(buildFuelProps(h.col * 13 + h.row * 7));
+    for (const h of this.map.props ?? []) {
+      const tile = this.tiles.get(hexKey(h));
+      if (tile) this.field.attach(tile, buildFuelProps(h.col * 13 + h.row * 7));
+    }
     const low = new Set((this.map.cover ?? []).filter((c) => COVER_HEIGHT[c.kind] === 'low').map(hexKey));
     for (const key of low) {
       const [col, row] = key.split(',').map(Number);
@@ -582,7 +738,14 @@ export class HexBoard {
     }
     const plane = buildPlane();
     plane.position.copy(center.divideScalar(hexes.length));
-    this.scene.add(plane);
+    this.addScenery(plane);
+  }
+
+  private addScenery(object: THREE.Object3D): void {
+    this.scene.add(object);
+    object.updateMatrixWorld(true);
+    const sphere = new THREE.Box3().setFromObject(object).getBoundingSphere(new THREE.Sphere());
+    this.scenery.push({ object, center: sphere.center, radius: sphere.radius });
   }
 
   /** Faixa central da pista: traços brancos nas colunas pares da fileira do meio. */
@@ -592,14 +755,13 @@ export class HexBoard {
     const isRunway = (col: number, row: number) => ground.get(hexKey({ col, row })) === 'runway';
     const geo = new THREE.BoxGeometry(HEX_SIZE * 1.1, 0.02, 0.14);
     const mat = new THREE.MeshStandardMaterial({ color: 0xe9eef0, roughness: 0.9 });
-    for (const tile of this.tiles.values()) {
+    const dashes: { tile: HexTile; local: THREE.Matrix4 }[] = [];
+    for (const tile of this.field.list) {
       const { col, row } = tile.coord;
       if (col % 2 || !isRunway(col, row) || !isRunway(col, row - 1) || !isRunway(col, row + 1)) continue;
-      const dash = new THREE.Mesh(geo, mat);
-      dash.position.y = 0.011;
-      dash.receiveShadow = true;
-      tile.mesh.add(dash);
+      dashes.push({ tile, local: new THREE.Matrix4().makeTranslation(0, 0.011, 0) });
     }
+    this.field.addDecals(geo, mat, dashes);
   }
 
   /**
@@ -610,114 +772,21 @@ export class HexBoard {
   private buildDirtTrack(): void {
     const ground = this.map.ground;
     if (!ground) return;
-    const dirt = [...this.tiles.values()].filter((t) => ground.get(hexKey(t.coord)) === 'dirt');
+    const dirt = this.field.list.filter((t) => ground.get(hexKey(t.coord)) === 'dirt');
     if (!dirt.length) return;
-    const xs = dirt.map((t) => t.mesh.position.x);
+    const xs = dirt.map((t) => t.x);
     const mid = (Math.min(...xs) + Math.max(...xs)) / 2;
-    const ruts = [mid - HEX_SIZE * 1.1, mid + HEX_SIZE * 1.1];
+    // a continuação da pista no mundo de fora usa as mesmas linhas
+    this.ruts.push(mid - HEX_SIZE * 1.1, mid + HEX_SIZE * 1.1);
     const mat = new THREE.MeshStandardMaterial({ color: 0x6b4c2c, roughness: 1 });
-    const r = HEX_SIZE * HEX_GAP;
+    const geo = new THREE.BoxGeometry(1, 0.02, 1);
+    const pieces: { tile: HexTile; local: THREE.Matrix4 }[] = [];
     for (const tile of dirt) {
-      for (const x of ruts) {
-        const dx = Math.abs(x - tile.mesh.position.x);
-        if (dx >= r) continue;
-        // corda vertical do hexágono "flat-top" na distância dx do centro
-        const half = dx <= r / 2 ? (Math.sqrt(3) / 2) * r : Math.sqrt(3) * (r - dx);
-        const rut = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.02, half * 2), mat);
-        rut.position.set(x - tile.mesh.position.x, 0.011, 0);
-        rut.receiveShadow = true;
-        tile.mesh.add(rut);
-      }
+      // peças relativas ao centro do hexágono (que sobem junto quando ele flutua)
+      const toLocal = new THREE.Matrix4().makeTranslation(-tile.x, 0, 0);
+      for (const m of rutPieces(this.ruts, tile.x, 0, HEX_SIZE * HEX_GAP)) pieces.push({ tile, local: m.premultiply(toLocal) });
     }
-  }
-
-  /**
-   * Mata: cada hexágono sorteia (pela posição) um arranjo de árvores — copa redonda,
-   * pinheiro, árvore alta e fina, arbusto — com tamanhos e tons diferentes. Tudo vai em
-   * três malhas instanciadas, para o mapa grande não pesar.
-   */
-  private buildTrees(trees: HexCoord[]): void {
-    if (!trees.length) return;
-    type Kind = 'round' | 'pine' | 'tall' | 'bush';
-    const ARRANGEMENTS: { kind: Kind; r: number; a: number; s: number }[][] = [
-      [{ kind: 'round', r: 0.1, a: 0, s: 1.25 }, { kind: 'bush', r: 0.55, a: 2.6, s: 1 }],
-      [{ kind: 'round', r: 0.35, a: 0.4, s: 0.95 }, { kind: 'round', r: 0.38, a: 3.4, s: 0.8 }],
-      [{ kind: 'pine', r: 0.2, a: 1, s: 1.2 }, { kind: 'pine', r: 0.5, a: 4, s: 0.75 }],
-      [{ kind: 'tall', r: 0.15, a: 5, s: 1.1 }, { kind: 'round', r: 0.5, a: 2, s: 0.7 }, { kind: 'bush', r: 0.5, a: 3.8, s: 0.9 }],
-      [{ kind: 'pine', r: 0.4, a: 0, s: 0.85 }, { kind: 'round', r: 0.42, a: 2.1, s: 0.75 }, { kind: 'tall', r: 0.4, a: 4.2, s: 0.8 }],
-      [{ kind: 'tall', r: 0.3, a: 0.8, s: 1 }, { kind: 'tall', r: 0.35, a: 3.6, s: 0.8 }],
-      [{ kind: 'round', r: 0, a: 0, s: 1.05 }],
-    ];
-    const LEAVES = [0x2f6d3a, 0x3c7a42, 0x27603a, 0x4d8246, 0x5a8a4a, 0x356b55, 0x6b8f4a];
-    const NEEDLES = [0x1f5238, 0x285a40, 0x2f6648];
-    // pseudoaleatório estável por posição
-    const rnd = (h: HexCoord, i: number): number => {
-      const x = Math.sin(h.col * 127.1 + h.row * 311.7 + i * 74.7) * 43758.5453;
-      return x - Math.floor(x);
-    };
-
-    const trunks: { m: THREE.Matrix4 }[] = [];
-    const blobs: { m: THREE.Matrix4; color: number }[] = [];
-    const cones: { m: THREE.Matrix4; color: number }[] = [];
-    const dummy = new THREE.Object3D();
-    const place = (x: number, y: number, z: number, sx: number, sy: number, sz: number, rot = 0): THREE.Matrix4 => {
-      dummy.position.set(x, y, z);
-      dummy.scale.set(sx, sy, sz);
-      dummy.rotation.set(0, rot, 0);
-      dummy.updateMatrix();
-      return dummy.matrix.clone();
-    };
-
-    for (const h of trees) {
-      const tile = this.tiles.get(hexKey(h));
-      if (!tile) continue;
-      tile.baseColor.set([0x33683a, 0x2e6035, 0x386f3e][Math.floor(rnd(h, 0) * 3)]);
-      const c = hexToWorld(h, HEX_SIZE);
-      const turn = Math.floor(rnd(h, 1) * 6) * (Math.PI / 3);
-      const arrangement = ARRANGEMENTS[Math.floor(rnd(h, 2) * ARRANGEMENTS.length)];
-      arrangement.forEach(({ kind, r, a, s: size }, i) => {
-        const s = size * (0.88 + rnd(h, 10 + i) * 0.24);
-        const x = c.x + Math.cos(a + turn) * r;
-        const z = c.z + Math.sin(a + turn) * r;
-        const rot = rnd(h, 20 + i) * Math.PI * 2;
-        const leaf = LEAVES[Math.floor(rnd(h, 30 + i) * LEAVES.length)];
-        if (kind === 'bush') {
-          blobs.push({ m: place(x, 0.16 * s, z, 0.55 * s, 0.4 * s, 0.55 * s, rot), color: leaf });
-        } else if (kind === 'round') {
-          trunks.push({ m: place(x, 0, z, s, 0.6 * s, s) });
-          blobs.push({ m: place(x, 0.9 * s, z, s, 0.85 * s, s, rot), color: leaf });
-        } else if (kind === 'tall') {
-          trunks.push({ m: place(x, 0, z, 0.7 * s, 1.25 * s, 0.7 * s) });
-          blobs.push({ m: place(x, 1.4 * s, z, 0.72 * s, 0.5 * s, 0.72 * s, rot), color: leaf });
-        } else {
-          trunks.push({ m: place(x, 0, z, 0.8 * s, 0.35 * s, 0.8 * s) });
-          const color = NEEDLES[Math.floor(rnd(h, 30 + i) * NEEDLES.length)];
-          cones.push({ m: place(x, 0.3 * s, z, s, s, s, rot), color });
-          cones.push({ m: place(x, 0.85 * s, z, 0.7 * s, 0.75 * s, 0.7 * s, rot), color });
-        }
-      });
-    }
-
-    const trunkGeo = new THREE.CylinderGeometry(0.07, 0.11, 1, 6);
-    trunkGeo.translate(0, 0.5, 0);
-    const coneGeo = new THREE.ConeGeometry(0.42, 1, 7);
-    coneGeo.translate(0, 0.5, 0);
-    const add = (geo: THREE.BufferGeometry, mat: THREE.Material, items: { m: THREE.Matrix4; color?: number }[]): void => {
-      if (!items.length) return;
-      const mesh = new THREE.InstancedMesh(geo, mat, items.length);
-      const color = new THREE.Color();
-      items.forEach((it, i) => {
-        mesh.setMatrixAt(i, it.m);
-        if (it.color !== undefined) mesh.setColorAt(i, color.set(it.color));
-      });
-      mesh.castShadow = true;
-      mesh.receiveShadow = true;
-      mesh.frustumCulled = false; // as instâncias se espalham pelo mapa inteiro
-      this.scene.add(mesh);
-    };
-    add(trunkGeo, new THREE.MeshStandardMaterial({ color: 0x6b4a2e, roughness: 1 }), trunks);
-    add(new THREE.IcosahedronGeometry(0.5, 1), new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }), blobs);
-    add(coneGeo, new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }), cones);
+    this.field.addDecals(geo, mat, pieces);
   }
 
   private buildEnemy(enemy: BoardEnemy): void {
@@ -983,12 +1052,13 @@ export class HexBoard {
         : this.approach?.flee.has(key)
           ? COLORS.approachFlee
           : null;
-      tile.material.color.set(
+      tile.color.set(
         zone ?? (isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? reachColor : seen ? COLORS.vision : tile.baseColor),
       );
-      tile.material.emissive.set(isSel ? 0x6b5200 : onPath ? 0x5a4a14 : 0x000000);
+      tile.emissive.set(isSel ? 0x6b5200 : onPath ? 0x5a4a14 : 0x000000);
       tile.lift = isSel ? 0.2 : onPath ? 0.1 : 0;
     }
+    this.field.markAll();
   }
 
   // ---------- peças ----------
@@ -1048,12 +1118,16 @@ export class HexBoard {
   /** Altura do topo do hexágono sob um ponto (os hexágonos do caminho flutuam). */
   private groundAt(x: number, z: number): number {
     const tile = this.tiles.get(hexKey(worldToHex(x, z, HEX_SIZE)));
-    return tile ? tile.mesh.position.y : 0;
+    return tile ? tile.y : 0;
   }
 
   // ---------- câmera / loop ----------
 
   private boardCenter(): THREE.Vector3 {
+    if (this.map.mission) {
+      const c = hexToWorld(this.map.mission.center, HEX_SIZE);
+      return new THREE.Vector3(c.x, 0, c.z);
+    }
     const last = hexToWorld({ col: this.map.cols - 1, row: this.map.rows - 1 }, HEX_SIZE);
     return new THREE.Vector3(last.x / 2, 0, last.z / 2);
   }
@@ -1083,6 +1157,24 @@ export class HexBoard {
     const lead = this.camera.aspect < 1 ? 1.4 : 0.3;
     this.camera.position.z += lead;
     this.camera.lookAt(this.camTarget.x, this.camTarget.y, this.camTarget.z + lead);
+
+    // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
+    // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
+    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE;
+    const fog = this.scene.fog as THREE.Fog;
+    fog.far = dist + view;
+    fog.near = dist + view * 0.45;
+    const far = fog.far + 4;
+    if (Math.abs(this.camera.far - far) > 0.5) {
+      this.camera.far = far;
+      this.camera.updateProjectionMatrix();
+    }
+
+    // o sol (e o quadro da sombra) acompanha o centro da tela, em passos inteiros para a sombra não tremer
+    const sx = Math.round(this.camTarget.x);
+    const sz = Math.round(this.camTarget.z);
+    this.sun.position.set(sx - 8, 16, sz + 6);
+    this.sun.target.position.set(sx, 0, sz);
   }
 
   private loop = (): void => {
@@ -1092,8 +1184,12 @@ export class HexBoard {
 
     const bob = Math.sin(t * 2.4) * 0.08;
     const lk = 1 - Math.exp(-dt * 8);
+    // monta em segundo plano o que entrou no raio (e muda o centro, se a câmera foi longe)
+    this.stream.update(this.camTarget.x, this.camTarget.z, STREAM_BUDGET_MS);
+
     for (const u of this.units.values()) {
       const active = u.id === this.activeId;
+      u.group.visible = u.shadow.visible = this.stream.inLoadRadius(u.group.position.x, u.group.position.z);
       if (u.rig) {
         // personagem com modelo: fica de pé sobre o hexágono (acompanha a flutuação do caminho)
         // e vira suavemente para onde vai; quem está na vez é marcado só pelo anel
@@ -1120,7 +1216,7 @@ export class HexBoard {
       e.facing += angleDelta(e.facing, e.facingGoal) * (1 - Math.exp(-dt * 12));
       e.group.rotation.y = -e.facing;
       e.presence += ((e.gone ? 0 : 1) - e.presence) * (1 - Math.exp(-dt * 7));
-      const visible = e.presence > 0.02;
+      const visible = e.presence > 0.02 && this.stream.inLoadRadius(e.group.position.x, e.group.position.z);
       e.group.visible = e.shadow.visible = visible;
       // ao fugir, a peça encolhe e afunda
       e.group.scale.setScalar(Math.max(0.001, e.presence));
@@ -1144,37 +1240,51 @@ export class HexBoard {
     const cursorTile = this.cursor ? this.tiles.get(hexKey(this.cursor)) : undefined;
     this.cursorMarker.visible = !!cursorTile;
     if (cursorTile) {
-      const cp = cursorTile.mesh.position;
-      this.cursorMarker.position.set(cp.x, cp.y + 0.03, cp.z);
+      this.cursorMarker.position.set(cursorTile.x, cursorTile.y + 0.03, cursorTile.z);
       this.cursorMarker.scale.setScalar(1 + Math.sin(t * 6) * 0.03);
     }
 
     // pulso suave nos hexágonos alcançáveis
     const pulse = 0.12 + Math.sin(t * 3) * 0.08;
     const tk = 1 - Math.exp(-dt * 12);
+    const field = this.field;
     for (const [key, tile] of this.tiles) {
-      const step = this.path.indexOf(key);
-      const isSel = sameHex(tile.coord, this.selected);
+      const step = this.path.length ? this.path.indexOf(key) : -1;
+      const isSel = this.selected !== null && sameHex(tile.coord, this.selected);
+      let goal = tile.lift;
+      let changed = false;
       if (step >= 0 && !isSel) {
         // caminho: brilho quente que "corre" da peça até o destino, e uma onda de flutuação
         const wave = Math.sin(t * 5 - step * 0.9);
         const glow = 0.4 + wave * 0.12;
-        tile.material.emissive.setRGB(glow, glow * 0.8, glow * 0.25);
-        tile.mesh.position.y += (tile.lift + wave * 0.035 - tile.mesh.position.y) * tk;
-        continue;
-      }
-      if (isSel) {
-        tile.mesh.position.y += (tile.lift + Math.sin(t * 3) * 0.03 - tile.mesh.position.y) * tk;
-        continue;
-      }
-      if (this.approach && (this.approach.surrender.has(key) || this.approach.flee.has(key))) {
+        tile.emissive.setRGB(glow, glow * 0.8, glow * 0.25);
+        goal = tile.lift + wave * 0.035;
+        changed = true;
+      } else if (isSel) {
+        goal = tile.lift + Math.sin(t * 3) * 0.03;
+      } else if (this.approach && (this.approach.surrender.has(key) || this.approach.flee.has(key))) {
         const g = 0.08 + Math.sin(t * 4) * 0.06;
-        tile.material.emissive.setRGB(g, g * 0.8, g * 0.3);
+        tile.emissive.setRGB(g, g * 0.8, g * 0.3);
+        changed = true;
       } else if (this.reachable.has(key)) {
-        if (this.vision.has(key)) tile.material.emissive.setRGB(pulse, pulse * 0.4, pulse * 0.3);
-        else tile.material.emissive.setRGB(pulse * 0.3, pulse * 0.6, pulse);
+        if (this.vision.has(key)) tile.emissive.setRGB(pulse, pulse * 0.4, pulse * 0.3);
+        else tile.emissive.setRGB(pulse * 0.3, pulse * 0.6, pulse);
+        changed = true;
       }
-      tile.mesh.position.y += (tile.lift - tile.mesh.position.y) * tk;
+      const diff = goal - tile.y;
+      if (diff !== 0) {
+        tile.y = Math.abs(diff) < 1e-3 ? goal : tile.y + diff * tk;
+        changed = true;
+      }
+      if (changed) field.mark(tile);
+    }
+    // só o que mudou neste quadro vai para a placa de vídeo
+    field.flush();
+
+    if (this.aura) {
+      const glow = 0.5 + Math.sin(t * 1.6) * 0.12;
+      (this.aura.wall.material as THREE.MeshBasicMaterial).opacity = glow;
+      (this.aura.ring.material as THREE.MeshBasicMaterial).opacity = glow + 0.1;
     }
 
     this.updateCamera(dt);
@@ -1270,15 +1380,27 @@ export class HexBoard {
   }
 
   private setZoom(z: number): void {
-    // mapas grandes deixam afastar mais; a névoa recua junto para não encobrir o tabuleiro
-    const max = Math.max(1.8, Math.max(this.map.cols, this.map.rows) / 11);
-    this.zoom = THREE.MathUtils.clamp(z, 0.55, max);
-    const fog = this.scene.fog as THREE.Fog;
-    fog.near = 22 * Math.max(1, this.zoom);
-    fog.far = 48 * Math.max(1, this.zoom);
+    // mapas grandes deixam afastar mais, até o limite do raio de visão do modo escolhido
+    // (a névoa acompanha a distância da câmera, ver `updateCamera`)
+    const byMap = this.worldBounds ? Infinity : Math.max(1.8, Math.max(this.map.cols, this.map.rows) / 11);
+    const byView = Math.max(1.1, (this.profile.viewRadius * HEX_STEP * HEX_SIZE * 0.7) / 11.5);
+    this.zoom = THREE.MathUtils.clamp(z, 0.55, Math.min(byMap, byView));
   }
 
   private clampGoal(): void {
+    const w = this.worldBounds;
+    if (w) {
+      // no mundo aberto a câmera passeia por um círculo um pouco menor que o mundo
+      const r = Math.max(0, w.r - this.profile.viewRadius * HEX_STEP * HEX_SIZE * 0.5);
+      const dx = this.camGoal.x - w.x;
+      const dz = this.camGoal.z - w.z;
+      const d = Math.hypot(dx, dz);
+      if (d > r && d > 0) {
+        this.camGoal.x = w.x + (dx / d) * r;
+        this.camGoal.z = w.z + (dz / d) * r;
+      }
+      return;
+    }
     const b = this.bounds;
     this.camGoal.x = THREE.MathUtils.clamp(this.camGoal.x, b.minX, b.maxX);
     this.camGoal.z = THREE.MathUtils.clamp(this.camGoal.z, b.minZ, b.maxZ);
@@ -1303,8 +1425,7 @@ export class HexBoard {
     // Os hexágonos do caminho flutuam: o toque vale tanto para onde o hexágono aparece
     // (malha) quanto para onde ele fica em repouso (plano y = 0). O destino já escolhido
     // ganha o desempate, para o segundo toque confirmar mesmo na borda do hexágono.
-    const hit = this.raycaster.intersectObjects(this.pickables, false)[0];
-    const meshHex = hit?.object.userData['hex'] as HexCoord | undefined;
+    const meshHex = this.field.pick(this.raycaster);
     const ground = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
     const groundHex = ground ? worldToHex(ground.x, ground.z, HEX_SIZE) : undefined;
     const onBoard = (h?: HexCoord) => !!h && this.tiles.has(hexKey(h));

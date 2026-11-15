@@ -1,5 +1,5 @@
 import type { ModelDef } from './character-model';
-import { HexCoord, hexDistance, hexKey, hexLine, hexToWorld, hexesInRange, pathTo, reachableHexes } from './hex';
+import { HexArea, HexCoord, hexDistance, hexKey, hexLine, hexToWorld, hexesInRange, pathTo, reachableHexes } from './hex';
 
 /**
  * Regras dos inimigos — pensadas para iterar: todos os números ficam aqui.
@@ -83,8 +83,8 @@ export function facingBetween(a: HexCoord, b: HexCoord): number {
   return pa.x === pb.x && pa.z === pb.z ? 0 : Math.atan2(pb.z - pa.z, pb.x - pa.x);
 }
 
-export const isBorder = (h: HexCoord, cols: number, rows: number): boolean =>
-  h.col === 0 || h.row === 0 || h.col === cols - 1 || h.row === rows - 1;
+/** Na borda da área jogável: é por ali que o inimigo foge. */
+export const isBorder = (h: HexCoord, area: HexArea): boolean => area.isEdge(h);
 
 /** Nenhum hexágono entre `a` e `b` (exclusive) é parede. */
 export function lineOfSight(a: HexCoord, b: HexCoord, walls: ReadonlySet<string>): boolean {
@@ -108,8 +108,7 @@ export function behindLowCover(a: HexCoord, b: HexCoord, lowCover: ReadonlySet<s
  */
 export function visionHexes(
   enemy: Pick<EnemyState, 'hex' | 'facing'>,
-  cols: number,
-  rows: number,
+  area: HexArea,
   walls: ReadonlySet<string>,
   range: number = ENEMY_RULES.visionRange,
   angle: number = ENEMY_RULES.visionAngle,
@@ -119,7 +118,7 @@ export function visionHexes(
   const fx = Math.cos(enemy.facing);
   const fz = Math.sin(enemy.facing);
   const o = hexToWorld(enemy.hex, 1);
-  return hexesInRange(enemy.hex, range, cols, rows).filter((h) => {
+  return hexesInRange(enemy.hex, range, area).filter((h) => {
     if (walls.has(hexKey(h)) || lowCover.has(hexKey(h))) return false;
     const p = hexToWorld(h, 1);
     const dx = p.x - o.x;
@@ -137,14 +136,13 @@ export function visionHexes(
 export function spotted(
   enemy: EnemyState,
   agents: ReadonlyMap<string, HexCoord>,
-  cols: number,
-  rows: number,
+  area: HexArea,
   walls: ReadonlySet<string>,
   lowCover: ReadonlySet<string> = new Set(),
 ): string | null {
   if (enemy.status !== 'patrol') return null;
   const seen = new Set(
-    visionHexes(enemy, cols, rows, walls, ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, lowCover).map(hexKey),
+    visionHexes(enemy, area, walls, ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, lowCover).map(hexKey),
   );
   for (const [id, h] of agents) if (seen.has(hexKey(h))) return id;
   return null;
@@ -157,8 +155,7 @@ export function spotted(
 export function planPatrol(
   enemy: EnemyState,
   steps: number,
-  cols: number,
-  rows: number,
+  area: HexArea,
   blocked: ReadonlySet<string>,
 ): { path: HexCoord[]; waypoint: number; dir: 1 | -1 } {
   let { waypoint, dir } = enemy;
@@ -173,7 +170,7 @@ export function planPatrol(
       ({ waypoint, dir } = advance(waypoint, dir, route.length));
       continue;
     }
-    const reach = reachableHexes(from, cols * rows, cols, rows, blocked);
+    const reach = reachableHexes(from, area.hexes.length, area, blocked);
     const leg = pathTo(reach, target);
     if (!leg.length) break; // rota bloqueada (por um agente, por exemplo): espera
     const take = leg.slice(0, steps - path.length);
@@ -197,16 +194,15 @@ function advance(i: number, dir: 1 | -1, n: number): { waypoint: number; dir: 1 
 export function planFlee(
   from: HexCoord,
   steps: number,
-  cols: number,
-  rows: number,
+  area: HexArea,
   blocked: ReadonlySet<string>,
   agents: readonly HexCoord[] = [],
 ): { path: HexCoord[]; full: HexCoord[]; escapes: boolean; cornered: boolean } {
-  if (isBorder(from, cols, rows)) return { path: [], full: [], escapes: true, cornered: false };
-  const reach = reachableHexes(from, cols * rows, cols, rows, blocked);
+  if (isBorder(from, area)) return { path: [], full: [], escapes: true, cornered: false };
+  const reach = reachableHexes(from, area.hexes.length, area, blocked);
   let best: { coord: HexCoord; cost: number; safety: number } | null = null;
   for (const { coord, cost } of reach.values()) {
-    if (!isBorder(coord, cols, rows)) continue;
+    if (!isBorder(coord, area)) continue;
     const safety = agents.length ? Math.min(...agents.map((a) => hexDistance(a, coord))) : 0;
     if (!best || cost < best.cost || (cost === best.cost && safety > best.safety)) {
       best = { coord, cost, safety };
