@@ -42,8 +42,13 @@ export type EnemyStatus = 'patrol' | 'alert' | 'surrendered' | 'fled';
 export interface EnemySpawn {
   id: string;
   name: string;
-  /** Rota de patrulha (ida e volta pelos pontos). O primeiro é a posição inicial. */
+  /**
+   * Rota de patrulha (ida e volta pelos pontos). O primeiro é a posição inicial. Com um
+   * ponto só, o inimigo fica parado (ver `stationary`).
+   */
   patrol: HexCoord[];
+  /** Para onde olha no começo (um hexágono); sem isso, olha para o próximo ponto da rota. */
+  facing?: HexCoord;
   /** Modelo 3D do inimigo; sem ele, o tabuleiro mostra a peça simples. */
   model?: ModelDef;
 }
@@ -68,13 +73,16 @@ export function spawnEnemy(spawn: EnemySpawn): EnemyState {
     id: spawn.id,
     name: spawn.name,
     hex: { ...start },
-    facing: facingBetween(start, next),
+    facing: facingBetween(start, spawn.facing ?? next),
     status: 'patrol',
     patrol: spawn.patrol.map((h) => ({ ...h })),
     waypoint: spawn.patrol.length > 1 ? 1 : 0,
     dir: 1,
   };
 }
+
+/** Parado no lugar (rota de um ponto só): no turno inimigo, não anda nem gira. */
+export const stationary = (e: Pick<EnemyState, 'patrol'>): boolean => e.patrol.length < 2;
 
 /** Ângulo de `a` para `b` no plano do mundo (0 se forem o mesmo hexágono). */
 export function facingBetween(a: HexCoord, b: HexCoord): number {

@@ -1,5 +1,6 @@
 import { ModelDef, MODELS } from './character-model';
 import { EnemySpawn } from './enemies';
+import type { HiddenItem } from './search';
 import { HexArea, HexCoord, circleArea, hexDistance, hexKey, rectArea } from './hex';
 import type { CoverKind } from './scenery';
 import { Terrain, openWorld } from './world';
@@ -40,6 +41,15 @@ export interface GameMap {
   plane?: HexCoord[];
   /** Hangar: retângulo (colunas e fileiras, inclusive) cujas paredes viram chapa reta, com telhado em arco. */
   hangar?: HexRect;
+  /**
+   * Casa: retângulo cujas paredes viram tábuas, com telhado de duas águas que some quando um
+   * agente entra. Paredes de dentro (divisórias) são colunas inteiras de `#` dentro do retângulo.
+   */
+  house?: HexRect;
+  /** Coisas escondidas: aparecem com um teste de percepção e se acham inspecionando o móvel. */
+  hidden?: HiddenItem[];
+  /** Objetivos da missão (aparecem numa ficha na tela). */
+  objectives?: Objective[];
   /** Inimigos e suas rotas de patrulha. */
   enemies: EnemySpawn[];
   /**
@@ -50,6 +60,11 @@ export interface GameMap {
   /** Mundo de cenário em volta da missão, até `radius` passos do centro dela. */
   world?: { radius: number; terrain: (h: HexCoord) => Terrain };
 }
+
+/** Objetivo: render um inimigo ou achar algo escondido. */
+export type Objective =
+  | { id: string; text: string; surrender: string }
+  | { id: string; text: string; find: string };
 
 export interface Character {
   id: string;
@@ -80,6 +95,8 @@ export const CHARACTERS: Character[] = [
  * Carga no piso (cobertura, ver `COVER_HEIGHT`): `B` caixotes de madeira e `M` caixas de
  * papelão (altas) · `S` sacos no palete e `G` gaiolas vazias (baixas) · `f` galões e botijão
  * (só decoração, passa)
+ *
+ * Móveis: `m` mesa (baixa, como os sacos) · `P` prateleira encostada na parede (alta)
  */
 export function parseLayout(
   layout: readonly string[],
@@ -93,9 +110,9 @@ export function parseLayout(
   const ground = new Map<string, Ground>();
   const kinds: Record<string, Ground> = {
     '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron', '~': 'dirt',
-    B: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor',
+    B: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor', m: 'floor', P: 'floor',
   };
-  const coverKinds: Record<string, CoverKind> = { B: 'crates', M: 'boxes', S: 'sacks', G: 'cages' };
+  const coverKinds: Record<string, CoverKind> = { B: 'crates', M: 'boxes', S: 'sacks', G: 'cages', m: 'table', P: 'shelf' };
   layout.forEach((line, row) => {
     if (line.length !== cols) throw new Error(`Linha ${row} do mapa tem ${line.length} colunas (esperado: ${cols})`);
     [...line].forEach((ch, col) => {
@@ -123,6 +140,8 @@ export const COVER_HEIGHT: Record<CoverKind, 'high' | 'low'> = {
   boxes: 'high',
   sacks: 'low',
   cages: 'low',
+  table: 'low',
+  shelf: 'high',
 };
 
 const coverOf = (map: GameMap, height: 'high' | 'low'): HexCoord[] =>
@@ -155,6 +174,11 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  * empilhada (cobertura) faz duas fileiras com vãos a oeste, um "L" a leste e um canto de gaiolas
  * junto ao portão; os vãos são passagens e janelas de visão. O resto é
  * mata fechada, cortada por trilhas e clareiras: a equipe parte de uma clareira no canto sudoeste.
+ *
+ * A leste da pista, numa clareira, fica a **casa** dos garimpeiros (colunas 29–41, fileiras
+ * 26–32): dois cômodos de 5 × 5 separados por uma divisória com porta. Entra-se pela porta
+ * do oeste, que dá para a pista. No cômodo 1 o Garimpeiro Jô come de costas para a entrada,
+ * na mesa (`m`); no cômodo 2, a prateleira (`P`) na parede do leste esconde uma arma.
  */
 const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTTTTTT..TTTTTTTTTTTTTTT..TTTTTTTTTTTT',
@@ -183,14 +207,14 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TTT..TTTTT.TT...T..~~~~~~.TT.TTTT..TTT.TTTTT',
   'TT.T..TTT...TTT..T.~~~~~~.TT..TT.TTTT..TT.TT',
   '...................~~~~~~...................',
-  'TT.TTTTT..TTTTTTTT.~~~~~~..TT..TTTTT..TT.TTT',
-  'TTTTTTTT..TT.TTTT..~~~~~~.TTTTT.TTT....TTTTT',
-  'TTTT.......T.....T.~~~~~~.TT.....TT.....TTTT',
-  'TTTTT.T......TTTTT.~~~~~~.T..TTTT....T..TTTT',
-  'TT........T..TTTTT.~~~~~~..T.TTTT..........T',
-  'T........TTT...TT..~~~~~~.TTTTT..TTT.TT.TT..',
-  '..........TTT....T.~~~~~~.TTT....TTTTTTTTTTT',
-  '.........TTTT...TT.~~~~~~.T......TTTTTTTTTTT',
+  'TT.TTTTT..TTTTTTTT.~~~~~~..T.#############.T',
+  'TTTTTTTT..TT.TTTT..~~~~~~.TT.#_____#_____#.T',
+  'TTTT.......T.....T.~~~~~~.TT.#_____#_____#.T',
+  'TTTTT.T......TTTTT.~~~~~~....D___m_D____P#.T',
+  'TT........T..TTTTT.~~~~~~..T.#_____#_____#.T',
+  'T........TTT...TT..~~~~~~.TT.#_____#_____#..',
+  '..........TTT....T.~~~~~~.TT.#############.T',
+  '.........TTTT...TT.~~~~~~.T................T',
   '.........TTT..T.TT.~~~~~~..TT.TT..TTTTTTTTTT',
   '........TTT...TTT..~~~~~~.TTTTTT..TTTTTTTTTT',
   'T.......TTTT.T.T.T.~~~~~~.TTTTT...TTTTTTTTTT',
@@ -240,6 +264,21 @@ export const MAPS: GameMap[] = [
     subtitle: 'Missão circular · pista de terra, hangar e mata',
     ...AEROPORTO,
     hangar: { cols: [11, 32], rows: [4, 18] },
+    house: { cols: [29, 41], rows: [26, 32] },
+    hidden: [
+      {
+        id: 'arma',
+        name: 'arma',
+        furniture: 'prateleira',
+        spot: { col: 40, row: 29 },
+        seized: 'Arma apreendida!',
+        room: { cols: [36, 40], rows: [27, 31] },
+      },
+    ],
+    objectives: [
+      { id: 'render-jo', text: 'Render o Garimpeiro Jô', surrender: 'jo' },
+      { id: 'apreender-arma', text: 'Apreender a arma escondida', find: 'arma' },
+    ],
     available: true,
     starts: [{ col: 4, row: 34 }, { col: 3, row: 35 }, { col: 5, row: 35 }],
     enemies: [
@@ -254,6 +293,14 @@ export const MAPS: GameMap[] = [
       { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 14, row: 20 }, { col: 29, row: 20 }] },
       // nos fundos, entre as duas portas
       { id: 'garimpeiro-pa', name: 'Garimpeiro da pá', model: MODELS.garimpeiroPa, patrol: [{ col: 13, row: 2 }, { col: 30, row: 2 }] },
+      // na casa: parado, comendo na mesa, de costas para a porta
+      {
+        id: 'jo',
+        name: 'Garimpeiro Jô',
+        model: MODELS.garimpeiro,
+        patrol: [{ col: 32, row: 29 }],
+        facing: { col: 33, row: 29 },
+      },
     ],
   },
   {

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { hexKey, reachableHexes } from './hex';
+import { HexCoord, hexKey, reachableHexes } from './hex';
 import {
-  COVER_HEIGHT, MAPS, STRUCTURE_SIGHT, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
+  COVER_HEIGHT, HexRect, MAPS, STRUCTURE_SIGHT, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
 } from './maps';
 
 describe('parseLayout', () => {
@@ -115,16 +115,18 @@ describe('aeroporto: mundo semiaberto', () => {
     expect(trees).toBeLessThan(400);
   });
 
-  it('aeroporto: o hangar tem carga alta e baixa, toda por dentro das paredes', () => {
+  it('aeroporto: a carga e os móveis ficam por dentro das paredes do hangar e da casa', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
-    const [c0, c1] = map.hangar!.cols;
-    const [r0, r1] = map.hangar!.rows;
     const cover = map.cover ?? [];
     expect(cover.some((c) => COVER_HEIGHT[c.kind] === 'high')).toBe(true);
     expect(cover.some((c) => COVER_HEIGHT[c.kind] === 'low')).toBe(true);
+    const inside = (h: HexCoord, { cols: [c0, c1], rows: [r0, r1] }: HexRect) => h.col > c0 && h.col < c1 && h.row > r0 && h.row < r1;
     for (const c of [...cover, ...(map.props ?? [])]) {
-      expect(c.col > c0 && c.col < c1 && c.row > r0 && c.row < r1, hexKey(c)).toBe(true);
+      const where = c.col <= map.hangar!.cols[1] ? map.hangar! : map.house!;
+      expect(inside(c, where), hexKey(c)).toBe(true);
     }
+    // na casa só há móveis: a mesa do Jô e a prateleira
+    expect(cover.filter((c) => inside(c, map.house!)).map((c) => c.kind).sort()).toEqual(['shelf', 'table']);
   });
 
   it('estrutura: o teto some com um agente dentro e o interior só aparece a até 6 hexágonos', () => {

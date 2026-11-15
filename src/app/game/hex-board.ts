@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, inStructure, playArea, structureView } from './maps';
+import { COVER_HEIGHT, GameMap, Ground, HexRect, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { CharacterRig, METER, ModelDef } from './character-model';
-import { HANGAR_INTERIOR, HANGAR_ROOF, buildCover, buildFuelProps, buildHangar, buildPlane } from './scenery';
+import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
@@ -175,10 +175,13 @@ export class HexBoard {
   private farGround?: THREE.Mesh;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
   private readonly scenery: { object: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
-  /** Telhado da estrutura (chapa e arcos): some quando um agente entra nela. */
-  private roof?: THREE.Object3D;
-  /** O que fica dentro da estrutura (carga, avião, lâmpadas): só aparece com um agente por perto. */
-  private readonly interior: THREE.Object3D[] = [];
+  /**
+   * Estruturas (hangar, casa): o telhado some quando um agente entra e o que fica dentro
+   * (carga, avião, lâmpadas, móveis) só aparece com um agente por perto.
+   */
+  private readonly structures: { rect: HexRect; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
+  /** Pista de algo escondido: uma lupa flutuando sobre o móvel percebido. */
+  private clue?: { sprite: THREE.Sprite; hex: HexCoord };
   /** Posições dos agentes na última conferência da estrutura (refaz só quando alguém anda). */
   private structureKey = '';
   private aura?: { wall: THREE.Mesh; ring: THREE.Mesh };
@@ -712,20 +715,26 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wallTop, roughness: 0.9 }),
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
+    const wallKeys = new Set(walls.map(hexKey));
     const hangar = this.map.hangar;
     if (hangar) {
-      const built = buildHangar(hangar, new Set(walls.map(hexKey)), HEX_SIZE);
-      this.roof = built.getObjectByName(HANGAR_ROOF);
+      const built = buildHangar(hangar, wallKeys, HEX_SIZE);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
-      if (lamps) this.interior.push(lamps);
+      this.structures.push({ rect: hangar, roof: built.getObjectByName(HANGAR_ROOF), interior: lamps ? [lamps] : [] });
       this.addScenery(built);
     }
-    const inHangar = (h: HexCoord): boolean => !!hangar && inStructure(h, hangar);
+    const house = this.map.house;
+    if (house) {
+      const built = buildHouse(house, wallKeys, HEX_SIZE);
+      this.structures.push({ rect: house, roof: built.getObjectByName(HOUSE_ROOF), interior: [] });
+      this.addScenery(built);
+    }
+    const inHangar = (h: HexCoord): boolean => this.structures.some((st) => inStructure(h, st.rect));
     for (const h of walls) {
       const tile = this.tiles.get(hexKey(h));
       if (!tile) continue;
       tile.baseColor.set(0x3b4a50);
-      if (inHangar(h)) continue; // a parede do hangar é desenhada inteira, não por hexágono
+      if (inHangar(h)) continue; // a parede da estrutura é desenhada inteira, não por hexágono
       const wall = new THREE.Mesh(geo, mats);
       wall.castShadow = true;
       wall.receiveShadow = true;
@@ -780,23 +789,71 @@ export class HexBoard {
    * liga e desliga o embrulho). Fora da estrutura, devolve o próprio objeto.
    */
   private housed(hex: HexCoord, object: THREE.Object3D): THREE.Object3D {
-    const hangar = this.map.hangar;
-    if (!hangar || !inStructure(hex, hangar)) return object;
-    this.interior.push(object);
+    const st = this.structures.find((s) => inStructure(hex, s.rect));
+    if (!st) return object;
+    st.interior.push(object);
     return new THREE.Group().add(object);
   }
 
-  /** Teto e interior da estrutura conforme a posição dos agentes (ver `structureView`). */
+  /** Teto e interior das estruturas conforme a posição dos agentes (ver `structureView`). */
   private updateStructure(): void {
-    const hangar = this.map.hangar;
-    if (!hangar) return;
+    if (!this.structures.length) return;
     let key = '';
     for (const u of this.units.values()) key += `${u.hex.col},${u.hex.row};`;
     if (key === this.structureKey) return;
     this.structureKey = key;
-    const view = structureView(hangar, [...this.units.values()].map((u) => u.hex));
-    if (this.roof) this.roof.visible = view.roof;
-    for (const o of this.interior) o.visible = view.interior;
+    const agents = [...this.units.values()].map((u) => u.hex);
+    for (const st of this.structures) {
+      const view = structureView(st.rect, agents);
+      if (st.roof) st.roof.visible = view.roof;
+      for (const o of st.interior) o.visible = view.interior;
+    }
+  }
+
+  /**
+   * Pista de algo escondido: uma lupa flutua sobre o hexágono (o móvel em que alguém
+   * reparou). `null` tira a pista.
+   */
+  setClue(hex: HexCoord | null): void {
+    if (!hex) {
+      if (this.clue) this.clue.sprite.visible = false;
+      return;
+    }
+    if (!this.clue) {
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.clueTexture(), depthTest: false }));
+      sprite.scale.set(0.8, 0.8, 1);
+      sprite.renderOrder = 10;
+      this.scene.add(sprite);
+      this.clue = { sprite, hex };
+    }
+    this.clue.hex = { ...hex };
+    this.clue.sprite.visible = true;
+  }
+
+  /** Lupa amarela num círculo escuro (desenhada num canvas). */
+  private clueTexture(): THREE.Texture {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    if (g) {
+      g.fillStyle = '#0b1d24';
+      g.beginPath();
+      g.arc(64, 64, 58, 0, Math.PI * 2);
+      g.fill();
+      g.strokeStyle = '#ffd43b';
+      g.lineWidth = 12;
+      g.lineCap = 'round';
+      g.beginPath();
+      g.arc(56, 54, 24, 0, Math.PI * 2);
+      g.stroke();
+      g.beginPath();
+      g.moveTo(74, 72);
+      g.lineTo(96, 96);
+      g.stroke();
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
   }
 
   private addScenery(object: THREE.Object3D): void {
@@ -1348,6 +1405,12 @@ export class HexBoard {
       const glow = 0.5 + Math.sin(t * 1.6) * 0.12;
       (this.aura.wall.material as THREE.MeshBasicMaterial).opacity = glow;
       (this.aura.ring.material as THREE.MeshBasicMaterial).opacity = glow + 0.1;
+    }
+
+    if (this.clue?.sprite.visible) {
+      const tile = this.tiles.get(hexKey(this.clue.hex));
+      const p = tile ?? this.worldOf(this.clue.hex);
+      this.clue.sprite.position.set(p.x, (tile?.y ?? 0) + 1.9 + Math.sin(t * 3) * 0.08, p.z);
     }
 
     this.updateCamera(dt);
