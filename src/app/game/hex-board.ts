@@ -25,6 +25,7 @@ const COLORS = {
   path: 0xfff4c2,
   activeRing: 0xffd23f,
   focusRing: 0xffffff,
+  cursor: 0xa9e4ff,
   wall: 0x56626a,
   wallTop: 0x7d8a90,
   vision: 0xc4513f,
@@ -144,6 +145,9 @@ export class HexBoard {
   private readonly enemies = new Map<string, EnemyView>();
   private readonly activeMarker: THREE.Mesh;
   private readonly focusMarker: THREE.Mesh;
+  /** Cursor do controle: contorno hexagonal sobre o hexágono apontado. */
+  private readonly cursorMarker: THREE.Mesh;
+  private cursor: HexCoord | null = null;
   private readonly clock = new THREE.Clock();
   private readonly resizeObserver: ResizeObserver;
   private frameId = 0;
@@ -197,6 +201,7 @@ export class HexBoard {
     for (const e of extras.enemies ?? []) this.buildEnemy(e);
     this.activeMarker = this.buildMarker(COLORS.activeRing, 0.62, 0.09);
     this.focusMarker = this.buildMarker(COLORS.focusRing, 0.72, 0.05);
+    this.cursorMarker = this.buildCursor();
 
     const first = units[0]?.start ?? { col: 0, row: 0 };
     this.camTarget.copy(this.worldOf(first));
@@ -264,6 +269,34 @@ export class HexBoard {
   focusHex(hex: HexCoord): void {
     this.camGoal.copy(this.worldOf(hex));
     this.clampGoal();
+  }
+
+  /** Mostra (ou esconde, com `null`) o cursor do controle. */
+  setCursor(hex: HexCoord | null): void {
+    this.cursor = hex && this.tiles.has(hexKey(hex)) ? hex : null;
+  }
+
+  /** Desloca a câmera só o necessário para o hexágono ficar longe das bordas da tela. */
+  keepInView(hex: HexCoord): void {
+    const p = this.worldOf(hex);
+    const portrait = this.camera.aspect < 1;
+    const mx = (portrait ? 1.6 : 4) * this.zoom;
+    const mz = (portrait ? 2.6 : 2.2) * this.zoom;
+    this.camGoal.x = THREE.MathUtils.clamp(this.camGoal.x, p.x - mx, p.x + mx);
+    this.camGoal.z = THREE.MathUtils.clamp(this.camGoal.z, p.z - mz, p.z + mz);
+    this.clampGoal();
+  }
+
+  /** Arrasta a câmera (em unidades de tela: x direita, y baixo), proporcional ao zoom. */
+  panBy(dx: number, dy: number): void {
+    this.camGoal.x += dx * this.zoom;
+    this.camGoal.z += dy * this.zoom * 1.3;
+    this.clampGoal();
+  }
+
+  /** Aproxima (< 1) ou afasta (> 1) a câmera. */
+  zoomBy(factor: number): void {
+    this.setZoom(this.zoom * factor);
   }
 
   /** Recoloca os inimigos (sem animação): posição, direção, alerta e presença. */
@@ -868,6 +901,18 @@ export class HexBoard {
     return m;
   }
 
+  private buildCursor(): THREE.Mesh {
+    // anel com 6 segmentos: vértices em ±X, como os hexágonos "flat-top"
+    const m = new THREE.Mesh(
+      new THREE.RingGeometry(HEX_SIZE * HEX_GAP * 0.8, HEX_SIZE * HEX_GAP, 6),
+      new THREE.MeshBasicMaterial({ color: COLORS.cursor, transparent: true, opacity: 0.9, side: THREE.DoubleSide }),
+    );
+    m.rotation.x = -Math.PI / 2;
+    m.visible = false;
+    this.scene.add(m);
+    return m;
+  }
+
   // ---------- estado / pintura ----------
 
   private paintTiles(): void {
@@ -1039,6 +1084,14 @@ export class HexBoard {
       0.04,
       1 + Math.sin(t * 5) * 0.04,
     );
+
+    const cursorTile = this.cursor ? this.tiles.get(hexKey(this.cursor)) : undefined;
+    this.cursorMarker.visible = !!cursorTile;
+    if (cursorTile) {
+      const cp = cursorTile.mesh.position;
+      this.cursorMarker.position.set(cp.x, cp.y + 0.03, cp.z);
+      this.cursorMarker.scale.setScalar(1 + Math.sin(t * 6) * 0.03);
+    }
 
     // pulso suave nos hexágonos alcançáveis
     const pulse = 0.12 + Math.sin(t * 3) * 0.08;

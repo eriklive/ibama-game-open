@@ -120,9 +120,11 @@
       </div>
       <button type="button" class="stamp confirm" (click)="confirmApproach()">
         <span class="stamp-ring"><span class="stamp-text">Abordar!</span></span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
       </button>
       <button type="button" class="paper side" (click)="cancelApproach()">
         <span class="stencil">Cancelar</span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
       </button>
     } @else if (viewingOther()) {
       <button type="button" class="stamp" (click)="focusCharacter(active().id)">
@@ -130,6 +132,7 @@
           <span class="stamp-small">voltar p/</span>
           <span class="stamp-text">{{ active().name }}</span>
         </span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
       </button>
     } @else if (selected() && phase() === 'moving-choice') {
       <button type="button" class="stamp confirm long" (click)="confirm()">
@@ -137,9 +140,11 @@
           <span class="stamp-small">{{ selectedCost() }} {{ selectedCost() === 1 ? 'passo' : 'passos' }}</span>
           <span class="stamp-text">Confirmar</span>
         </span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
       </button>
       <button type="button" class="paper side" (click)="cancel()">
         <span class="stencil">Cancelar</span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
       </button>
     } @else {
       @if (phase() === 'moving-choice' && movesLeft() <= 0) {
@@ -149,6 +154,7 @@
             <span class="stamp-small">sem movimento</span>
             <span class="stamp-text">Passar</span>
           </span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('endTurn') }}</span> }
         </button>
       } @else {
         <div class="stamp passive" [attr.aria-label]="'Movimento restante: ' + movesLeft()" data-testid="moves">
@@ -167,6 +173,7 @@
         <button type="button" class="paper side" [disabled]="phase() !== 'moving-choice'" (click)="endTurn()">
           <span class="stencil">Passar</span>
           <span class="typed">a vez &#8250;</span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('endTurn') }}</span> }
         </button>
       }
       <!-- Abordar só aparece com suspeito no raio -->
@@ -179,10 +186,33 @@
           (click)="startApproach()">
           <span class="approach-stamp">Abordar</span>
           <span class="badge" aria-hidden="true">{{ approachCount() }}</span>
+          @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
     }
   </div>
+
+  @if (pad(); as p) {
+    @if (padHelp()) {
+      <aside class="pad-help" data-testid="pad-help" aria-label="Comandos do controle">
+        <strong>{{ p.dualshock ? 'DualShock 4' : 'Controle' }}</strong>
+        <dl>
+          <dt>Direcional / analógico esq.</dt><dd>mover o cursor</dd>
+          <dt>{{ glyph('confirm') }}</dt><dd>confirmar</dd>
+          <dt>{{ glyph('cancel') }}</dt><dd>cancelar</dd>
+          <dt>{{ glyph('approach') }}</dt><dd>abordar</dd>
+          <dt>{{ glyph('endTurn') }}</dt><dd>passar a vez</dd>
+          <dt>{{ glyph('prev') }} / {{ glyph('next') }}</dt><dd>trocar personagem</dd>
+          <dt>{{ p.dualshock ? 'Touchpad' : 'R3' }}</dt><dd>voltar para quem joga</dd>
+          <dt>Analógico dir.</dt><dd>mover a câmera</dd>
+          <dt>{{ p.kind === 'playstation' ? 'R2 / L2' : 'RT / LT' }}</dt><dd>aproximar / afastar</dd>
+        </dl>
+        <span class="small">{{ glyph('help') }} fecha</span>
+      </aside>
+    } @else {
+      <div class="pad-tip" aria-hidden="true">{{ glyph('help') }} · comandos</div>
+    }
+  }
 
   @if (phase() === 'rolling') {
     <div class="roll-stage" role="status" aria-live="polite" data-testid="roll">
