@@ -1,0 +1,121 @@
+:host {
+  --mb-ink: #23201a;
+  --mb-bg: #f7e36a;
+  --mb-tape: rgba(233, 220, 176, 0.92);
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  min-height: 56px;
+  min-width: 180px;
+  padding: 16px 36px;
+  border: 0;
+  border-radius: 2px;
+  background: linear-gradient(170deg, rgba(255, 255, 255, 0.35), transparent 45%), var(--mb-bg);
+  color: var(--mb-ink);
+  font-family: 'Stardos Stencil', 'Arial Black', sans-serif;
+  font-weight: 700;
+  font-size: 20px;
+  letter-spacing: 0.14em;
+  line-height: 1;
+  text-transform: uppercase;
+  text-decoration: none;
+  box-shadow: 2px 4px 0 rgba(0, 0, 0, 0.38);
+  transform: rotate(-1.5deg);
+  transition:
+    transform 0.12s,
+    box-shadow 0.12s,
+    filter 0.12s;
+  cursor: pointer;
+}
+:host(.paper) {
+  --mb-bg: #f7f2e4;
+}
+
+/* pedaço de fita crepe segurando o papel */
+:host::before {
+  content: '';
+  position: absolute;
+  top: -9px;
+  left: 50%;
+  width: 54px;
+  height: 18px;
+  margin-left: -27px;
+  background: var(--mb-tape);
+  box-shadow: 0 1px 1px rgba(0, 0, 0, 0.18);
+  transform: rotate(3deg);
+  clip-path: polygon(3% 0, 97% 6%, 100% 100%, 0 94%);
+  pointer-events: none;
+}
+
+.label {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* contorno de caneta riscado sobre o papel, como quem rodeia a resposta certa */
+.scribble {
+  position: absolute;
+  inset: 5px 7px;
+  width: calc(100% - 14px);
+  height: calc(100% - 10px);
+  overflow: visible;
+  pointer-events: none;
+}
+.scribble path {
+  fill: none;
+  stroke: var(--mb-ink);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  vector-effect: non-scaling-stroke;
+}
+.pass-1 {
+  stroke-width: 2.6;
+}
+.pass-2 {
+  stroke-width: 1.4;
+  opacity: 0.55;
+}
+
+:host(:hover:not(:disabled)) {
+  filter: brightness(1.04);
+  transform: rotate(-0.5deg) translateY(-1px);
+}
+:host(:hover:not(:disabled)) .scribble,
+:host(:focus-visible) .scribble {
+  animation: boil 0.36s steps(1) infinite;
+}
+:host(:active:not(:disabled)) {
+  transform: rotate(0) translateY(3px);
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.38);
+}
+:host(:focus-visible) {
+  outline: 3px dashed #c0352b;
+  outline-offset: 9px;
+}
+:host(:disabled) {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+/* traço "fervendo": o contorno pula entre posições, como quadros desenhados à mão */
+@keyframes boil {
+  0% {
+    transform: translate(0, 0) rotate(0deg);
+  }
+  33% {
+    transform: translate(1px, -1px) rotate(0.4deg);
+  }
+  66% {
+    transform: translate(-1px, 1px) rotate(-0.3deg);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :host,
+  .scribble {
+    transition: none;
+    animation: none !important;
+  }
+}

@@ -10,10 +10,12 @@ import {
   viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { rollDice, rollDie, sum } from '../../game/dice';
+import { rollDice, sum } from '../../game/dice';
+import { DiceTray } from '../../game/dice-3d';
 import { HexBoard } from '../../game/hex-board';
 import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
+import { MainButton } from '../../ui/main-button';
 import { RENDER_PROFILES, RenderMode, RenderSettings } from '../../game/render-settings';
 import {
   APPROACH_RULES,
@@ -49,6 +51,7 @@ const reducedMotion = (): boolean =>
 
 @Component({
   selector: 'app-game-screen',
+  imports: [MainButton],
   templateUrl: './game-screen.html',
   styleUrl: './game-screen.css',
 })
@@ -60,7 +63,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private board?: HexBoard;
   private timers: ReturnType<typeof setTimeout>[] = [];
-  private rollTicker?: ReturnType<typeof setInterval>;
+  /** Palco dos dados 3D (só existe enquanto a rolagem está na tela). */
+  private readonly diceHost = viewChild<ElementRef<HTMLDivElement>>('diceHost');
+  private readonly rollConfirmBtn = viewChild<ElementRef<HTMLButtonElement>>('rollConfirm');
+  private diceTray?: DiceTray;
+  /** Resultado sorteado esperando o palco aparecer para ser jogado. */
+  private pendingRoll: number[] | null = null;
   private destroyed = false;
   /** Muda a cada "Recomeçar": animações antigas param de mexer no estado. */
   private epoch = 0;
@@ -82,9 +90,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Turno global: aumenta a cada vez que um personagem começa a jogar. */
   protected readonly turn = signal(1);
   protected readonly phase = signal<Phase>('rolling');
-  /** Valores mostrados nos dados (mudam durante a animação). */
+  /** Valores sorteados nesta rolagem. */
   protected readonly dice = signal<number[]>(Array(MOVE_DICE.count).fill(1));
   protected readonly rolled = signal(0);
+  /** Sem WebGL: a rolagem cai nos d4 desenhados em 2D. */
+  protected readonly flatDice = signal(false);
   protected readonly movesLeft = signal(0);
   protected readonly selected = signal<HexCoord | null>(null);
   /** Personagem em foco na interface (tocado no tabuleiro ou no retrato). */
@@ -123,6 +133,25 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   constructor() {
+    // o palco da rolagem entra e sai com a fase: monta/desmonta a bandeja 3D junto
+    effect(() => {
+      const host = this.diceHost()?.nativeElement;
+      if (!host) {
+        this.diceTray?.dispose();
+        this.diceTray = undefined;
+        return;
+      }
+      if (!this.diceTray && !this.flatDice()) {
+        try {
+          this.diceTray = new DiceTray(host);
+        } catch {
+          this.flatDice.set(true);
+        }
+      }
+      if (this.pendingRoll) this.throwDice(this.pendingRoll);
+    });
+    // resultado na tela: o foco vai para "Confirmar" (Enter/Espaço fecham)
+    effect(() => this.rollConfirmBtn()?.nativeElement.focus({ preventScroll: true }));
     // troca de modo no menu: o tabuleiro remonta o mundo em segundo plano
     effect(() => {
       const mode = this.renderMode();
@@ -318,6 +347,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.clearTimers();
     clearTimeout(this.noticeTimer);
     clearInterval(this.statsTicker);
+    this.diceTray?.dispose();
+    this.diceTray = undefined;
     this.board?.dispose();
   }
 
@@ -337,24 +368,34 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.roll();
   }
 
-  /** Rola 2d4 com animação; ao parar, a soma vira o movimento do turno. */
+  /** Rola 2d4 com dados 3D; o resultado fica na tela até o jogador confirmar. */
   private roll(): void {
     this.phase.set('rolling');
     this.rolled.set(0);
     const final = rollDice(MOVE_DICE.count, MOVE_DICE.sides);
-    const duration = reducedMotion() ? 250 : 1100;
-    this.rollTicker = setInterval(
-      () => this.dice.set(final.map(() => rollDie(MOVE_DICE.sides))),
-      reducedMotion() ? 250 : 70,
-    );
-    this.later(duration, () => {
-      clearInterval(this.rollTicker);
-      this.dice.set(final);
+    this.dice.set(final);
+    this.pendingRoll = final;
+    // palco já montado (ex.: recomeçar durante a rolagem): joga direto
+    if (this.diceTray || this.flatDice()) this.throwDice(final);
+  }
+
+  private throwDice(final: number[]): void {
+    this.pendingRoll = null;
+    const epoch = this.epoch;
+    const show = () => {
+      if (this.destroyed || this.epoch !== epoch || this.dice() !== final) return;
       this.rolled.set(sum(final));
       this.movesLeft.set(sum(final) + (this.grouped() ? GROUP_RULES.moveBonus : 0));
-      // mostra o resultado um instante antes de liberar o movimento
-      this.later(reducedMotion() ? 150 : 650, () => this.beginChoosing());
-    });
+      this.gamepad.rumble(0.3, 0.2, 120);
+    };
+    if (this.diceTray) void this.diceTray.roll(final, { instant: reducedMotion() }).then(show);
+    else this.later(reducedMotion() ? 150 : 700, show);
+  }
+
+  /** Fecha o resultado da rolagem e libera o movimento. */
+  protected confirmRoll(): void {
+    if (this.phase() !== 'rolling' || this.rolled() === 0) return;
+    this.beginChoosing();
   }
 
   private beginChoosing(): void {
@@ -759,7 +800,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const choosing = this.phase() === 'moving-choice';
     switch (b) {
       case 'cross':
-        if (this.approaching()) this.confirmApproach();
+        if (this.phase() === 'rolling') this.confirmRoll();
+        else if (this.approaching()) this.confirmApproach();
         else if (this.grouping()) void this.confirmGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
         else if (choosing && this.selected()) void this.confirm();
@@ -934,6 +976,5 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private clearTimers(): void {
     this.timers.forEach(clearTimeout);
     this.timers = [];
-    clearInterval(this.rollTicker);
   }
 }

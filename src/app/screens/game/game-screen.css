@@ -292,33 +292,58 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   text-align: center; font-family: var(--stencil); font-weight: 700; font-size: 12px; line-height: 1; color: var(--ink-paper);
 }
 
-/* ---------- palco da rolagem ---------- */
+/* ---------- palco da rolagem: dados 3D, resultado fica até "Confirmar" ---------- */
 .roll-stage {
   position: absolute; inset: 0;
-  display: grid; place-items: center;
-  padding: 16px;
-  pointer-events: none;
-  background: radial-gradient(circle, rgba(20, 28, 16, .55), rgba(20, 28, 16, .15) 70%);
-  animation: fade-in .2s ease-out both;
-  z-index: 4;
+  display: grid; grid-template-rows: auto 1fr auto; justify-items: center;
+  padding: max(20px, env(safe-area-inset-top)) 16px max(24px, env(safe-area-inset-bottom));
+  background:
+    radial-gradient(ellipse 60% 45% at 50% 50%, rgba(255, 196, 90, .10), transparent 70%),
+    radial-gradient(ellipse at center, rgba(10, 12, 8, .55) 0%, rgba(6, 8, 5, .88) 75%);
+  animation: fade-in .25s ease-out both;
+  z-index: 6;
+  color: var(--paper-light);
 }
-.roll-card {
-  padding: 16px 26px 18px;
-  background: var(--paper-light);
-  box-shadow: 3px 6px 0 rgba(0, 0, 0, 0.4);
-  transform: rotate(-2deg);
-  display: flex; flex-direction: column; align-items: center; text-align: center;
+.roll-tray { position: absolute; inset: 0; display: grid; place-items: center; }
+.roll-head, .roll-result { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
+.roll-head { animation: drop-in .4s ease-out both; }
+.roll-kicker {
+  font-size: 12px; letter-spacing: .22em; text-transform: uppercase; color: #d9c58f;
+  padding-bottom: 6px; border-bottom: 1px solid rgba(217, 197, 143, .45);
 }
-.roll-who { font-family: var(--marker); font-size: 26px; color: var(--red); }
-.dice.big { gap: 18px; margin: 20px 0 10px; }
+.roll-who { margin-top: 6px; font-family: var(--marker); font-size: 30px; color: var(--paper-light); text-shadow: 0 2px 0 rgba(0, 0, 0, .5); }
+.roll-result { grid-row: 3; gap: 6px; min-height: 150px; justify-content: flex-end; }
+.roll-number {
+  font-family: var(--stencil); font-weight: 700; font-size: 72px; line-height: 1;
+  color: #ffd772;
+  text-shadow: 0 0 18px rgba(255, 190, 70, .65), 0 3px 0 rgba(0, 0, 0, .55);
+  animation: reveal .5s cubic-bezier(.2, 1.5, .4, 1) both;
+}
+.roll-total { font-size: 15px; color: #eadfbf; animation: fade-in .4s .1s ease-out both; }
+.roll-total strong { font-family: var(--stencil); font-weight: 700; font-size: 18px; color: #ffd772; }
+.roll-total.rolling { animation: pulse 1s ease-in-out infinite; }
+.roll-confirm { margin-top: 18px; animation: rise .35s .25s ease-out both; }
+.roll-confirm .pad-glyph { top: -14px; right: -14px; }
+.dice.big { gap: 18px; }
 .dice.big .d4 { width: 92px; height: 84px; filter: drop-shadow(2px 4px 0 rgba(0, 0, 0, .35)); }
 .dice.big .d4-value { font-size: 36px; top: 38%; }
 .dice.big:not(.rolling) .d4 { animation: land .45s cubic-bezier(.3, 1.6, .5, 1) both; }
 .dice.big.rolling .d4 { animation: tumble .42s linear infinite; }
-.roll-total { font-size: 15px; min-height: 22px; }
-.roll-total.show { animation: land .35s ease-out both; }
-.roll-total strong { font-family: var(--stencil); font-weight: 700; font-size: 22px; color: var(--red); }
 
+@keyframes reveal {
+  0%   { opacity: 0; transform: scale(1.8); filter: blur(4px); }
+  100% { opacity: 1; transform: scale(1); filter: blur(0); }
+}
+@keyframes drop-in {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+/* só `translate`: o botão principal guarda a inclinação no `transform` */
+@keyframes rise {
+  from { opacity: 0; translate: 0 -10px; }
+  to   { opacity: 1; translate: 0 0; }
+}
+@keyframes pulse { 50% { opacity: .45; } }
 @keyframes tumble {
   0%   { transform: translateY(0) rotate(0deg) scale(1); }
   25%  { transform: translateY(-22px) rotate(100deg) scale(1.08); }
@@ -338,7 +363,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .dice.big.rolling .d4, .telegram, .stamp-turn, .stamp.confirm, .approach, .slip, .suspect { animation: none; }
+  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .slip, .suspect { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
