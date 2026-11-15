@@ -69,6 +69,32 @@ O hangar (chapa ondulada, portão e arcos do telhado) e o avião são montados p
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
+### Controle (DualShock 4)
+
+Dá para jogar com o controle do PS4 (por USB ou Bluetooth), pela Gamepad API do navegador. O
+navegador só enxerga o controle depois do **primeiro botão apertado** com a página aberta. Com o
+controle conectado, aparece um **cursor** (contorno azul) no tabuleiro e os botões da tela ganham o
+símbolo correspondente.
+
+| Botão | Ação |
+| --- | --- |
+| Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
+| ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
+| ○ | Cancela |
+| □ | Abordar |
+| △ | Passar a vez |
+| L1 / R1 | Personagem anterior / seguinte |
+| Touchpad / R3 | Volta para quem está na vez |
+| Analógico direito | Move a câmera |
+| R2 / L2 | Aproxima / afasta |
+| Options | Mostra ou esconde a legenda dos comandos |
+
+Na tela inicial, o direcional escolhe o mapa e ✕ inicia. O controle vibra quando um inimigo avista
+um agente e na abordagem (Chrome/Edge). No Chrome/Edge o DualShock 4 chega com o mapeamento
+"standard"; no Firefox/Linux, sem ele, o jogo usa o mapeamento do driver. Outros controles (Xbox,
+genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em
+`src/app/game/gamepad.ts` (funções puras testadas) e `gamepad.service.ts`.
+
 ## Modelos dos personagens
 
 Há sete modelos em `public/assets/characters/`: quatro agentes do Ibama (Ana, Bruno, Clara e

@@ -34,6 +34,8 @@
                 Bloqueado
               } @else if (selectedId() === map.id) {
                 Selecionado
+              } @else if (pad()) {
+                Direcional para escolher
               } @else {
                 Tocar para escolher
               }
@@ -47,6 +49,7 @@
   <footer class="actions">
     <button type="button" class="btn btn-primary start-btn" [disabled]="!selectedId()" (click)="start()">
       Iniciar
+      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ confirmGlyph() }}</span> }
     </button>
   </footer>
 </main>

@@ -327,3 +327,46 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   .postit { left: calc(110px + var(--safe-left)); bottom: calc(14px + var(--safe-bottom)); }
   .telegram { top: calc(70px + var(--safe-top)); }
 }
+
+/* ---------- controle (DualShock 4) ---------- */
+/* símbolo do botão do controle, num "botão" redondo preso ao carimbo/papel */
+.pad-glyph {
+  position: absolute; top: -10px; right: -8px;
+  min-width: 26px; height: 26px; padding: 0 6px;
+  display: grid; place-items: center;
+  border-radius: 13px;
+  background: var(--ink-paper); color: var(--paper-light);
+  border: 2px solid var(--paper-light);
+  font-family: var(--body); font-size: 14px; line-height: 1;
+  box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.35);
+  pointer-events: none;
+}
+.pad-glyph.left { right: auto; left: -8px; }
+
+.pad-tip {
+  position: absolute;
+  left: 50%; bottom: calc(10px + var(--safe-bottom));
+  transform: translateX(-50%);
+  padding: 4px 10px;
+  background: rgba(35, 32, 26, 0.75); color: var(--paper-light);
+  border-radius: 10px;
+  font-size: 12px; white-space: nowrap;
+  pointer-events: none;
+}
+
+.pad-help {
+  position: absolute;
+  left: 50%; top: 50%;
+  transform: translate(-50%, -50%) rotate(-1deg);
+  width: min(320px, calc(100% - 32px));
+  padding: 14px 16px;
+  background: var(--paper); color: var(--ink-paper);
+  box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.35);
+  font-family: var(--typed); font-size: 13px;
+  z-index: 5;
+}
+.pad-help strong { display: block; font-family: var(--stencil); font-size: 18px; text-transform: uppercase; margin-bottom: 8px; }
+.pad-help dl { margin: 0 0 8px; display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; }
+.pad-help dt { font-family: var(--body); font-weight: 800; text-align: right; }
+.pad-help dd { margin: 0; }
+.pad-help .small { font-size: 11px; color: var(--muted-paper); }

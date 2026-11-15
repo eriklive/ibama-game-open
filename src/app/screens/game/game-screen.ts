@@ -4,6 +4,7 @@ import {
   ElementRef,
   OnDestroy,
   computed,
+  effect,
   inject,
   signal,
   viewChild,
@@ -11,6 +12,8 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { rollDice, rollDie, sum } from '../../game/dice';
 import { HexBoard } from '../../game/hex-board';
+import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
+import { GamepadService } from '../../game/gamepad.service';
 import {
   APPROACH_RULES,
   ENEMY_RULES,
@@ -49,6 +52,8 @@ const reducedMotion = (): boolean =>
 })
 export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly router = inject(Router);
+  private readonly gamepad = inject(GamepadService);
+  private stopPad?: () => void;
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private board?: HexBoard;
   private timers: ReturnType<typeof setTimeout>[] = [];
@@ -79,6 +84,28 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Último acontecimento com inimigos (avistou, correu, fugiu…), mostrado num aviso. */
   protected readonly notice = signal<{ text: string; tone: 'alert' | 'info' } | null>(null);
   private noticeTimer?: ReturnType<typeof setTimeout>;
+
+  /** Controle conectado (DualShock 4 ou outro): troca os textos de toque pelos botões. */
+  protected readonly pad = this.gamepad.pad;
+  /** Hexágono apontado pelo cursor do controle. */
+  protected readonly cursor = signal<HexCoord | null>(null);
+  /** Legenda dos botões do controle (Options mostra/esconde). */
+  protected readonly padHelp = signal(false);
+
+  constructor() {
+    // o cursor só aparece no tabuleiro com um controle conectado
+    // (lê os sinais antes do `?.`: sem tabuleiro ainda, o effect precisa ficar inscrito neles)
+    effect(() => {
+      const hex = this.pad() ? this.cursor() : null;
+      this.board?.setCursor(hex);
+    });
+  }
+
+  /** Símbolo do botão do controle para uma ação (✕, ○, □, △ no DualShock 4). */
+  protected glyph(action: PadAction): string {
+    const p = this.pad();
+    return p ? glyphFor(p.kind, action) : '';
+  }
 
   protected readonly enemyCounts = computed(() => {
     const es = this.enemies();
@@ -184,10 +211,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     this.refreshVision();
     this.startTurn();
+    this.stopPad = this.gamepad.listen({
+      button: (b) => this.padButton(b),
+      move: (dir) => this.moveCursor(dir),
+      frame: (dt, state) => this.padFrame(dt, state),
+    });
   }
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.stopPad?.();
     this.clearTimers();
     clearTimeout(this.noticeTimer);
     this.board?.dispose();
@@ -200,6 +233,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeApproach();
     this.selected.set(null);
     this.focusedId.set(active.id);
+    this.placeCursor(this.positions().get(active.id));
     this.board?.setActive(active.id);
     this.board?.focus(active.id);
     this.board?.setSelected(null);
@@ -344,6 +378,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setEnemyFacing(enemyId, facingBetween(enemy.hex, agent));
     this.board?.setEnemyAlert(enemyId, true);
     this.refreshVision();
+    this.gamepad.rumble(0.7, 0.4, 260);
     const name = CHARACTERS.find((c) => c.id === who)?.name ?? who;
     this.say(`${enemy.name} avistou ${name}! Vai correr para a borda.`, 'alert');
     return true;
@@ -358,6 +393,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private tapHex(hex: HexCoord | null): void {
     if (this.phase() !== 'moving-choice') return;
+    if (hex && !this.approaching()) this.cursor.set(hex);
     if (this.approaching()) {
       this.cancelApproach();
       return;
@@ -380,6 +416,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (id !== this.active().id) this.cancelApproach();
     this.focusedId.set(id);
     this.board?.focus(id);
+    this.placeCursor(this.positions().get(id));
     if (id !== this.active().id) {
       this.selected.set(null);
       this.board?.setSelected(null);
@@ -468,6 +505,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       flee.length && `${namesOf(flee)} ${flee.length === 1 ? 'vai tentar correr' : 'vão tentar correr'}`,
     ].filter(Boolean);
     this.say(`Ibama! ${parts.join(' · ')}`, 'alert');
+    this.gamepad.rumble(1, 0.6, 320);
     this.phase.set('ending');
     if (!this.actingEnemies().length) this.later(1400, () => this.announceIfOver());
     this.later(reducedMotion() ? 400 : 1600, () => this.endTurn());
@@ -508,6 +546,93 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   protected hexColor(c: Character): string {
     return '#' + c.color.toString(16).padStart(6, '0');
+  }
+
+  // ---------- controle (DualShock 4) ----------
+
+  /**
+   * ✕ confirma · ○ cancela · □ aborda · △ passa a vez · L1/R1 trocam o personagem em foco ·
+   * touchpad/R3 voltam para quem está na vez · Options mostra os comandos.
+   */
+  private padButton(b: PadButton): void {
+    const choosing = this.phase() === 'moving-choice';
+    switch (b) {
+      case 'cross':
+        if (this.approaching()) this.confirmApproach();
+        else if (this.viewingOther()) this.focusCharacter(this.active().id);
+        else if (choosing && this.selected()) void this.confirm();
+        else this.focusUnitUnderCursor();
+        break;
+      case 'circle':
+        if (this.approaching()) this.cancelApproach();
+        else if (this.viewingOther()) this.focusCharacter(this.active().id);
+        else if (this.selected()) {
+          this.cancel();
+          this.placeCursor(this.positions().get(this.active().id));
+        }
+        break;
+      case 'square':
+        if (this.approaching()) this.cancelApproach();
+        else this.startApproach();
+        break;
+      case 'triangle':
+        if (choosing && !this.approaching()) this.endTurn();
+        break;
+      case 'l1':
+      case 'r1': {
+        if (this.phase() === 'enemy') break;
+        const ids = CHARACTERS.map((c) => c.id);
+        const i = ids.indexOf(this.focusedId());
+        this.focusCharacter(ids[(i + (b === 'r1' ? 1 : ids.length - 1)) % ids.length]);
+        break;
+      }
+      case 'touchpad':
+      case 'r3':
+        if (this.phase() !== 'enemy') this.focusCharacter(this.active().id);
+        break;
+      case 'options':
+        this.padHelp.update((v) => !v);
+        break;
+    }
+  }
+
+  /** Anda o cursor um hexágono; sobre um destino alcançável, já mostra o caminho (como o 1º toque). */
+  private moveCursor(dir: Stick): void {
+    const map = this.map;
+    if (!map || !this.board || this.phase() === 'enemy' || this.approaching()) return;
+    const from = this.cursor() ?? this.positions().get(this.active().id);
+    if (!from) return;
+    const next = neighborToward(from, dir);
+    if (next.col < 0 || next.row < 0 || next.col >= map.cols || next.row >= map.rows) return;
+    this.cursor.set(next);
+    this.board.keepInView(next);
+    if (this.phase() !== 'moving-choice') return;
+    if (this.viewingOther()) {
+      this.focusedId.set(this.active().id);
+      this.board.focus(this.active().id, false);
+    }
+    this.selected.set(this.reach().has(hexKey(next)) ? next : null);
+    this.board.setSelected(this.selected(), this.selectedPath());
+  }
+
+  /** Analógico direito move a câmera; R2 aproxima e L2 afasta. */
+  private padFrame(dt: number, state: PadState): void {
+    if (!this.board) return;
+    const r = deadzone(state.right);
+    if (r.x || r.y) this.board.panBy(r.x * dt * 9, r.y * dt * 9);
+    const zoom = state.buttons.l2 - state.buttons.r2;
+    if (Math.abs(zoom) > 0.1) this.board.zoomBy(Math.exp(zoom * dt * 1.6));
+  }
+
+  /** ✕ sobre um agente (que não é destino) mostra aquele agente. */
+  private focusUnitUnderCursor(): void {
+    const c = this.cursor();
+    const who = c && [...this.positions()].find(([, h]) => sameHex(h, c))?.[0];
+    if (who) this.focusCharacter(who);
+  }
+
+  private placeCursor(hex: HexCoord | undefined): void {
+    if (hex) this.cursor.set({ ...hex });
   }
 
   // ---------- auxiliares ----------
