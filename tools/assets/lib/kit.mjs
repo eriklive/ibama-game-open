@@ -836,6 +836,104 @@ export const KIT = {
     }
   },
 
+  /** Óculos de aviador: lentes em gota, armação dourada e hastes até a orelha. */
+  aviators(kit, ctx, { lens = '#18242c', frame = '#c9a54a' } = {}) {
+    const { E, H } = ctx;
+    const ey = (E.min[1] + E.max[1]) / 2 - 0.002, ez = E.max[2] + 0.014, ex = E.max[0] * 0.66;
+    for (const s of [1, -1]) {
+      kit.add(new THREE.SphereGeometry(1, 16, 10), lens, 'Head', { pos: [s * ex, ey, ez], scale: [0.025, 0.021, 0.006], rot: [0, s * 0.18, s * -0.12], grad: 0.35, edgeLift: 0.6 });
+      kit.add(new THREE.TorusGeometry(1, 0.08, 6, 20), frame, 'Head', { pos: [s * ex, ey, ez + 0.001], scale: [0.026, 0.022, 0.03], rot: [0, s * 0.18, s * -0.12], grad: 0 });
+      // haste: da lente até a orelha
+      const x0 = s * (ex + 0.025), x1 = s * (H.rx + 0.004);
+      const a = new THREE.Vector3(x0, ey + 0.008, ez - 0.004), b = new THREE.Vector3(x1, ey + 0.004, H.zc - 0.01);
+      kit.add(new THREE.TubeGeometry(new THREE.LineCurve3(a, b), 4, 0.0018, 5), frame, 'Head', { grad: 0 });
+    }
+    kit.add(rbox(ex * 0.9, 0.003, 0.003, 0.001), frame, 'Head', { pos: [0, ey + 0.016, ez + 0.002], grad: 0 });
+  },
+
+  /** Headset de piloto descansando no pescoço, com microfone. */
+  headset(kit, ctx, { color = '#2a2d31', cup = '#3d4248', pad = '#18191b' } = {}) {
+    const { body, M } = ctx;
+    const x = 0.078;
+    const z = M.neckZ + 0.012;
+    for (const s of [1, -1]) {
+      const y = body.topAt(s * x) + 0.028;
+      kit.add(new THREE.CylinderGeometry(0.032, 0.034, 0.03, 18), cup, 'spine_03', { pos: [s * x, y, z], rot: [0.25, 0, Math.PI / 2] });
+      kit.add(new THREE.CylinderGeometry(0.028, 0.028, 0.012, 18), pad, 'spine_03', { pos: [s * (x - 0.019), y, z], rot: [0.25, 0, Math.PI / 2] });
+    }
+    const y = body.topAt(x) + 0.028;
+    // arco por trás do pescoço
+    kit.add(new THREE.TorusGeometry(x, 0.007, 6, 20, Math.PI), color, 'spine_03', { pos: [0, y + 0.01, z - 0.004], rot: [Math.PI / 2 + 0.25, 0, 0] });
+    // microfone saindo da concha esquerda
+    const a = new THREE.Vector3(x + 0.012, y - 0.01, z + 0.02), b = new THREE.Vector3(0.045, y - 0.03, z + 0.075);
+    kit.add(new THREE.TubeGeometry(new THREE.QuadraticBezierCurve3(a, new THREE.Vector3(x, y - 0.02, z + 0.07), b), 8, 0.003, 5), color, 'spine_03', { grad: 0 });
+    kit.add(new THREE.SphereGeometry(0.009, 8, 6), pad, 'spine_03', { pos: [b.x, b.y, b.z] });
+  },
+
+  /** Dragonas de piloto nos ombros, com faixas douradas. */
+  epaulets(kit, ctx, { color = '#1f2a44', stripe = '#d4a017', stripes = 3 } = {}) {
+    const { body, M } = ctx;
+    for (const side of ['l', 'r']) {
+      const s = side === 'l' ? 1 : -1;
+      const x = s * (M.shoulderX - 0.035);
+      const top = body.topAt(x, 0.015);
+      const z = M.B[`clavicle_${side}`][2] - 0.01;
+      const m = new THREE.Matrix4().compose(new THREE.Vector3(x, top + 0.004, z), new THREE.Quaternion().setFromEuler(new THREE.Euler(0, 0, -s * 0.22)), new THREE.Vector3(1, 1, 1));
+      kit.add(rbox(0.085, 0.007, 0.045, 0.003), color, `clavicle_${side}`, { matrix: m, grad: 0.1 });
+      for (let k = 0; k < stripes; k++) {
+        const dx = s * (0.022 - k * 0.013);
+        kit.add(new THREE.BoxGeometry(0.006, 0.003, 0.043), stripe, `clavicle_${side}`, { matrix: m.clone().multiply(new THREE.Matrix4().makeTranslation(dx, 0.005, 0)), grad: 0, edgeLift: 0.3 });
+      }
+    }
+  },
+
+  /** Bolso de camisa no peito esquerdo, com canetas. */
+  shirtPocket(kit, ctx, { color = '#cfd7dc', pens = ['#1f3c88', '#1a1a1a'] } = {}) {
+    const { body, M } = ctx;
+    const C = (ctx.torso ??= torsoContour(body, M));
+    const f = frameOn(C, 0.42, C.tOf(M.chestY - 0.005), 0.004);
+    const m = placeOn(f, 0.003);
+    kit.add(rbox(0.07, 0.075, 0.007, 0.003), color, 'spine_03', { matrix: m });
+    kit.add(rbox(0.072, 0.022, 0.009, 0.003), shade(color, 0.92), 'spine_03', { matrix: m.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0.03, 0.002)) });
+    pens.forEach((c, k) => {
+      const pm = m.clone().multiply(new THREE.Matrix4().makeTranslation(-0.018 + k * 0.014, 0.05, 0.001));
+      kit.add(new THREE.CylinderGeometry(0.004, 0.004, 0.05, 8), c, 'spine_03', { matrix: pm, grad: 0.1 });
+      kit.add(rbox(0.002, 0.025, 0.004, 0.001), '#c0c4c8', 'spine_03', { matrix: pm.clone().multiply(new THREE.Matrix4().makeTranslation(0, 0.008, 0.005)), grad: 0 });
+    });
+  },
+
+  /** Lenço amarrado no pescoço, com o nó caindo na frente. */
+  bandana(kit, ctx, { color = '#b8322a', dots = '#f1e4c8' } = {}) {
+    const { body, M } = ctx;
+    const y0 = M.neckY - 0.005, y1 = M.neckY + 0.04;
+    const C = new Contour(body, {
+      axis: 'y', l0: y0, l1: y1, nL: 4, nA: 32,
+      filter: (i, x, y) => body.part(i, 'head') + body.part(i, 'torso') > 0.6 && y > y0 - 0.04 && y < y1 + 0.03 && Math.abs(x) < 0.09,
+    });
+    const pattern = (th, t) => ((Math.round(th * 5) + Math.round(t * 6)) % 3 === 0 ? dots : color);
+    band(kit, C, { t0: 0, t1: 1, full: true, off: 0.004, th: 0.012, pillow: 0.5, color: pattern, nA: 28, nL: 3 });
+    // ponta triangular caindo sobre o peito
+    const p = C.point(0, 0.1, C.R(0, 0.1) + 0.012);
+    const tri = new THREE.CylinderGeometry(0.05, 0.004, 0.075, 3, 1);
+    kit.add(tri, color, 'spine_03', { pos: [p[0], p[1] - 0.035, p[2] + 0.006], rot: [-0.25, Math.PI / 6, 0], scale: [1, 1, 0.28], grad: 0.2 });
+  },
+
+  /** Pá de garimpo segura pelo cabo, pendurada da mão direita (braço em T: para baixo é −x). */
+  shovel(kit, ctx, { wood = '#8a5a32', metal = '#7d858c', rust = '#8a4b2a' } = {}) {
+    const { M } = ctx;
+    const B = M.B.hand_r;
+    const gx = B[0] - 0.075, y = B[1] - 0.012, z = B[2] + 0.012;
+    // punho em D na mão
+    kit.add(new THREE.TorusGeometry(0.035, 0.009, 6, 14), '#3a2a1a', 'hand_r', { pos: [gx + 0.01, y, z], rot: [Math.PI / 2, 0, 0], scale: [1, 0.6, 1] });
+    const len = 0.7;
+    kit.add(new THREE.CylinderGeometry(0.0155, 0.0155, len, 10), wood, 'hand_r', { pos: [gx - 0.02 - len / 2, y, z], rot: [0, 0, Math.PI / 2], grad: 0.15 });
+    // colarinho e lâmina (larga no eixo y: com o braço baixado, fica de frente)
+    const bx = gx - 0.02 - len;
+    kit.add(new THREE.CylinderGeometry(0.02, 0.026, 0.06, 10), metal, 'hand_r', { pos: [bx - 0.02, y, z], rot: [0, 0, Math.PI / 2] });
+    const blade = rbox(0.24, 0.2, 0.012, 0.005);
+    kit.add(blade, (px, py) => (Math.abs(py - y) > 0.085 || px < bx - 0.27 ? rust : metal), 'hand_r', { pos: [bx - 0.17, y, z], edgeLift: 0.4 });
+  },
+
   /** Bandoleira de cartuchos atravessada no peito (caçador). */
   bandolier(kit, ctx, { color = '#5a3e24', shells = '#b32a1f', brass = '#c9a24a' } = {}) {
     const { body, M } = ctx;

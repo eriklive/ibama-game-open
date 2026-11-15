@@ -78,8 +78,21 @@ caprichado (formas gordinhas, bordas acolchoadas, luz pintada por vértice):
 
 Peças disponíveis em `KIT` (`lib/kit.mjs`): `plateCarrier` (`style: 'vest'` para o colete de
 campo leve), `radio`, `belt`, `kneePads`, `boots`, `gloves`, `holster`, `cargoPockets`,
-`flagPatch`, `backpack`, `earMuffs`, `bandolier`. Cada personagem lista as suas em `kit`, em
+`flagPatch`, `backpack`, `earMuffs`, `bandolier`, `aviators`, `headset`, `epaulets`,
+`shirtPocket`, `bandana`, `shovel`. Cada personagem lista as suas em `kit`, em
 `characters.mjs`. `KIT_DEBUG=1 node refit.mjs` mostra quantos triângulos cada peça custa.
+
+## Personagem novo sem os pacotes: moldes
+
+Um personagem com `from: '<molde>'` em `characters.mjs` não precisa de base própria: o refit abre
+a base do molde (`base/characters/<molde>`), repinta a pele e o figurino por cima
+(`repaintBody`, em `lib/bake.mjs`) e segue normalmente. Os moldes ficam em `TEMPLATES`, com a pele
+e o figurino com que foram pintados. Hoje são o madeireiro e o caçador, que saíram do jogo.
+
+O figurino novo precisa cobrir tudo o que o do molde cobria (manga pelo menos tão comprida,
+calça até o chão, luva onde havia luva), senão a roupa velha aparece; o refit avisa se sobrar
+muita coisa. O corpo do molde mantém a forma (volume da roupa antiga) e o penteado; com chapéu
+ou boné no molde, o personagem novo também precisa de um, porque o cabelo já veio cortado.
 
 ## Criar ou mudar um personagem
 

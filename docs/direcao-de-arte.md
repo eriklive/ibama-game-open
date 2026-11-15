@@ -77,8 +77,10 @@ O que tiramos delas:
 5. **Exagero de miniatura.** Pés, mãos e equipamento um pouco maiores que o real; detalhes
    finos (antena, cabo do PTT, cadarço) só se forem grossos o bastante para sobreviver de cima.
 6. **Cada personagem com uma marca.** Ana: coque e coldre. Bruno: boné com distintivo. Clara:
-   chapéu, colete cáqui e mochila. Kauã: urucum e colar. Inimigos com cor de ofício (xadrez e
-   capacete amarelo, regata e galocha, camuflagem e bandoleira).
+   chapéu, colete cáqui e mochila. Kauã: urucum e colar. Inimigos com cor de ofício e uma cor de cabeça
+   própria, para distinguir de cima: garimpeiro da bateia (chapéu de palha, regata, galocha
+   preta), garimpeiro da pá (boné laranja, manga longa azul, lenço, galocha amarela) e piloto
+   (boné azul-marinho, camisa clara com dragonas, óculos de aviador, headset).
 7. **Orçamento.** Até ~35 mil triângulos por personagem e um draw call para todo o equipamento
    (`KIT_DEBUG=1 node refit.mjs` mostra o custo de cada peça).
 

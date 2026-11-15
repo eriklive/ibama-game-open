@@ -13,12 +13,12 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CHARACTERS } from './characters.mjs';
-import { bodyMetrics } from './lib/bake.mjs';
+import { bodyMetrics, repaintBody } from './lib/bake.mjs';
 import { PIECES, measure } from './lib/gear.mjs';
 import { BodyShape, Kit, KIT, relaxLegs } from './lib/kit.mjs';
 import { dequantizeSkinned } from './lib/glb-space.mjs';
 import { PROPORTIONS, reproportion } from './lib/proportions.mjs';
-import { STYLE } from './characters.mjs';
+import { STYLE, TEMPLATES } from './characters.mjs';
 
 const here = path.dirname(fileURLToPath(import.meta.url));
 const args = process.argv.slice(2);
@@ -33,9 +33,14 @@ await MeshoptEncoder.ready;
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies({ 'meshopt.decoder': MeshoptDecoder, 'meshopt.encoder': MeshoptEncoder });
 
 async function refit(def) {
-  const doc = await io.read(path.join(BASE, 'characters', def.id, `${def.id}.glb`));
+  // personagem novo, sem base própria: parte do molde e repinta a roupa por cima
+  const mold = def.from ? TEMPLATES[def.from] : null;
+  if (def.from && !mold) throw new Error(`molde desconhecido: ${def.from}`);
+  const baseId = def.from ?? def.id;
+  const doc = await io.read(path.join(BASE, 'characters', baseId, `${baseId}.glb`));
   const root = doc.getRoot();
   dequantizeSkinned(doc);
+  if (mold) await repaint(root, def, mold);
   // os acessórios antigos são refeitos aqui
   for (const n of root.listNodes()) if (n.getName() === 'Gear') { n.getMesh()?.dispose(); n.dispose(); }
   for (const m of root.listMaterials()) if (m.getName() === 'Gear') m.dispose();
@@ -62,7 +67,9 @@ async function refit(def) {
   for (let i = 0; i < body.nv; i++) { let w = 0, s = 0; for (let k = 0; k < 4; k++) { s += body.W[i * 4 + k]; if (body.J[i * 4 + k] === headIdx) w += body.W[i * 4 + k]; } headW[i] = w / (s || 1); }
   const H = measure(body.pos, headW, torsoW, M, brows.getAttribute('POSITION').getMax([])[1]);
   const kit = new Kit(body);
-  const ctx = { body, M, H };
+  const eyesPrim = root.listNodes().find((n) => n.getName() === 'Eyes')?.getMesh()?.listPrimitives()[0];
+  const E = eyesPrim && { min: eyesPrim.getAttribute('POSITION').getMin([]), max: eyesPrim.getAttribute('POSITION').getMax([]) };
+  const ctx = { body, M, H, E };
   for (const [piece, opts] of def.kit ?? []) {
     if (!KIT[piece]) throw new Error(`peça de kit desconhecida: ${piece}`);
     const before = kit.idx.length;
@@ -104,6 +111,29 @@ async function refit(def) {
   const tris = root.listMeshes().flatMap((m) => m.listPrimitives()).reduce((s, p) => s + p.getIndices().getCount() / 3, 0);
   const gearTris = root.listMeshes().find((m) => m.getName() === 'Gear')?.listPrimitives()[0].getIndices().getCount() / 3 || 0;
   console.log(`${def.id.padEnd(12)} ${(fs.statSync(file).size / 1024).toFixed(0).padStart(5)} KB  ${Math.round(tris)} triângulos (kit: ${Math.round(gearTris)})`);
+}
+
+/** Pinta o figurino de `def` sobre a textura do molde e tinge o cabelo. */
+async function repaint(root, def, mold) {
+  const prims = root.listMeshes().flatMap((m) => m.listPrimitives());
+  const body = prims.find((p) => /Superhero/.test(p.getMaterial()?.getName() ?? ''));
+  const skinNode = root.listNodes().find((n) => n.getMesh()?.listPrimitives().includes(body));
+  const eyes = root.listNodes().find((n) => n.getName() === 'Eyes').getMesh().listPrimitives()[0];
+  const eyeY = (eyes.getAttribute('POSITION').getMin([])[1] + eyes.getAttribute('POSITION').getMax([])[1]) / 2;
+  const tex = body.getMaterial().getBaseColorTexture();
+  const { jpeg, leak } = await repaintBody({
+    prim: body, skin: skinNode.getSkin(), image: tex.getImage(),
+    outfit: def.outfit, oldOutfit: mold.outfit, oldSkin: mold.skin, skinTone: def.skin, eyeY,
+  });
+  // alguns milhares de texels na borda entre uma peça e outra são normais (antisserrilhado)
+  if (leak > 10000) console.warn(`  ${def.id}: ${leak} texels da roupa de ${mold.id} continuam à mostra`);
+  // textura própria: o molde e o personagem novo não podem dividir a imagem
+  tex.setImage(new Uint8Array(jpeg)).setMimeType('image/jpeg');
+  if (def.hair?.color) {
+    const lin = (v) => Math.pow(v / 255, 2.2);
+    const n = parseInt(def.hair.color.slice(1), 16);
+    for (const m of root.listMaterials()) if (/Hair/.test(m.getName())) m.setBaseColorFactor([lin((n >> 16) & 255), lin((n >> 8) & 255), lin(n & 255), 1]);
+  }
 }
 
 /** Ponto da superfície do tronco mais próximo de p, um pouco para fora (colar de miçangas). */

@@ -23,7 +23,7 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 ## Inimigos (primeira iteração)
 
 O mapa de teste tem **paredes** (prismas cinza: ninguém passa e ninguém enxerga através
-delas) e **três inimigos** (madeireiro, garimpeiro e caçador, cada um com seu modelo 3D sobre
+delas) e **três inimigos** (dois garimpeiros e o piloto do avião do garimpo, cada um com seu modelo 3D sobre
 uma base vermelha; o corpo mostra para onde olham).
 
 - Depois da Clara vem o **turno inimigo**: quem está em patrulha anda 2 passos pela rota.
@@ -100,7 +100,7 @@ genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em
 ## Modelos dos personagens
 
 Há sete modelos em `public/assets/characters/`: quatro agentes do Ibama (Ana, Bruno, Clara e
-Kauã) e três inimigos (madeireiro, garimpeiro e caçador). Todos saem de `tools/assets`, a partir
+Kauã) e três inimigos (o garimpeiro da bateia, o garimpeiro da pá e o piloto). Todos saem de `tools/assets`, a partir
 dos corpos CC0 da Quaternius: o elenco (corpo, pele, cabelo, roupa, acessórios e equipamento)
 fica em `tools/assets/characters.mjs` e o catálogo usado pelo jogo, em `MODELS`
 (`src/app/game/character-model.ts`).

@@ -10,7 +10,7 @@ descritos em [README.md](README.md).
 | `characters/bruno/bruno.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Buzzed` + `Hair_Beard` | Quaternius | CC0 1.0 | Idem |
 | `characters/clara/clara.glb` | Universal Base Characters (Standard): `Superhero_Female_FullBody` + `Hair_Long` | Quaternius | CC0 1.0 | Idem |
 | `characters/kaua/kaua.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Long` | Quaternius | CC0 1.0 | Idem |
-| `characters/madeireiro/madeireiro.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_SimpleParted` + `Hair_Beard` | Quaternius | CC0 1.0 | Idem |
+| `characters/piloto/piloto.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_SimpleParted` + `Hair_Beard` | Quaternius | CC0 1.0 | Criado no refit a partir da base do madeireiro: roupa e pele repintadas, demais alterações idem |
 | `characters/garimpeiro/garimpeiro.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Buzzed` | Quaternius | CC0 1.0 | Idem |
-| `characters/cacador/cacador.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Buzzed` + `Hair_Beard` | Quaternius | CC0 1.0 | Idem |
+| `characters/garimpeiro-pa/garimpeiro-pa.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Buzzed` + `Hair_Beard` | Quaternius | CC0 1.0 | Criado no refit a partir da base do caçador: roupa e pele repintadas, demais alterações idem |
 | `anims/humanoid-base.glb` | [Universal Animation Library](https://quaternius.itch.io/universal-animation-library) (Standard): `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop`, `Crouch_Idle_Loop` | Quaternius | CC0 1.0 | Clipes renomeados para `idle`, `walk`, `run` e `crouch`; boneco removido; curvas comprimidas |

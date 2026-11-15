@@ -110,6 +110,76 @@ export const CHARACTERS = [
 
   // ------------------------------- inimigos -------------------------------
   {
+    id: 'garimpeiro',
+    body: 'Male',
+    skin: '#8c5c3e',
+    hair: { styles: ['Hair_Buzzed'], color: '#15110e' },
+    outfit: {
+      pants: { color: '#3d4a5c', short: 0.02 },
+      boots: { color: '#23211f', top: 0.43 },
+      shirt: { color: '#e4decb', tank: true, dirt: '#9a7a52', untucked: true },
+      mud: { color: '#7d5f3e', top: 0.7 },
+    },
+    gear: [['hat', { color: '#d8b968', band: '#5a3a22', brim: 0.13, drop: 0.012, crown: 0.045, flat: 0.72 }], ['bateia']],
+    // galochas de borracha
+    kit: [['boots', { color: '#23211f', sole: '#111', top: 0.43, cuff: '#2e2b28', laces: false }]],
+  },
+  {
+    // segundo garimpeiro: o da pá. Manga longa contra o sol, lenço no pescoço, galocha amarela.
+    // Criado no refit a partir do molde do caçador (TEMPLATES): a roupa nova cobre a antiga.
+    id: 'garimpeiro-pa',
+    from: 'cacador',
+    body: 'Male',
+    skin: '#a8714c',
+    hair: { styles: ['Hair_Buzzed', 'Hair_Beard'], color: '#2a1d14' },
+    outfit: {
+      pants: { color: '#5d574a' },
+      boots: { color: '#d9a520', top: 0.42 },
+      shirt: { color: '#3f6f8f', sleeve: 1.0, untucked: true, dirt: '#8a6a44' },
+      mud: { color: '#7d5f3e', top: 0.62, strength: 0.85 },
+    },
+    gear: [['cap', { color: '#e07a1f' }]],
+    kit: [
+      ['boots', { color: '#d9a520', sole: '#3a2e10', top: 0.42, cuff: '#e6b434', laces: false }],
+      ['bandana', { color: '#b8322a' }],
+      ['shovel'],
+      ['cargoPockets', { color: '#4e493d' }],
+    ],
+  },
+  {
+    // piloto do avião do garimpo: camisa clara de botão, dragonas, óculos de aviador, headset
+    // no pescoço, luvas de couro. Molde: madeireiro (a camisa nova cobre a xadrez).
+    id: 'piloto',
+    from: 'madeireiro',
+    body: 'Male',
+    skin: '#d9a882',
+    hair: { styles: ['Hair_SimpleParted', 'Hair_Beard'], color: '#3b2a1c' },
+    outfit: {
+      pants: { color: '#2b3448' },
+      boots: { color: '#141414', top: 0.13 },
+      shirt: { color: '#dfe6ea', sleeve: 0.6, buttons: true },
+      belt: '#151515',
+      gloves: '#5a3c26',
+    },
+    gear: [['cap', { color: '#1f2a44', patch: '#d4a017' }]],
+    kit: [
+      ['aviators'],
+      ['headset'],
+      ['epaulets', { color: '#1f2a44', stripe: '#d4a017' }],
+      ['shirtPocket', { color: '#d3dbe0' }],
+      ['belt', { color: '#151515', buckle: '#c9a54a', pouchCount: 0 }],
+      ['gloves', { color: '#5a3c26', cuff: '#4a3020', knuckles: false }],
+      ['boots', { color: '#161616', sole: '#0c0c0c', top: 0.13, cuff: '#222', laces: false }],
+    ],
+  },
+];
+
+// Moldes: bases que não entram no jogo (ficam em tools/assets/base/characters/<id>), mas servem de
+// ponto de partida para personagens novos sem os pacotes da Quaternius (campo `from`). O refit
+// precisa saber com que pele e figurino o molde foi pintado, para trocar a pele e cobrir a
+// roupa antiga.
+export const TEMPLATES = Object.fromEntries([
+  {
     id: 'madeireiro',
     body: 'Male',
     skin: '#c48f6c',
@@ -127,21 +197,6 @@ export const CHARACTERS = [
       ['boots', { color: '#6a4424', sole: '#2a1a10', cuff: '#7a5230', laces: true }],
       ['belt', { color: '#3a2a1a', buckle: '#b8a070', pouchCount: 0 }],
     ],
-  },
-  {
-    id: 'garimpeiro',
-    body: 'Male',
-    skin: '#8c5c3e',
-    hair: { styles: ['Hair_Buzzed'], color: '#15110e' },
-    outfit: {
-      pants: { color: '#3d4a5c', short: 0.02 },
-      boots: { color: '#23211f', top: 0.43 },
-      shirt: { color: '#e4decb', tank: true, dirt: '#9a7a52', untucked: true },
-      mud: { color: '#7d5f3e', top: 0.7 },
-    },
-    gear: [['hat', { color: '#d8b968', band: '#5a3a22', brim: 0.13, drop: 0.012, crown: 0.045, flat: 0.72 }], ['bateia']],
-    // galochas de borracha
-    kit: [['boots', { color: '#23211f', sole: '#111', top: 0.43, cuff: '#2e2b28', laces: false }]],
   },
   {
     id: 'cacador',
@@ -163,4 +218,4 @@ export const CHARACTERS = [
       ['cargoPockets', { color: '#4d5a36' }],
     ],
   },
-];
+].map((t) => [t.id, t]));
