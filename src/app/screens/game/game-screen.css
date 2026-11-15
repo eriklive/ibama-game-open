@@ -191,6 +191,68 @@ button:disabled { cursor: not-allowed; }
 .suspect.fled { opacity: .7; }
 .suspect.fled .suspect-name { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--red); }
 
+/* objetivos: um bilhete preso embaixo da pilha */
+.objectives {
+  padding: 7px 9px 6px;
+  background: var(--paper-light);
+  box-shadow: var(--drop);
+  transform: rotate(-1deg);
+}
+.objectives-head { display: block; font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted-paper); }
+.objectives ul { list-style: none; margin: 2px 0 0; padding: 0; display: flex; flex-direction: column; gap: 3px; }
+.objective { display: flex; gap: 5px; align-items: baseline; font-size: 12px; line-height: 1.2; }
+.objective .tick {
+  flex: none; width: 13px; height: 13px; margin-top: 1px;
+  border: 2px solid var(--ink-paper);
+  font-family: var(--marker); font-size: 13px; line-height: 9px; text-align: center;
+}
+.objective.done .tick { color: var(--green-ok); }
+.objective.done > span:nth-child(2) { color: var(--green-ok); }
+.objective.failed .tick { color: var(--red); }
+.objective.failed > span:nth-child(2) { text-decoration: line-through; text-decoration-color: var(--red); opacity: .75; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* ---------- teste de d20: ficha na lateral esquerda, embaixo ---------- */
+.check {
+  position: absolute;
+  left: calc(14px + var(--safe-left));
+  bottom: calc(14px + var(--safe-bottom));
+  width: 132px;
+  padding: 8px 10px 10px;
+  background: var(--paper-light);
+  box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.35);
+  transform: rotate(-2deg);
+  display: flex; flex-direction: column; align-items: center; gap: 2px;
+  text-align: center;
+  animation: slap .25s ease-out both;
+  z-index: 4;
+}
+.check-kicker { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted-paper); }
+.check-who { font-family: var(--marker); font-size: 15px; line-height: 1.1; }
+.d20 { position: relative; display: grid; place-items: center; width: 74px; height: 74px; margin: 2px 0; }
+.d20 svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.d20-body { fill: #fff; stroke: var(--ink-paper); stroke-width: 5; stroke-linejoin: round; }
+.d20 path { fill: none; stroke: rgba(35, 32, 26, .35); stroke-width: 2.5; stroke-linejoin: round; }
+.d20-value {
+  position: relative; top: 7px;
+  font-family: var(--stencil); font-weight: 700; font-size: 22px; line-height: 1;
+}
+.d20.rolling svg { animation: d20-spin .45s linear infinite; }
+.d20.rolling .d20-value { opacity: .55; }
+@keyframes d20-spin { to { transform: rotate(360deg); } }
+.check-need { font-size: 11px; line-height: 1.2; }
+.check-result {
+  margin-top: 4px; padding: 1px 6px;
+  border: 3px solid currentColor;
+  font-family: var(--stencil); font-weight: 700; font-size: 14px; text-transform: uppercase;
+  transform: rotate(-6deg);
+  animation: slap .2s ease-out both;
+}
+.check.pass .check-result { color: var(--green-ok); }
+.check.pass .d20-body { fill: #dff3d9; }
+.check.fail .check-result { color: var(--red-text); }
+.check.fail .d20-body { fill: #f6dcd6; }
+
 /* ---------- ações: um carimbo contextual + aba ---------- */
 .actions {
   position: absolute;
@@ -246,6 +308,9 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   font-family: var(--typed); font-size: 9px; line-height: 13px; text-transform: uppercase;
   box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.3);
 }
+.inspect { right: 60px; bottom: 116px; width: 112px; height: 46px; transform: rotate(2deg); background: var(--postit); animation: slap .25s ease-out both; }
+.inspect .stencil { font-size: 13px; }
+.inspect .typed { font-size: 9px; }
 .approach { right: 72px; bottom: 64px; width: 92px; height: 44px; transform: rotate(-5deg); animation: slap .25s ease-out both; }
 .approach-stamp {
   padding: 1px 7px;
@@ -363,12 +428,12 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .slip, .suspect { animation: none; }
+  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .slip, .suspect, .check, .check-result, .d20.rolling svg, .inspect { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
 @media (min-width: 700px) and (min-height: 600px) {
-  .top, .agents, .suspects, .actions, .telegram { zoom: 1.25; }
+  .top, .agents, .suspects, .actions, .telegram, .check { zoom: 1.25; }
 }
 
 /* ---------- controle (DualShock 4) ---------- */

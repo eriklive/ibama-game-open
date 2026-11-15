@@ -270,6 +270,154 @@ export function buildHangar(
   return group;
 }
 
+/** Nome do grupo do telhado da casa (some quando um agente entra). */
+export const HOUSE_ROOF = 'house-roof';
+const HOUSE_WALL_HEIGHT = 1.3;
+
+/** Textura de tábuas corridas na horizontal, com frestas escuras e veios. */
+function plankTexture(): THREE.Texture {
+  const canvas = document.createElement('canvas');
+  canvas.width = 64;
+  canvas.height = 64;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const tones = ['#9a6b3e', '#8c5f35', '#a57446', '#93653a'];
+    for (let i = 0; i < 4; i++) {
+      ctx.fillStyle = tones[i];
+      ctx.fillRect(0, i * 16, 64, 16);
+      ctx.fillStyle = 'rgba(60, 36, 16, 0.25)';
+      ctx.fillRect(0, i * 16 + 6 + (i % 2) * 3, 64, 1);
+      ctx.fillStyle = '#4a3018';
+      ctx.fillRect(0, i * 16 + 15, 64, 1);
+      // emenda das tábuas, cada fileira num lugar
+      ctx.fillRect((i * 23) % 64, i * 16, 1, 16);
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/**
+ * Casa de tábuas sobre os hexágonos de parede do retângulo `cols` × `rows`: paredes retas
+ * (como as do hangar) no perímetro e nas divisórias (colunas de parede dentro do retângulo),
+ * interrompidas onde não há parede — as portas. O telhado de duas águas, de chapa
+ * enferrujada, vem num grupo com nome (`HOUSE_ROOF`).
+ */
+export function buildHouse(
+  rect: { cols: [number, number]; rows: [number, number] },
+  walls: ReadonlySet<string>,
+  size: number,
+): THREE.Group {
+  const group = new THREE.Group();
+  const [c0, c1] = rect.cols;
+  const [r0, r1] = rect.rows;
+  const H = HOUSE_WALL_HEIGHT;
+  const colX = (col: number) => hexToWorld({ col, row: 0 }, size).x;
+  const rowZ = (row: number) => hexToWorld({ col: 0, row }, size).z + (Math.sqrt(3) * size) / 4;
+  const colZ = (col: number, row: number) => hexToWorld({ col, row }, size).z;
+  const x0 = colX(c0);
+  const x1 = colX(c1);
+  const zBack = rowZ(r0);
+  const zFront = rowZ(r1);
+  const isWall = (col: number, row: number) => walls.has(hexKey({ col, row }));
+
+  const texture = plankTexture();
+  const trim = new THREE.MeshStandardMaterial({ color: 0x5a3b1e, roughness: 0.9 });
+  const panel = (ax: number, az: number, bx: number, bz: number): void => {
+    const length = Math.hypot(bx - ax, bz - az);
+    const map = texture.clone();
+    map.repeat.set(length / 1.2, H / 1.2);
+    map.needsUpdate = true;
+    const side = new THREE.MeshStandardMaterial({ map, roughness: 0.9 });
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, H, WALL_THICKNESS), [trim, trim, trim, trim, side, side]);
+    mesh.position.set((ax + bx) / 2, H / 2, (az + bz) / 2);
+    mesh.rotation.y = Math.atan2(-(bz - az), bx - ax);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    group.add(mesh);
+  };
+  const post = (x: number, z: number): void => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, H + 0.1, 0.22), trim);
+    mesh.position.set(x, (H + 0.1) / 2, z);
+    mesh.castShadow = true;
+    group.add(mesh);
+  };
+
+  const half = 0.75 * size;
+  const clampX = (x: number) => Math.min(x1, Math.max(x0, x));
+  const cols = Array.from({ length: c1 - c0 + 1 }, (_, i) => c0 + i);
+  for (const [row, z] of [[r0, zBack], [r1, zFront]] as const) {
+    for (const [a, b] of runs(cols.filter((c) => isWall(c, row)))) {
+      const ax = clampX(colX(a) - half);
+      const bx = clampX(colX(b) + half);
+      panel(ax, z, bx, z);
+      post(ax, z);
+      post(bx, z);
+    }
+  }
+  // laterais e divisórias: colunas com parede em todas (ou quase todas) as fileiras de dentro
+  const rows = Array.from({ length: r1 - r0 + 1 }, (_, i) => r0 + i);
+  const inner = rows.slice(1, -1);
+  const halfRow = (Math.sqrt(3) * size) / 2;
+  const clampZ = (z: number) => Math.min(zFront, Math.max(zBack, z));
+  for (const col of cols) {
+    const side = col === c0 || col === c1;
+    if (!side && inner.filter((r) => isWall(col, r)).length < inner.length - 1) continue;
+    const x = colX(col);
+    for (const [a, b] of runs(rows.filter((r) => isWall(col, r)))) {
+      const za = clampZ(colZ(col, a) - halfRow);
+      const zb = clampZ(colZ(col, b) + halfRow);
+      panel(x, za, x, zb);
+      post(x, za);
+      post(x, zb);
+    }
+  }
+
+  // telhado de duas águas: cumeeira no sentido leste–oeste, oitões de tábua nas pontas
+  const roof = new THREE.Group();
+  roof.name = HOUSE_ROOF;
+  group.add(roof);
+  const eave = 0.35;
+  const depth = (zFront - zBack) / 2;
+  const rise = 1.5;
+  const cz = (zBack + zFront) / 2;
+  const cx = (x0 + x1) / 2;
+  const slope = Math.hypot(depth + eave, rise * (1 + eave / depth));
+  const tilt = Math.atan2(rise, depth);
+  const sheetMap = corrugatedTexture();
+  sheetMap.repeat.set((x1 - x0) * 2.5, 1);
+  const sheetMat = new THREE.MeshStandardMaterial({ map: sheetMap, color: 0xc0714a, roughness: 0.75, metalness: 0.2 });
+  for (const dir of [-1, 1]) {
+    const sheet = new THREE.Mesh(new THREE.BoxGeometry(x1 - x0 + 2 * eave, 0.07, slope), sheetMat);
+    sheet.rotation.x = dir * tilt;
+    sheet.position.set(cx, H + rise / 2 - (eave * rise) / depth / 2, cz + (dir * (depth + eave)) / 2);
+    sheet.castShadow = true;
+    sheet.receiveShadow = true;
+    roof.add(sheet);
+  }
+  const gable = new THREE.Shape();
+  gable.moveTo(-depth, 0);
+  gable.lineTo(depth, 0);
+  gable.lineTo(0, rise);
+  gable.closePath();
+  const gableMap = texture.clone();
+  gableMap.repeat.set(1.4, 1);
+  gableMap.needsUpdate = true;
+  const gableGeo = new THREE.ShapeGeometry(gable);
+  const gableMat = new THREE.MeshStandardMaterial({ map: gableMap, roughness: 0.9, side: THREE.DoubleSide });
+  for (const x of [x0, x1]) {
+    const g = new THREE.Mesh(gableGeo, gableMat);
+    g.rotation.y = Math.PI / 2;
+    g.position.set(x, H, cz);
+    g.castShadow = true;
+    roof.add(g);
+  }
+  return group;
+}
+
 /**
  * Teco-teco de asa alta (estilo Cessna 152), feito de caixas e cilindros. O nariz
  * aponta para +Z; mede cerca de 6,2 (envergadura) × 5 (comprimento) unidades.
@@ -370,6 +518,13 @@ function makeCargoMaterials() {
     cylinder: std(0xe9e6dd, 0.4, 0.2),
     cylinderBand: std(0x2f6fb0, 0.5),
     brass: std(0xc9a440, 0.4, 0.7),
+    plate: std(0xf1ede2, 0.35),
+    rice: std(0xf6f1df, 0.9),
+    beans: std(0x5b2f1c, 0.8),
+    mug: std(0x2f6fb0, 0.45),
+    jar: std(0xd8c27a, 0.3),
+    tin: std(0x9aa3a8, 0.4, 0.6),
+    rag: std(0x7d2f2a, 1),
   };
 }
 
@@ -518,13 +673,15 @@ function cage(w: number, h: number, d: number): THREE.Group {
   return g;
 }
 
-export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages';
+export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shelf';
 
 /**
  * Monta a carga de um hexágono. `seed` varia a arrumação (giro, quantas peças, quais
  * pilhas são mais altas) sem mudar a altura total de cada tipo.
  */
 export function buildCover(kind: CoverKind, seed: number): THREE.Group {
+  if (kind === 'table') return diningTable();
+  if (kind === 'shelf') return shelf(seed);
   const rnd = seeded(seed);
   const g = new THREE.Group();
   if (kind === 'crates') {
@@ -595,6 +752,58 @@ export function buildCover(kind: CoverKind, seed: number): THREE.Group {
     g.add(c);
   }
   g.rotation.y = Math.floor(rnd(99) * 6) * (Math.PI / 3);
+  return g;
+}
+
+/**
+ * Mesa rústica com o almoço servido: prato de arroz com feijão, caneca e um pano. O prato
+ * fica no lado oeste (−X), de quem come olhando para o leste.
+ */
+function diningTable(): THREE.Group {
+  const m = cargo();
+  const g = new THREE.Group();
+  const top = 0.5;
+  g.add(solid(new THREE.BoxGeometry(0.8, 0.06, 1.0), m.wood, 0, top, 0));
+  for (const x of [-1, 1]) for (const z of [-1, 1]) {
+    g.add(solid(new THREE.BoxGeometry(0.07, top, 0.07), m.woodDark, x * 0.32, top / 2, z * 0.42));
+  }
+  const y = top + 0.03;
+  g.add(solid(new THREE.CylinderGeometry(0.17, 0.13, 0.03, 16), m.plate, -0.2, y + 0.015, 0.05));
+  g.add(solid(new THREE.SphereGeometry(0.09, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), m.rice, -0.24, y + 0.03, 0.02));
+  g.add(solid(new THREE.SphereGeometry(0.07, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), m.beans, -0.13, y + 0.03, 0.1));
+  g.add(solid(new THREE.CylinderGeometry(0.05, 0.045, 0.11, 10), m.mug, 0.05, y + 0.055, -0.3));
+  const rag = solid(new THREE.BoxGeometry(0.22, 0.01, 0.18), m.rag, 0.18, y + 0.005, 0.28);
+  rag.rotation.y = 0.4;
+  g.add(rag);
+  return g;
+}
+
+/**
+ * Prateleira de tábuas encostada na parede do leste (+X), com potes, latas e um pano dobrado
+ * — o que está escondido ali não aparece.
+ */
+function shelf(seed: number): THREE.Group {
+  const rnd = seeded(seed);
+  const m = cargo();
+  const g = new THREE.Group();
+  const x = 0.42;
+  const h = 1.15;
+  const w = 1.0;
+  const d = 0.36;
+  for (const z of [-1, 1]) g.add(solid(new THREE.BoxGeometry(d, h, 0.05), m.woodDark, x, h / 2, (z * w) / 2));
+  g.add(solid(new THREE.BoxGeometry(0.03, h, w), m.woodDark, x + d / 2, h / 2, 0));
+  const boards = [0.06, 0.42, 0.78, h];
+  for (const y of boards) g.add(solid(new THREE.BoxGeometry(d, 0.04, w), m.wood, x, y, 0));
+  // miudezas em cada prateleira
+  boards.slice(0, 3).forEach((y, i) => {
+    for (let k = 0; k < 3; k++) {
+      const z = -0.32 + k * 0.32 + (rnd(i * 5 + k) - 0.5) * 0.1;
+      const pick = rnd(20 + i * 5 + k);
+      if (pick < 0.4) g.add(solid(new THREE.CylinderGeometry(0.07, 0.07, 0.18, 10), m.jar, x, y + 0.11, z));
+      else if (pick < 0.75) g.add(solid(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 10), m.tin, x, y + 0.08, z));
+      else g.add(solid(new THREE.BoxGeometry(0.22, 0.08, 0.22), m.rag, x, y + 0.06, z));
+    }
+  });
   return g;
 }
 
