@@ -312,7 +312,7 @@
           <span class="roll-total">
             {{ dice().join(' + ') }}@if (grouped()) { + {{ groupBonus }} (grupo)} = <strong>{{ movesLeft() }}</strong> de movimento
           </span>
-          <button type="button" class="roll-confirm" #rollConfirm (click)="confirmRoll()" data-testid="roll-confirm">
+          <button type="button" appMainButton class="roll-confirm" #rollConfirm (click)="confirmRoll()" data-testid="roll-confirm">
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
             Confirmar
           </button>

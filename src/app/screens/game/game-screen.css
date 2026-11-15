@@ -322,22 +322,8 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .roll-total { font-size: 15px; color: #eadfbf; animation: fade-in .4s .1s ease-out both; }
 .roll-total strong { font-family: var(--stencil); font-weight: 700; font-size: 18px; color: #ffd772; }
 .roll-total.rolling { animation: pulse 1s ease-in-out infinite; }
-.roll-confirm {
-  position: relative;
-  margin-top: 12px; min-width: 200px; padding: 12px 34px;
-  font-family: var(--stencil); font-weight: 700; font-size: 20px; letter-spacing: .12em; text-transform: uppercase;
-  color: #2a1d08;
-  background: linear-gradient(#ffe39a, #e2a93c);
-  border: 2px solid #fff1c4;
-  border-radius: 4px;
-  box-shadow: 0 0 0 3px rgba(40, 26, 6, .8), 0 0 22px rgba(255, 190, 70, .45), 0 6px 14px rgba(0, 0, 0, .5);
-  cursor: pointer;
-  animation: drop-in .35s .25s ease-out both;
-}
-.roll-confirm:hover { filter: brightness(1.08); }
-.roll-confirm:active { transform: translateY(2px); }
-.roll-confirm:focus-visible { outline: 3px solid var(--paper-light); outline-offset: 5px; }
-.roll-confirm .pad-glyph { top: -12px; right: -12px; }
+.roll-confirm { margin-top: 18px; animation: rise .35s .25s ease-out both; }
+.roll-confirm .pad-glyph { top: -14px; right: -14px; }
 .dice.big { gap: 18px; }
 .dice.big .d4 { width: 92px; height: 84px; filter: drop-shadow(2px 4px 0 rgba(0, 0, 0, .35)); }
 .dice.big .d4-value { font-size: 36px; top: 38%; }
@@ -351,6 +337,11 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes drop-in {
   from { opacity: 0; transform: translateY(-10px); }
   to   { opacity: 1; transform: translateY(0); }
+}
+/* só `translate`: o botão principal guarda a inclinação no `transform` */
+@keyframes rise {
+  from { opacity: 0; translate: 0 -10px; }
+  to   { opacity: 1; translate: 0 0; }
 }
 @keyframes pulse { 50% { opacity: .45; } }
 @keyframes tumble {

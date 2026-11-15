@@ -15,6 +15,7 @@ import { DiceTray } from '../../game/dice-3d';
 import { HexBoard } from '../../game/hex-board';
 import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
+import { MainButton } from '../../ui/main-button';
 import { RENDER_PROFILES, RenderMode, RenderSettings } from '../../game/render-settings';
 import {
   APPROACH_RULES,
@@ -50,6 +51,7 @@ const reducedMotion = (): boolean =>
 
 @Component({
   selector: 'app-game-screen',
+  imports: [MainButton],
   templateUrl: './game-screen.html',
   styleUrl: './game-screen.css',
 })
