@@ -7,7 +7,9 @@ import { HexCoord, hexDistance, hexKey, hexLine, hexToWorld, hexesInRange, pathT
  * - No turno inimigo (depois de todos os agentes), quem está em patrulha anda
  *   `patrolSteps` passos pela rota.
  * - Cada inimigo em patrulha enxerga um cone à frente (`visionRange` hexágonos,
- *   abertura de `visionAngle` graus). Paredes bloqueiam a linha de visão.
+ *   abertura de `visionAngle` graus). Paredes (e carga alta) bloqueiam a linha de visão.
+ *   Carga baixa não bloqueia: ele enxerga por cima, mas não vê o agente colado nela,
+ *   do lado de lá.
  * - Se um agente estiver no cone (porque andou para dentro dele ou porque o inimigo
  *   virou para ele), o inimigo é "spotado": fica em alerta.
  * - Em alerta, no turno inimigo ele corre `fleeSteps` passos rumo à borda mais
@@ -90,7 +92,20 @@ export function lineOfSight(a: HexCoord, b: HexCoord, walls: ReadonlySet<string>
   return line.slice(1, -1).every((h) => !walls.has(hexKey(h)));
 }
 
-/** Hexágonos que o inimigo enxerga: dentro do alcance, do cone e sem parede no meio. */
+/**
+ * Agente em `b` escondido de quem olha de `a`: o último hexágono antes dele, na linha
+ * reta entre os dois, é carga baixa (ele está agachado, colado nela, do lado de lá).
+ */
+export function behindLowCover(a: HexCoord, b: HexCoord, lowCover: ReadonlySet<string>): boolean {
+  if (!lowCover.size) return false;
+  const line = hexLine(a, b);
+  return line.length > 2 && lowCover.has(hexKey(line[line.length - 2]));
+}
+
+/**
+ * Hexágonos que o inimigo enxerga: dentro do alcance, do cone e sem parede no meio.
+ * Os hexágonos de carga baixa e os logo atrás dela (na linha do olhar) ficam de fora.
+ */
 export function visionHexes(
   enemy: Pick<EnemyState, 'hex' | 'facing'>,
   cols: number,
@@ -98,18 +113,23 @@ export function visionHexes(
   walls: ReadonlySet<string>,
   range: number = ENEMY_RULES.visionRange,
   angle: number = ENEMY_RULES.visionAngle,
+  lowCover: ReadonlySet<string> = new Set(),
 ): HexCoord[] {
   const half = (angle / 2) * (Math.PI / 180) + 1e-6;
   const fx = Math.cos(enemy.facing);
   const fz = Math.sin(enemy.facing);
   const o = hexToWorld(enemy.hex, 1);
   return hexesInRange(enemy.hex, range, cols, rows).filter((h) => {
-    if (walls.has(hexKey(h))) return false;
+    if (walls.has(hexKey(h)) || lowCover.has(hexKey(h))) return false;
     const p = hexToWorld(h, 1);
     const dx = p.x - o.x;
     const dz = p.z - o.z;
     const cos = (dx * fx + dz * fz) / Math.hypot(dx, dz);
-    return Math.acos(Math.min(1, Math.max(-1, cos))) <= half && lineOfSight(enemy.hex, h, walls);
+    return (
+      Math.acos(Math.min(1, Math.max(-1, cos))) <= half &&
+      lineOfSight(enemy.hex, h, walls) &&
+      !behindLowCover(enemy.hex, h, lowCover)
+    );
   });
 }
 
@@ -120,9 +140,12 @@ export function spotted(
   cols: number,
   rows: number,
   walls: ReadonlySet<string>,
+  lowCover: ReadonlySet<string> = new Set(),
 ): string | null {
   if (enemy.status !== 'patrol') return null;
-  const seen = new Set(visionHexes(enemy, cols, rows, walls).map(hexKey));
+  const seen = new Set(
+    visionHexes(enemy, cols, rows, walls, ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, lowCover).map(hexKey),
+  );
   for (const [id, h] of agents) if (seen.has(hexKey(h))) return id;
   return null;
 }

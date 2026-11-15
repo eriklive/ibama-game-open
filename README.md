@@ -64,8 +64,24 @@ clareira no canto sudoeste e avança pelas trilhas da mata ou pela pista.
 Os blocos de **árvores** (de vários tipos e tamanhos) e o **avião** funcionam como paredes: ninguém
 passa e os inimigos não enxergam através deles.
 
+### Cobertura no hangar
+
+O hangar tem carga empilhada para os agentes se esconderem e planejarem a aproximação:
+
+- **Cobertura alta** (caixotes de madeira e caixas de papelão de "amido de milho"): funciona como
+  parede. Ninguém passa e ninguém enxerga através.
+- **Cobertura baixa** (sacos no palete e gaiolas vazias): ninguém passa, mas o inimigo enxerga por
+  cima. Só não vê o agente que está **colado nela, do lado de lá** (o último hexágono antes dele, na
+  linha do olhar, é a carga). O cone vermelho já mostra essa "sombra" atrás da carga. Parado ao lado de
+  carga baixa, o agente fica agachado.
+- **Decoração** (galões de gasolina e botijão): não bloqueia nada.
+
+A carga é desenhada no texto do mapa (`B` caixotes, `M` papelão, `S` sacos, `G` gaiolas, `f` galões) e
+a altura de cada tipo fica em `COVER_HEIGHT` (`maps.ts`). Os modelos são montados por código em
+`scenery.ts` (`buildCover`, `buildFuelProps`).
+
 O terreno é desenhado em texto em `maps.ts` (`parseLayout`): `.` grama, `T` árvores, `#` parede,
-`_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio e `A` avião — basta editar as linhas para mudar o mapa.
+`_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio, `A` avião e a carga (ver abaixo) — basta editar as linhas para mudar o mapa.
 O hangar (chapa ondulada, portão, arcos do telhado, postes e lâmpadas) e o avião são montados por código em
 `scenery.ts`. O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
 

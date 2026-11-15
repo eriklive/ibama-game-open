@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { GameMap, Ground } from './maps';
-import { HexCoord, hexKey, hexToWorld, sameHex, worldToHex } from './hex';
+import { COVER_HEIGHT, GameMap, Ground } from './maps';
+import { HexCoord, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { CharacterRig, METER, ModelDef } from './character-model';
-import { buildHangar, buildPlane } from './scenery';
+import { buildCover, buildFuelProps, buildHangar, buildPlane } from './scenery';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -143,6 +143,8 @@ export class HexBoard {
   private readonly tiles = new Map<string, HexTile>();
   private readonly pickables: THREE.Object3D[] = [];
   private readonly units = new Map<string, UnitView>();
+  /** Hexágonos colados em carga baixa: quem para ali fica agachado. */
+  private readonly crouchSpots = new Set<string>();
   private readonly enemies = new Map<string, EnemyView>();
   private readonly activeMarker: THREE.Mesh;
   private readonly focusMarker: THREE.Mesh;
@@ -198,6 +200,7 @@ export class HexBoard {
     this.buildWalls(extras.walls ?? []);
     this.buildTrees(map.trees ?? []);
     this.buildPlane(map.plane ?? []);
+    this.buildCargo();
     for (const u of units) this.buildUnit(u);
     for (const e of extras.enemies ?? []) this.buildEnemy(e);
     this.activeMarker = this.buildMarker(COLORS.activeRing, 0.62, 0.09);
@@ -397,6 +400,7 @@ export class HexBoard {
       u.epoch++;
       u.hop = 0;
       u.hex = { ...hex };
+      u.rig?.play(this.restClip(u), 0);
       const p = this.worldOf(hex);
       u.group.position.x = p.x;
       u.group.position.z = p.z;
@@ -433,7 +437,7 @@ export class HexBoard {
       this.paintTiles();
       onStep?.(step);
     }
-    u.rig?.play('idle', 0.3);
+    if (u.rig) u.rig.play(this.restClip(u), 0.3);
     this.selected = null;
     this.path = [];
     this.paintTiles();
@@ -545,6 +549,27 @@ export class HexBoard {
       wall.scale.y = 0.85 + ((h.col * 13 + h.row * 7) % 5) * 0.07;
       tile.mesh.add(wall);
     }
+  }
+
+  /** Carga do hangar (cobertura) e decoração solta; cada peça sobe junto com o seu hexágono. */
+  private buildCargo(): void {
+    for (const c of this.map.cover ?? []) {
+      const tile = this.tiles.get(hexKey(c));
+      if (!tile) continue;
+      tile.baseColor.set(0xa8987a);
+      tile.mesh.add(buildCover(c.kind, c.col * 31 + c.row * 17));
+    }
+    for (const h of this.map.props ?? []) this.tiles.get(hexKey(h))?.mesh.add(buildFuelProps(h.col * 13 + h.row * 7));
+    const low = new Set((this.map.cover ?? []).filter((c) => COVER_HEIGHT[c.kind] === 'low').map(hexKey));
+    for (const key of low) {
+      const [col, row] = key.split(',').map(Number);
+      for (const n of hexNeighbors({ col, row })) this.crouchSpots.add(hexKey(n));
+    }
+  }
+
+  /** Parado ao lado de carga baixa, o agente fica agachado atrás dela. */
+  private restClip(u: UnitView): 'idle' | 'crouch' {
+    return this.crouchSpots.has(hexKey(u.hex)) ? 'crouch' : 'idle';
   }
 
   /** Avião estacionado: centrado nos hexágonos que ocupa, com o nariz para o sul (o portão). */
@@ -917,7 +942,7 @@ export class HexBoard {
     // a área de toque passa a cobrir o corpo todo
     u.hitbox.scale.set(0.8, def.height / 0.6, 0.8);
     u.hitbox.position.y = def.height / 2;
-    rig.play('idle', 0);
+    rig.play(this.restClip(u), 0);
     u.rig = rig;
   }
 

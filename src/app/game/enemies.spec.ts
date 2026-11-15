@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   APPROACH_RULES,
   ENEMY_RULES,
+  behindLowCover,
   canAct,
   resolveApproach,
   facingBetween,
@@ -43,6 +44,23 @@ describe('visão dos inimigos', () => {
     expect(seen.has(hexKey({ col: 5, row: 7 }))).toBe(false);
     expect(lineOfSight({ col: 5, row: 5 }, { col: 5, row: 8 }, walls)).toBe(false);
     expect(lineOfSight({ col: 5, row: 5 }, { col: 5, row: 8 }, none)).toBe(true);
+  });
+
+  it('carga baixa: enxerga por cima, mas não vê quem está colado nela do lado de lá', () => {
+    const low = keys([{ col: 5, row: 6 }]);
+    const seen = keys(visionHexes(enemy, 12, 12, none, ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, low));
+    expect(seen.has(hexKey({ col: 5, row: 6 }))).toBe(false); // a própria carga
+    expect(seen.has(hexKey({ col: 5, row: 7 }))).toBe(false); // colado nela, atrás
+    expect(seen.has(hexKey({ col: 5, row: 8 }))).toBe(true); // mais longe: visto por cima
+    expect(behindLowCover(enemy.hex, { col: 5, row: 7 }, low)).toBe(true);
+    expect(behindLowCover(enemy.hex, { col: 5, row: 8 }, low)).toBe(false);
+  });
+
+  it('não avista o agente agachado atrás de carga baixa', () => {
+    const e = spawnEnemy({ id: 'x', name: 'X', patrol: [{ col: 5, row: 5 }, { col: 5, row: 8 }] });
+    const agents = new Map([['ana', { col: 5, row: 7 }]]);
+    expect(spotted(e, agents, 12, 12, none, keys([{ col: 5, row: 6 }]))).toBeNull();
+    expect(spotted(e, agents, 12, 12, none, keys([{ col: 4, row: 6 }]))).toBe('ana');
   });
 
   it('avista o agente no cone, mas só se estiver em patrulha', () => {
