@@ -33,9 +33,15 @@ describe('mapas', () => {
   it('aeroporto: só se entra no hangar pelo portão e pelas duas portas dos fundos', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
     const inside = { col: 15, row: 9 };
-    const doors = [{ col: 14, row: 4 }, { col: 29, row: 4 }, ...[19, 20, 21, 22, 23, 24].map((col) => ({ col, row: 14 }))];
+    const doors = [{ col: 14, row: 4 }, { col: 29, row: 4 }, ...Array.from({ length: 12 }, (_, i) => ({ col: 16 + i, row: 18 }))];
     const open = reachableHexes(map.starts[0], 999, map.cols, map.rows, blockedHexes(map));
     expect(open.has(hexKey(inside))).toBe(true);
+    // o portão tem 12 hexágonos de largura e a pista de terra chega nele
+    for (const d of doors.slice(2)) {
+      expect(blockedHexes(map).has(hexKey(d))).toBe(false);
+      expect(map.ground?.get(hexKey({ col: d.col, row: d.row + 1 }))).toBe('dirt');
+      expect(map.ground?.get(hexKey({ col: d.col, row: map.rows - 1 }))).toBe('dirt');
+    }
     const sealed = new Set([...blockedHexes(map), ...doors.map(hexKey)]);
     expect(reachableHexes(map.starts[0], 999, map.cols, map.rows, sealed).has(hexKey(inside))).toBe(false);
   });

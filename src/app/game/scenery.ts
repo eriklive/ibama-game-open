@@ -2,8 +2,8 @@ import * as THREE from 'three';
 import { HexCoord, hexKey, hexToWorld } from './hex';
 
 /**
- * Cenário montado por código: o hangar (paredes retas de chapa ondulada, portão e
- * treliças do telhado) e o avião estacionado. Nada aqui tem regra de jogo — quem
+ * Cenário montado por código: o hangar (paredes retas de chapa ondulada, portão,
+ * treliças do telhado, postes e lâmpadas) e o avião estacionado. Nada aqui tem regra de jogo — quem
  * bloqueia passagem e visão são os hexágonos marcados no mapa.
  */
 
@@ -151,6 +151,51 @@ export function buildHangar(
     const arch = new THREE.Mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points), 48, 0.07, 5), steel);
     arch.castShadow = true;
     group.add(arch);
+  }
+
+  // iluminação: dois postes do lado de fora, nos cantos da frente, e duas lâmpadas
+  // pendentes do lado de dentro, penduradas no arco mais próximo do terço dos fundos
+  const bulb = new THREE.MeshStandardMaterial({ color: 0xfff3c4, emissive: 0xffd978, emissiveIntensity: 1.6 });
+  const glow = (x: number, y: number, z: number, distance: number): void => {
+    const light = new THREE.PointLight(0xffe2a0, 14, distance, 1.6);
+    light.position.set(x, y, z);
+    group.add(light);
+  };
+  // poste: encostado na face de fora da parede da frente (não ocupa hexágono livre)
+  const poleHeight = 3.6;
+  const poleZ = zFront + 0.55 * size;
+  for (const [x, dir] of [[x0 + 1.5 * size, 1], [x1 - 1.5 * size, -1]] as const) {
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, poleHeight, 8), steel);
+    pole.position.set(x, poleHeight / 2, poleZ);
+    pole.castShadow = true;
+    const foot = new THREE.Mesh(new THREE.CylinderGeometry(0.2, 0.24, 0.16, 8), trim);
+    foot.position.set(x, 0.08, poleZ);
+    // braço virado para o portão, com a luminária na ponta
+    const tip = new THREE.Vector3(x + 0.9 * dir, poleHeight - 0.05, poleZ + 0.5);
+    const arm = beam(new THREE.Vector3(x, poleHeight - 0.1, poleZ), tip, 0.08, steel);
+    const head = new THREE.Mesh(new THREE.BoxGeometry(0.5, 0.1, 0.26), trim);
+    head.position.copy(tip);
+    const lens = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.18), bulb);
+    lens.position.copy(tip).setY(tip.y - 0.07);
+    group.add(pole, foot, arm, head, lens);
+    glow(tip.x, tip.y - 0.3, tip.z, 14);
+  }
+  // lâmpada pendente: fio, cúpula e bulbo
+  const lampZ = zBack + (zFront - zBack) / 3;
+  const archZ = zBack + ((zFront - zBack) * Math.round(((lampZ - zBack) / (zFront - zBack)) * (count - 1))) / (count - 1);
+  const shade = new THREE.MeshStandardMaterial({ color: 0x33524a, roughness: 0.5, metalness: 0.3, side: THREE.DoubleSide });
+  for (const t of [0.2, 0.8]) {
+    const x = x0 + (x1 - x0) * t;
+    const top = WALL_HEIGHT + Math.sin(Math.PI * t) * rise;
+    const y = WALL_HEIGHT + 0.75;
+    group.add(beam(new THREE.Vector3(x, top, archZ), new THREE.Vector3(x, y + 0.2, archZ), 0.03, steel));
+    const cone = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.3, 12, 1, true), shade);
+    cone.position.set(x, y + 0.1, archZ);
+    cone.castShadow = true;
+    const globe = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), bulb);
+    globe.position.set(x, y - 0.02, archZ);
+    group.add(cone, globe);
+    glow(x, y - 0.15, archZ, 12);
   }
   return group;
 }

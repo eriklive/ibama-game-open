@@ -45,6 +45,7 @@ const GROUND: Record<Ground, [number, number, number]> = {
   runway: [0x4a5258, 0x444c52, 0x50585e],
   apron: [0x8d9498, 0x858c90, 0x959ca0],
   floor: [0xc9b48f, 0xc1ac87, 0xd1bc97],
+  dirt: [0x9a7448, 0x916c42, 0xa37c50],
 };
 
 export interface BoardUnit {

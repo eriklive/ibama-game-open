@@ -3,7 +3,7 @@ import { EnemySpawn } from './enemies';
 import { HexCoord, hexKey } from './hex';
 
 /** Tipo de chão de um hexágono (só muda a aparência; quem bloqueia são paredes e árvores). */
-export type Ground = 'grass' | 'runway' | 'apron' | 'floor';
+export type Ground = 'grass' | 'runway' | 'apron' | 'floor' | 'dirt';
 
 export interface GameMap {
   id: string;
@@ -53,7 +53,7 @@ export const CHARACTERS: Character[] = [
  * hexágono mais abaixo).
  *
  * `.` grama · `T` árvores · `#` parede · `_` piso interno · `D` porta (piso, passa)
- * `=` pista · `:` pátio · `A` avião estacionado (piso, não passa)
+ * `=` pista de asfalto · `:` pátio · `~` terra batida · `A` avião estacionado (piso, não passa)
  */
 export function parseLayout(
   layout: readonly string[],
@@ -63,7 +63,7 @@ export function parseLayout(
   const trees: HexCoord[] = [];
   const plane: HexCoord[] = [];
   const ground = new Map<string, Ground>();
-  const kinds: Record<string, Ground> = { '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron' };
+  const kinds: Record<string, Ground> = { '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron', '~': 'dirt' };
   layout.forEach((line, row) => {
     if (line.length !== cols) throw new Error(`Linha ${row} do mapa tem ${line.length} colunas (esperado: ${cols})`);
     [...line].forEach((ch, col) => {
@@ -84,10 +84,11 @@ export const blockedHexes = (map: GameMap): Set<string> =>
   new Set([...map.walls, ...(map.trees ?? []), ...(map.plane ?? [])].map(hexKey));
 
 /**
- * Aeroporto clandestino: o hangar fica ao norte, com o portão virado para o pátio e a
- * pista, e duas portas nos fundos. Por dentro cabem duas fileiras de quatro aviões (cada
- * um ocupa 4 colunas × 3 fileiras); por enquanto há um só, no meio. O resto é mata
- * fechada, cortada por trilhas e clareiras: a equipe chega pelo sul, do outro lado da pista.
+ * Aeroporto clandestino: o hangar fica ao norte, com um portão largo (12 hexágonos) virado
+ * para o pátio e duas portas nos fundos. A pista é de terra batida e dá direto no portão,
+ * cortando a mata de sul a norte. Por dentro cabem quatro aviões lado a lado (cada um ocupa
+ * 4 colunas × 3 fileiras) em mais de uma fileira; por enquanto há um só, no meio. O resto é
+ * mata fechada, cortada por trilhas e clareiras: a equipe chega pelo sul, na cabeceira da pista.
  */
 const AEROPORTO = parseLayout([
   'TTTTTTTTTTTTT..TTTTTTTTTTTTTTT..TTTTTTTTTTTT',
@@ -98,32 +99,36 @@ const AEROPORTO = parseLayout([
   'TTTTTTTTT..#____________________#..TTT.TTTTT',
   'TTTTTT.....#____________________#.......TTTT',
   'TTTT....T..#____________________#........TTT',
-  'TTTTT...TT.#________AAAA________#.TTT...TTTT',
-  'TTTTT..TT..#________AAAA________#..TTT..TTTT',
+  'TTTTT...TT.#____________________#.TTT...TTTT',
+  'TTTTT..TT..#____________________#..TTT..TTTT',
+  'TTTTTT.....#________AAAA________#.......TTTT',
   'TT.....TT..#________AAAA________#..TTT....TT',
+  'TTT.T.TT...#________AAAA________#..TT....TTT',
+  'TTTT....T..#____________________#........TTT',
+  'TTTTT..TT..#____________________#..TTT..TTTT',
   'T.T.T.TT...#____________________#..TT....TTT',
   '......TTT.T#____________________#T.TTT.T....',
   'T.T...TTT..#____________________#..TTT...TTT',
-  'TTTTT..TT..########DDDDDD########..TTT..TTTT',
-  'TTTT...TT....::::::::::::::::::....TTT..TTTT',
-  'TTTTTT.TT.T..::::::::::::::::::..T....TTTTTT',
-  '.............::::::::::::::::::.............',
-  '.==========================================.',
-  '.==========================================.',
-  '.==========================================.',
-  '............................................',
-  'TT.TTTTT..TTTTTTTT...TT.TTTTT..TTTTT..TT.TTT',
-  'TTTTTTTT..TT.TTTTTTTTT..TTTTTTT.TTT....TTTTT',
-  'TTTT.......T......TTTT..TT.T.....TT.....TTTT',
-  'TTTTT.T......TTTT......T.....TTTT....T..TTTT',
-  'TT........T..TTTTTT......T.T.TTTT..........T',
-  '...TT.TT.TTT...TTTTTT..TTTTTTTT..TTT.TT.TT..',
-  'T.TTTTTTTTTTT...T.TTT...T.TTT....TTTTTTTTTTT',
-  'TTTTTTTTTTTTT...........T.T......TTTTTTTTTTT',
-  'TTTTTTTTTTTT..T..T...T......T.TT..TTTTTTTTTT',
-  'TTTTTTTTTTT...TTTT........TTTTTT..TTTTTTTTTT',
-  'TTTTTTTTTTTT.T.TTTTTT.....TTTTT...TTTTTTTTTT',
-  'TTTTTTTTTTTTT..TTTTTTT..TTTTTTT..TTTTTTTTTTT',
+  'TTTTT..TT..#####DDDDDDDDDDDD#####..TTT..TTTT',
+  'TTTT...TT....~~~~~~~~~~~~~~~~~~....TTT..TTTT',
+  'TTTTTT.TT.T..~~~~~~~~~~~~~~~~~~..T....TTTTTT',
+  '.............~~~~~~~~~~~~~~~~~~.............',
+  'T.TT.TTTT..TTT..~~~~~~~~~~~~..TTT.TT..TTTT.T',
+  'TTT..TTTTT.TT...~~~~~~~~~~~~.TTTT..TTT.TTTTT',
+  'TT.T..TTT...TTT.~~~~~~~~~~~~..TT.TTTT..TT.TT',
+  '................~~~~~~~~~~~~................',
+  'TT.TTTTT..TTTTTT~~~~~~~~~~~~T..TTTTT..TT.TTT',
+  'TTTTTTTT..TT.TTT~~~~~~~~~~~~TTT.TTT....TTTTT',
+  'TTTT.......T....~~~~~~~~~~~~.....TT.....TTTT',
+  'TTTTT.T......TTT~~~~~~~~~~~~.TTTT....T..TTTT',
+  'TT........T..TTT~~~~~~~~~~~~.TTTT..........T',
+  '...TT.TT.TTT...T~~~~~~~~~~~~TTT..TTT.TT.TT..',
+  'T.TTTTTTTTTTT...~~~~~~~~~~~~T....TTTTTTTTTTT',
+  'TTTTTTTTTTTTT...~~~~~~~~~~~~.....TTTTTTTTTTT',
+  'TTTTTTTTTTTT..T.~~~~~~~~~~~~T.TT..TTTTTTTTTT',
+  'TTTTTTTTTTT...TT~~~~~~~~~~~~TTTT..TTTTTTTTTT',
+  'TTTTTTTTTTTT.T.T~~~~~~~~~~~~TTT...TTTTTTTTTT',
+  'TTTTTTTTTTTTT..T~~~~~~~~~~~~TTT..TTTTTTTTTTT',
 ]);
 
 export const MAPS: GameMap[] = [
@@ -159,21 +164,21 @@ export const MAPS: GameMap[] = [
   {
     id: 'aeroporto',
     name: 'Aeroporto',
-    subtitle: 'Mapa 44×34 · pista, hangar e mata',
+    subtitle: 'Mapa 44×38 · pista de terra, hangar e mata',
     ...AEROPORTO,
-    hangar: { cols: [11, 32], rows: [4, 14] },
+    hangar: { cols: [11, 32], rows: [4, 18] },
     available: true,
-    starts: [{ col: 22, row: 30 }, { col: 21, row: 31 }, { col: 23, row: 31 }],
+    starts: [{ col: 22, row: 34 }, { col: 21, row: 35 }, { col: 23, row: 35 }],
     enemies: [
       // dentro do hangar, dando a volta no avião
       {
         id: 'madeireiro',
         name: 'Madeireiro',
         model: MODELS.madeireiro,
-        patrol: [{ col: 14, row: 6 }, { col: 29, row: 6 }, { col: 29, row: 12 }, { col: 14, row: 12 }],
+        patrol: [{ col: 14, row: 6 }, { col: 29, row: 6 }, { col: 29, row: 16 }, { col: 14, row: 16 }],
       },
       // no pátio, em frente ao portão
-      { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 14, row: 16 }, { col: 29, row: 16 }] },
+      { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 14, row: 20 }, { col: 29, row: 20 }] },
       // nos fundos, entre as duas portas
       { id: 'cacador', name: 'Caçador', model: MODELS.cacador, patrol: [{ col: 13, row: 2 }, { col: 30, row: 2 }] },
     ],
