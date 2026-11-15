@@ -107,9 +107,9 @@ modelos está em `tools/assets/README.md`.
 
 ## Próximas rodadas
 
-1. **Proporções chibi.** O corpo ainda é de super-herói (ombros largos, braços musculosos).
-   Cabeça e mãos maiores, tronco mais curto e braços mais finos, deformando ossos e malha no
-   refit. É o que mais aproxima das referências estilizadas.
+1. ~~**Proporções chibi.**~~ Feito: cabeça +30%, mãos +24%, pés +18%, braços 22% mais finos, em
+   todo o elenco (`STYLE.proportions = 'chibi'`, `lib/proportions.mjs`). Falta encurtar tronco e
+   pernas, o que exige tirar das animações as trilhas de posição dos ossos.
 2. **Sombreamento dos personagens.** Luz em degraus suaves e brilho de contorno só nos
    personagens, para que se destaquem do tabuleiro.
 3. **Rosto e cabelo.** Sobrancelhas mais marcadas, olhos um pouco maiores, cabelo em mechas
