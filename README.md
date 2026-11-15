@@ -55,11 +55,11 @@ rotas de patrulha ficam no mapa (`maps.ts`).
 ### Mapa do aeroporto
 
 O mapa **Aeroporto** (44×38) é o primeiro mapa "de verdade". O **hangar** fica ao norte, com um
-portão largo (12 hexágonos) e duas portas nos fundos. A **pista é de terra batida** e dá direto no
-portão, cortando a mata de sul a norte. Por dentro cabem quatro aviões lado a lado (cada um ocupa
+portão largo (12 hexágonos) e duas portas nos fundos. A **pista é um rastro de terra** de 6 hexágonos de
+largura, com sulcos de pneu, que sai do meio do portão e corta a mata de sul a norte. Por dentro cabem quatro aviões lado a lado (cada um ocupa
 4 colunas × 3 fileiras); por enquanto há um só, parado no meio. Dois postes de luz ficam do lado
-de fora, nos cantos da frente, e duas lâmpadas pendem do telhado. A equipe começa ao sul, na
-cabeceira da pista, e avança por ela ou pelas trilhas e clareiras na mata.
+de fora, nos cantos da frente, e duas lâmpadas pendem do telhado. A equipe começa numa
+clareira no canto sudoeste e avança pelas trilhas da mata ou pela pista.
 
 Os blocos de **árvores** (de vários tipos e tamanhos) e o **avião** funcionam como paredes: ninguém
 passa e os inimigos não enxergam através deles.

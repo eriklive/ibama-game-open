@@ -45,7 +45,7 @@ const GROUND: Record<Ground, [number, number, number]> = {
   runway: [0x4a5258, 0x444c52, 0x50585e],
   apron: [0x8d9498, 0x858c90, 0x959ca0],
   floor: [0xc9b48f, 0xc1ac87, 0xd1bc97],
-  dirt: [0x9a7448, 0x916c42, 0xa37c50],
+  dirt: [0xa47b4b, 0x9a7244, 0xad8554],
 };
 
 export interface BoardUnit {
@@ -498,6 +498,7 @@ export class HexBoard {
       }
     }
     this.buildRunwayMarks();
+    this.buildDirtTrack();
 
     const last = hexToWorld({ col: this.map.cols - 1, row: this.map.rows - 1 }, HEX_SIZE);
     Object.assign(this.bounds, { minX: 0, maxX: last.x, minZ: 0, maxZ: last.z + HEX_SIZE });
@@ -573,6 +574,35 @@ export class HexBoard {
       dash.position.y = 0.011;
       dash.receiveShadow = true;
       tile.mesh.add(dash);
+    }
+  }
+
+  /**
+   * Pista de terra: dois sulcos de pneu escuros correndo de norte a sul pelo meio do
+   * rastro. Cada hexágono de terra recebe o pedaço de sulco que passa por ele (e sobe
+   * junto quando o hexágono se ergue).
+   */
+  private buildDirtTrack(): void {
+    const ground = this.map.ground;
+    if (!ground) return;
+    const dirt = [...this.tiles.values()].filter((t) => ground.get(hexKey(t.coord)) === 'dirt');
+    if (!dirt.length) return;
+    const xs = dirt.map((t) => t.mesh.position.x);
+    const mid = (Math.min(...xs) + Math.max(...xs)) / 2;
+    const ruts = [mid - HEX_SIZE * 1.1, mid + HEX_SIZE * 1.1];
+    const mat = new THREE.MeshStandardMaterial({ color: 0x6b4c2c, roughness: 1 });
+    const r = HEX_SIZE * HEX_GAP;
+    for (const tile of dirt) {
+      for (const x of ruts) {
+        const dx = Math.abs(x - tile.mesh.position.x);
+        if (dx >= r) continue;
+        // corda vertical do hexágono "flat-top" na distância dx do centro
+        const half = dx <= r / 2 ? (Math.sqrt(3) / 2) * r : Math.sqrt(3) * (r - dx);
+        const rut = new THREE.Mesh(new THREE.BoxGeometry(0.24, 0.02, half * 2), mat);
+        rut.position.set(x - tile.mesh.position.x, 0.011, 0);
+        rut.receiveShadow = true;
+        tile.mesh.add(rut);
+      }
     }
   }
 

@@ -84,11 +84,11 @@ export const blockedHexes = (map: GameMap): Set<string> =>
   new Set([...map.walls, ...(map.trees ?? []), ...(map.plane ?? [])].map(hexKey));
 
 /**
- * Aeroporto clandestino: o hangar fica ao norte, com um portão largo (12 hexágonos) virado
- * para o pátio e duas portas nos fundos. A pista é de terra batida e dá direto no portão,
- * cortando a mata de sul a norte. Por dentro cabem quatro aviões lado a lado (cada um ocupa
+ * Aeroporto clandestino: o hangar fica ao norte, com um portão largo (12 hexágonos) e duas
+ * portas nos fundos. A pista é um rastro de terra de 6 hexágonos de largura que sai do meio
+ * do portão e corta a mata de sul a norte, até a borda do mapa. Por dentro cabem quatro aviões lado a lado (cada um ocupa
  * 4 colunas × 3 fileiras) em mais de uma fileira; por enquanto há um só, no meio. O resto é
- * mata fechada, cortada por trilhas e clareiras: a equipe chega pelo sul, na cabeceira da pista.
+ * mata fechada, cortada por trilhas e clareiras: a equipe parte de uma clareira no canto sudoeste.
  */
 const AEROPORTO = parseLayout([
   'TTTTTTTTTTTTT..TTTTTTTTTTTTTTT..TTTTTTTTTTTT',
@@ -110,25 +110,25 @@ const AEROPORTO = parseLayout([
   '......TTT.T#____________________#T.TTT.T....',
   'T.T...TTT..#____________________#..TTT...TTT',
   'TTTTT..TT..#####DDDDDDDDDDDD#####..TTT..TTTT',
-  'TTTT...TT....~~~~~~~~~~~~~~~~~~....TTT..TTTT',
-  'TTTTTT.TT.T..~~~~~~~~~~~~~~~~~~..T....TTTTTT',
-  '.............~~~~~~~~~~~~~~~~~~.............',
-  'T.TT.TTTT..TTT..~~~~~~~~~~~~..TTT.TT..TTTT.T',
-  'TTT..TTTTT.TT...~~~~~~~~~~~~.TTTT..TTT.TTTTT',
-  'TT.T..TTT...TTT.~~~~~~~~~~~~..TT.TTTT..TT.TT',
-  '................~~~~~~~~~~~~................',
-  'TT.TTTTT..TTTTTT~~~~~~~~~~~~T..TTTTT..TT.TTT',
-  'TTTTTTTT..TT.TTT~~~~~~~~~~~~TTT.TTT....TTTTT',
-  'TTTT.......T....~~~~~~~~~~~~.....TT.....TTTT',
-  'TTTTT.T......TTT~~~~~~~~~~~~.TTTT....T..TTTT',
-  'TT........T..TTT~~~~~~~~~~~~.TTTT..........T',
-  '...TT.TT.TTT...T~~~~~~~~~~~~TTT..TTT.TT.TT..',
-  'T.TTTTTTTTTTT...~~~~~~~~~~~~T....TTTTTTTTTTT',
-  'TTTTTTTTTTTTT...~~~~~~~~~~~~.....TTTTTTTTTTT',
-  'TTTTTTTTTTTT..T.~~~~~~~~~~~~T.TT..TTTTTTTTTT',
-  'TTTTTTTTTTT...TT~~~~~~~~~~~~TTTT..TTTTTTTTTT',
-  'TTTTTTTTTTTT.T.T~~~~~~~~~~~~TTT...TTTTTTTTTT',
-  'TTTTTTTTTTTTT..T~~~~~~~~~~~~TTT..TTTTTTTTTTT',
+  'TTTT...TT..........~~~~~~..........TTT..TTTT',
+  'TTTTTT.TT.T........~~~~~~........T....TTTTTT',
+  '...................~~~~~~...................',
+  'T.TT.TTTT..TTT..TT.~~~~~~..T..TTT.TT..TTTT.T',
+  'TTT..TTTTT.TT...T..~~~~~~.TT.TTTT..TTT.TTTTT',
+  'TT.T..TTT...TTT..T.~~~~~~.TT..TT.TTTT..TT.TT',
+  '...................~~~~~~...................',
+  'TT.TTTTT..TTTTTTTT.~~~~~~..TT..TTTTT..TT.TTT',
+  'TTTTTTTT..TT.TTTT..~~~~~~.TTTTT.TTT....TTTTT',
+  'TTTT.......T.....T.~~~~~~.TT.....TT.....TTTT',
+  'TTTTT.T......TTTTT.~~~~~~.T..TTTT....T..TTTT',
+  'TT........T..TTTTT.~~~~~~..T.TTTT..........T',
+  'T........TTT...TT..~~~~~~.TTTTT..TTT.TT.TT..',
+  '..........TTT....T.~~~~~~.TTT....TTTTTTTTTTT',
+  '.........TTTT...TT.~~~~~~.T......TTTTTTTTTTT',
+  '.........TTT..T.TT.~~~~~~..TT.TT..TTTTTTTTTT',
+  '........TTT...TTT..~~~~~~.TTTTTT..TTTTTTTTTT',
+  'T.......TTTT.T.T.T.~~~~~~.TTTTT...TTTTTTTTTT',
+  'TT.....TTTTTT..TTT.~~~~~~.TTTTT..TTTTTTTTTTT',
 ]);
 
 export const MAPS: GameMap[] = [
@@ -168,7 +168,7 @@ export const MAPS: GameMap[] = [
     ...AEROPORTO,
     hangar: { cols: [11, 32], rows: [4, 18] },
     available: true,
-    starts: [{ col: 22, row: 34 }, { col: 21, row: 35 }, { col: 23, row: 35 }],
+    starts: [{ col: 4, row: 34 }, { col: 3, row: 35 }, { col: 5, row: 35 }],
     enemies: [
       // dentro do hangar, dando a volta no avião
       {
