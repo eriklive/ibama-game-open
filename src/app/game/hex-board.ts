@@ -6,6 +6,7 @@ import { HANGAR_INTERIOR, HANGAR_ROOF, buildCover, buildFuelProps, buildHangar, 
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
+import { StaticShadow, castsMovingShadow } from './static-shadow';
 import { HexTile, TileField } from './tile-field';
 
 const HEX_SIZE = 1;
@@ -185,6 +186,7 @@ export class HexBoard {
   private structureKey = '';
   /** Estado do que faz sombra no último redesenho do mapa de sombras. */
   private shadowKey = '';
+  private readonly staticShadow: StaticShadow;
   private aura?: { wall: THREE.Mesh; ring: THREE.Mesh };
   /** Posições x dos sulcos da pista de terra (a continuação no mundo usa as mesmas). */
   private ruts: number[] = [];
@@ -226,7 +228,9 @@ export class HexBoard {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
     this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
-    this.renderer.shadowMap.autoUpdate = false;
+    // contagem por quadro (a sombra móvel faz um `render` dentro do outro)
+    this.renderer.info.autoReset = false;
+    this.staticShadow = new StaticShadow(this.renderer, this.scene, this.sun);
     this.area = playArea(map);
 
     this.scene.background = new THREE.Color(COLORS.background);
@@ -541,6 +545,7 @@ export class HexBoard {
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
       else mat?.dispose();
     });
+    this.staticShadow.dispose();
     this.renderer.dispose();
   }
 
@@ -872,9 +877,11 @@ export class HexBoard {
     const eyes = new THREE.Mesh(new THREE.BoxGeometry(0.06, 0.07, 0.24), dark);
     eyes.position.set(0.18, 0.34, 0);
     group.add(body, head, nose, eyes);
+    for (const m of [body, head, nose]) castsMovingShadow(m);
     // base redonda que aparece sob o modelo 3D e mostra a cor do estado (alerta, rendido)
     const disc = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, BASE_TOP * 2, 40), bodyMaterial);
     disc.visible = false;
+    castsMovingShadow(disc);
     group.add(disc);
 
     const alertSprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.bangTexture(), depthTest: false }));
@@ -1035,6 +1042,7 @@ export class HexBoard {
     );
     nub.position.set(0, 0, 0.42);
     group.add(disc, ring, dot, nub);
+    for (const m of [disc, ring]) castsMovingShadow(m);
 
     // área de toque generosa (invisível) para facilitar selecionar com o dedo
     const hitbox = new THREE.Mesh(
@@ -1246,10 +1254,10 @@ export class HexBoard {
   }
 
   /**
-   * Sol e cenário (mata, hangar, paredes) são estáticos, e quem anda não faz sombra de
-   * verdade (leva a sombra redonda): o mapa de sombras só é redesenhado quando o quadro
-   * do sol salta, quando blocos do mundo entram ou saem, ou quando o teto do hangar
-   * aparece ou some. Nos outros quadros não há passe de sombras.
+   * Sol e cenário (mata, hangar, paredes) são estáticos: a parte estática do mapa de
+   * sombras só é redesenhada quando o quadro do sol salta, quando blocos do mundo entram
+   * ou saem, ou quando o teto do hangar aparece ou some. Nos outros quadros só a sombra
+   * de quem se mexe é desenhada por cima da estática (ver `StaticShadow`).
    */
   private shadowDue(): boolean {
     if (!this.sun.castShadow) return false;
@@ -1257,7 +1265,7 @@ export class HexBoard {
     const key = `${p.x},${p.z};${this.stream.version};${this.roof?.visible};${this.interior[0]?.visible};${this.profile.mode}`;
     if (key === this.shadowKey) return false;
     this.shadowKey = key;
-    this.renderer.shadowMap.needsUpdate = true;
+    this.staticShadow.invalidate();
     return true;
   }
 
@@ -1376,6 +1384,7 @@ export class HexBoard {
     const shadow = this.shadowDue();
     // a mata que só faz sombra (fora da tela) entra apenas no quadro que redesenha a sombra
     this.stream.cull(this.camera, shadow ? this.sun : undefined);
+    this.renderer.info.reset();
     this.renderer.render(this.scene, this.camera);
   };
 

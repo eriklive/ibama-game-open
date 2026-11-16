@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MOVING_SHADOW_LAYER } from './static-shadow';
 import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -124,8 +125,8 @@ export class CharacterRig {
         mesh.material = own;
         owned.push(own);
       }
-      // sem sombra de verdade: a sombra do sol é estática (ver HexBoard); quem anda leva
-      // a sombra redonda de baixo
+      // sombra móvel: desenhada a cada quadro por cima da sombra estática (ver StaticShadow)
+      mesh.layers.enable(MOVING_SHADOW_LAYER);
       // a caixa de colisão da malha é a da pose de repouso; animada, ela pode sair
       // dela e sumir na borda da tela
       mesh.frustumCulled = false;
