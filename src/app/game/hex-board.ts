@@ -382,11 +382,12 @@ export class HexBoard {
 
   /**
    * Onda de voz da abordagem: um anel sai de `from` e cada hexágono das zonas da abordagem
-   * pula e brilha quando ela chega (as zonas precisam estar mostradas).
+   * pula e brilha quando ela chega (as zonas precisam estar mostradas). `radius` é o alcance
+   * da abordagem de quem gritou (cresce com a intimidação e com o grupo).
    */
-  playApproachWave(from: HexCoord): void {
+  playApproachWave(from: HexCoord, radius?: number): void {
     const start = this.clock.elapsedTime;
-    this.wave = { from: { ...from }, start, end: start + waveDuration() };
+    this.wave = { from: { ...from }, start, end: start + waveDuration(radius) };
     if (!this.waveRing) {
       // anel fino de raio 1 (escalado a cada quadro), deitado no chão
       this.waveRing = new THREE.Mesh(

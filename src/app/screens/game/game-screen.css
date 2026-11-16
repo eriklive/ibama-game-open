@@ -120,6 +120,15 @@ button:disabled { cursor: not-allowed; }
 .photo-img { height: 32px; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
 .photo-img svg { width: 28px; height: 32px; }
 .photo-name { font-size: 10px; line-height: 1.2; text-transform: uppercase; text-align: left; }
+/* atributos em campo (com o grupo somado, quando agrupado) */
+.photo-stats {
+  display: flex; flex-direction: column;
+  font-size: 8px; line-height: 1.15; text-transform: uppercase; text-align: left;
+  color: var(--muted-paper);
+}
+.photo-stats.boosted { color: var(--green-ok); }
+.photo.on-turn .photo-stats { font-size: 9px; }
+.approach-range { color: var(--muted-paper); }
 .photo.focused { opacity: 1; outline: 3px solid var(--paper-light); outline-offset: 2px; }
 
 .photo.on-turn { width: 66px; padding: 5px 5px 6px; opacity: 1; box-shadow: 2px 4px 0 rgba(0, 0, 0, 0.35); }
@@ -308,6 +317,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 
 .group-btn { right: 174px; bottom: 2px; width: 74px; height: 44px; transform: rotate(-2deg); }
 .group-btn .stencil { font-size: 12px; }
+.group-btn .typed { font-size: 9px; }
 .stamp:disabled { opacity: .6; }
 .group-tag {
   position: absolute; left: -6px; top: -6px; transform: rotate(-8deg);
