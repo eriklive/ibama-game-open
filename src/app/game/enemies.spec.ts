@@ -12,6 +12,7 @@ import {
   planPatrol,
   spawnEnemy,
   spotted,
+  stationary,
   visionHexes,
 } from './enemies';
 import { HexCoord, hexDistance, hexKey, hexNeighbors, rectArea } from './hex';
@@ -90,6 +91,33 @@ describe('patrulha', () => {
     for (let i = 1; i < around.path.length; i++) expect(hexDistance(around.path[i - 1], around.path[i])).toBe(1);
     const walled = planPatrol({ ...e, hex: { col: 0, row: 0 }, waypoint: 1 }, 3, rectArea(12, 12), keys([{ col: 1, row: 0 }, { col: 0, row: 1 }]));
     expect(walled.path).toEqual([]);
+  });
+});
+
+describe('vaguear', () => {
+  const zone = { cols: [3, 8] as [number, number], rows: [3, 8] as [number, number] };
+  const e = spawnEnemy({ id: 'w', name: 'W', patrol: [{ col: 5, row: 5 }], wander: zone });
+
+  it('não conta como parado e sorteia um destino dentro da zona', () => {
+    expect(stationary(e)).toBe(false);
+    for (const r of [0, 0.5, 0.999]) {
+      const plan = planPatrol(e, 2, rectArea(12, 12), none, () => r);
+      expect(plan.path.length).toBeGreaterThan(0);
+      expect(plan.path.length).toBeLessThanOrEqual(2);
+      const t = plan.target!;
+      expect(t.col >= 3 && t.col <= 8 && t.row >= 3 && t.row <= 8).toBe(true);
+      expect(hexDistance(t, e.hex)).toBeGreaterThanOrEqual(3);
+    }
+  });
+
+  it('segue para o destino já sorteado e sorteia outro ao chegar', () => {
+    const target = { col: 5, row: 8 };
+    const a = planPatrol({ ...e, target }, 2, rectArea(12, 12), none, () => 0);
+    expect(a.path).toEqual([{ col: 5, row: 6 }, { col: 5, row: 7 }]);
+    expect(a.target).toEqual(target);
+    const b = planPatrol({ ...e, hex: { col: 5, row: 7 }, target }, 2, rectArea(12, 12), none, () => 0);
+    expect(b.path).toEqual([{ col: 5, row: 8 }]);
+    expect(b.target).toBeUndefined();
   });
 });
 

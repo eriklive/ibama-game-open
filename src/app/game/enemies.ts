@@ -36,6 +36,15 @@ export const APPROACH_RULES = {
   surrenderRange: 2,
 } as const;
 
+/** Retângulo (colunas e fileiras, inclusive) onde um inimigo vagueia. */
+export interface WanderZone {
+  cols: [number, number];
+  rows: [number, number];
+}
+
+/** Distância mínima até o próximo destino sorteado de quem vagueia (para não ficar dando passinhos). */
+const WANDER_MIN_LEG = 3;
+
 export type EnemyStatus = 'patrol' | 'alert' | 'surrendered' | 'fled';
 
 /** Inimigo como definido no mapa. */
@@ -49,6 +58,11 @@ export interface EnemySpawn {
   patrol: HexCoord[];
   /** Para onde olha no começo (um hexágono); sem isso, olha para o próximo ponto da rota. */
   facing?: HexCoord;
+  /**
+   * Vagueia (movimento semialeatório) dentro deste retângulo em vez de seguir a rota: sorteia
+   * um ponto da área, anda até ele e sorteia outro. `patrol[0]` continua sendo onde começa.
+   */
+  wander?: WanderZone;
   /** Modelo 3D do inimigo; sem ele, o tabuleiro mostra a peça simples. */
   model?: ModelDef;
 }
@@ -65,6 +79,10 @@ export interface EnemyState {
   waypoint: number;
   /** Sentido em que percorre a rota (1 = ida, -1 = volta). */
   dir: 1 | -1;
+  /** Área onde vagueia (ver `EnemySpawn.wander`). */
+  wander?: WanderZone;
+  /** Destino sorteado de quem vagueia (sem isso, sorteia um no próximo turno). */
+  target?: HexCoord;
 }
 
 export function spawnEnemy(spawn: EnemySpawn): EnemyState {
@@ -78,11 +96,12 @@ export function spawnEnemy(spawn: EnemySpawn): EnemyState {
     patrol: spawn.patrol.map((h) => ({ ...h })),
     waypoint: spawn.patrol.length > 1 ? 1 : 0,
     dir: 1,
+    ...(spawn.wander ? { wander: spawn.wander } : {}),
   };
 }
 
 /** Parado no lugar (rota de um ponto só): no turno inimigo, não anda nem gira. */
-export const stationary = (e: Pick<EnemyState, 'patrol'>): boolean => e.patrol.length < 2;
+export const stationary = (e: Pick<EnemyState, 'patrol' | 'wander'>): boolean => e.patrol.length < 2 && !e.wander;
 
 /** Ângulo de `a` para `b` no plano do mundo (0 se forem o mesmo hexágono). */
 export function facingBetween(a: HexCoord, b: HexCoord): number {
@@ -165,7 +184,9 @@ export function planPatrol(
   steps: number,
   area: HexArea,
   blocked: ReadonlySet<string>,
-): { path: HexCoord[]; waypoint: number; dir: 1 | -1 } {
+  rng: () => number = Math.random,
+): { path: HexCoord[]; waypoint: number; dir: 1 | -1; target?: HexCoord } {
+  if (enemy.wander) return { ...planWander(enemy, enemy.wander, steps, area, blocked, rng), waypoint: enemy.waypoint, dir: enemy.dir };
   let { waypoint, dir } = enemy;
   let from = enemy.hex;
   const path: HexCoord[] = [];
@@ -187,6 +208,37 @@ export function planPatrol(
     if (hexKey(from) === hexKey(target)) ({ waypoint, dir } = advance(waypoint, dir, route.length));
   }
   return { path, waypoint, dir };
+}
+
+const inZone = (h: HexCoord, z: WanderZone): boolean =>
+  h.col >= z.cols[0] && h.col <= z.cols[1] && h.row >= z.rows[0] && h.row <= z.rows[1];
+
+/**
+ * Vaguear: segue rumo ao destino sorteado; chegando (ou se ele ficou inalcançável), sorteia
+ * outro hexágono livre da zona, a pelo menos `WANDER_MIN_LEG` passos, e continua.
+ */
+function planWander(
+  enemy: EnemyState,
+  zone: WanderZone,
+  steps: number,
+  area: HexArea,
+  blocked: ReadonlySet<string>,
+  rng: () => number,
+): { path: HexCoord[]; target?: HexCoord } {
+  const reach = reachableHexes(enemy.hex, area.hexes.length, area, blocked);
+  let target = enemy.target;
+  let leg = target && hexKey(target) !== hexKey(enemy.hex) ? pathTo(reach, target) : [];
+  if (!leg.length) {
+    const options = [...reach.values()]
+      .map((r) => r.coord)
+      .filter((h) => inZone(h, zone) && hexDistance(h, enemy.hex) >= WANDER_MIN_LEG);
+    if (!options.length) return { path: [] };
+    target = options[Math.min(options.length - 1, Math.floor(rng() * options.length))];
+    leg = pathTo(reach, target);
+  }
+  const path = leg.slice(0, steps);
+  const arrived = path.length && hexKey(path[path.length - 1]) === hexKey(target!);
+  return { path, target: arrived ? undefined : target };
 }
 
 function advance(i: number, dir: 1 | -1, n: number): { waypoint: number; dir: 1 | -1 } {

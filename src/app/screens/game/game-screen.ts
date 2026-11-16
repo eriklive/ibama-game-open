@@ -545,7 +545,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async patrol(enemy: EnemyState, epoch: number): Promise<void> {
     const map = this.map!;
     const plan = planPatrol(enemy, ENEMY_RULES.patrolSteps, this.area, this.blockedFor(enemy.id));
-    this.updateEnemy(enemy.id, { waypoint: plan.waypoint, dir: plan.dir });
+    this.updateEnemy(enemy.id, { waypoint: plan.waypoint, dir: plan.dir, target: plan.target });
     if (!plan.path.length) {
       this.say(`${enemy.name} espera: o caminho está bloqueado`, 'info');
       return;
