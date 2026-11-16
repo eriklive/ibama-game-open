@@ -42,6 +42,21 @@
     </button>
   </header>
 
+  <!-- Avião queimado: os agentes já podem encerrar a operação -->
+  @if (canEnd() && !debrief()) {
+    <button
+      type="button"
+      class="end-op"
+      [disabled]="!endAvailable()"
+      (click)="openDebrief()"
+      [attr.aria-label]="'Objetivo cumprido: avião queimado. Encerrar a operação' + (endAvailable() ? '' : ' (na vez de um agente)')"
+      data-testid="end-op">
+      <span class="end-op-kicker">Avião queimado</span>
+      <span class="end-op-text">Encerrar operação</span>
+      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('endMission') }}</span> }
+    </button>
+  }
+
   @if (menuOpen()) {
     <section id="game-menu" class="menu" aria-label="Menu" data-testid="menu">
       <h2 class="menu-title">Menu</h2>
@@ -194,9 +209,9 @@
           <span class="objectives-head">Objetivos</span>
           <ul>
             @for (o of objectives(); track o.id) {
-              <li [class]="'objective ' + o.state" [attr.data-testid]="'objective-' + o.id">
+              <li [class]="'objective ' + o.state" [class.primary]="o.primary" [attr.data-testid]="'objective-' + o.id">
                 <span class="tick" aria-hidden="true">{{ o.state === 'done' ? '✓' : o.state === 'failed' ? '✗' : '' }}</span>
-                <span>{{ o.text }}</span>
+                <span>{{ o.text }}@if (o.primary) {<span class="primary-tag">principal</span>}</span>
                 <span class="sr-only">{{ o.state === 'done' ? '(cumprido)' : o.state === 'failed' ? '(perdido)' : '(pendente)' }}</span>
               </li>
             }
@@ -253,6 +268,28 @@
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
       </button>
       <button type="button" class="paper side" (click)="cancelApproach()">
+        <span class="stencil">Cancelar</span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+      </button>
+    } @else if (burning() && burnable(); as target) {
+      <div class="slip burn-slip" role="status" aria-live="polite" data-testid="burn-hint">
+        <strong>Queimar {{ target.name }}?</strong>
+        @if (burnWitnesses().length) {
+          <ul class="approach-list">
+            @for (e of burnWitnesses(); track e.id) {
+              <li class="flee">{{ e.name }} vai ver o fogo</li>
+            }
+          </ul>
+        } @else {
+          <span class="small">Ninguém vigiando a até {{ burnRules.alertRadius }} hexágonos.</span>
+        }
+        <span class="small">Encerra a vez.</span>
+      </div>
+      <button type="button" class="stamp confirm fire" (click)="confirmBurn()" data-testid="burn-confirm">
+        <span class="stamp-ring"><span class="stamp-text">Queimar!</span></span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+      </button>
+      <button type="button" class="paper side" (click)="cancelBurn()">
         <span class="stencil">Cancelar</span>
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
       </button>
@@ -352,6 +389,19 @@
           (click)="inspect()">
           <span class="stencil">{{ searchFails().get(item.id) ? 'Rolar de novo' : 'Inspecionar' }}</span>
           <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
+          @if (pad() && !canApproach() && !burnable()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
+        </button>
+      }
+      <!-- Queimar: colado no avião ou na pilha de suprimentos (encerra a vez) -->
+      @if (burnable(); as target) {
+        <button
+          type="button"
+          class="paper burn"
+          [attr.aria-label]="'Queimar ' + target.name + ' (encerra a vez)'"
+          data-testid="burn"
+          (click)="startBurn()">
+          <span class="stencil">Queimar</span>
+          <span class="typed">{{ target.short }}</span>
           @if (pad() && !canApproach()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
@@ -404,9 +454,10 @@
           <dt>Direcional / analógico esq.</dt><dd>mover o cursor</dd>
           <dt>{{ glyph('confirm') }}</dt><dd>confirmar</dd>
           <dt>{{ glyph('cancel') }}</dt><dd>cancelar</dd>
-          <dt>{{ glyph('approach') }}</dt><dd>abordar / inspecionar</dd>
+          <dt>{{ glyph('approach') }}</dt><dd>abordar / queimar / inspecionar</dd>
           <dt>{{ glyph('endTurn') }}</dt><dd>passar a vez</dd>
           <dt>{{ glyph('group') }}</dt><dd>agrupar / desagrupar</dd>
+          <dt>{{ glyph('endMission') }}</dt><dd>encerrar a operação (avião queimado)</dd>
           <dt>{{ glyph('prev') }} / {{ glyph('next') }}</dt><dd>trocar personagem</dd>
           <dt>{{ p.dualshock ? 'Touchpad' : 'R3' }}</dt><dd>voltar para quem joga</dd>
           <dt>Analógico dir.</dt><dd>mover a câmera</dd>
@@ -451,6 +502,60 @@
           <span class="roll-total rolling">Rolando…</span>
         }
       </div>
+    </div>
+  }
+  <!-- Relatório da operação: confirma o encerramento e depois mostra o resultado -->
+  @if (debrief(); as stage) {
+    <div class="debrief-stage" role="dialog" aria-modal="true" aria-labelledby="debrief-title" data-testid="debrief">
+      <article [class]="'debrief ' + verdict()">
+        <span class="debrief-kicker">Ibama · Op. {{ map?.name }}</span>
+        <h2 class="debrief-title" id="debrief-title">
+          {{ stage === 'confirm' ? 'Encerrar a operação?' : 'Relatório da operação' }}
+        </h2>
+        <ul class="debrief-objectives">
+          @for (o of objectives(); track o.id) {
+            <li [class]="'objective ' + o.state" [class.primary]="o.primary">
+              <span class="tick" aria-hidden="true">{{ o.state === 'done' ? '✓' : o.state === 'failed' ? '✗' : '–' }}</span>
+              <span>{{ o.text }}@if (o.primary) {<span class="primary-tag">principal</span>}</span>
+              <span class="sr-only">{{ o.state === 'done' ? '(cumprido)' : o.state === 'failed' ? '(perdido)' : '(não cumprido)' }}</span>
+            </li>
+          }
+        </ul>
+        <p class="debrief-line">
+          Suspeitos: {{ enemyCounts().surrendered }} {{ enemyCounts().surrendered === 1 ? 'rendido' : 'rendidos' }},
+          {{ enemyCounts().fled }} {{ enemyCounts().fled === 1 ? 'fugiu' : 'fugiram' }},
+          {{ enemyCounts().patrol + enemyCounts().alert }} à solta
+        </p>
+        <p class="debrief-line" [class.late]="late()">
+          Turno {{ round() }} de {{ deadline }}@if (late()) { · atrasado}
+        </p>
+        @if (stage === 'confirm') {
+          @if (verdict() !== 'success') {
+            <p class="debrief-warn">Ainda falta objetivo principal: encerrar agora deixa a missão incompleta.</p>
+          }
+          <div class="debrief-actions">
+            <button type="button" class="paper debrief-btn" (click)="closeDebrief()" data-testid="debrief-cancel">
+              <span class="stencil">Continuar</span>
+              @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+            </button>
+            <button type="button" class="paper debrief-btn primary" (click)="confirmEnd()" data-testid="debrief-confirm">
+              <span class="stencil">Encerrar</span>
+              @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+            </button>
+          </div>
+        } @else {
+          <div class="debrief-verdict" data-testid="verdict">{{ verdictLabel[verdict()] }}</div>
+          <div class="debrief-actions">
+            <button type="button" class="paper debrief-btn" (click)="exit()">
+              <span class="stencil">Início</span>
+            </button>
+            <button type="button" class="paper debrief-btn primary" (click)="restart()" data-testid="debrief-restart">
+              <span class="stencil">Jogar de novo</span>
+              @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+            </button>
+          </div>
+        }
+      </article>
     </div>
   }
 </div>

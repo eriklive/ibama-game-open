@@ -199,12 +199,12 @@ export function pressedNow(prev: PadState | null, cur: PadState, threshold = 0.5
 }
 
 /** Ações da interface e o botão de cada família de controle. */
-export type PadAction = 'confirm' | 'cancel' | 'approach' | 'endTurn' | 'group' | 'prev' | 'next' | 'help';
+export type PadAction = 'confirm' | 'cancel' | 'approach' | 'endTurn' | 'group' | 'prev' | 'next' | 'help' | 'endMission';
 
 const GLYPHS: Record<PadKind, Record<PadAction, string>> = {
-  playstation: { confirm: '✕', cancel: '○', approach: '□', endTurn: '△', group: 'Share', prev: 'L1', next: 'R1', help: 'Options' },
-  xbox: { confirm: 'A', cancel: 'B', approach: 'X', endTurn: 'Y', group: 'View', prev: 'LB', next: 'RB', help: 'Menu' },
-  generic: { confirm: 'A', cancel: 'B', approach: 'X', endTurn: 'Y', group: 'Select', prev: 'LB', next: 'RB', help: 'Start' },
+  playstation: { confirm: '✕', cancel: '○', approach: '□', endTurn: '△', group: 'Share', prev: 'L1', next: 'R1', help: 'Options', endMission: 'L3' },
+  xbox: { confirm: 'A', cancel: 'B', approach: 'X', endTurn: 'Y', group: 'View', prev: 'LB', next: 'RB', help: 'Menu', endMission: 'LS' },
+  generic: { confirm: 'A', cancel: 'B', approach: 'X', endTurn: 'Y', group: 'Select', prev: 'LB', next: 'RB', help: 'Start', endMission: 'L3' },
 };
 
 export const glyphFor = (kind: PadKind, action: PadAction): string => GLYPHS[kind][action];

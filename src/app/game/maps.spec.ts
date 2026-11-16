@@ -18,6 +18,8 @@ describe('parseLayout', () => {
     const m = parseLayout(['BMSGf_']);
     expect(m.cover?.map((c) => c.kind)).toEqual(['crates', 'boxes', 'sacks', 'cages']);
     expect(m.cover?.map((c) => COVER_HEIGHT[c.kind])).toEqual(['high', 'high', 'low', 'low']);
+    expect(parseLayout(['R']).cover).toEqual([{ col: 0, row: 0, kind: 'supplies' }]);
+    expect(COVER_HEIGHT.supplies).toBe('high');
     expect(m.props).toEqual([{ col: 4, row: 0 }]);
     const map = { ...m, id: 'x', name: 'x', subtitle: '', available: true, starts: [], enemies: [] };
     expect([...blockedHexes(map)].sort()).toEqual(['0,0', '1,0']);

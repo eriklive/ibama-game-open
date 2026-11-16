@@ -525,6 +525,11 @@ function makeCargoMaterials() {
     jar: std(0xd8c27a, 0.3),
     tin: std(0x9aa3a8, 0.4, 0.6),
     rag: std(0x7d2f2a, 1),
+    tarp: std(0x3f6b3a, 0.95),
+    rope: std(0xcfb77a, 0.9),
+    drum: std(0x2b5d9e, 0.5, 0.3),
+    drumRim: std(0x1d3f6b, 0.5, 0.4),
+    hose: std(0x1f2224, 0.7),
   };
 }
 
@@ -673,7 +678,7 @@ function cage(w: number, h: number, d: number): THREE.Group {
   return g;
 }
 
-export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shelf';
+export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shelf' | 'supplies';
 
 /**
  * Monta a carga de um hexágono. `seed` varia a arrumação (giro, quantas peças, quais
@@ -682,6 +687,7 @@ export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shel
 export function buildCover(kind: CoverKind, seed: number): THREE.Group {
   if (kind === 'table') return diningTable();
   if (kind === 'shelf') return shelf(seed);
+  if (kind === 'supplies') return supplyPile(seed);
   const rnd = seeded(seed);
   const g = new THREE.Group();
   if (kind === 'crates') {
@@ -811,6 +817,41 @@ function shelf(seed: number): THREE.Group {
  * Decoração (não bloqueia nada): um galão de gasolina vermelho e, às vezes, um botijão
  * de gás, encostados num canto do hexágono para não esconder a peça de quem passa.
  */
+/**
+ * Suprimentos do garimpo (o que a equipe queima): caixotes sob uma lona verde amarrada,
+ * tambores azuis de diesel para as dragas e um rolo de mangueira preta. Alta como os
+ * caixotes (bloqueia a visão), mas com cara de "estoque" para chamar atenção.
+ */
+function supplyPile(seed: number): THREE.Group {
+  const rnd = seeded(seed);
+  const m = cargo();
+  const g = new THREE.Group();
+  g.add(pallet(1.3, 1.0));
+  // caixotes por baixo da lona: só a lona aparece, com cordas cruzando
+  const load = new THREE.Group();
+  load.add(solid(new THREE.BoxGeometry(1.15, 1.05, 0.85), m.tarp, 0, 0.13 + 0.52, 0));
+  for (const x of [-0.3, 0.25]) load.add(solid(new THREE.BoxGeometry(0.035, 1.09, 0.89), m.rope, x, 0.13 + 0.52, 0));
+  load.position.set(-0.05, 0, -0.05);
+  load.rotation.y = (rnd(1) - 0.5) * 0.2;
+  g.add(load);
+  // tambores de diesel na frente
+  const drum = (x: number, z: number) => {
+    const d = new THREE.Group();
+    d.add(solid(new THREE.CylinderGeometry(0.2, 0.2, 0.62, 12), m.drum, 0, 0.31, 0));
+    for (const y of [0.16, 0.46]) d.add(solid(new THREE.CylinderGeometry(0.205, 0.205, 0.035, 12), m.drumRim, 0, y, 0));
+    d.position.set(x, 0, z);
+    return d;
+  };
+  g.add(drum(0.42, 0.42));
+  if (rnd(2) < 0.7) g.add(drum(0.0, 0.5));
+  // rolo de mangueira em cima da lona
+  const hose = solid(new THREE.TorusGeometry(0.22, 0.05, 6, 14), m.hose, 0.05, 1.24, 0);
+  hose.rotation.x = Math.PI / 2;
+  g.add(hose);
+  g.rotation.y = Math.floor(rnd(9) * 6) * (Math.PI / 3);
+  return g;
+}
+
 export function buildFuelProps(seed: number): THREE.Group {
   const rnd = seeded(seed);
   const m = cargo();
