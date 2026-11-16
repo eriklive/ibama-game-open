@@ -211,7 +211,7 @@ export class HexBoard {
    * Estruturas (hangar, casa): o telhado some quando um agente entra e o que fica dentro
    * (carga, avião, lâmpadas, móveis) só aparece com um agente por perto.
    */
-  private readonly structures: { rect: HexRect; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
+  private readonly structures: { rect: HexRect; doors: HexCoord[]; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
   /** Pista de algo escondido: uma lupa flutuando sobre o móvel percebido. */
   private clue?: { sprite: THREE.Sprite; hex: HexCoord };
   /** Modelo do avião e da carga por hexágono: o que escurece quando pega fogo. */
@@ -807,13 +807,13 @@ export class HexBoard {
     if (hangar) {
       const built = buildHangar(hangar, wallKeys, HEX_SIZE);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
-      this.structures.push({ rect: hangar, roof: built.getObjectByName(HANGAR_ROOF), interior: lamps ? [lamps] : [] });
+      this.structures.push({ rect: hangar, doors: this.doorsOf(hangar), roof: built.getObjectByName(HANGAR_ROOF), interior: lamps ? [lamps] : [] });
       this.addScenery(built);
     }
     const house = this.map.house;
     if (house) {
       const built = buildHouse(house, wallKeys, HEX_SIZE);
-      this.structures.push({ rect: house, roof: built.getObjectByName(HOUSE_ROOF), interior: [] });
+      this.structures.push({ rect: house, doors: this.doorsOf(house), roof: built.getObjectByName(HOUSE_ROOF), interior: [] });
       this.addScenery(built);
     }
     const inHangar = (h: HexCoord): boolean => this.structures.some((st) => inStructure(h, st.rect));
@@ -885,6 +885,11 @@ export class HexBoard {
     return new THREE.Group().add(object);
   }
 
+  /** Portas do mapa que ficam na planta da estrutura. */
+  private doorsOf(rect: HexRect): HexCoord[] {
+    return (this.map.doors ?? []).filter((d) => inStructure(d, rect));
+  }
+
   /** Teto e interior das estruturas conforme a posição dos agentes (ver `structureView`). */
   private updateStructure(): void {
     if (!this.structures.length) return;
@@ -894,7 +899,7 @@ export class HexBoard {
     this.structureKey = key;
     const agents = [...this.units.values()].map((u) => u.hex);
     for (const st of this.structures) {
-      const view = structureView(st.rect, agents);
+      const view = structureView(st.rect, agents, st.doors);
       if (st.roof) st.roof.visible = view.roof;
       for (const o of st.interior) o.visible = view.interior;
     }

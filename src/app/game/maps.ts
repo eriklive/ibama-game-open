@@ -28,6 +28,8 @@ export interface GameMap {
   starts: { col: number; row: number }[];
   /** Hexágonos com parede: bloqueiam passagem e visão. */
   walls: { col: number; row: number }[];
+  /** Hexágonos de porta (`D` no esboço): passagens nas paredes das estruturas. */
+  doors?: HexCoord[];
   /** Hexágonos com árvores: bloqueiam passagem e visão, como as paredes. */
   trees?: HexCoord[];
   /** Chão de cada hexágono (chave de `hexKey`); sem isso, o tabuleiro azul de teste. */
@@ -101,9 +103,10 @@ export const CHARACTERS: Character[] = [
  */
 export function parseLayout(
   layout: readonly string[],
-): Pick<GameMap, 'cols' | 'rows' | 'walls' | 'trees' | 'ground' | 'plane' | 'cover' | 'props'> {
+): Pick<GameMap, 'cols' | 'rows' | 'walls' | 'doors' | 'trees' | 'ground' | 'plane' | 'cover' | 'props'> {
   const cols = layout[0].length;
   const walls: HexCoord[] = [];
+  const doors: HexCoord[] = [];
   const trees: HexCoord[] = [];
   const plane: HexCoord[] = [];
   const cover: (HexCoord & { kind: CoverKind })[] = [];
@@ -124,13 +127,14 @@ export function parseLayout(
       const h = { col, row };
       ground.set(hexKey(h), kind);
       if (ch === '#') walls.push(h);
+      if (ch === 'D') doors.push(h);
       if (ch === 'T') trees.push(h);
       if (ch === 'A') plane.push(h);
       if (ch === 'f') props.push(h);
       if (coverKinds[ch]) cover.push({ ...h, kind: coverKinds[ch] });
     });
   });
-  return { cols, rows: layout.length, walls, trees, ground, plane, cover, props };
+  return { cols, rows: layout.length, walls, doors, trees, ground, plane, cover, props };
 }
 
 /**
@@ -378,20 +382,25 @@ export function stepsToStructure(h: HexCoord, rect: HexRect): number {
   return best;
 }
 
+/** Distância (em hexágonos) de uma porta a partir da qual o teto some para mostrar o interior. */
+export const DOOR_REVEAL = 2;
+
 /**
  * O que se desenha de uma estrutura, dadas as posições dos agentes: o teto some quando
- * algum agente entra (de fora ele fica) e o que há dentro só aparece com um agente a
- * até `sight` hexágonos dela.
+ * algum agente entra ou está a até `DOOR_REVEAL` hexágonos de uma das portas (`doors`) —
+ * ao se afastar da porta, ele volta. O que há dentro só aparece com um agente a até
+ * `sight` hexágonos dela.
  */
 export function structureView(
   rect: HexRect,
   agents: Iterable<HexCoord>,
+  doors: readonly HexCoord[] = [],
   sight = STRUCTURE_SIGHT,
 ): { roof: boolean; interior: boolean } {
   let roof = true;
   let interior = false;
   for (const a of agents) {
-    if (inStructure(a, rect)) roof = false;
+    if (inStructure(a, rect) || doors.some((d) => hexDistance(a, d) <= DOOR_REVEAL)) roof = false;
     if (stepsToStructure(a, rect) <= sight) interior = true;
   }
   return { roof, interior };

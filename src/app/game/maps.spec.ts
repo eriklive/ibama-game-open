@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HexCoord, hexKey, reachableHexes } from './hex';
 import {
-  COVER_HEIGHT, HexRect, MAPS, STRUCTURE_SIGHT, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
+  COVER_HEIGHT, DOOR_REVEAL, HexRect, MAPS, STRUCTURE_SIGHT, inStructure, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
 } from './maps';
 
 describe('parseLayout', () => {
@@ -143,9 +143,30 @@ describe('aeroporto: mundo semiaberto', () => {
     expect(structureView(hangar, [{ col: 22, row: 25 }])).toEqual({ roof: true, interior: false });
     // perto, mas do lado de fora: o teto fica e o interior já é desenhado
     expect(structureView(hangar, [{ col: 22, row: 24 }])).toEqual({ roof: true, interior: true });
-    expect(structureView(hangar, [{ col: 22, row: 19 }])).toEqual({ roof: true, interior: true });
+    expect(structureView(hangar, [{ col: 22, row: 21 }], (map.doors ?? []).filter((d) => inStructure(d, hangar)))).toEqual({ roof: true, interior: true });
     // basta um agente entrar (o vão do portão já conta) para o teto sumir
     expect(structureView(hangar, [...map.starts, { col: 22, row: 18 }])).toEqual({ roof: false, interior: true });
     expect(structureView(hangar, [{ col: 15, row: 9 }])).toEqual({ roof: false, interior: true });
+  });
+
+  it('estrutura: o teto some com um agente a até 2 hexágonos de uma porta e volta quando ele se afasta', () => {
+    const map = MAPS.find((m) => m.id === 'aeroporto')!;
+    expect(DOOR_REVEAL).toBe(2);
+    const hangar = map.hangar!;
+    const house = map.house!;
+    const hangarDoors = (map.doors ?? []).filter((d) => inStructure(d, hangar));
+    const houseDoors = (map.doors ?? []).filter((d) => inStructure(d, house));
+    expect(hangarDoors.length).toBe(14);
+    expect(houseDoors.map(hexKey)).toContain(hexKey({ col: 29, row: 29 }));
+    // diante do portão (fileira 18): a 1 e a 2 fileiras some o teto; a 3 ele volta
+    expect(structureView(hangar, [{ col: 22, row: 19 }], hangarDoors).roof).toBe(false);
+    expect(structureView(hangar, [{ col: 22, row: 20 }], hangarDoors).roof).toBe(false);
+    expect(structureView(hangar, [{ col: 22, row: 21 }], hangarDoors).roof).toBe(true);
+    // porta dos fundos, ao norte
+    expect(structureView(hangar, [{ col: 14, row: 2 }], hangarDoors).roof).toBe(false);
+    expect(structureView(hangar, [{ col: 14, row: 1 }], hangarDoors).roof).toBe(true);
+    // porta da casa, a oeste
+    expect(structureView(house, [{ col: 27, row: 29 }], houseDoors).roof).toBe(false);
+    expect(structureView(house, [{ col: 26, row: 29 }], houseDoors).roof).toBe(true);
   });
 });
