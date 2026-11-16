@@ -41,6 +41,8 @@ import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../g
 import { APPROACH_FX, holdProgress, holdRing, waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
+import { RosterService } from '../../game/roster.service';
+import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../game/stats';
 
 /** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
 const MISSION_DEADLINE = 5;
@@ -83,6 +85,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly gamepad = inject(GamepadService);
   private readonly renderSettings = inject(RenderSettings);
+  /** Atributos escolhidos na ficha (escalação). */
+  private readonly roster = inject(RosterService);
   private readonly haptics = inject(Haptics);
   private stopPad?: () => void;
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
@@ -346,6 +350,39 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Agentes agrupados (andam juntos e ganham movimento extra); vazio = cada um por si. */
   protected readonly group = signal<ReadonlySet<string>>(new Set());
   protected readonly groupBonus = GROUP_RULES.moveBonus;
+  protected readonly groupApproachBonus = GROUP_RULES.approachBonus;
+  protected readonly signed = signed;
+
+  /** Atributos de um agente em campo (com o bônus do grupo, se ele estiver agrupado). */
+  protected fieldStats(c: Character): { vel: number; int: number; range: number } {
+    const loadout = this.roster.loadout(c.id);
+    const grouped = this.group().has(c.id);
+    return {
+      vel: statBreakdown(loadout, 'velocidade', grouped).total,
+      int: statBreakdown(loadout, 'intimidacao', grouped).total,
+      range: approachRulesFor(loadout, grouped).radius,
+    };
+  }
+  /** Velocidade do agente da vez que entra na rolagem (sem o grupo, que aparece à parte). */
+  protected readonly activeSpeed = computed(
+    () => statBreakdown(this.roster.loadout(this.active().id), 'velocidade', false).total,
+  );
+  /** Parcela da velocidade na conta da rolagem (" + 1 (velocidade)"), vazia sem modificador. */
+  protected readonly speedTerm = computed(() => {
+    const v = this.activeSpeed();
+    return v ? ` ${v > 0 ? '+' : '−'} ${Math.abs(v)} (velocidade)` : '';
+  });
+  /** Partes do alcance da abordagem do agente da vez: base, intimidação e grupo. */
+  protected readonly approachParts = computed(() => {
+    const loadout = this.roster.loadout(this.active().id);
+    const grouped = this.grouped();
+    return {
+      base: APPROACH_RULES.radius,
+      int: statBreakdown(loadout, 'intimidacao', false).total,
+      group: grouped ? GROUP_RULES.approachBonus : 0,
+      total: this.activeApproach().radius,
+    };
+  });
   /** Escolhendo o ponto de encontro do "Agrupar". */
   protected readonly grouping = signal(false);
   /** Ponto de encontro destacado (aguardando confirmação). */
@@ -386,10 +423,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const b = Math.round((c.color & 255) * k);
     return `rgb(${r}, ${g}, ${b})`;
   }
+  /**
+   * Raio da abordagem do agente da vez: o base (`APPROACH_RULES`) + intimidação, e +2 enquanto
+   * estiver agrupado (ver `approachRulesFor` em `stats.ts`).
+   */
+  protected readonly activeApproach = computed(() =>
+    approachRulesFor(this.roster.loadout(this.active().id), this.grouped()),
+  );
   /** Quem se renderia e quem tentaria correr se o agente da vez abordasse agora. */
   protected readonly approachPlan = computed(() => {
     const from = this.positions().get(this.active().id);
-    return from ? resolveApproach(from, this.enemies()) : { surrender: [], flee: [] };
+    return from ? resolveApproach(from, this.enemies(), this.activeApproach()) : { surrender: [], flee: [] };
   });
   protected readonly canApproach = computed(
     () => this.approachPlan().surrender.length + this.approachPlan().flee.length > 0,
@@ -522,7 +566,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const show = () => {
       if (this.destroyed || this.epoch !== epoch || this.dice() !== final) return;
       this.rolled.set(sum(final));
-      this.movesLeft.set(sum(final) + (this.grouped() ? GROUP_RULES.moveBonus : 0));
+      this.movesLeft.set(turnMovement(sum(final), this.roster.loadout(this.active().id), this.grouped()));
       this.gamepad.rumble(0.3, 0.2, 120);
       this.haptics.vibrate(SETTLE_PATTERN);
     };
@@ -827,7 +871,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!(await this.walkUnits(id, plan.paths))) return;
     this.group.set(new Set(CHARACTERS.map((c) => c.id)));
     this.movesLeft.update((n) => Math.max(0, n - plan.cost));
-    this.say(`Equipe agrupada! Andando juntos: +${GROUP_RULES.moveBonus} de movimento`, 'info');
+    this.say(
+      `Equipe agrupada! Juntos: +${GROUP_RULES.moveBonus} de movimento e +${GROUP_RULES.approachBonus} de alcance na abordagem`,
+      'info',
+    );
     if (!(await this.perceive(plan.paths))) return;
     this.afterMove();
   }
@@ -948,7 +995,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeBurn();
     this.clearBoardForApproach();
     this.approaching.set(true);
-    this.paintApproachZones(APPROACH_RULES.radius);
+    this.paintApproachZones(this.activeApproach().radius);
   }
 
   /** Pinta as zonas da abordagem até o anel `upTo` (o raio cresce enquanto o botão é segurado). */
@@ -960,9 +1007,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         .filter((h) => !this.solid.has(hexKey(h)))
         .filter((h) => hexDistance(from, h) > min)
         .map(hexKey);
+    const rules = this.activeApproach();
     this.board?.setApproachZones({
-      surrender: zone(0, APPROACH_RULES.surrenderRange),
-      flee: zone(APPROACH_RULES.surrenderRange, APPROACH_RULES.radius),
+      surrender: zone(0, rules.surrenderRange),
+      flee: zone(rules.surrenderRange, rules.radius),
     });
   }
 
@@ -1030,7 +1078,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.charging.set(true);
     }
     this.holdProgress.set(p);
-    const ring = holdRing(p);
+    const ring = holdRing(p, this.activeApproach().radius);
     if (ring !== h.ring) {
       h.ring = ring;
       this.paintApproachZones(ring);
@@ -1069,7 +1117,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const { surrender, flee } = this.approachPlan();
     if (!from || surrender.length + flee.length === 0) return;
     this.approaching.set(false);
-    this.paintApproachZones(APPROACH_RULES.radius);
+    this.paintApproachZones(this.activeApproach().radius);
     this.phase.set('ending');
     const motion = !reducedMotion();
     for (const e of surrender) this.updateEnemy(e.id, { status: 'surrendered', facing: facingBetween(e.hex, from) });
@@ -1077,7 +1125,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.refreshVision();
     this.gamepad.rumble(1, 0.6, 320);
     this.haptics.vibrate(APPROACH_PATTERN);
-    if (motion) this.board?.playApproachWave(from);
+    const radius = this.activeApproach().radius;
+    if (motion) this.board?.playApproachWave(from, radius);
     for (const e of [...surrender, ...flee]) {
       const delay = motion ? waveArrival(hexDistance(from, e.hex)) * 1000 : 0;
       this.later(delay, () => {
@@ -1088,7 +1137,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else this.board?.setEnemyAlert(e.id, true);
       });
     }
-    this.later(motion ? waveDuration() * 1000 : 300, () => {
+    this.later(motion ? waveDuration(radius) * 1000 : 300, () => {
       this.board?.setApproachZones(null);
       this.report.set({ agent: this.active().name, surrender, flee });
       this.later(motion ? APPROACH_FX.reportMs : 1800, () => this.closeReport());

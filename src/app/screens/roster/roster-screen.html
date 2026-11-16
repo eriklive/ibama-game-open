@@ -1,0 +1,271 @@
+<main class="roster">
+  <header class="head">
+    <div class="head-title">
+      <span class="kicker"
+        ><span class="wide-only">IBAMA · GEF · </span>Escalação · {{ map?.name }}</span
+      >
+      <h1>Ficha do agente</h1>
+    </div>
+    <span class="count"
+      ><span class="wide-only">Agente </span>{{ cur() + 1 }} / {{ agents.length }}</span
+    >
+  </header>
+
+  <div class="body">
+    <!-- Abas: foto 3x4 de cada agente (amarelo = ponto livre, verde = distribuído) -->
+    <div class="tabs" role="tablist" aria-label="Agentes da equipe">
+      @for (t of tabs(); track t.c.id) {
+        <button
+          type="button"
+          role="tab"
+          class="tab"
+          [class.on]="t.selected"
+          [attr.aria-selected]="t.selected"
+          aria-controls="ficha"
+          [attr.aria-label]="t.c.name + (t.done ? ', ponto distribuído' : ', ponto livre')"
+          [attr.data-testid]="'tab-' + t.c.id"
+          (click)="go(t.i)"
+        >
+          <span class="tab-photo">
+            <svg viewBox="0 0 76 96" aria-hidden="true" [style.fill]="shade(t.c)">
+              <circle cx="38" cy="34" r="18" />
+              <path d="M4 96c2-24 16-36 34-36s32 12 34 36z" />
+            </svg>
+            <span class="dot" [class.done]="t.done"></span>
+          </span>
+          <span class="tab-label" aria-hidden="true">{{ t.c.name }}</span>
+        </button>
+      }
+      @if (pad()) {
+        <span class="pad-hint" aria-hidden="true">{{ glyph('prev') }} / {{ glyph('next') }}</span>
+      }
+    </div>
+
+    <!-- Modelo 3D do agente, com os espaços de equipamento (em breve) -->
+    <section class="model" aria-label="Modelo 3D do agente">
+      <div class="grid-bg" aria-hidden="true"></div>
+      <div class="stage" #stage></div>
+      @if (viewerFailed()) {
+        <svg
+          class="placeholder"
+          viewBox="0 0 170 270"
+          role="img"
+          aria-label="Modelo do agente (desenho)"
+        >
+          <ellipse
+            cx="85"
+            cy="252"
+            rx="70"
+            ry="13"
+            fill="#3B3830"
+            stroke="#5A5444"
+            stroke-width="2"
+          />
+          <ellipse cx="85" cy="250" rx="44" ry="7" fill="#1A1915" opacity=".6" />
+          <path d="M70 168 L64 246 L80 246 L85 186 Z" fill="#3D4A35" />
+          <path d="M100 168 L106 246 L90 246 L85 186 Z" fill="#33402D" />
+          <path d="M60 244 h22 v8 h-24 z M88 244 h22 v8 h-24 z" fill="#1E2420" />
+          <path d="M58 82 L112 82 L116 170 L54 170 Z" fill="#46553E" />
+          <path d="M62 86 L108 86 L110 150 L60 150 Z" fill="#2F3A2A" />
+          <rect x="66" y="104" width="38" height="10" fill="#D8C38C" />
+          <text
+            x="85"
+            y="112.5"
+            text-anchor="middle"
+            font-family="Courier Prime, monospace"
+            font-size="9"
+            font-weight="700"
+            fill="#1E2420"
+          >
+            IBAMA
+          </text>
+          <path d="M58 84 L42 140 L50 160 L60 120 Z" fill="#3D4A35" />
+          <path d="M112 84 L128 140 L120 160 L110 120 Z" fill="#33402D" />
+          <circle cx="46" cy="160" r="6" fill="#B08A6A" />
+          <circle cx="124" cy="160" r="6" fill="#9C7A5C" />
+          <rect x="78" y="70" width="14" height="14" fill="#9C7A5C" />
+          <ellipse cx="85" cy="56" rx="17" ry="19" fill="#B08A6A" />
+          <path d="M66 52 Q85 26 104 52 L108 54 L62 54 Z" fill="#2F3A2A" />
+          <rect x="62" y="166" width="46" height="6" fill="#1E2420" />
+        </svg>
+      } @else if (loadingModel()) {
+        <span class="loading" aria-live="polite">carregando…</span>
+      }
+      <span class="model-label" aria-hidden="true">Modelo 3D</span>
+      <button
+        type="button"
+        class="turn"
+        aria-label="Girar modelo"
+        [disabled]="viewerFailed()"
+        (click)="turnModel()"
+      >
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M3 12a9 9 0 0 1 15.5-6.2L21 8" />
+          <path d="M21 3v5h-5" />
+          <path d="M21 12a9 9 0 0 1-15.5 6.2L3 16" />
+          <path d="M3 21v-5h5" />
+        </svg>
+      </button>
+      <ul class="equip left" aria-label="Equipamento (em breve)">
+        @for (s of slotsLeft; track s) {
+          <li class="equip-slot">
+            <span class="equip-name">{{ s }}</span
+            ><span class="equip-soon">Em breve</span>
+          </li>
+        }
+      </ul>
+      <ul class="equip right" aria-label="Equipamento (em breve)">
+        @for (s of slotsRight; track s) {
+          <li class="equip-slot">
+            <span class="equip-name">{{ s }}</span
+            ><span class="equip-soon">Em breve</span>
+          </li>
+        }
+      </ul>
+      <div class="id-bar">
+        <div class="id">
+          <span class="id-name">{{ agent().name }}</span>
+          <span class="id-sub">GEF · Fiscal · Mat. {{ matricula(cur()) }}</span>
+        </div>
+        <span class="id-hint" aria-hidden="true">{{
+          viewerFailed() ? '' : 'arraste p/ girar'
+        }}</span>
+      </div>
+    </section>
+
+    <div class="side">
+      <!-- Ficha em papel: atributos, régua de −5 a +5 e o total em campo -->
+      <section
+        class="sheet"
+        id="ficha"
+        role="tabpanel"
+        [attr.aria-label]="'Ficha de ' + agent().name"
+      >
+        <span class="tape" aria-hidden="true"></span>
+
+        <div class="sheet-head">
+          <h2>Atributos</h2>
+          <div
+            class="free"
+            [class.spent]="free() <= 0"
+            role="status"
+            [attr.aria-label]="'Pontos livres: ' + free()"
+          >
+            <span class="free-label">Pontos livres</span>
+            <span class="free-num">{{ free() }}</span>
+          </div>
+        </div>
+
+        @for (s of stats(); track s.key; let i = $index) {
+          <div
+            class="stat"
+            [class.pad-on]="pad() && padStat() === i"
+            [attr.data-testid]="'stat-' + s.key"
+          >
+            <div class="stat-head">
+              <span class="stat-name">{{ s.name }}</span>
+              <span class="stat-effect">{{ s.effect }}</span>
+            </div>
+            <div class="stat-row">
+              <button
+                type="button"
+                class="step"
+                [disabled]="!s.canDec"
+                [attr.aria-label]="'Remover ponto de ' + s.aria"
+                (click)="dec(s.key)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14" /></svg>
+              </button>
+              <div
+                class="ruler"
+                role="img"
+                [attr.aria-label]="s.name + ': ' + signed(s.value) + ', escala de −5 a +5'"
+              >
+                <div class="cells">
+                  @for (cell of s.cells; track cell.unit) {
+                    <span [class]="'cell ' + cell.state"></span>
+                  }
+                  <span class="zero" aria-hidden="true"></span>
+                </div>
+                <div class="marks narrow-only" aria-hidden="true">
+                  <span>{{ signed(scale.min) }}</span><strong>0</strong
+                  ><span>{{ signed(scale.max) }}</span>
+                </div>
+                <div class="marks-all wide-only" aria-hidden="true">
+                  @for (l of rulerLabels; track l) {
+                    <span>{{ l }}</span>
+                  }
+                </div>
+              </div>
+              <button
+                type="button"
+                class="step"
+                [disabled]="!s.canInc"
+                [attr.aria-label]="'Adicionar ponto em ' + s.aria"
+                (click)="inc(s.key)"
+              >
+                <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14" /></svg>
+              </button>
+              <span class="stat-val">{{ signed(s.value) }}</span>
+            </div>
+          </div>
+        }
+
+        <p class="note">
+          Escala de −5 a +5. Lado negativo reservado para penalidades (ex.: peso, equipamento).
+        </p>
+
+        <div class="field">
+          <h3>Total em campo</h3>
+          <table>
+            <thead>
+              <tr>
+                <td></td>
+                <th scope="col">
+                  <span class="wide-only">Atributo</span><span class="narrow-only">Atrib.</span>
+                </th>
+                <th scope="col">
+                  <span class="wide-only">Equipamento</span><span class="narrow-only">Equip.</span>
+                </th>
+                <th scope="col">Grupo*</th>
+              </tr>
+            </thead>
+            <tbody>
+              @for (s of stats(); track s.key) {
+                <tr>
+                  <th scope="row">{{ s.field }}</th>
+                  <td>{{ signed(s.value) }}</td>
+                  <td class="none" aria-label="nenhum">—</td>
+                  <td>{{ signed(s.group) }}</td>
+                </tr>
+              }
+            </tbody>
+          </table>
+          <p class="note">
+            *Só enquanto estiver agrupado. Equipamentos terão modificadores próprios.
+          </p>
+        </div>
+      </section>
+
+      <nav class="nav" aria-label="Navegação da escalação">
+        <button type="button" class="prev" aria-label="Agente anterior" (click)="prev()">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+          <span class="wide-only">Anterior</span>
+        </button>
+        <button
+          type="button"
+          class="next"
+          [class.confirm]="last()"
+          data-testid="roster-next"
+          (click)="next()"
+        >
+          {{ last() ? 'Confirmar escalação' : 'Próximo agente'
+          }}<span class="wide-only" aria-hidden="true">{{ last() ? '' : ' →' }}</span>
+          @if (pad()) {
+            <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span>
+          }
+        </button>
+      </nav>
+    </div>
+  </div>
+</main>

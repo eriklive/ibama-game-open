@@ -382,11 +382,12 @@ export class HexBoard {
 
   /**
    * Onda de voz da abordagem: um anel sai de `from` e cada hexágono das zonas da abordagem
-   * pula e brilha quando ela chega (as zonas precisam estar mostradas).
+   * pula e brilha quando ela chega (as zonas precisam estar mostradas). `radius` é o alcance
+   * da abordagem de quem gritou (cresce com a intimidação e com o grupo).
    */
-  playApproachWave(from: HexCoord): void {
+  playApproachWave(from: HexCoord, radius?: number): void {
     const start = this.clock.elapsedTime;
-    this.wave = { from: { ...from }, start, end: start + waveDuration() };
+    this.wave = { from: { ...from }, start, end: start + waveDuration(radius) };
     if (!this.waveRing) {
       // anel fino de raio 1 (escalado a cada quadro), deitado no chão
       this.waveRing = new THREE.Mesh(
@@ -1607,7 +1608,9 @@ export class HexBoard {
   private shadowDue(): boolean {
     if (!this.sun.castShadow) return false;
     const p = this.sun.target.position;
-    const key = `${p.x},${p.z};${this.stream.version};${this.roof?.visible};${this.interior[0]?.visible};${this.profile.mode}`;
+    // teto e interior de cada estrutura (hangar, casa): aparecer ou sumir muda a sombra
+    const views = this.structures.map((st) => `${st.roof?.visible}/${st.interior[0]?.visible}`).join(',');
+    const key = `${p.x},${p.z};${this.stream.version};${views};${this.profile.mode}`;
     if (key === this.shadowKey) return false;
     this.shadowKey = key;
     this.staticShadow.invalidate();

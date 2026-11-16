@@ -152,13 +152,19 @@
         [class.focused]="c.id === focused().id && !onTurn(c)"
         [style.--tilt]="tilts[i % tilts.length] + 'deg'"
         [attr.aria-pressed]="c.id === focused().id"
-        [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + '. Toque para ver no tabuleiro.'"
+        [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + '. Velocidade ' + signed(fieldStats(c).vel) + ', intimidação ' + signed(fieldStats(c).int) + ', alcance da abordagem ' + fieldStats(c).range + '. Toque para ver no tabuleiro.'"
         [attr.data-testid]="'chip-' + c.id"
         (click)="focusCharacter(c.id)">
         <span class="photo-img" [style.background]="hexColor(c)">
           <svg viewBox="0 0 24 24" aria-hidden="true" [style.fill]="shade(c)"><circle cx="12" cy="9" r="4.5" /><path d="M3 24c0-6 4-9.5 9-9.5s9 3.5 9 9.5z" /></svg>
         </span>
         <span class="photo-name">{{ c.name }}</span>
+        @let fs = fieldStats(c);
+        <span class="photo-stats" aria-hidden="true" [class.boosted]="inGroup(c)" data-testid="photo-stats">
+          <span>vel {{ signed(fs.vel) }}</span>
+          <span>int {{ signed(fs.int) }}</span>
+          @if (onTurn(c)) { <span>alc. {{ fs.range }}</span> }
+        </span>
         @if (inGroup(c)) {
           <span class="group-tag" aria-hidden="true">grupo</span>
         }
@@ -253,6 +259,10 @@
     } @else if (approaching()) {
       <div class="slip" role="status" aria-live="polite" data-testid="hint">
         <strong>Abordagem de {{ active().name }}</strong>
+        @let ap = approachParts();
+        <span class="small approach-range" data-testid="approach-range">
+          Alcance {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+        </span>
         <ul class="approach-list" data-testid="approach-list">
           @for (e of approachPlan().surrender; track e.id) {
             <li class="surrender">{{ e.name }} se rende</li>
@@ -302,7 +312,7 @@
         } @else {
           <span>Toque no ponto de encontro (hexágonos claros).</span>
         }
-        <span class="small">Juntos: +{{ groupBonus }} de movimento.</span>
+        <span class="small">Juntos: +{{ groupBonus }} de movimento e +{{ groupApproachBonus }} de alcance na abordagem.</span>
       </div>
       <button type="button" class="stamp confirm" [disabled]="!rallyPlan()" (click)="confirmGrouping()" data-testid="group-confirm">
         <span class="stamp-ring"><span class="stamp-text">Agrupar!</span></span>
@@ -365,16 +375,16 @@
       <!-- Agrupar: todos se encontram num ponto e andam juntos (+movimento) -->
       @if (phase() === 'moving-choice' && group().size) {
         <button type="button" class="paper group-btn" data-testid="ungroup" (click)="ungroup()"
-          [attr.aria-label]="'Desagrupar a equipe (juntos ganham +' + groupBonus + ' de movimento)'">
+          [attr.aria-label]="'Desagrupar a equipe (juntos ganham +' + groupBonus + ' de movimento e +' + groupApproachBonus + ' de alcance na abordagem)'">
           <span class="stencil">Desagrupar</span>
           <span class="typed">juntos +{{ groupBonus }}</span>
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
         </button>
       } @else if (phase() === 'moving-choice' && canGroup()) {
         <button type="button" class="paper group-btn" data-testid="group" (click)="startGrouping()"
-          [attr.aria-label]="'Agrupar a equipe num ponto em comum: juntos ganham +' + groupBonus + ' de movimento'">
+          [attr.aria-label]="'Agrupar a equipe num ponto em comum: juntos ganham +' + groupBonus + ' de movimento e +' + groupApproachBonus + ' de alcance na abordagem'">
           <span class="stencil">Agrupar</span>
-          <span class="typed">+{{ groupBonus }} mov.</span>
+          <span class="typed">+{{ groupBonus }} mov./alc.</span>
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
         </button>
       }
@@ -492,7 +502,7 @@
         @if (rolled() > 0) {
           <span class="roll-number">{{ movesLeft() }}</span>
           <span class="roll-total">
-            {{ dice().join(' + ') }}@if (grouped()) { + {{ groupBonus }} (grupo)} = <strong>{{ movesLeft() }}</strong> de movimento
+            {{ dice().join(' + ') }}{{ speedTerm() }}@if (grouped()) { + {{ groupBonus }} (grupo)} = <strong>{{ movesLeft() }}</strong> de movimento
           </span>
           <button type="button" appMainButton class="roll-confirm" #rollConfirm (click)="confirmRoll()" data-testid="roll-confirm">
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }

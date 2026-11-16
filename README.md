@@ -7,18 +7,53 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 ## Como jogar o teste
 
 1. Na tela inicial, toque em **Campo de teste** (o único mapa disponível) e em **Iniciar**.
-2. Há **3 personagens** (Ana, Bruno e Clara), cada um com o seu turno, em rodadas sem fim.
-3. No início de cada turno são rolados **2d4**: a soma é o movimento daquele turno.
-4. Os hexágonos claros mostram até onde dá para ir (contornando os outros personagens).
+2. Antes da partida vem a **ficha do agente** (escalação): distribua o ponto de cada agente e
+   toque em **Confirmar escalação** (ver [Ficha do agente](#ficha-do-agente-atributos)).
+3. Há **3 personagens** (Ana, Bruno e Clara), cada um com o seu turno, em rodadas sem fim.
+4. No início de cada turno são rolados **2d4**: a soma **mais a velocidade** do agente (e +2 se
+   estiver agrupado) é o movimento daquele turno.
+5. Os hexágonos claros mostram até onde dá para ir (contornando os outros personagens).
    Toque num hexágono para destacá-lo (fica amarelo): o caminho até ele brilha e flutua,
    mostrando por onde o personagem vai passar. **Toque de novo** no destino para
    confirmar — ou use o botão **Confirmar**. Dá para andar várias vezes no mesmo turno
    enquanto sobrar movimento; o custo é o número de passos.
-5. Quando o movimento acaba, a vez passa sozinha; **Passar a vez** encerra antes.
-6. Toque numa peça no tabuleiro ou num retrato no topo para ver aquele personagem. Quem
-   está na vez ganha um anel amarelo e o retrato fica destacado como **Na vez**.
-7. Ana, Bruno e Clara são personagens 3D animados (ficam parados respirando e correm pelo
+6. Quando o movimento acaba, a vez passa sozinha; **Passar a vez** encerra antes.
+7. Toque numa peça no tabuleiro ou num retrato no topo para ver aquele personagem. Quem
+   está na vez ganha um anel amarelo e o retrato fica destacado como **Na vez**. Cada retrato
+   mostra a velocidade e a intimidação do agente em campo (em verde quando o grupo soma o bônus);
+   o de quem está na vez mostra também o alcance da abordagem.
+8. Ana, Bruno e Clara são personagens 3D animados (ficam parados respirando e correm pelo
    caminho), de pé sobre um disco com a cor de cada um.
+
+## Ficha do agente (atributos)
+
+Entre escolher o mapa e começar, a tela **Ficha do agente** (`#/escalacao/<mapa>`) mostra cada
+agente: abas com a foto 3x4 (ponto **amarelo** = ponto livre, **verde** = distribuído), o
+**modelo 3D** real do personagem (arraste ou use o botão para girar) com seis espaços de
+equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a ficha em papel.
+
+- **Velocidade:** cada ponto vale **+1 de movimento** no turno (somado aos 2d4).
+- **Intimidação:** cada ponto vale **+1 no alcance da abordagem** (o raio total, de alerta). A
+  zona de rendição continua a mesma.
+- Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
+  direita, negativo em vermelho para a esquerda; o tracejado mostra onde o ponto livre pode
+  entrar). Todo agente começa com 0 nos dois.
+- Cada agente tem **1 ponto** para pôr em **um** dos dois atributos. Dá para tirar só o ponto que
+  você colocou: pelo jogador, o mínimo é 0. O lado negativo fica para penalidades (peso,
+  equipamento).
+- **Total em campo:** atributo + equipamento (por enquanto, nenhum) + **grupo**. Enquanto os
+  agentes estão **agrupados**, cada um ganha **+2 de velocidade** (movimento) e **+2 de alcance**
+  na abordagem; separou, perdeu.
+- **Anterior / Próximo agente** passam pelas fichas; no último, **Confirmar escalação** começa a
+  partida com esses atributos (a escolha fica guardada na sessão do navegador e vale também para
+  "Recomeçar"). Com controle: L1/R1 trocam de agente, cima/baixo escolhem o atributo,
+  esquerda/direita tiram/põem o ponto, ✕ avança e ○ volta ao início.
+- Larga (≥ 900 px), a tela usa o layout "web" (abas na lateral); estreita, o de celular.
+
+As regras ficam em `src/app/game/stats.ts` (`STAT_RULES`, `APPROACH_SCALING`, funções puras
+testadas); o bônus do grupo, em `GROUP_RULES` (`group.ts`). Para a intimidação também aumentar a
+zona de rendição, troque `APPROACH_SCALING.surrender` para `true`. A tela fica em
+`src/app/screens/roster/` e o visualizador 3D em `src/app/game/agent-viewer.ts`.
 
 ## Inimigos (primeira iteração)
 
@@ -38,8 +73,11 @@ uma base vermelha; o corpo mostra para onde olham).
 
 Na vez de um agente, o botão **Abordar** (com o número de inimigos no raio) mostra a
 abordagem antes de confirmar: hexágonos **verdes** são a zona de rendição (até 2
-hexágonos) e os **laranja**, o resto do raio (até 4). O painel lista quem se rende e quem
-vai tentar correr. **Abordar!** confirma; tocar no tabuleiro ou em **Cancelar** desiste.
+hexágonos) e os **laranja**, o resto do raio. O raio é **4 + intimidação** do agente, e **+2**
+enquanto ele estiver agrupado (ex.: com 1 ponto em intimidação e em grupo, 7). O painel mostra
+essa conta (base · intimidação · grupo) e lista quem se rende e quem vai tentar correr. O botão
+**Abordar** só aparece com algum suspeito dentro do raio de quem está na vez. **Abordar!**
+confirma; tocar no tabuleiro ou em **Cancelar** desiste.
 
 **Segurar para abordar:** um toque rápido no **Abordar** abre essa prévia, mas dá para
 **segurar** o botão: o raio cresce no tabuleiro anel por anel, um contorno vermelho se fecha em
@@ -54,13 +92,15 @@ ficam em `APPROACH_FX` (`src/app/game/approach-fx.ts`).
 
 - Inimigos a até 2 hexágonos **se rendem**: a base fica branca, eles se agacham com uma bandeira branca, param de
   agir e continuam ocupando o hexágono. Vale também para quem já estava em alerta.
-- Inimigos entre 3 e 4 hexágonos são **alertados** e tentam correr no turno inimigo.
+- Inimigos entre 3 hexágonos e o fim do raio (4 sem bônus) são **alertados** e tentam correr no
+  turno inimigo.
 - A distância é em linha reta: por enquanto, paredes não abafam o grito.
 - Abordar **encerra a vez** do agente. Se o movimento acabar com inimigos no raio, a vez
   não passa sozinha, para dar tempo de abordar.
 - Quando ninguém mais age (todos rendidos ou fugidos), aparece o resultado.
 
-Os números ficam em `ENEMY_RULES` e `APPROACH_RULES` (`src/app/game/enemies.ts`); paredes e
+Os números ficam em `ENEMY_RULES` e `APPROACH_RULES` (`src/app/game/enemies.ts`; o raio de cada
+agente sai de `approachRulesFor`, em `stats.ts`); paredes e
 rotas de patrulha ficam no mapa (`maps.ts`).
 
 ### Agrupar
@@ -72,10 +112,11 @@ na vez vai até o ponto e os outros param em volta dele. Gasta-se o caminho mais
 
 - Agrupados, os agentes **andam juntos**: quando um deles anda, os outros seguem o rastro logo
   atrás. Quem não consegue acompanhar (caminho bloqueado) sai do grupo.
-- Juntos, cada agente ganha **+2 de movimento** na rolagem do seu turno.
+- Juntos, cada agente ganha **+2 de movimento** na rolagem do seu turno e **+2 de alcance** na
+  abordagem. Desagrupou, perdeu os dois.
 - **Desagrupar** desfaz o grupo e cada um volta a andar por conta própria.
 
-O bônus fica em `GROUP_RULES` (`src/app/game/group.ts`).
+Os bônus ficam em `GROUP_RULES` (`moveBonus` e `approachBonus`, em `src/app/game/group.ts`).
 
 ### Mapa do aeroporto
 
@@ -223,7 +264,7 @@ símbolo correspondente.
 | R2 / L2 | Aproxima / afasta |
 | Options | Mostra ou esconde a legenda dos comandos |
 
-Na tela inicial, o direcional escolhe o mapa e ✕ inicia. O controle vibra quando um inimigo avista
+Na tela inicial, o direcional escolhe o mapa e ✕ inicia; na ficha do agente, L1/R1 trocam de agente, o direcional mexe nos pontos e ✕ avança. O controle vibra quando um inimigo avista
 um agente e na abordagem (Chrome/Edge). No Chrome/Edge o DualShock 4 chega com o mapeamento
 "standard"; no Firefox/Linux, sem ele, o jogo usa o mapeamento do driver. Outros controles (Xbox,
 genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em

@@ -28,7 +28,8 @@ export class StartScreen implements OnDestroy {
 
   protected start(): void {
     const id = this.selectedId();
-    if (id) this.router.navigate(['/jogo', id]);
+    // antes da partida, a ficha de cada agente (escalação)
+    if (id) this.router.navigate(['/escalacao', id]);
   }
 
   protected confirmGlyph(): string {
