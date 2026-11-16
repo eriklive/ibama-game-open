@@ -34,6 +34,8 @@ import {
   visionHexes,
 } from '../../game/enemies';
 import { HiddenItem, SEARCH_RULES, beats, canReach, entersRoom } from '../../game/search';
+import { BURN_RULES, Burnable, burnTarget, seeFire } from '../../game/burn';
+import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState } from '../../game/mission';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
@@ -42,8 +44,11 @@ import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCo
 /** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
 const MISSION_DEADLINE = 5;
 
-/** `checking`: rolando um d20 (percepção, inspecionar) — nada mais anda até o dado parar. */
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'ending' | 'enemy';
+/**
+ * `checking`: rolando um d20 (percepção, inspecionar) — nada mais anda até o dado parar.
+ * `over`: a operação foi encerrada (fica o relatório na tela).
+ */
+type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'ending' | 'enemy' | 'over';
 
 /** Teste de d20 mostrado na ficha da lateral. */
 interface CheckView {
@@ -261,18 +266,54 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return (this.map?.hidden ?? []).find((h) => noticed.has(h.id) && !found.has(h.id) && canReach(from, h.spot)) ?? null;
   });
 
-  /** Objetivos da missão com a situação de cada um. */
-  protected readonly objectives = computed(() =>
-    (this.map?.objectives ?? []).map((o) => {
-      let state: 'open' | 'done' | 'failed' = 'open';
-      if ('surrender' in o) {
-        const status = this.enemies().find((e) => e.id === o.surrender)?.status;
-        state = status === 'surrendered' ? 'done' : status === 'fled' ? 'failed' : 'open';
-      } else if (this.found().has(o.find)) {
-        state = 'done';
-      }
-      return { id: o.id, text: o.text, state };
-    }),
+  /** O que já aconteceu e decide os objetivos (rendidos, achados, queimados). */
+  private readonly progress = computed<MissionProgress>(() => ({
+    enemies: this.enemies(),
+    found: this.found(),
+    burned: this.burned(),
+  }));
+
+  /** Objetivos da missão com a situação de cada um (os principais primeiro). */
+  protected readonly objectives = computed(() => {
+    const p = this.progress();
+    return (this.map?.objectives ?? [])
+      .map((o) => ({ id: o.id, text: o.text, primary: !!o.primary, state: objectiveState(o, p) }))
+      .sort((a, b) => Number(b.primary) - Number(a.primary));
+  });
+
+  // ---------- queimar e encerrar a operação ----------
+
+  protected readonly burnRules = BURN_RULES;
+  /** Alvos já queimados (o fogo fica aceso até o fim). */
+  protected readonly burned = signal<ReadonlySet<string>>(new Set());
+  /** Pré-visualizando o "Queimar" (aguardando confirmação). */
+  protected readonly burning = signal(false);
+
+  /** Alvo ainda inteiro colado no agente da vez. */
+  protected readonly burnable = computed<Burnable | null>(() => {
+    if (this.phase() !== 'moving-choice' || this.viewingOther()) return null;
+    const from = this.positions().get(this.active().id);
+    return from ? burnTarget(from, this.map?.burnables ?? [], this.burned()) : null;
+  });
+  /** Quem está vigiando perto e veria o fogo (entra em alerta ao queimar). */
+  protected readonly burnWitnesses = computed(() => {
+    const target = this.burnable();
+    return target ? seeFire(target, this.enemies()) : [];
+  });
+
+  /** Objetivos que liberam o fim cumpridos (queimar o avião): a equipe pode encerrar. */
+  protected readonly canEnd = computed(() => canEndMission(this.map?.objectives ?? [], this.progress()));
+  protected readonly verdict = computed<Verdict>(() => missionVerdict(this.map?.objectives ?? [], this.progress()));
+  protected readonly verdictLabel: Record<Verdict, string> = {
+    success: 'Missão cumprida',
+    partial: 'Missão parcial',
+    failure: 'Missão fracassada',
+  };
+  /** Relatório da operação: `confirm` pergunta antes de encerrar; `over` é o resultado final. */
+  protected readonly report = signal<'confirm' | 'over' | null>(null);
+  /** Dá para abrir o relatório agora (na vez de um agente, sem outra ação aberta). */
+  protected readonly endAvailable = computed(
+    () => this.canEnd() && this.phase() === 'moving-choice' && !this.report(),
   );
 
   // ---------- grupo ----------
@@ -398,6 +439,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         })),
       },
     );
+    this.board.setBurnTargets(this.map.burnables ?? []);
     this.refreshVision();
     this.startTurn();
     this.stopPad = this.gamepad.listen({
@@ -426,6 +468,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const active = this.active();
     this.closeApproach();
     this.closeGrouping();
+    this.closeBurn();
     this.selected.set(null);
     this.focusedId.set(active.id);
     this.placeCursor(this.positions().get(active.id));
@@ -475,11 +518,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected endTurn(): void {
-    if (['walking', 'checking', 'rolling', 'enemy'].includes(this.phase())) return;
+    if (['walking', 'checking', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
     this.clearTimers();
     this.phase.set('ending');
     this.closeApproach();
     this.closeGrouping();
+    this.closeBurn();
     if (this.activeIndex() === CHARACTERS.length - 1 && this.actingEnemies().length) {
       void this.enemyTurn();
       return;
@@ -603,9 +647,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private tapHex(hex: HexCoord | null): void {
     if (this.phase() !== 'moving-choice') return;
-    if (hex && !this.approaching()) this.cursor.set(hex);
+    if (hex && !this.approaching() && !this.burning()) this.cursor.set(hex);
     if (this.approaching()) {
       this.cancelApproach();
+      return;
+    }
+    if (this.burning()) {
+      this.cancelBurn();
       return;
     }
     if (this.grouping()) {
@@ -630,6 +678,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (id !== this.active().id) {
       this.cancelApproach();
       this.cancelGrouping();
+      this.cancelBurn();
     }
     this.focusedId.set(id);
     this.board?.focus(id);
@@ -703,6 +752,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected startGrouping(): void {
     if (this.phase() !== 'moving-choice' || !this.canGroup()) return;
     this.focusCharacter(this.active().id);
+    this.closeBurn();
     this.selected.set(null);
     this.rallyHex.set(null);
     this.grouping.set(true);
@@ -873,6 +923,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!map || !from) return;
     this.focusCharacter(this.active().id);
     this.closeGrouping();
+    this.closeBurn();
     this.selected.set(null);
     this.approaching.set(true);
     this.board?.setSelected(null);
@@ -929,6 +980,95 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setApproachZones(null);
   }
 
+  // ---------- queimar ----------
+
+  /** Primeiro passo: mostra o que vai queimar e quem veria o fogo. */
+  protected startBurn(): void {
+    const target = this.burnable();
+    if (!target || this.phase() !== 'moving-choice') return;
+    this.focusCharacter(this.active().id);
+    this.closeApproach();
+    this.closeGrouping();
+    this.selected.set(null);
+    this.burning.set(true);
+    this.board?.setSelected(null);
+    this.board?.setReachable([]);
+    this.board?.keepInView(target.hexes[0]);
+  }
+
+  protected cancelBurn(): void {
+    if (!this.burning()) return;
+    this.closeBurn();
+    if (this.phase() === 'moving-choice') this.refreshBoard();
+  }
+
+  private closeBurn(): void {
+    this.burning.set(false);
+  }
+
+  /** Confirma: o alvo pega fogo, quem vigia perto entra em alerta e a vez do agente acaba. */
+  protected confirmBurn(): void {
+    const target = this.burnable();
+    if (!this.burning() || !target || this.phase() !== 'moving-choice') return;
+    const witnesses = this.burnWitnesses();
+    this.closeBurn();
+    this.burned.update((s) => new Set([...s, target.id]));
+    this.board?.ignite(target.id, target.hexes);
+    for (const e of witnesses) {
+      const facing = facingBetween(e.hex, target.hexes[0]);
+      this.updateEnemy(e.id, { status: 'alert', facing });
+      this.board?.setEnemyFacing(e.id, facing);
+      this.board?.setEnemyAlert(e.id, true);
+    }
+    this.refreshVision();
+    this.gamepad.rumble(1, 0.7, 420);
+    this.haptics.vibrate(SETTLE_PATTERN);
+    const seen = witnesses.length
+      ? ` ${namesOf(witnesses)} ${witnesses.length === 1 ? 'viu o fogo e vai correr' : 'viram o fogo e vão correr'}!`
+      : '';
+    const unlocked = this.canEnd() && this.map?.objectives?.some((o) => o.unlocksEnd && 'burn' in o && o.burn === target.id);
+    this.say(
+      // "n" + "o avião" = "no avião"; "n" + "os suprimentos…" = "nos suprimentos…"
+      `${this.active().name} ateou fogo n${target.name}!${seen}` +
+        (unlocked ? ' A equipe já pode encerrar a operação.' : ''),
+      'alert',
+    );
+    this.phase.set('ending');
+    this.later(reducedMotion() ? 400 : 2000, () => this.endTurn());
+  }
+
+  // ---------- encerrar a operação ----------
+
+  /** Abre o relatório para confirmar o fim (só depois de cumprir o que libera o fim). */
+  protected openReport(): void {
+    if (!this.endAvailable()) return;
+    this.closeApproach();
+    this.closeGrouping();
+    this.closeBurn();
+    this.selected.set(null);
+    this.board?.setSelected(null);
+    this.report.set('confirm');
+  }
+
+  /** Volta ao jogo sem encerrar. */
+  protected closeReport(): void {
+    if (this.report() !== 'confirm') return;
+    this.report.set(null);
+    if (this.phase() === 'moving-choice') this.refreshBoard();
+  }
+
+  /** Encerra a operação: nada mais anda e o relatório fica com o resultado. */
+  protected confirmEnd(): void {
+    if (this.report() !== 'confirm') return;
+    this.clearTimers();
+    this.phase.set('over');
+    this.report.set('over');
+    this.board?.setReachable([]);
+    this.board?.setSelected(null);
+    this.board?.setActive(null);
+    this.gamepad.rumble(0.6, 0.6, 300);
+  }
+
   protected cancel(): void {
     this.selected.set(null);
     this.board?.setSelected(null);
@@ -950,6 +1090,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     clearInterval(this.checkSpin);
     this.check.set(null);
     this.board?.setClue(null);
+    this.burned.set(new Set());
+    this.closeBurn();
+    this.report.set(null);
+    this.board?.clearFires();
     this.board?.placeEnemies(this.enemies().map((e) => ({ ...e, alert: false, surrendered: false, gone: false })));
     this.refreshVision();
     this.notice.set(null);
@@ -978,10 +1122,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    */
   private padButton(b: PadButton): void {
     const choosing = this.phase() === 'moving-choice';
+    // relatório na tela: ✕ encerra (ou recomeça, no fim) e ○ volta ao jogo
+    if (this.report()) {
+      if (b === 'cross' && this.report() === 'confirm') this.confirmEnd();
+      else if (b === 'cross') this.restart();
+      else if (b === 'circle') this.closeReport();
+      else if (b === 'options') this.padHelp.update((v) => !v);
+      return;
+    }
     switch (b) {
       case 'cross':
         if (this.phase() === 'rolling') this.confirmRoll();
         else if (this.approaching()) this.confirmApproach();
+        else if (this.burning()) this.confirmBurn();
         else if (this.grouping()) void this.confirmGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
         else if (choosing && this.selected()) void this.confirm();
@@ -989,6 +1142,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         break;
       case 'circle':
         if (this.approaching()) this.cancelApproach();
+        else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) this.cancelGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
         else if (this.selected()) {
@@ -997,11 +1151,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         }
         break;
       case 'square':
-        // □ aborda; sem ninguém no raio, inspeciona o móvel percebido ao lado
+        // □ aborda; sem ninguém no raio, queima o alvo ou inspeciona o móvel percebido ao lado
         if (this.approaching()) this.cancelApproach();
+        else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) break;
         else if (this.canApproach()) this.startApproach();
+        else if (this.burnable()) this.startBurn();
         else if (this.inspectable()) void this.inspect();
+        break;
+      case 'l3':
+        this.openReport();
         break;
       case 'share':
         // Share: agrupa (ou desagrupa) a equipe
@@ -1010,7 +1169,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else this.startGrouping();
         break;
       case 'triangle':
-        if (choosing && !this.approaching()) this.endTurn();
+        if (choosing && !this.approaching() && !this.burning()) this.endTurn();
         break;
       case 'l1':
       case 'r1': {
@@ -1033,7 +1192,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Anda o cursor um hexágono; sobre um destino alcançável, já mostra o caminho (como o 1º toque). */
   private moveCursor(dir: Stick): void {
     const map = this.map;
-    if (!map || !this.board || this.phase() === 'enemy' || this.approaching()) return;
+    if (!map || !this.board || this.phase() === 'enemy' || this.approaching() || this.burning() || this.report()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
     const next = neighborToward(from, dir);

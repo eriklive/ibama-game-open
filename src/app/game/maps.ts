@@ -1,5 +1,7 @@
+import type { Burnable } from './burn';
 import { ModelDef, MODELS } from './character-model';
 import { EnemySpawn } from './enemies';
+import type { Objective } from './mission';
 import type { HiddenItem } from './search';
 import { HexArea, HexCoord, circleArea, hexDistance, hexKey, rectArea } from './hex';
 import type { CoverKind } from './scenery';
@@ -48,6 +50,8 @@ export interface GameMap {
   house?: HexRect;
   /** Coisas escondidas: aparecem com um teste de percepção e se acham inspecionando o móvel. */
   hidden?: HiddenItem[];
+  /** O que a equipe pode queimar (o avião, os suprimentos do garimpo). */
+  burnables?: Burnable[];
   /** Objetivos da missão (aparecem numa ficha na tela). */
   objectives?: Objective[];
   /** Inimigos e suas rotas de patrulha. */
@@ -60,11 +64,6 @@ export interface GameMap {
   /** Mundo de cenário em volta da missão, até `radius` passos do centro dela. */
   world?: { radius: number; terrain: (h: HexCoord) => Terrain };
 }
-
-/** Objetivo: render um inimigo ou achar algo escondido. */
-export type Objective =
-  | { id: string; text: string; surrender: string }
-  | { id: string; text: string; find: string };
 
 export interface Character {
   id: string;
@@ -97,6 +96,8 @@ export const CHARACTERS: Character[] = [
  * (só decoração, passa)
  *
  * Móveis: `m` mesa (baixa, como os sacos) · `P` prateleira encostada na parede (alta)
+ *
+ * `R` suprimentos do garimpo (pilha alta de caixas, galões e mangueiras: dá para queimar)
  */
 export function parseLayout(
   layout: readonly string[],
@@ -110,9 +111,11 @@ export function parseLayout(
   const ground = new Map<string, Ground>();
   const kinds: Record<string, Ground> = {
     '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron', '~': 'dirt',
-    B: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor', m: 'floor', P: 'floor',
+    B: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor', m: 'floor', P: 'floor', R: 'floor',
   };
-  const coverKinds: Record<string, CoverKind> = { B: 'crates', M: 'boxes', S: 'sacks', G: 'cages', m: 'table', P: 'shelf' };
+  const coverKinds: Record<string, CoverKind> = {
+    B: 'crates', M: 'boxes', S: 'sacks', G: 'cages', m: 'table', P: 'shelf', R: 'supplies',
+  };
   layout.forEach((line, row) => {
     if (line.length !== cols) throw new Error(`Linha ${row} do mapa tem ${line.length} colunas (esperado: ${cols})`);
     [...line].forEach((ch, col) => {
@@ -142,6 +145,7 @@ export const COVER_HEIGHT: Record<CoverKind, 'high' | 'low'> = {
   cages: 'low',
   table: 'low',
   shelf: 'high',
+  supplies: 'high',
 };
 
 const coverOf = (map: GameMap, height: 'high' | 'low'): HexCoord[] =>
@@ -179,6 +183,9 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  * 26–32): dois cômodos de 5 × 5 separados por uma divisória com porta. Entra-se pela porta
  * do oeste, que dá para a pista. No cômodo 1 o Garimpeiro Jô come de costas para a entrada,
  * na mesa (`m`); no cômodo 2, a prateleira (`P`) na parede do leste esconde uma arma.
+ *
+ * A missão principal é queimar o **avião** e a pilha de **suprimentos do garimpo** (`R`), no
+ * fundo do hangar, à direita de quem entra pelo portão.
  */
 const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTTTTTT..TTTTTTTTTTTTTTT..TTTTTTTTTTTT',
@@ -189,7 +196,7 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTT..#____________________#..TTT.TTTTT',
   'TTTTTT.....#____________________#.......TTTT',
   'TTTT....T..#_BMB_MB_____________#........TTT',
-  'TTTTT...TT.#_S____S____________f#.TTT...TTTT',
+  'TTTTT...TT.#_S____S____RRR_____f#.TTT...TTTT',
   'TTTTT..TT..#__________________B_#..TTT..TTTT',
   'TTTTTT.....#________AAAA______M_#.......TTTT',
   'TT.....TT..#________AAAA______Sf#..TTT....TT',
@@ -275,7 +282,18 @@ export const MAPS: GameMap[] = [
         room: { cols: [36, 40], rows: [27, 31] },
       },
     ],
+    burnables: [
+      { id: 'aviao', name: 'o avião', short: 'avião', hexes: AEROPORTO.plane ?? [] },
+      {
+        id: 'suprimentos',
+        name: 'os suprimentos do garimpo',
+        short: 'suprimentos',
+        hexes: (AEROPORTO.cover ?? []).filter((c) => c.kind === 'supplies').map(({ col, row }) => ({ col, row })),
+      },
+    ],
     objectives: [
+      { id: 'queimar-aviao', text: 'Queimar o avião', burn: 'aviao', primary: true, unlocksEnd: true },
+      { id: 'queimar-suprimentos', text: 'Queimar os suprimentos do garimpo', burn: 'suprimentos', primary: true },
       { id: 'render-jo', text: 'Render o Garimpeiro Jô', surrender: 'jo' },
       { id: 'apreender-arma', text: 'Apreender a arma escondida', find: 'arma' },
     ],

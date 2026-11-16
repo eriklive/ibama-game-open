@@ -95,7 +95,7 @@ a altura de cada tipo fica em `COVER_HEIGHT` (`maps.ts`). Os modelos são montad
 `scenery.ts` (`buildCover`, `buildFuelProps`).
 
 O terreno é desenhado em texto em `maps.ts` (`parseLayout`): `.` grama, `T` árvores, `#` parede,
-`_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio, `A` avião, a carga (ver abaixo) e os móveis da casa (`m`, `P`) — basta editar as linhas para mudar o mapa.
+`_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio, `A` avião, a carga (ver abaixo), os suprimentos do garimpo (`R`) e os móveis da casa (`m`, `P`) — basta editar as linhas para mudar o mapa.
 O hangar (chapa ondulada, portão, teto em arco, postes e lâmpadas) e o avião são montados por código em
 `scenery.ts`. O **teto** (chapa, oitões e arcos) cobre o hangar visto de fora e some assim que um agente entra
 (o vão do portão já conta); a carga, o avião e as lâmpadas de dentro só são desenhados quando há um agente a até
@@ -125,6 +125,30 @@ suspeitos. As regras dos testes ficam em `SEARCH_RULES` (`src/app/game/search.ts
 e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
 mesa (cobertura baixa) e `P` a prateleira (alta); os modelos são montados em `scenery.ts` (`buildHouse`).
 Um inimigo com rota de um ponto só fica parado; `facing` no mapa diz para onde ele olha.
+
+### Missão principal: queimar o avião e os suprimentos
+
+O objetivo principal no Aeroporto é **queimar o avião** e a **pilha de suprimentos do garimpo** (caixotes
+sob lona verde, tambores azuis de diesel e mangueira, no fundo do hangar, à direita do avião). Um ícone de
+chama flutua sobre cada alvo até ele queimar, e os dois aparecem no topo do bilhete de objetivos com a
+etiqueta **principal**.
+
+- Colado no alvo, aparece **Queimar** (□ no controle, quando não há ninguém para abordar). O bilhete
+  mostra quem está vigiando a até **5 hexágonos** e vai ver o fogo; **Queimar!** confirma.
+- O alvo escurece, pega fogo (chamas, fumaça e clarão no chão) e continua bloqueando a passagem.
+  Queimar **encerra a vez** do agente.
+- Quem estava vigiando perto vê as chamas e entra em **alerta** (vai tentar correr no turno inimigo).
+- **Queimar o avião libera o fim da operação:** aparece a etiqueta vermelha **Encerrar operação** no canto
+  de baixo, à esquerda (L3 no controle). Ela só funciona na vez de um agente.
+- Tocar nela abre o **relatório**: objetivos cumpridos, suspeitos rendidos/fugidos/à solta e o turno. Se
+  ainda falta objetivo principal, um aviso diz que a missão fica incompleta. **Continuar** volta ao jogo;
+  **Encerrar** fecha a operação com o carimbo do resultado: **Missão cumprida** (os dois principais),
+  **parcial** (só um) ou **fracassada**. Daí dá para jogar de novo ou voltar ao início.
+
+As regras ficam em `BURN_RULES` (`src/app/game/burn.ts`) e os objetivos/resultado em `src/app/game/mission.ts`
+(`primary` marca o objetivo principal, `unlocksEnd` o que libera o encerramento). No mapa, `burnables`
+lista os alvos e a pilha é desenhada com `R` no texto (`buildCover` em `scenery.ts`). O fogo é montado em
+`hex-board.ts` (`ignite`, `clearFires`, `setBurnTargets`).
 
 ### Mundo semiaberto: área da missão
 
@@ -175,7 +199,8 @@ símbolo correspondente.
 | Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
 | ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
 | ○ | Cancela |
-| □ | Abordar (sem ninguém no raio: inspecionar) |
+| □ | Abordar (sem ninguém no raio: queimar o alvo ou inspecionar) |
+| L3 | Encerrar a operação (depois de queimar o avião) |
 | △ | Passar a vez |
 | Share | Agrupar / desagrupar |
 | L1 / R1 | Personagem anterior / seguinte |

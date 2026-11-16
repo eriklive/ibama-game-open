@@ -129,6 +129,32 @@ interface EnemyView extends Mover {
 const angleDelta = (from: number, to: number): number =>
   Math.atan2(Math.sin(to - from), Math.cos(to - from));
 
+/** Uma chama ou um rolo de fumaça: sobe do ponto de base e some, em ciclo. */
+interface FireParticle {
+  sprite: THREE.Sprite;
+  smoke: boolean;
+  base: THREE.Vector3;
+  /** Fase inicial (0..1), para as partículas não andarem juntas. */
+  offset: number;
+  /** Ciclos por segundo. */
+  speed: number;
+  size: number;
+  /** Quanto sobe num ciclo. */
+  rise: number;
+}
+
+interface Fire {
+  /** O que vai na cena (embrulho do interior da estrutura, quando o alvo está dentro dela). */
+  holder: THREE.Object3D;
+  group: THREE.Group;
+  particles: FireParticle[];
+  /** Clarão no chão que tremula (no lugar de uma luz de verdade). */
+  glow: THREE.Mesh;
+  /** Malhas que escureceram e o material original de cada uma. */
+  charred: { mesh: THREE.Mesh; original: THREE.Material | THREE.Material[] }[];
+  born: number;
+}
+
 export interface HexBoardCallbacks {
   /** Toque num hexágono vazio (ou fora do tabuleiro, com `null`). */
   onHexTap(hex: HexCoord | null): void;
@@ -182,6 +208,16 @@ export class HexBoard {
   private readonly structures: { rect: HexRect; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
   /** Pista de algo escondido: uma lupa flutuando sobre o móvel percebido. */
   private clue?: { sprite: THREE.Sprite; hex: HexCoord };
+  /** Modelo do avião e da carga por hexágono: o que escurece quando pega fogo. */
+  private planeModel?: THREE.Object3D;
+  private readonly cargoModels = new Map<string, THREE.Object3D>();
+  /** Alvos da missão (queimar): um ícone de chama flutua sobre cada um até ele queimar. */
+  private readonly targets = new Map<string, { sprite: THREE.Sprite; center: THREE.Vector3; height: number }>();
+  /** Incêndios acesos: chamas, fumaça e luz que tremula, e os materiais trocados pelos queimados. */
+  private readonly fires = new Map<string, Fire>();
+  private flameTex?: THREE.Texture;
+  private smokeTex?: THREE.Texture;
+  private glowTex?: THREE.Texture;
   /** Posições dos agentes na última conferência da estrutura (refaz só quando alguém anda). */
   private structureKey = '';
   private aura?: { wall: THREE.Mesh; ring: THREE.Mesh };
@@ -751,7 +787,9 @@ export class HexBoard {
       const tile = this.tiles.get(hexKey(c));
       if (!tile) continue;
       tile.baseColor.set(0xa8987a);
-      this.field.attach(tile, this.housed(c, buildCover(c.kind, c.col * 31 + c.row * 17)));
+      const model = buildCover(c.kind, c.col * 31 + c.row * 17);
+      this.cargoModels.set(hexKey(c), model);
+      this.field.attach(tile, this.housed(c, model));
     }
     for (const h of this.map.props ?? []) {
       const tile = this.tiles.get(hexKey(h));
@@ -778,6 +816,7 @@ export class HexBoard {
       this.tiles.get(hexKey(h))?.baseColor.set(0x9c8c70);
     }
     const plane = buildPlane();
+    this.planeModel = plane;
     const holder = this.housed(hexes[0], plane);
     holder.position.copy(center.divideScalar(hexes.length));
     this.addScenery(holder);
@@ -828,6 +867,221 @@ export class HexBoard {
     }
     this.clue.hex = { ...hex };
     this.clue.sprite.visible = true;
+  }
+
+  // ---------- fogo (missão: queimar o avião e os suprimentos) ----------
+
+  /**
+   * Marca os alvos da missão: um ícone de chama flutua sobre o meio de cada um (visto de
+   * longe, através do telhado). Alvos que já queimaram ficam sem ícone.
+   */
+  setBurnTargets(targets: readonly { id: string; hexes: HexCoord[] }[]): void {
+    for (const t of this.targets.values()) this.scene.remove(t.sprite);
+    this.targets.clear();
+    for (const t of targets) {
+      if (!t.hexes.length) continue;
+      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.targetTexture(), depthTest: false }));
+      sprite.scale.set(0.9, 0.9, 1);
+      sprite.renderOrder = 10;
+      this.scene.add(sprite);
+      const center = this.centerOf(t.hexes);
+      this.targets.set(t.id, { sprite, center, height: t.hexes.length > 4 ? 3.4 : 2.6 });
+    }
+  }
+
+  /**
+   * Ateia fogo num alvo: o modelo escurece (materiais trocados por cópias queimadas) e
+   * nascem chamas, fumaça e uma luz alaranjada que tremula. O fogo não apaga sozinho.
+   */
+  ignite(id: string, hexes: readonly HexCoord[]): void {
+    if (this.fires.has(id) || !hexes.length) return;
+    const target = this.targets.get(id);
+    if (target) target.sprite.visible = false;
+
+    const models = new Set<THREE.Object3D>();
+    const planeKeys = new Set((this.map.plane ?? []).map(hexKey));
+    for (const h of hexes) {
+      const key = hexKey(h);
+      if (planeKeys.has(key) && this.planeModel) models.add(this.planeModel);
+      const cargo = this.cargoModels.get(key);
+      if (cargo) models.add(cargo);
+    }
+    const charred: Fire['charred'] = [];
+    const soot = new THREE.Color(0x1b1714);
+    for (const model of models) {
+      model.traverse((o) => {
+        const mesh = o as THREE.Mesh;
+        if (!mesh.isMesh) return;
+        const burn = (m: THREE.Material): THREE.Material => {
+          const c = m.clone() as THREE.MeshStandardMaterial;
+          if (c.color) c.color.lerp(soot, 0.82);
+          c.map = null;
+          if ('roughness' in c) c.roughness = 1;
+          if ('metalness' in c) c.metalness = 0;
+          c.needsUpdate = true;
+          return c;
+        };
+        charred.push({ mesh, original: mesh.material });
+        mesh.material = Array.isArray(mesh.material) ? mesh.material.map(burn) : burn(mesh.material);
+      });
+    }
+
+    const group = new THREE.Group();
+    const flameMat = new THREE.SpriteMaterial({
+      map: (this.flameTex ??= this.glowTexture([[0, '#fff6c9'], [0.25, '#ffc24a'], [0.6, 'rgba(255,90,20,0.75)'], [1, 'rgba(180,30,0,0)']])),
+      blending: THREE.AdditiveBlending,
+      depthWrite: false,
+      transparent: true,
+    });
+    const smokeMat = new THREE.SpriteMaterial({
+      map: (this.smokeTex ??= this.glowTexture([[0, 'rgba(70,66,62,0.9)'], [0.55, 'rgba(60,56,52,0.5)'], [1, 'rgba(50,48,46,0)']])),
+      depthWrite: false,
+      transparent: true,
+    });
+    const particles: FireParticle[] = [];
+    const big = hexes.length > 4;
+    const perHex = big ? 3 : 7;
+    const rnd = (i: number) => {
+      const x = Math.sin(i * 12.9898 + hexes.length * 78.233) * 43758.5453;
+      return x - Math.floor(x);
+    };
+    let n = 0;
+    for (const h of hexes) {
+      const c = this.worldOf(h);
+      for (let k = 0; k < perHex; k++, n++) {
+        const smoke = k % 3 === 2;
+        const sprite = new THREE.Sprite(smoke ? smokeMat.clone() : flameMat.clone());
+        group.add(sprite);
+        particles.push({
+          sprite,
+          smoke,
+          base: new THREE.Vector3(c.x + (rnd(n) - 0.5) * 0.9, (big ? 0.5 : 0.3) + rnd(n + 7) * 0.5, c.z + (rnd(n + 3) - 0.5) * 0.8),
+          offset: rnd(n + 11),
+          speed: smoke ? 0.22 + rnd(n + 5) * 0.12 : 0.9 + rnd(n + 5) * 0.7,
+          size: smoke ? 1.1 + rnd(n + 9) * 0.6 : (big ? 0.55 : 0.75) + rnd(n + 9) * 0.45,
+          rise: smoke ? 3.2 + rnd(n + 13) * 1.2 : 0.9 + rnd(n + 13) * 0.6,
+        });
+      }
+    }
+    // clarão alaranjado no chão: faz o papel da luz do fogo sem acender uma luz de verdade
+    // (uma luz nova no meio da partida obrigaria a recompilar todos os materiais da cena)
+    const center = this.centerOf(hexes);
+    const glow = new THREE.Mesh(
+      new THREE.PlaneGeometry(1, 1),
+      new THREE.MeshBasicMaterial({
+        map: (this.glowTex ??= this.glowTexture([[0, 'rgba(255,150,50,0.85)'], [0.5, 'rgba(255,110,30,0.35)'], [1, 'rgba(255,80,20,0)']])),
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        transparent: true,
+      }),
+    );
+    glow.rotation.x = -Math.PI / 2;
+    glow.position.set(center.x, 0.06, center.z);
+    glow.scale.setScalar(big ? 6 : 3.6);
+    group.add(glow);
+
+    const holder = this.housed(hexes[0], group);
+    this.scene.add(holder);
+    // o interior da estrutura é reavaliado no próximo quadro (o fogo novo entra junto)
+    this.structureKey = '';
+    this.fires.set(id, { holder, group, particles, glow, charred, born: this.clock.elapsedTime });
+  }
+
+  /** Apaga todos os incêndios e devolve os modelos ao normal (usado ao recomeçar). */
+  clearFires(): void {
+    for (const fire of this.fires.values()) {
+      for (const { mesh, original } of fire.charred) {
+        const burned = mesh.material;
+        mesh.material = original;
+        (Array.isArray(burned) ? burned : [burned]).forEach((m) => m.dispose());
+      }
+      this.scene.remove(fire.holder);
+      for (const st of this.structures) st.interior = st.interior.filter((o) => o !== fire.group);
+      for (const p of fire.particles) p.sprite.material.dispose();
+      fire.glow.geometry.dispose();
+      (fire.glow.material as THREE.Material).dispose();
+    }
+    this.fires.clear();
+    for (const t of this.targets.values()) t.sprite.visible = true;
+  }
+
+  private centerOf(hexes: readonly HexCoord[]): THREE.Vector3 {
+    const c = new THREE.Vector3();
+    for (const h of hexes) c.add(this.worldOf(h));
+    return c.divideScalar(hexes.length || 1);
+  }
+
+  /** Mancha redonda com degradê (chama, fumaça). */
+  private glowTexture(stops: [number, string][]): THREE.Texture {
+    const c = document.createElement('canvas');
+    c.width = c.height = 64;
+    const g = c.getContext('2d');
+    if (g) {
+      const grad = g.createRadialGradient(32, 32, 0, 32, 32, 32);
+      for (const [at, color] of stops) grad.addColorStop(at, color);
+      g.fillStyle = grad;
+      g.fillRect(0, 0, 64, 64);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /** Chama laranja num círculo escuro com borda vermelha: "queimar aqui". */
+  private targetTexture(): THREE.Texture {
+    const c = document.createElement('canvas');
+    c.width = c.height = 128;
+    const g = c.getContext('2d');
+    if (g) {
+      g.fillStyle = '#0b1d24';
+      g.strokeStyle = '#e8492f';
+      g.lineWidth = 8;
+      g.beginPath();
+      g.arc(64, 64, 56, 0, Math.PI * 2);
+      g.fill();
+      g.stroke();
+      const flame = (scale: number, color: string) => {
+        g.save();
+        g.translate(64, 98);
+        g.scale(scale, scale);
+        g.fillStyle = color;
+        g.beginPath();
+        g.moveTo(0, 0);
+        g.bezierCurveTo(-30, 0, -34, -30, -14, -52);
+        g.bezierCurveTo(-12, -36, -4, -34, -2, -40);
+        g.bezierCurveTo(-6, -58, 6, -70, 10, -76);
+        g.bezierCurveTo(12, -58, 34, -44, 30, -20);
+        g.bezierCurveTo(28, -6, 16, 0, 0, 0);
+        g.fill();
+        g.restore();
+      };
+      flame(1, '#ff7a1a');
+      flame(0.55, '#ffd43b');
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    return tex;
+  }
+
+  /** Anima chamas (sobem, encolhem e somem), fumaça (sobe devagar e se espalha) e a luz. */
+  private updateFires(t: number): void {
+    for (const fire of this.fires.values()) {
+      // o fogo "pega" aos poucos no primeiro segundo e meio
+      const grow = Math.min(1, (t - fire.born) / 1.5);
+      (fire.glow.material as THREE.MeshBasicMaterial).opacity = (0.75 + Math.sin(t * 13) * 0.12 + Math.sin(t * 7.3) * 0.1) * grow;
+      for (const p of fire.particles) {
+        const life = (t * p.speed + p.offset) % 1;
+        const s = p.size * (p.smoke ? 0.6 + life * 1.2 : 1 - life * 0.75) * grow;
+        p.sprite.scale.set(s, s * (p.smoke ? 1 : 1.35), 1);
+        const drift = p.smoke ? life * 0.6 : Math.sin(t * 6 + p.offset * 9) * 0.06;
+        p.sprite.position.set(p.base.x + drift, p.base.y + life * p.rise, p.base.z - (p.smoke ? life * 0.3 : 0));
+        p.sprite.material.opacity = Math.sin(Math.PI * life) * (p.smoke ? 0.55 : 0.95);
+      }
+    }
+    for (const target of this.targets.values()) {
+      if (!target.sprite.visible) continue;
+      target.sprite.position.set(target.center.x, target.height + Math.sin(t * 2.6) * 0.1, target.center.z);
+    }
   }
 
   /** Lupa amarela num círculo escuro (desenhada num canvas). */
@@ -1406,6 +1660,8 @@ export class HexBoard {
       (this.aura.wall.material as THREE.MeshBasicMaterial).opacity = glow;
       (this.aura.ring.material as THREE.MeshBasicMaterial).opacity = glow + 0.1;
     }
+
+    this.updateFires(t);
 
     if (this.clue?.sprite.visible) {
       const tile = this.tiles.get(hexKey(this.clue.hex));
