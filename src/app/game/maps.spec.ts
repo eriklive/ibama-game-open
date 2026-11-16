@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { HexCoord, hexKey, reachableHexes } from './hex';
 import {
-  COVER_HEIGHT, HexRect, MAPS, STRUCTURE_SIGHT, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
+  COVER_HEIGHT, DOOR_REVEAL, HexRect, MAPS, STRUCTURE_SIGHT, doorsOf, structureRect, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
 } from './maps';
 
 describe('parseLayout', () => {
@@ -64,8 +64,8 @@ describe('mapas', () => {
 
   it('aeroporto: o hangar comporta duas fileiras de quatro aviões e tem um no meio', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
-    const [c0, c1] = map.hangar!.cols;
-    const [r0, r1] = map.hangar!.rows;
+    const [c0, c1] = structureRect(map, 'hangar')!.cols;
+    const [r0, r1] = structureRect(map, 'hangar')!.rows;
     // por dentro das paredes: 4 vagas de 4 colunas e 2 fileiras de 3, com um corredor no meio
     expect(c1 - c0 - 1).toBeGreaterThanOrEqual(4 * 4);
     expect(r1 - r0 - 1).toBeGreaterThanOrEqual(2 * 3 + 1);
@@ -91,8 +91,8 @@ describe('aeroporto: mundo semiaberto', () => {
 
   it('a missão é um círculo que contém o hangar inteiro, a equipe e as rotas', () => {
     expect(map.mission).toBeDefined();
-    const [c0, c1] = map.hangar!.cols;
-    const [r0, r1] = map.hangar!.rows;
+    const [c0, c1] = structureRect(map, 'hangar')!.cols;
+    const [r0, r1] = structureRect(map, 'hangar')!.rows;
     for (let col = c0; col <= c1; col++) for (let row = r0; row <= r1; row++) expect(area.has({ col, row })).toBe(true);
     for (const p of [...map.starts, ...map.enemies.flatMap((e) => e.patrol)]) expect(area.has(p), hexKey(p)).toBe(true);
   });
@@ -124,16 +124,16 @@ describe('aeroporto: mundo semiaberto', () => {
     expect(cover.some((c) => COVER_HEIGHT[c.kind] === 'low')).toBe(true);
     const inside = (h: HexCoord, { cols: [c0, c1], rows: [r0, r1] }: HexRect) => h.col > c0 && h.col < c1 && h.row > r0 && h.row < r1;
     for (const c of [...cover, ...(map.props ?? [])]) {
-      const where = c.col <= map.hangar!.cols[1] ? map.hangar! : map.house!;
+      const where = c.col <= structureRect(map, 'hangar')!.cols[1] ? structureRect(map, 'hangar')! : structureRect(map, 'house')!;
       expect(inside(c, where), hexKey(c)).toBe(true);
     }
     // na casa só há móveis: a mesa do Jô e a prateleira
-    expect(cover.filter((c) => inside(c, map.house!)).map((c) => c.kind).sort()).toEqual(['shelf', 'table']);
+    expect(cover.filter((c) => inside(c, structureRect(map, 'house')!)).map((c) => c.kind).sort()).toEqual(['shelf', 'table']);
   });
 
   it('estrutura: o teto some com um agente dentro e o interior só aparece a até 6 hexágonos', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
-    const hangar = map.hangar!;
+    const hangar = structureRect(map, 'hangar')!;
     expect(STRUCTURE_SIGHT).toBe(6);
     // a equipe começa longe: teto no lugar, nada de dentro desenhado
     expect(structureView(hangar, map.starts)).toEqual({ roof: true, interior: false });
@@ -143,9 +143,30 @@ describe('aeroporto: mundo semiaberto', () => {
     expect(structureView(hangar, [{ col: 22, row: 25 }])).toEqual({ roof: true, interior: false });
     // perto, mas do lado de fora: o teto fica e o interior já é desenhado
     expect(structureView(hangar, [{ col: 22, row: 24 }])).toEqual({ roof: true, interior: true });
-    expect(structureView(hangar, [{ col: 22, row: 19 }])).toEqual({ roof: true, interior: true });
+    expect(structureView(hangar, [{ col: 22, row: 21 }], doorsOf(map, hangar))).toEqual({ roof: true, interior: true });
     // basta um agente entrar (o vão do portão já conta) para o teto sumir
     expect(structureView(hangar, [...map.starts, { col: 22, row: 18 }])).toEqual({ roof: false, interior: true });
     expect(structureView(hangar, [{ col: 15, row: 9 }])).toEqual({ roof: false, interior: true });
+  });
+
+  it('estrutura: o teto some com um agente a até 2 hexágonos de uma porta e volta quando ele se afasta', () => {
+    const map = MAPS.find((m) => m.id === 'aeroporto')!;
+    expect(DOOR_REVEAL).toBe(2);
+    const hangar = structureRect(map, 'hangar')!;
+    const house = structureRect(map, 'house')!;
+    const hangarDoors = doorsOf(map, hangar);
+    const houseDoors = doorsOf(map, house);
+    expect(hangarDoors.length).toBe(14);
+    expect(houseDoors.map(hexKey)).toContain(hexKey({ col: 29, row: 29 }));
+    // diante do portão (fileira 18): a 1 e a 2 fileiras some o teto; a 3 ele volta
+    expect(structureView(hangar, [{ col: 22, row: 19 }], hangarDoors).roof).toBe(false);
+    expect(structureView(hangar, [{ col: 22, row: 20 }], hangarDoors).roof).toBe(false);
+    expect(structureView(hangar, [{ col: 22, row: 21 }], hangarDoors).roof).toBe(true);
+    // porta dos fundos, ao norte
+    expect(structureView(hangar, [{ col: 14, row: 2 }], hangarDoors).roof).toBe(false);
+    expect(structureView(hangar, [{ col: 14, row: 1 }], hangarDoors).roof).toBe(true);
+    // porta da casa, a oeste
+    expect(structureView(house, [{ col: 27, row: 29 }], houseDoors).roof).toBe(false);
+    expect(structureView(house, [{ col: 26, row: 29 }], houseDoors).roof).toBe(true);
   });
 });
