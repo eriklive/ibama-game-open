@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { COVER_HEIGHT, GameMap, Ground, HexRect, inStructure, playArea, structureView } from './maps';
-import { HEX_STEP, HexArea, HexCoord, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
+import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
+import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, METER, ModelDef } from './character-model';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
@@ -123,6 +124,8 @@ interface EnemyView extends Mover {
   signY: number;
   /** Correndo entre hexágonos: o clipe de corrida tem prioridade sobre o do estado. */
   running?: boolean;
+  /** Instante (relógio do tabuleiro) do susto com a abordagem: um pulinho no lugar. */
+  startleAt?: number;
 }
 
 /** Diferença angular em (-π, π]. */
@@ -228,6 +231,9 @@ export class HexBoard {
   private vision = new Set<string>();
   /** Pré-visualização da abordagem: zona de rendição e zona de fuga. */
   private approach: { surrender: Set<string>; flee: Set<string> } | null = null;
+  /** Onda de voz da abordagem: sai do agente e acende os hexágonos do raio. */
+  private wave: { from: HexCoord; start: number; end: number } | null = null;
+  private waveRing?: THREE.Mesh;
   private selected: HexCoord | null = null;
   /** Caminho até o destino (sem a origem, com o destino), na ordem em que será percorrido. */
   private path: string[] = [];
@@ -358,6 +364,34 @@ export class HexBoard {
   setApproachZones(zones: { surrender: Iterable<string>; flee: Iterable<string> } | null): void {
     this.approach = zones && { surrender: new Set(zones.surrender), flee: new Set(zones.flee) };
     this.paintTiles();
+  }
+
+  /**
+   * Onda de voz da abordagem: um anel sai de `from` e cada hexágono das zonas da abordagem
+   * pula e brilha quando ela chega (as zonas precisam estar mostradas).
+   */
+  playApproachWave(from: HexCoord): void {
+    const start = this.clock.elapsedTime;
+    this.wave = { from: { ...from }, start, end: start + waveDuration() };
+    if (!this.waveRing) {
+      // anel fino de raio 1 (escalado a cada quadro), deitado no chão
+      this.waveRing = new THREE.Mesh(
+        new THREE.RingGeometry(0.9, 1, 64),
+        new THREE.MeshBasicMaterial({ color: 0xfff6d6, transparent: true, depthWrite: false, side: THREE.DoubleSide }),
+      );
+      this.waveRing.rotation.x = -Math.PI / 2;
+      this.waveRing.renderOrder = 5;
+      this.scene.add(this.waveRing);
+    }
+    const p = this.worldOf(from);
+    this.waveRing.position.set(p.x, 0.35, p.z);
+    this.waveRing.visible = false;
+  }
+
+  /** Susto com a abordagem: o inimigo dá um pulinho no lugar. */
+  startleEnemy(id: string): void {
+    const e = this.enemies.get(id);
+    if (e) e.startleAt = this.clock.elapsedTime;
   }
 
   /** Leva a câmera até um hexágono. */
@@ -1597,7 +1631,8 @@ export class HexBoard {
       const jitter = e.alert ? Math.abs(Math.sin(t * 9)) * 0.06 : 0;
       // rendido fica abaixado
       const crouch = e.surrendered && !e.rig ? -0.08 : 0;
-      e.group.position.y = e.baseY + crouch + e.hop + jitter - (1 - e.presence) * 0.5;
+      const startle = e.startleAt === undefined ? 0 : waveBump(t - e.startleAt, 0.32) * 0.4;
+      e.group.position.y = e.baseY + crouch + e.hop + startle + jitter - (1 - e.presence) * 0.5;
       e.alertSprite.position.y = e.signY + Math.sin(t * 6) * 0.06;
       e.shadow.position.set(e.group.position.x, 0.01, e.group.position.z);
       e.shadow.scale.setScalar(Math.max(0.001, e.presence * (1 - e.hop * 0.6)));
@@ -1622,6 +1657,7 @@ export class HexBoard {
     const pulse = 0.12 + Math.sin(t * 3) * 0.08;
     const tk = 1 - Math.exp(-dt * 12);
     const field = this.field;
+    const wave = this.updateWave(t);
     for (const [key, tile] of this.tiles) {
       const step = this.path.length ? this.path.indexOf(key) : -1;
       const isSel = this.selected !== null && sameHex(tile.coord, this.selected);
@@ -1637,8 +1673,12 @@ export class HexBoard {
       } else if (isSel) {
         goal = tile.lift + Math.sin(t * 3) * 0.03;
       } else if (this.approach && (this.approach.surrender.has(key) || this.approach.flee.has(key))) {
-        const g = 0.08 + Math.sin(t * 4) * 0.06;
-        tile.emissive.setRGB(g, g * 0.8, g * 0.3);
+        // na onda de voz, o hexágono pula e acende quando ela chega; antes, só pulsa
+        const hit = wave ? waveBump(t - wave.start - waveArrival(hexDistance(wave.from, tile.coord))) : 0;
+        const g = wave ? 0.04 + hit * 0.45 : 0.08 + Math.sin(t * 4) * 0.06;
+        tile.emissive.setRGB(g, g * 0.85, g * 0.45);
+        goal = tile.lift + hit * 0.3;
+        if (hit) tile.y = goal;
         changed = true;
       } else if (this.reachable.has(key)) {
         if (this.vision.has(key)) tile.emissive.setRGB(pulse, pulse * 0.4, pulse * 0.3);
@@ -1672,6 +1712,25 @@ export class HexBoard {
     this.updateCamera(dt);
     this.renderer.render(this.scene, this.camera);
   };
+
+  /** Anel da onda de voz; devolve a onda em andamento (ou `null` quando acabou). */
+  private updateWave(t: number): { from: HexCoord; start: number } | null {
+    const w = this.wave;
+    const ring = this.waveRing;
+    if (!w || t >= w.end) {
+      this.wave = null;
+      if (ring) ring.visible = false;
+      return null;
+    }
+    if (ring) {
+      const radius = (t - w.start - APPROACH_FX.waveDelay) * APPROACH_FX.waveSpeed;
+      const max = (w.end - w.start - APPROACH_FX.waveDelay) * APPROACH_FX.waveSpeed;
+      ring.visible = radius > 0;
+      ring.scale.setScalar(Math.max(0.01, (radius + 0.5) * HEX_STEP * HEX_SIZE));
+      (ring.material as THREE.MeshBasicMaterial).opacity = 0.9 * (1 - Math.min(1, Math.max(0, radius / max)));
+    }
+    return w;
+  }
 
   private updateMarker(m: THREE.Mesh, id: string | null, y: number, scale: number): void {
     const u = id ? this.units.get(id) : undefined;

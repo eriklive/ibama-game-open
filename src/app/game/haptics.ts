@@ -6,6 +6,8 @@ const STORAGE_KEY = 'ibama.vibration';
 export const ROLL_PATTERN: readonly number[] = [35, 110, 28, 170, 22, 240, 16, 320, 10];
 /** Toque curto quando os dados param e o resultado aparece. */
 export const SETTLE_PATTERN: readonly number[] = [45];
+/** O grito da abordagem: uma pancada forte e um eco. */
+export const APPROACH_PATTERN: readonly number[] = [70, 50, 30];
 
 /** Vibração do celular (Vibration API); pode ser desligada no menu e fica guardada no navegador. */
 @Injectable({ providedIn: 'root' })
