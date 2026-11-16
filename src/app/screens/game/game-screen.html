@@ -73,6 +73,7 @@
         <p class="menu-stats" data-testid="render-stats">
           Raio {{ st.loadRadius }} · visão {{ st.viewRadius }} · {{ st.chunks }} blocos
           @if (st.pending) { · montando {{ st.pending }}… } @else { · pronto }
+          <br />{{ st.calls }} desenhos · {{ (st.triangles / 1000).toFixed(0) }} mil triângulos
         </p>
       }
       <button type="button" class="menu-close" (click)="toggleMenu()">Fechar</button>
