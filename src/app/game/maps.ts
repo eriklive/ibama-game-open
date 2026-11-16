@@ -16,6 +16,19 @@ export interface HexRect {
   rows: [number, number];
 }
 
+/** Aparência de uma estrutura: as regras (telhado, portas, interior) são as mesmas para todas. */
+export type StructureKind = 'hangar' | 'house';
+
+/**
+ * Estrutura coberta sobre um retângulo de hexágonos (colunas e fileiras, inclusive).
+ * `hangar`: paredes de chapa reta e telhado em arco. `house`: paredes de tábua e telhado de
+ * duas águas; paredes de dentro (divisórias) são colunas inteiras de `#` dentro do retângulo.
+ */
+export interface Structure {
+  kind: StructureKind;
+  rect: HexRect;
+}
+
 export interface GameMap {
   id: string;
   name: string;
@@ -43,13 +56,13 @@ export interface GameMap {
   props?: HexCoord[];
   /** Hexágonos ocupados pelo avião estacionado: bloqueiam passagem e visão. */
   plane?: HexCoord[];
-  /** Hangar: retângulo (colunas e fileiras, inclusive) cujas paredes viram chapa reta, com telhado em arco. */
-  hangar?: HexRect;
   /**
-   * Casa: retângulo cujas paredes viram tábuas, com telhado de duas águas que some quando um
-   * agente entra. Paredes de dentro (divisórias) são colunas inteiras de `#` dentro do retângulo.
+   * Estruturas cobertas (hangar, casa…). Toda estrutura com telhado segue as mesmas regras
+   * (ver `structureView`): o telhado some com um agente dentro ou perto de uma das portas
+   * (`D` dentro do retângulo dela), e o que se passa lá dentro fica escondido enquanto o
+   * telhado estiver no lugar.
    */
-  house?: HexRect;
+  structures?: Structure[];
   /** Coisas escondidas: aparecem com um teste de percepção e se acham inspecionando o móvel. */
   hidden?: HiddenItem[];
   /** O que a equipe pode queimar (o avião, os suprimentos do garimpo). */
@@ -274,8 +287,10 @@ export const MAPS: GameMap[] = [
     name: 'Aeroporto',
     subtitle: 'Missão circular · pista de terra, hangar e mata',
     ...AEROPORTO,
-    hangar: { cols: [11, 32], rows: [4, 18] },
-    house: { cols: [29, 41], rows: [26, 32] },
+    structures: [
+      { kind: 'hangar', rect: { cols: [11, 32], rows: [4, 18] } },
+      { kind: 'house', rect: { cols: [29, 41], rows: [26, 32] } },
+    ],
     hidden: [
       {
         id: 'arma',
@@ -405,6 +420,14 @@ export function structureView(
   }
   return { roof, interior };
 }
+
+/** Retângulo da primeira estrutura de um tipo no mapa. */
+export const structureRect = (map: GameMap, kind: StructureKind): HexRect | undefined =>
+  map.structures?.find((s) => s.kind === kind)?.rect;
+
+/** Portas do mapa que ficam na planta da estrutura. */
+export const doorsOf = (map: GameMap, rect: HexRect): HexCoord[] =>
+  (map.doors ?? []).filter((d) => inStructure(d, rect));
 
 export const findMap = (id: string | null | undefined): GameMap | undefined =>
   MAPS.find((m) => m.id === id && m.available);

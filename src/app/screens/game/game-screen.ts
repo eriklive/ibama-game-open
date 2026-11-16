@@ -630,26 +630,25 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (!enemy || !canAct(enemy)) continue;
       // parado no lugar (o Jô comendo): não anda nem gira, então nem chama a câmera
       if (enemy.status === 'patrol' && stationary(enemy)) continue;
-      board.focusHex(enemy.hex);
-      await this.wait(350);
-      if (enemy.status === 'alert') await this.flee(enemy, epoch);
-      else await this.patrol(enemy, epoch);
-      await this.wait(300);
+      // debaixo de um telhado que o jogador não enxerga, o inimigo age sem câmera nem animação
+      const shown = enemy.status === 'alert' ? await this.flee(enemy, epoch) : await this.patrol(enemy, epoch);
+      if (shown) await this.wait(300);
     }
     if (stale()) return;
     this.announceIfOver();
     this.nextCharacter();
   }
 
-  private async patrol(enemy: EnemyState, epoch: number): Promise<void> {
-    const map = this.map!;
+  /** Patrulha um trecho. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
+  private async patrol(enemy: EnemyState, epoch: number): Promise<boolean> {
     const plan = planPatrol(enemy, ENEMY_RULES.patrolSteps, this.area, this.blockedFor(enemy.id));
     this.updateEnemy(enemy.id, { waypoint: plan.waypoint, dir: plan.dir, target: plan.target });
     if (!plan.path.length) {
+      if (this.board!.isCovered(enemy.hex)) return false;
       this.say(`${enemy.name} espera: o caminho está bloqueado`, 'info');
-      return;
+      return true;
     }
-    await this.board!.moveEnemy(enemy.id, plan.path, (hex) => {
+    const shown = await this.walkEnemy(enemy.id, plan.path, (hex) => {
       if (this.epoch !== epoch) return false;
       const prev = this.enemy(enemy.id)!.hex;
       this.updateEnemy(enemy.id, { hex, facing: facingBetween(prev, hex) });
@@ -658,20 +657,26 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return !this.checkSpotted(enemy.id);
     });
     // dá tempo de ver o "!" antes de seguir
-    if (this.enemy(enemy.id)?.status === 'alert') await this.wait(900);
+    if (this.enemy(enemy.id)?.status === 'alert') {
+      await this.wait(900);
+      return true;
+    }
+    return shown;
   }
 
-  private async flee(enemy: EnemyState, epoch: number): Promise<void> {
-    const map = this.map!;
+  /** Foge para a borda. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
+  private async flee(enemy: EnemyState, epoch: number): Promise<boolean> {
     const agents = [...this.positions().values()];
     const plan = planFlee(enemy.hex, ENEMY_RULES.fleeSteps, this.area, this.blockedFor(enemy.id), agents);
+    const covered = this.board!.isCovered(enemy.hex);
     if (plan.cornered) {
-      this.say(`${enemy.name} está encurralado!`, 'info');
-      return;
+      if (!covered) this.say(`${enemy.name} está encurralado!`, 'info');
+      return !covered;
     }
+    let shown = false;
     if (plan.path.length) {
-      this.say(`${enemy.name} corre para a borda!`, 'alert');
-      await this.board!.moveEnemy(
+      if (!covered) this.say(`${enemy.name} corre para a borda!`, 'alert');
+      shown = await this.walkEnemy(
         enemy.id,
         plan.path,
         (hex) => {
@@ -682,12 +687,62 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         1.8,
       );
     }
-    if (this.epoch !== epoch) return;
+    if (this.epoch !== epoch) return shown;
     if (isBorder(this.enemy(enemy.id)!.hex, this.area)) {
       this.updateEnemy(enemy.id, { status: 'fled' });
       this.say(`${enemy.name} fugiu do mapa!`, 'alert');
       await this.board!.removeEnemy(enemy.id);
+      return true;
     }
+    return shown;
+  }
+
+  /**
+   * Anda com o inimigo pelo caminho. Os passos de um hexágono coberto a outro (debaixo de
+   * um telhado que o jogador não enxerga, ver `HexBoard.isCovered`) acontecem na hora, sem
+   * câmera nem animação — o jogador não sabe o que se passa lá dentro. O resto anda
+   * normalmente, com a câmera chegando antes do primeiro trecho visível. `onStep` é como o
+   * de `moveEnemy`. Devolve se algum trecho apareceu na tela.
+   */
+  private async walkEnemy(
+    id: string,
+    path: HexCoord[],
+    onStep: (hex: HexCoord) => boolean,
+    speed = 1,
+  ): Promise<boolean> {
+    const board = this.board!;
+    const hiddenStep = (from: HexCoord, to: HexCoord) => board.isCovered(from) && board.isCovered(to);
+    let shown = false;
+    let i = 0;
+    while (i < path.length) {
+      const from = this.enemy(id)?.hex;
+      if (!from) return shown;
+      if (hiddenStep(from, path[i])) {
+        board.jumpEnemy(id, path[i]);
+        if (!onStep(path[i++])) return shown;
+        continue;
+      }
+      let j = i + 1;
+      while (j < path.length && !hiddenStep(path[j - 1], path[j])) j++;
+      if (!shown) {
+        board.focusHex(from);
+        await this.wait(350);
+        shown = true;
+      }
+      let stopped = false;
+      await board.moveEnemy(
+        id,
+        path.slice(i, j),
+        (hex) => {
+          stopped = !onStep(hex);
+          return !stopped;
+        },
+        speed,
+      );
+      if (stopped || hexKey(this.enemy(id)?.hex ?? from) !== hexKey(path[j - 1])) return shown;
+      i = j;
+    }
+    return shown;
   }
 
   /** Se o inimigo em patrulha enxerga algum agente, entra em alerta. Devolve se avistou. */

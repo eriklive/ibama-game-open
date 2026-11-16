@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, HexRect, inStructure, playArea, structureView } from './maps';
+import { COVER_HEIGHT, GameMap, Ground, HexRect, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, METER, ModelDef } from './character-model';
@@ -803,17 +803,11 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
     const wallKeys = new Set(walls.map(hexKey));
-    const hangar = this.map.hangar;
-    if (hangar) {
-      const built = buildHangar(hangar, wallKeys, HEX_SIZE);
+    for (const { kind, rect } of this.map.structures ?? []) {
+      const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE);
+      const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
-      this.structures.push({ rect: hangar, doors: this.doorsOf(hangar), roof: built.getObjectByName(HANGAR_ROOF), interior: lamps ? [lamps] : [] });
-      this.addScenery(built);
-    }
-    const house = this.map.house;
-    if (house) {
-      const built = buildHouse(house, wallKeys, HEX_SIZE);
-      this.structures.push({ rect: house, doors: this.doorsOf(house), roof: built.getObjectByName(HOUSE_ROOF), interior: [] });
+      this.structures.push({ rect, doors: doorsOf(this.map, rect), roof, interior: lamps ? [lamps] : [] });
       this.addScenery(built);
     }
     const inHangar = (h: HexCoord): boolean => this.structures.some((st) => inStructure(h, st.rect));
@@ -885,9 +879,27 @@ export class HexBoard {
     return new THREE.Group().add(object);
   }
 
-  /** Portas do mapa que ficam na planta da estrutura. */
-  private doorsOf(rect: HexRect): HexCoord[] {
-    return (this.map.doors ?? []).filter((d) => inStructure(d, rect));
+  /**
+   * O hexágono fica debaixo de um telhado que está no lugar (nenhum agente dentro da
+   * estrutura nem perto de uma porta dela): o jogador não enxerga o que acontece ali.
+   */
+  isCovered(hex: HexCoord): boolean {
+    const agents = [...this.units.values()].map((u) => u.hex);
+    return this.structures.some((st) => st.roof && inStructure(hex, st.rect) && structureView(st.rect, agents, st.doors).roof);
+  }
+
+  /** Põe o inimigo num hexágono na hora (sem animação), virado para onde ia. */
+  jumpEnemy(id: string, hex: HexCoord): void {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    const from = this.worldOf(e.hex);
+    const to = this.worldOf(hex);
+    e.epoch++;
+    e.hop = 0;
+    e.hex = { ...hex };
+    e.group.position.x = to.x;
+    e.group.position.z = to.z;
+    if (from.distanceToSquared(to) > 0) e.facing = e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
   }
 
   /** Teto e interior das estruturas conforme a posição dos agentes (ver `structureView`). */
