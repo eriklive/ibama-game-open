@@ -1607,7 +1607,9 @@ export class HexBoard {
   private shadowDue(): boolean {
     if (!this.sun.castShadow) return false;
     const p = this.sun.target.position;
-    const key = `${p.x},${p.z};${this.stream.version};${this.roof?.visible};${this.interior[0]?.visible};${this.profile.mode}`;
+    // teto e interior de cada estrutura (hangar, casa): aparecer ou sumir muda a sombra
+    const views = this.structures.map((st) => `${st.roof?.visible}/${st.interior[0]?.visible}`).join(',');
+    const key = `${p.x},${p.z};${this.stream.version};${views};${this.profile.mode}`;
     if (key === this.shadowKey) return false;
     this.shadowKey = key;
     this.staticShadow.invalidate();
