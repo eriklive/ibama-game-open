@@ -295,7 +295,9 @@ export const MAPS: GameMap[] = [
       { id: 'queimar-aviao', text: 'Queimar o avião', burn: 'aviao', primary: true, unlocksEnd: true },
       { id: 'queimar-suprimentos', text: 'Queimar os suprimentos do garimpo', burn: 'suprimentos', primary: true },
       { id: 'render-jo', text: 'Render o Garimpeiro Jô', surrender: 'jo' },
-      { id: 'apreender-arma', text: 'Apreender a arma escondida', find: 'arma' },
+      // a casa vem primeiro; achar a arma na prateleira (percepção) abre o passo seguinte
+      { id: 'investigar-casa', text: 'Investigar a casa', notice: 'arma' },
+      { id: 'apreender-arma', text: 'Apreender a arma escondida', find: 'arma', after: 'investigar-casa' },
     ],
     available: true,
     starts: [{ col: 4, row: 34 }, { col: 3, row: 35 }, { col: 5, row: 35 }],

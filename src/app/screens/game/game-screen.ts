@@ -35,7 +35,7 @@ import {
 } from '../../game/enemies';
 import { HiddenItem, SEARCH_RULES, beats, canReach, entersRoom } from '../../game/search';
 import { BURN_RULES, Burnable, burnTarget, seeFire } from '../../game/burn';
-import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState } from '../../game/mission';
+import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
@@ -269,14 +269,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** O que já aconteceu e decide os objetivos (rendidos, achados, queimados). */
   private readonly progress = computed<MissionProgress>(() => ({
     enemies: this.enemies(),
+    noticed: this.noticed(),
     found: this.found(),
     burned: this.burned(),
   }));
 
-  /** Objetivos da missão com a situação de cada um (os principais primeiro). */
+  /**
+   * Objetivos da missão com a situação de cada um (os principais primeiro). Passos
+   * seguintes (`after`) só aparecem depois do anterior: "Investigar a casa" vira, ao achar
+   * a arma, um ✓ e o novo "Apreender a arma escondida".
+   */
   protected readonly objectives = computed(() => {
     const p = this.progress();
-    return (this.map?.objectives ?? [])
+    return visibleObjectives(this.map?.objectives ?? [], p)
       .map((o) => ({ id: o.id, text: o.text, primary: !!o.primary, state: objectiveState(o, p) }))
       .sort((a, b) => Number(b.primary) - Number(a.primary));
   });

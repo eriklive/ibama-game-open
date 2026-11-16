@@ -120,8 +120,11 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
   falhar, o botão vira **Rolar de novo**. Cada tentativa gasta **1 de movimento**.
 - Se os três agentes falharem na percepção, a arma fica sem ser encontrada.
 
-Os **objetivos** da missão (render o Jô, apreender a arma) ficam num bilhete embaixo da pilha de
-suspeitos. As regras dos testes ficam em `SEARCH_RULES` (`src/app/game/search.ts`); a casa, o esconderijo
+Os **objetivos** da missão ficam num bilhete embaixo da pilha de suspeitos. Da casa, de início, aparece só
+**Investigar a casa**: quando alguém repara na prateleira (percepção), ele fica cumprido (✓) e surge o passo
+seguinte, **Apreender a arma escondida**, cumprido ao inspecionar e achar a arma. Também há **Render o Garimpeiro
+Jô**. Passos assim usam `after` no objetivo (só aparece depois do objetivo com aquele id); `notice` cumpre ao
+reparar num esconderijo. As regras dos testes ficam em `SEARCH_RULES` (`src/app/game/search.ts`); a casa, o esconderijo
 e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
 mesa (cobertura baixa) e `P` a prateleira (alta); os modelos são montados em `scenery.ts` (`buildHouse`).
 Um inimigo com rota de um ponto só fica parado; `facing` no mapa diz para onde ele olha.
