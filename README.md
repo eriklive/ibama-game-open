@@ -169,9 +169,9 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
   aparece numa ficha no canto esquerdo da tela. Tirando **mais que 6**, ele repara em algo na
   **prateleira** da parede do leste, que ganha uma lupa.
 - Colado na prateleira percebida, **toque na lupa** (que pulsa; □ no controle, quando não há ninguém
-  para abordar): a câmera desce e chega perto, como ao arrombar uma porta ou abrir uma fechadura —
-  por cima do ombro direito do agente, que fica em primeiro plano virado para a prateleira, em foco
-  no meio da tela — e fica **travada** (arrastar, pinça e roda não mexem nela). A HUD some;
+  para abordar): a câmera faz o mesmo enquadramento da cena da porta (arrombar / abrir fechadura) —
+  gira 45° para o lado do agente, desce para 30° e chega perto, mirando entre a prateleira e o
+  agente, que vira para ela — e fica **travada** (arrastar, pinça e roda não mexem nela). A HUD some;
   sobram o bilhete e os botões de sempre: o carimbo **Inspecionar** (✕/□, ou a lupa de novo) rola o
   d20 e **Cancelar** (○) volta ao normal sem gastar nada. Tirando **mais que 4**, acha a **arma
   escondida**, que é apreendida. Se falhar, o d20 fica com o resultado, o bilhete diz que falhou e
