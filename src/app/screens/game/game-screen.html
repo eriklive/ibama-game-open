@@ -1,38 +1,10 @@
-<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'">
+<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.rolling]="phase() === 'rolling'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
 
-  <!-- Topo: fita crepe com a linha do tempo -->
-  <header class="top">
+  <!-- Topo: voltar e menu soltos; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
+  <div class="corner">
     <button type="button" class="paper-btn back" (click)="exit()" aria-label="Voltar ao início">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-    </button>
-
-    <div class="tape">
-      <div class="tape-head">
-        <span class="marker" [class.late]="late()" data-testid="turn">
-          @if (late()) { Turno {{ round() }} · atrasado! } @else { Turno {{ round() }} de {{ deadline }} }
-        </span>
-        <span class="op">Op. {{ map?.name }}</span>
-      </div>
-      @if (breakInBoost()) {
-        <span class="boost-tag" data-testid="break-in-boost">
-          Arrombamento: equipe +{{ breakInBoost() }} intimidação · {{ breakInLeft() }} {{ breakInLeft() === 1 ? 'turno' : 'turnos' }}
-        </span>
-      }
-      <ol class="timeline" [attr.aria-label]="'Linha do tempo: turno ' + round() + ' de ' + deadline + '. No turno ' + deadline + ' o carro foge.'">
-        @for (t of timeline; track t) {
-          <li class="box" [class.final]="t === deadline" [class.done]="t <= round()" aria-hidden="true">
-            @if (t <= round()) { X }
-          </li>
-        }
-        <li class="car" aria-hidden="true">
-          <svg viewBox="0 0 30 22"><path d="M2 15v-4l3-6h16l4 6v4H2z" /><circle cx="8" cy="16" r="2.5" /><circle cx="20" cy="16" r="2.5" /><path d="M26 7l3-2M26 11h4" /></svg>
-        </li>
-      </ol>
-    </div>
-
-    <button type="button" class="paper-btn restart" (click)="restart()" aria-label="Recomeçar a partida">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12a9 9 0 1 0 3-6.7L3 8" /><path d="M3 3v5h5" /></svg>
     </button>
     <button
       type="button"
@@ -45,7 +17,46 @@
       data-testid="menu-toggle">
       <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M4 7h16M4 12h16M4 17h16" /></svg>
     </button>
-  </header>
+  </div>
+
+  <section class="goal" [class.open]="goalOpen()" [class.late]="late()" aria-label="Turno e objetivos" data-testid="objectives">
+    <button
+      type="button"
+      class="goal-head"
+      (click)="toggleGoal()"
+      [attr.aria-expanded]="goalOpen()"
+      aria-controls="goal-list"
+      [attr.aria-label]="(late() ? 'Atrasado, turno ' + round() : 'Turno ' + round() + ' de ' + deadline) + '. ' + goalSummary().done + ' de ' + goalSummary().total + ' objetivos. Toque para ' + (goalOpen() ? 'fechar' : 'ver') + ' a lista.'"
+      data-testid="goal-toggle">
+      <span class="goal-turn" data-testid="turn">
+        @if (late()) { Atrasado! } @else { Turno {{ round() }}/{{ deadline }} }
+      </span>
+      @if (goalSummary().total) {
+        <span class="goal-main">{{ goalSummary().text }}</span>
+        <span class="goal-count">{{ goalSummary().done }}/{{ goalSummary().total }}</span>
+      }
+      <svg class="goal-caret" viewBox="0 0 16 16" aria-hidden="true"><path d="M3 6l5 5 5-5" /></svg>
+    </button>
+    @if (breakInBoost()) {
+      <span class="boost-tag" data-testid="break-in-boost">
+        Arrombamento: equipe +{{ breakInBoost() }} intimidação · {{ breakInLeft() }} {{ breakInLeft() === 1 ? 'turno' : 'turnos' }}
+      </span>
+    }
+    @if (goalOpen()) {
+      <div class="goal-body" id="goal-list">
+        <span class="goal-op">Op. {{ map?.name }} · no turno {{ deadline }} o carro foge</span>
+        <ul>
+          @for (o of objectives(); track o.id) {
+            <li [class]="'objective ' + o.state" [class.primary]="o.primary" [attr.data-testid]="'objective-' + o.id">
+              <span class="tick" aria-hidden="true">{{ o.state === 'done' ? '✓' : o.state === 'failed' ? '✗' : '' }}</span>
+              <span>{{ o.text }}@if (o.primary) {<span class="primary-tag">principal</span>}</span>
+              <span class="sr-only">{{ o.state === 'done' ? '(cumprido)' : o.state === 'failed' ? '(perdido)' : '(pendente)' }}</span>
+            </li>
+          }
+        </ul>
+      </div>
+    }
+  </section>
 
   <!-- Avião queimado: os agentes já podem encerrar a operação -->
   @if (canEnd() && !debrief()) {
@@ -96,6 +107,7 @@
           <br />{{ st.calls }} desenhos · {{ (st.triangles / 1000).toFixed(0) }} mil triângulos
         </p>
       }
+      <button type="button" class="menu-restart" (click)="toggleMenu(); restart()" data-testid="menu-restart">Recomeçar a partida</button>
       <button type="button" class="menu-close" (click)="toggleMenu()">Fechar</button>
     </section>
   }
@@ -159,42 +171,76 @@
     </div>
   }
 
-  <!-- Agentes: fotos 3x4 -->
-  <nav class="agents" aria-label="Agentes">
-    @for (c of characters; track c.id; let i = $index) {
-      <button
-        type="button"
-        class="photo"
-        [class.on-turn]="onTurn(c)"
-        [class.focused]="c.id === focused().id && !onTurn(c)"
-        [style.--tilt]="tilts[i % tilts.length] + 'deg'"
-        [attr.aria-pressed]="c.id === focused().id"
-        [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + (isCaptain(c) ? ', Capitão' : ', Agente') + '. Vigor ' + signed(fieldStats(c).vig) + ', intimidação ' + signed(fieldStats(c).int) + ', alcance da abordagem ' + fieldStats(c).range + '. Toque para ver no tabuleiro.'"
-        [attr.data-testid]="'chip-' + c.id"
-        (click)="focusCharacter(c.id)">
-        <span class="photo-img" [style.background]="hexColor(c)">
-          <svg viewBox="0 0 24 24" aria-hidden="true" [style.fill]="shade(c)"><circle cx="12" cy="9" r="4.5" /><path d="M3 24c0-6 4-9.5 9-9.5s9 3.5 9 9.5z" /></svg>
-        </span>
-        <span class="photo-name">{{ c.name }}</span>
-        @let fs = fieldStats(c);
-        <span class="photo-stats" aria-hidden="true" [class.boosted]="inGroup(c) || breakInBoost() > 0" data-testid="photo-stats">
-          <span>vig {{ signed(fs.vig) }}</span>
-          <span>int {{ signed(fs.int) }}</span>
-          @if (onTurn(c)) { <span>alc. {{ fs.range }}</span> }
-        </span>
-        @if (inGroup(c)) {
-          <span class="group-tag" aria-hidden="true">grupo</span>
+  <!-- Coluna da esquerda: quem está selecionado no topo (grande e animado), os outros em faixas, e as ferramentas -->
+  <div class="left">
+    <nav class="agents" aria-label="Agentes">
+      @for (c of orderedAgents(); track c.id; let i = $index) {
+        <button
+          type="button"
+          class="photo"
+          [class.hero]="c.id === focused().id"
+          [class.on-turn]="onTurn(c)"
+          [style.--tilt]="tilts[i % tilts.length] + 'deg'"
+          [attr.aria-pressed]="c.id === focused().id"
+          [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + (isCaptain(c) ? ', Capitão' : ', Agente') + '. Vigor ' + signed(fieldStats(c).vig) + ', intimidação ' + signed(fieldStats(c).int) + ', alcance da abordagem ' + fieldStats(c).range + '. Toque para ver no tabuleiro.'"
+          [attr.data-testid]="'chip-' + c.id"
+          (click)="focusCharacter(c.id)">
+          <span class="photo-img" [style.background]="hexColor(c)">
+            <svg viewBox="0 0 24 24" aria-hidden="true" [style.fill]="shade(c)"><circle cx="12" cy="9" r="4.5" /><path d="M3 24c0-6 4-9.5 9-9.5s9 3.5 9 9.5z" /></svg>
+          </span>
+          <span class="photo-info">
+            <span class="photo-name">{{ c.name }}</span>
+            @let fs = fieldStats(c);
+            <span class="photo-stats" aria-hidden="true" [class.boosted]="inGroup(c) || breakInBoost() > 0" data-testid="photo-stats">
+              <span>vig {{ signed(fs.vig) }}</span>
+              <span>int {{ signed(fs.int) }}</span>
+              @if (c.id === focused().id) { <span>alc. {{ fs.range }}</span> }
+            </span>
+          </span>
+          @if (inGroup(c)) {
+            <span class="group-tag" aria-hidden="true">grupo</span>
+          }
+          @if (isCaptain(c)) {
+            <span class="captain-tag" aria-hidden="true" data-testid="captain-tag">Capitão</span>
+          }
+          @if (onTurn(c)) {
+            <span class="stamp-turn" aria-hidden="true">Na vez</span>
+          }
+        </button>
+      }
+    </nav>
+
+    <!-- Ferramentas do turno: ícone grande em cima, o texto embaixo -->
+    @if (toolsVisible()) {
+      <div class="tools" data-testid="tools">
+        @if (phase() === 'moving-choice' && group().size) {
+          <button type="button" class="tool on" data-testid="ungroup" (click)="ungroup()"
+            [attr.aria-label]="'Desagrupar a equipe (juntos ganham +' + groupMove() + ' de movimento e +' + groupInt() + ' de intimidação)'">
+            <svg class="tool-icon" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="9" r="4" /><circle cx="7" cy="27" r="4" /><circle cx="33" cy="27" r="4" /><path d="M17 14l-6 8M23 14l6 8" /><path d="M5 36h30" stroke-dasharray="3 4" /></svg>
+            <span class="stencil">Desagrupar</span>
+            <span class="typed">juntos +{{ groupMove() }}</span>
+            @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
+          </button>
+        } @else if (phase() === 'moving-choice' && canGroup()) {
+          <button type="button" class="tool" data-testid="group" (click)="startGrouping()"
+            [attr.aria-label]="'Agrupar a equipe num ponto em comum: juntos ganham +' + rallyMove() + ' de movimento e +' + rallyInt() + ' de intimidação' + (freeRally() ? '. Comando do Capitão: não gasta movimento' : '')">
+            <svg class="tool-icon" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="10" r="4" /><circle cx="9" cy="20" r="4" /><circle cx="31" cy="20" r="4" /><path d="M20 16v6M15 24l3-2M25 24l-3-2" /><path d="M5 34h30" /></svg>
+            <span class="stencil">Agrupar</span>
+            <span class="typed">@if (freeRally()) {grátis · }+{{ rallyMove() }} mov./int.</span>
+            @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
+          </button>
         }
-        @if (isCaptain(c)) {
-          <span class="captain-tag" aria-hidden="true" data-testid="captain-tag">Capitão</span>
+        @if (!(phase() === 'moving-choice' && movesLeft() <= 0)) {
+          <button type="button" class="tool" data-testid="pass" [disabled]="phase() !== 'moving-choice'" (click)="endTurn()" aria-label="Passar a vez">
+            <svg class="tool-icon" viewBox="0 0 40 40" aria-hidden="true"><path d="M8 10l12 10-12 10z" /><path d="M22 10l12 10-12 10z" /></svg>
+            <span class="stencil">Passar</span>
+            <span class="typed">a vez</span>
+            @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('endTurn') }}</span> }
+          </button>
         }
-        @if (onTurn(c)) {
-          <span class="stamp-turn" aria-hidden="true">Na vez</span>
-          <svg class="clip" viewBox="0 0 14 28" aria-hidden="true"><path d="M3 6v15a4 4 0 0 0 8 0V5a3 3 0 0 0-6 0v14" /></svg>
-        }
-      </button>
+      </div>
     }
-  </nav>
+  </div>
 
   <!-- Suspeitos: uma pilha de fichas que abre em lista -->
   @if (knownEnemies().length) {
@@ -230,27 +276,14 @@
           }
         </ul>
       }
-      @if (objectives().length) {
-        <section class="objectives" aria-label="Objetivos" data-testid="objectives">
-          <span class="objectives-head">Objetivos</span>
-          <ul>
-            @for (o of objectives(); track o.id) {
-              <li [class]="'objective ' + o.state" [class.primary]="o.primary" [attr.data-testid]="'objective-' + o.id">
-                <span class="tick" aria-hidden="true">{{ o.state === 'done' ? '✓' : o.state === 'failed' ? '✗' : '' }}</span>
-                <span>{{ o.text }}@if (o.primary) {<span class="primary-tag">principal</span>}</span>
-                <span class="sr-only">{{ o.state === 'done' ? '(cumprido)' : o.state === 'failed' ? '(perdido)' : '(pendente)' }}</span>
-              </li>
-            }
-          </ul>
-        </section>
-      }
     </div>
   }
 
   <!-- Menu da porta: a câmera gira e aproxima; as ações ficam em fichas na direita -->
   @if (phase() === 'door' && openDoor(); as door) {
-    <button type="button" class="paper-btn door-back" [disabled]="doorBusy()" (click)="closeDoorMenu()" aria-label="Voltar ao tabuleiro" data-testid="door-back">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+    <button type="button" class="door-back" [disabled]="doorBusy()" (click)="closeDoorMenu()" aria-label="Voltar ao tabuleiro" data-testid="door-back">
+      <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      <span class="door-back-text">Voltar</span>
       @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
     </button>
     <aside class="door-sheet" aria-label="Ações da porta" data-testid="door-sheet">
@@ -264,9 +297,11 @@
       <ul class="door-opts">
         @for (o of doorOptions(); track o.action; let i = $index) {
           <li>
-            <button type="button" class="door-opt" [style.--i]="i" [style.--tilt]="['-1deg', '.8deg', '-.6deg'][i]" [disabled]="o.disabled" [attr.aria-label]="o.label" [attr.data-testid]="'door-' + o.action" (click)="doorAction(o.action)">
-              <span class="door-slot" [class.none]="!o.rolls" aria-hidden="true">
-                @if (o.rolls) {
+            <button type="button" class="door-opt" [class.locked]="o.locked" [style.--i]="i" [style.--tilt]="['-1deg', '.8deg', '-.6deg'][i]" [disabled]="o.disabled" [attr.aria-label]="o.label" [attr.data-testid]="'door-' + o.action" (click)="doorAction(o.action)">
+              <span class="door-slot" [class.none]="!o.rolls && !o.locked" [class.locked]="o.locked" aria-hidden="true">
+                @if (o.locked) {
+                  <svg class="door-lock" viewBox="0 0 24 24"><path class="shackle" d="M8 11V8a4 4 0 0 1 8 0v3" /><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M12 15v2.5" /></svg>
+                } @else if (o.rolls) {
                   <span class="d20" [class.never]="o.tone === 'never'">
                     <svg viewBox="0 0 100 100">
                       <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
@@ -484,11 +519,12 @@
       </button>
     } @else {
       @if (phase() === 'moving-choice' && movesLeft() <= 0) {
-        <!-- sem movimento: o próprio carimbo passa a vez -->
-        <button type="button" class="stamp" data-testid="moves" (click)="endTurn()">
-          <span class="stamp-ring">
-            <span class="stamp-small">sem movimento</span>
-            <span class="stamp-text">Passar</span>
+        <!-- acabou o movimento: a vez só passa quando o jogador encerrar o turno -->
+        <button type="button" class="end-turn" data-testid="end-turn" (click)="endTurn()" [attr.aria-label]="'Encerrar o turno de ' + active().name">
+          <svg class="end-turn-icon" viewBox="0 0 40 40" aria-hidden="true"><circle cx="20" cy="20" r="14" /><path d="M12 20.5l5.5 5.5L28 14.5" /></svg>
+          <span class="end-turn-text">
+            <span class="end-turn-kicker">{{ active().name }} terminou</span>
+            <span class="end-turn-label">Encerrar turno</span>
           </span>
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('endTurn') }}</span> }
         </button>
@@ -506,27 +542,6 @@
             <span class="stamp-text">Mover {{ phase() === 'rolling' ? '–' : movesLeft() }}</span>
           </span>
         </div>
-        <button type="button" class="paper side" [disabled]="phase() !== 'moving-choice'" (click)="endTurn()">
-          <span class="stencil">Passar</span>
-          <span class="typed">a vez &#8250;</span>
-        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('endTurn') }}</span> }
-        </button>
-      }
-      <!-- Agrupar: todos se encontram num ponto e andam juntos (+movimento) -->
-      @if (phase() === 'moving-choice' && group().size) {
-        <button type="button" class="paper group-btn" data-testid="ungroup" (click)="ungroup()"
-          [attr.aria-label]="'Desagrupar a equipe (juntos ganham +' + groupMove() + ' de movimento e +' + groupInt() + ' de intimidação)'">
-          <span class="stencil">Desagrupar</span>
-          <span class="typed">juntos +{{ groupMove() }}</span>
-          @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
-        </button>
-      } @else if (phase() === 'moving-choice' && canGroup()) {
-        <button type="button" class="paper group-btn" data-testid="group" (click)="startGrouping()"
-          [attr.aria-label]="'Agrupar a equipe num ponto em comum: juntos ganham +' + rallyMove() + ' de movimento e +' + rallyInt() + ' de intimidação' + (freeRally() ? '. Comando do Capitão: não gasta movimento' : '')">
-          <span class="stencil">Agrupar</span>
-          <span class="typed">@if (freeRally()) {grátis · }+{{ rallyMove() }} mov./int.</span>
-          @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
-        </button>
       }
       <!-- Inspecionar: o toque é na lupa do tabuleiro; este botão só aparece com o foco do teclado -->
       @if (inspectable(); as item) {
@@ -759,10 +774,20 @@
       </header>
       <div class="roll-result" aria-live="polite">
         @if (rolled() > 0) {
-          <span class="roll-number">{{ movesLeft() }}</span>
-          <span class="roll-total">
-            {{ dice().join(' + ') }}{{ speedTerm() }}@if (grouped()) { + {{ groupBonus }} (grupo)}@if (grouped() && led()) { + {{ leaderBonus.vigor }} (Capitão)} = <strong>{{ movesLeft() }}</strong> de movimento
-          </span>
+          <div class="roll-calc" role="group" [attr.aria-label]="rollSummary()" data-testid="roll-calc">
+            @for (t of rollTerms(); track t.key; let i = $index) {
+              @if (i > 0) { <span class="roll-op" aria-hidden="true">+</span> }
+              <button type="button" class="roll-term" [class.dice]="t.kind === 'dice'" [class.bonus]="t.kind === 'bonus'" [class.open]="termKey() === t.key" [attr.aria-pressed]="termKey() === t.key" (click)="toggleTerm(t.key)">
+                <span class="roll-term-v">{{ t.value }}</span>
+                <span class="roll-term-l">{{ t.label }}</span>
+              </button>
+            }
+            <span class="roll-sum">
+              <span class="roll-sum-n" data-testid="roll-total">{{ movesLeft() }}</span>
+              <span class="roll-sum-u">hexágonos<br />de movimento</span>
+            </span>
+          </div>
+          <p class="roll-hint" aria-live="polite">{{ termHint() ?? 'Você poderá andar até ' + movesLeft() + ' hexágonos neste turno. Toque numa parcela para ver de onde ela vem.' }}</p>
           <button type="button" appMainButton class="roll-confirm" #rollConfirm (click)="confirmRoll()" data-testid="roll-confirm">
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
             Confirmar

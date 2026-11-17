@@ -173,6 +173,8 @@ interface DoorOption {
   /** Movimento gasto ("1 mov."). */
   cost?: string;
   disabled: boolean;
+  /** Bloqueada por ora (porta trancada): continua tocável para dar o aviso, mas aparece com cadeado. */
+  locked?: boolean;
   label: string;
 }
 
@@ -575,18 +577,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         'arrombar',
         'Arrombar',
         st === 'bloqueada' && !door.broken ? 'nunca passa' : open ? 'já está aberta' : st === 'encostada' ? 'sem tranca, chama atenção' : 'porta trancada',
+        { disabled: busy || open, locked: open },
       ),
       option(
         'pick',
         'Destrancar',
         open ? 'já está aberta' : noMoves ? 'sem movimento' : st === 'bloqueada' ? 'nunca passa' : st === 'trancada' ? `fechadura ${door.lock}${gazua ? `, ${SKILLS.gazua.name} +${gazua}` : ''}` : 'precisa de 0, abre sozinha',
-        { cost: `${DOOR_RULES.pickCost} mov.`, disabled: busy || open || noMoves },
+        { cost: `${DOOR_RULES.pickCost} mov.`, disabled: busy || open || noMoves, locked: open || noMoves },
       ),
       option(
         'abrir',
         'Abrir',
         open ? 'já dá para passar' : st === 'encostada' ? 'só empurrar' : st === 'trancada' ? 'está trancada' : 'está bloqueada',
-        { disabled: busy || open },
+        { disabled: busy || open, locked: open || st !== 'encostada' },
       ),
     ];
   });
@@ -751,10 +754,70 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return h ? this.rallyPlans().get(hexKey(h)) : undefined;
   });
 
-  /** Linha do tempo da fita no topo: no último turno o carro foge. */
+  /** Turno máximo: no último turno o carro foge. */
   protected readonly deadline = MISSION_DEADLINE;
-  protected readonly timeline = Array.from({ length: MISSION_DEADLINE }, (_, i) => i + 1);
   protected readonly late = computed(() => this.round() > MISSION_DEADLINE);
+
+  // ---------- bilhete de objetivos (compacto; abre ao toque) ----------
+  protected readonly goalOpen = signal(false);
+  protected toggleGoal(): void {
+    this.goalOpen.update((v) => !v);
+  }
+  /** Resumo da linha fechada: o próximo objetivo principal pendente e quantos já foram cumpridos. */
+  protected readonly goalSummary = computed(() => {
+    const list = this.objectives();
+    const next = list.find((o) => o.primary && o.state === 'open') ?? list.find((o) => o.state === 'open') ?? list[0];
+    return { done: list.filter((o) => o.state === 'done').length, total: list.length, text: next?.text ?? '' };
+  });
+
+  // ---------- coluna da esquerda ----------
+  /** Quem está em foco vai para o topo; os outros seguem na ordem da equipe. */
+  protected readonly orderedAgents = computed<Character[]>(() => {
+    const f = this.focused();
+    return [f, ...CHARACTERS.filter((c) => c.id !== f.id)];
+  });
+  /** As ferramentas (agrupar e passar a vez) só aparecem quando nenhum outro modo ocupa a tela. */
+  protected readonly toolsVisible = computed(
+    () =>
+      this.phase() !== 'enemy' &&
+      this.phase() !== 'rolling' &&
+      !this.approaching() &&
+      !(this.burning() && this.burnable()) &&
+      !this.grouping() &&
+      !this.viewingOther() &&
+      !(this.selected() && this.phase() === 'moving-choice'),
+  );
+
+  // ---------- conta da rolagem: cada parcela explica de onde vem ----------
+  protected readonly termKey = signal<string | null>(null);
+  protected toggleTerm(key: string): void {
+    this.termKey.update((k) => (k === key ? null : key));
+  }
+  protected readonly rollTerms = computed(() => {
+    const who = this.active().name;
+    const terms: { key: string; kind: 'dice' | 'bonus'; value: string; label: string; hint: string }[] = this.dice().map((v, i) => ({
+      key: 'd' + i,
+      kind: 'dice',
+      value: String(v),
+      label: 'Dado',
+      hint: `Dado ${i + 1}: o que saiu no d${MOVE_DICE.sides}.`,
+    }));
+    const vigor = this.activeSpeed();
+    if (vigor) {
+      terms.push({ key: 'vigor', kind: 'bonus', value: signed(vigor), label: 'Vigor', hint: `Vigor: o atributo de ${who} na ficha.` });
+    }
+    if (this.grouped()) {
+      terms.push({ key: 'grupo', kind: 'bonus', value: signed(this.groupBonus), label: 'Grupo', hint: `Grupo: +${this.groupBonus} por andar com a equipe agrupada.` });
+      if (this.led()) {
+        terms.push({ key: 'capitao', kind: 'bonus', value: signed(this.leaderBonus.vigor), label: 'Capitão', hint: `Capitão: +${this.leaderBonus.vigor} de Liderança, porque o Capitão está no grupo.` });
+      }
+    }
+    return terms;
+  });
+  protected readonly termHint = computed(() => this.rollTerms().find((t) => t.key === this.termKey())?.hint ?? null);
+  protected readonly rollSummary = computed(
+    () => this.rollTerms().map((t) => `${t.label} ${t.value}`).join(', ') + `: ${this.movesLeft()} de movimento`,
+  );
   /** Inclinação dos papéis (fotos e fichas), para não ficarem alinhados demais. */
   protected readonly tilts = [-3, 2, -1, 1.5];
 
@@ -949,6 +1012,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   private beginChoosing(): void {
+    this.termKey.set(null);
     this.phase.set('moving-choice');
     this.refreshBoard();
   }
@@ -1229,18 +1293,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return true;
   }
 
-  /** Depois de andar: segue escolhendo, espera para abordar ou passa a vez. */
+  /**
+   * Depois de andar: segue escolhendo. Mesmo sem movimento a vez não passa sozinha: aparece o
+   * botão "Encerrar turno" e o jogador decide (ainda pode abordar, queimar, inspecionar...).
+   */
   private afterMove(): void {
-    if (this.movesLeft() <= 0 && this.canApproach()) {
-      // sem movimento, mas com inimigos no raio: espera para poder abordar
-      this.beginChoosing();
-    } else if (this.movesLeft() <= 0) {
-      // sem movimento: passa a vez automaticamente após um instante
-      this.phase.set('ending');
-      this.later(reducedMotion() ? 200 : 700, () => this.endTurn());
-    } else {
-      this.beginChoosing();
-    }
+    this.beginChoosing();
   }
 
   // ---------- agrupar ----------
