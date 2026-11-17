@@ -33,8 +33,8 @@ agente: abas com a foto 3x4 (ponto **amarelo** = ponto livre, **verde** = distri
 equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a ficha em papel.
 
 - **Velocidade:** cada ponto vale **+1 de movimento** no turno (somado aos 2d4).
-- **Intimidação:** cada ponto vale **+1 no alcance da abordagem** (o raio total, de alerta). A
-  zona de rendição continua a mesma.
+- **Intimidação:** cada ponto vale **+1 no raio de abordagem** (a zona de rendição). A zona de
+  rolagem e a de fuga se afastam junto.
 - Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
   direita, negativo em vermelho para a esquerda; o tracejado mostra onde o ponto livre pode
   entrar). Todo agente começa com 0 nos dois.
@@ -71,30 +71,40 @@ uma base vermelha; o corpo mostra para onde olham).
 
 ### Abordagem
 
-Na vez de um agente, o botão **Abordar** (com o número de inimigos no raio) mostra a
-abordagem antes de confirmar: hexágonos **verdes** são a zona de rendição (até 2
-hexágonos) e os **laranja**, o resto do raio. O raio é **4 + intimidação** do agente, e **+2**
-enquanto ele estiver agrupado (ex.: com 1 ponto em intimidação e em grupo, 7). O painel mostra
-essa conta (base · intimidação · grupo) e lista quem se rende e quem vai tentar correr. O botão
-**Abordar** só aparece com algum suspeito dentro do raio de quem está na vez **e com acesso direto** a ele:
-parede, porta fechada ou carga alta no meio do caminho tiram o suspeito da abordagem (e da prévia). **Abordar!**
-confirma; tocar no tabuleiro ou em **Cancelar** desiste.
+Na vez de um agente, um toque no botão **Abordar** (com o número de inimigos no raio) abre o
+**modo de abordagem**, e nada acontece até confirmar. O tabuleiro fica em **escala de cinza**:
+só ficam em cor quem está na vez, os suspeitos no raio (cada um com uma etiqueta: *se rende*,
+*X% de escapar* ou *vai correr*; o alvo da missão ganha um *alvo!*) e o próprio raio. A câmera
+enquadra todos eles. São três faixas, uma logo depois da outra:
 
-**Segurar para abordar:** um toque rápido no **Abordar** abre essa prévia, mas dá para
-**segurar** o botão: o raio cresce no tabuleiro anel por anel, um contorno vermelho se fecha em
-volta do botão e, quando fecha (cerca de 1 s), a abordagem é feita direto. Soltar antes desiste.
+- **Verde, raio de abordagem:** **2 + intimidação** do agente, **+2** enquanto ele estiver
+  agrupado, nunca menor que 1. Quem está nele se rende.
+- **Amarelo, zona de rolagem (3 hexágonos):** cada suspeito rola **d20 + modificador** e passa
+  no teste com **8 ou mais**. O modificador é **−1** no hexágono mais perto da abordagem, **0** no
+  meio e **+1** no mais perto da fuga (60%, 65% e 70% de escapar). Passou: não se rende, fica em
+  alerta e corre no turno inimigo. Falhou: se rende.
+- **Laranja, zona de fuga (1 hexágono):** fica em alerta e corre, sem rolar.
+
+Sem bônus, as faixas são 1–2, 3–5 e 6. O painel mostra a conta (base · intimidação · grupo), as
+faixas e quantos se rendem, rolam e vão correr. Os números ficam em `APPROACH_RULES`
+(`src/app/game/enemies.ts`). O botão
+**Abordar** só aparece com algum suspeito dentro do raio de quem está na vez **e com acesso direto** a
+ele: parede, porta fechada ou carga alta no meio do caminho tiram o suspeito da abordagem (e das
+faixas pintadas). Um arrombamento recente soma **+1 de intimidação** (ver [Portas](#portas)). A decisão fica em
+dois botões separados: o carimbo **Abordar!** (embaixo, à direita; ✕ no controle) confirma e o
+botão **vermelho** de **Cancelar** (na esquerda; ○ no controle) desiste. Tocar no tabuleiro não
+faz nada nesse modo. O cinza é um passe de pós-processamento (`src/app/game/spotlight.ts`).
 
 Ao abordar, uma **onda de voz** sai do agente: cada hexágono do raio pula e acende quando ela
 passa, e cada suspeito leva um susto e reage (rende-se ou fica em alerta) quando a onda chega
 até ele, então quem está mais perto reage primeiro. Em seguida aparece o **auto de abordagem**:
 uma ficha com a foto de cada suspeito, carimbo verde **Rendido** ou círculo vermelho **Vai
-correr**. Ela some sozinha em uns 3 s (ou com um toque em **Fechar**) e a vez passa. Os tempos
+correr**, com a conta do d20 de quem rolou. Ela some sozinha em uns 3 s (ou com um toque em **Fechar**) e a vez passa. Os tempos
 ficam em `APPROACH_FX` (`src/app/game/approach-fx.ts`).
 
-- Inimigos a até 2 hexágonos **se rendem**: a base fica branca, eles se agacham com uma bandeira branca, param de
-  agir e continuam ocupando o hexágono. Vale também para quem já estava em alerta.
-- Inimigos entre 3 hexágonos e o fim do raio (4 sem bônus) são **alertados** e tentam correr no
-  turno inimigo.
+- Quem **se rende**: a base fica branca, ele se agacha com uma bandeira branca, para de agir e
+  continua ocupando o hexágono. Vale também para quem já estava em alerta.
+- Quem passou no teste e ainda não fugiu pode ser abordado de novo e rola outra vez.
 - A distância é em linha reta: por enquanto, paredes não abafam o grito.
 - Abordar **encerra a vez** do agente. Se o movimento acabar com inimigos no raio, a vez
   não passa sozinha, para dar tempo de abordar.
@@ -111,6 +121,7 @@ encontro** possíveis — lugares que todos alcançam com o movimento que resta 
 Toque num ponto para ver o caminho e toque de novo (ou em **Agrupar!**) para confirmar: quem está
 na vez vai até o ponto e os outros param em volta dele. Gasta-se o caminho mais longo entre todos.
 
+- A partida **começa com a equipe agrupada** (os três saem juntos do ponto de partida).
 - Agrupados, os agentes **andam juntos**: quando um deles anda, os outros seguem o rastro logo
   atrás. Quem não consegue acompanhar (caminho bloqueado) sai do grupo.
 - Juntos, cada agente ganha **+2 de movimento** na rolagem do seu turno e **+2 de alcance** na
@@ -170,9 +181,16 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
 - **Cômodo 2:** ao entrar (mesmo só de passagem), cada agente rola **percepção** uma vez — um **d20** que
   aparece numa ficha no canto esquerdo da tela. Tirando **mais que 6**, ele repara em algo na
   **prateleira** da parede do leste, que ganha uma lupa.
-- Colado na prateleira percebida, aparece **Inspecionar** (□ no controle, quando não há ninguém para
-  abordar): rola outro d20 e, tirando **mais que 4**, acha a **arma escondida**, que é apreendida. Se
-  falhar, o botão vira **Rolar de novo**. Cada tentativa gasta **1 de movimento**.
+- Colado na prateleira percebida, **toque na lupa** (que pulsa; □ no controle, quando não há ninguém
+  para abordar): a câmera faz o mesmo enquadramento da cena da porta (arrombar / abrir fechadura) —
+  gira 45° para o lado do agente, desce para 30° e chega perto, mirando entre a prateleira e o
+  agente, que vira para ela — e fica **travada** (arrastar, pinça e roda não mexem nela). A HUD some;
+  sobram o bilhete e os botões de sempre: o carimbo **Inspecionar** (✕/□, ou a lupa de novo) rola o
+  d20 e **Cancelar** (○) volta ao normal sem gastar nada. Tirando **mais que 4**, acha a **arma
+  escondida**, que é apreendida. Se falhar, o d20 fica com o resultado, o bilhete diz que falhou e
+  dá para tentar **De novo!** ali mesmo ou **Fechar**. **Cada rolagem gasta 1 de movimento.**
+  Longe da prateleira, tocar na lupa avisa que é
+  preciso chegar colado nela.
 - Se os três agentes falharem na percepção, a arma fica sem ser encontrada.
 
 Os **objetivos** da missão ficam num bilhete embaixo da pilha de suspeitos. Da casa, de início, aparece só

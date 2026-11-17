@@ -2,7 +2,8 @@
  * Camada "RPG": atributos de cada agente, escolhidos na ficha antes da missão.
  *
  * - **Velocidade:** cada ponto vale +1 de movimento no turno (somado aos 2d4).
- * - **Intimidação:** cada ponto vale +1 no alcance da abordagem (ver `APPROACH_SCALING`).
+ * - **Intimidação:** cada ponto vale +1 no raio de abordagem; a zona de rolagem e a de fuga
+ *   se afastam junto (ver `approachRulesFor`).
  *
  * Cada atributo vai de −5 a +5 e todo agente começa com 0. O jogador tem `points` (1) para pôr
  * em um dos dois; o lado negativo fica para penalidades de outras fontes (peso, equipamento).
@@ -11,7 +12,7 @@
  *
  * Só funções puras (testadas em `stats.spec.ts`); as telas decidem quando usá-las.
  */
-import { APPROACH_RULES } from './enemies';
+import { APPROACH_RULES, ApproachZones, approachZones } from './enemies';
 import { GROUP_RULES } from './group';
 
 export type StatKey = 'velocidade' | 'intimidacao';
@@ -29,16 +30,6 @@ export const STAT_RULES = {
 } as const;
 
 export const ZERO_STATS: Stats = { velocidade: 0, intimidacao: 0 };
-
-/**
- * Onde a intimidação (e o bônus de grupo) entram na abordagem. Hoje só o **raio total** (o de
- * alerta, `APPROACH_RULES.radius`) cresce; a zona de rendição fica como está. Para que ela
- * também cresça, troque `surrender` para `true`.
- */
-export const APPROACH_SCALING = {
-  radius: true,
-  surrender: false,
-} as const;
 
 const clampStat = (v: number): number => Math.min(STAT_RULES.max, Math.max(STAT_RULES.min, v));
 
@@ -115,19 +106,19 @@ export function turnMovement(diceTotal: number, loadout: Loadout, grouped: boole
   return Math.max(0, diceTotal + statBreakdown(loadout, 'velocidade', grouped).total);
 }
 
-/** Regras da abordagem de um agente: o raio base cresce com a intimidação (e com o grupo). */
+/**
+ * Faixas da abordagem de um agente: o raio de abordagem base cresce com a intimidação (e com
+ * o grupo), nunca fica menor que 1, e a zona de rolagem e a de fuga vêm logo depois dele.
+ */
 export function approachRulesFor(
   loadout: Loadout,
   grouped: boolean,
-  base: { radius: number; surrenderRange: number } = APPROACH_RULES,
+  rules: Pick<typeof APPROACH_RULES, 'surrenderRange' | 'rollBand' | 'fleeBand'> = APPROACH_RULES,
   /** Intimidação extra de fora da ficha (o arrombamento dá +1 à equipe por alguns turnos). */
   extra = 0,
-): { radius: number; surrenderRange: number } {
+): ApproachZones {
   const bonus = statBreakdown(loadout, 'intimidacao', grouped).total + extra;
-  // sempre dá para abordar quem está colado (raio ≥ 1), e a rendição nunca passa do raio
-  const radius = Math.max(1, base.radius + (APPROACH_SCALING.radius ? bonus : 0));
-  const surrender = Math.max(0, base.surrenderRange + (APPROACH_SCALING.surrender ? bonus : 0));
-  return { radius, surrenderRange: Math.min(radius, surrender) };
+  return approachZones(rules.surrenderRange + bonus, rules);
 }
 
 /**

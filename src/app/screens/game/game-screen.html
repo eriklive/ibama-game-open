@@ -1,4 +1,4 @@
-<div class="game" [class.door-focus]="phase() === 'door'">
+<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming()" [class.door-focus]="phase() === 'door'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
 
   <!-- Topo: fita crepe com a linha do tempo -->
@@ -106,7 +106,7 @@
     </div>
   }
 
-  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr; some sozinho -->
+  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); some sozinho -->
   @if (report(); as r) {
     <div class="report" role="status" aria-live="polite" data-testid="approach-report" (click)="closeReport()">
       <div class="report-head">
@@ -120,6 +120,7 @@
               <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" /><circle cx="20" cy="12" r="5.5" /><path class="pole" d="M27 24 L33 6" /><rect class="flag" x="31" y="5" width="7" height="5" /></svg>
             </span>
             <span class="pola-name">{{ e.name }}</span>
+            @if (r.rolls.get(e.id); as t) { <span class="pola-roll">d20 {{ t.roll }}{{ modTerm(t.modifier) }} = {{ t.total }}</span> }
             <span class="pola-stamp">Rendido</span>
           </li>
         }
@@ -129,6 +130,7 @@
               <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" transform="rotate(12 20 25)" /><circle cx="22" cy="12" r="5.5" /></svg>
             </span>
             <span class="pola-name">{{ e.name }}</span>
+            @if (r.rolls.get(e.id); as t) { <span class="pola-roll">d20 {{ t.roll }}{{ modTerm(t.modifier) }} = {{ t.total }}</span> }
             <span class="pola-stamp">Vai correr</span>
             <svg class="pola-circle" viewBox="0 0 100 130" preserveAspectRatio="none" aria-hidden="true">
               <path pathLength="100" d="M50 4 C 88 2, 98 40, 96 70 C 94 108, 70 126, 44 124 C 14 122, 2 96, 4 62 C 6 28, 22 6, 58 8" />
@@ -277,17 +279,18 @@
   }
 
   <!-- Teste de d20 (percepção, inspecionar, portas): uma ficha na lateral -->
-  @if (check(); as ck) {
+  @for (ck of checks(); track ck.id) {
     <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
       <span class="check-kicker">{{ ck.kicker }} · d20</span>
       <span class="check-who">{{ ck.who }}</span>
-      <span class="d20" [class.rolling]="ck.result === null" aria-hidden="true">
-        <svg viewBox="0 0 100 100">
-          <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
-          <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
-        </svg>
-        <span class="d20-value">{{ ck.face }}</span>
-      </span>
+      <app-d20
+        class="check-die"
+        aria-hidden="true"
+        [value]="ck.value"
+        [duration]="ck.duration ?? 1200"
+        [tone]="ck.pass === null ? 'gold' : ck.pass ? 'pass' : 'fail'"
+        (rolled)="checkDieRolled($event)" />
+      @if (ck.result !== null) { <span class="check-value" data-testid="check-value">{{ ck.result }}</span> }
       <span class="check-need">{{ ck.need }}</span>
       @if (ck.pass !== null) {
         <span class="check-result" data-testid="check-result">{{ ck.pass ? ck.passText : ck.failText }}</span>
@@ -304,29 +307,41 @@
         <span class="stamp-ring"><span class="stamp-text">Turno<br />inimigo</span></span>
       </div>
     } @else if (approaching()) {
-      <div class="slip" role="status" aria-live="polite" data-testid="hint">
+      <div class="slip approach-slip" role="status" aria-live="polite" data-testid="hint">
         <strong>Abordagem de {{ active().name }}</strong>
         @let ap = approachParts();
         <span class="small approach-range" data-testid="approach-range">
-          Alcance {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}@if (ap.door) { · arrombamento +{{ ap.door }}}
+          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}@if (ap.door) { · arrombamento +{{ ap.door }}}
         </span>
-        <ul class="approach-list" data-testid="approach-list">
-          @for (e of approachPlan().surrender; track e.id) {
-            <li class="surrender">{{ e.name }} se rende</li>
+        <span class="small approach-range" data-testid="approach-bands">
+          Rolagem {{ ap.zones.surrenderRange + 1 }}–{{ ap.zones.rollRange }} (d20 ≥ {{ approachRules.escapeDC }} escapa) · fuga até {{ ap.zones.radius }}
+        </span>
+        @let plan = approachPlan();
+        <span class="approach-tally" aria-hidden="true">
+          @if (plan.surrender.length) { <span class="surrender">{{ plan.surrender.length }} se {{ plan.surrender.length === 1 ? 'rende' : 'rendem' }}</span> }
+          @if (plan.roll.length) { <span class="roll">{{ plan.roll.length }} {{ plan.roll.length === 1 ? 'rola' : 'rolam' }} d20</span> }
+          @if (plan.flee.length) { <span class="flee">{{ plan.flee.length }} {{ plan.flee.length === 1 ? 'vai' : 'vão' }} correr</span> }
+          <span class="small">· encerra a vez</span>
+        </span>
+        <!-- no tabuleiro cada suspeito tem a sua etiqueta; a lista fica para o leitor de tela -->
+        <ul class="sr-only" data-testid="approach-list">
+          @for (e of plan.surrender; track e.id) {
+            <li>{{ e.name }} se rende</li>
           }
-          @for (e of approachPlan().flee; track e.id) {
-            <li class="flee">{{ e.name }} vai correr</li>
+          @for (c of plan.roll; track c.enemy.id) {
+            <li>{{ c.enemy.name }} rola d20{{ modTerm(c.modifier) }}: {{ percent(c.chance) }} de escapar@if (missionTargets().has(c.enemy.id)) { · alvo da missão}</li>
+          }
+          @for (e of plan.flee; track e.id) {
+            <li>{{ e.name }} vai correr@if (missionTargets().has(e.id)) { · alvo da missão}</li>
           }
         </ul>
-        <span class="small">Encerra a vez.</span>
       </div>
-      <button type="button" class="stamp confirm" (click)="confirmApproach()">
-        <span class="stamp-ring"><span class="stamp-text">Abordar!</span></span>
+      <button type="button" class="stamp confirm approach-confirm" data-testid="approach-confirm" (click)="confirmApproach()">
+        <span class="stamp-ring">
+          <span class="stamp-small">confirmar</span>
+          <span class="stamp-text">Abordar!</span>
+        </span>
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-      </button>
-      <button type="button" class="paper side" (click)="cancelApproach()">
-        <span class="stencil">Cancelar</span>
-        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
       </button>
     } @else if (burning() && burnable(); as target) {
       <div class="slip burn-slip" role="status" aria-live="polite" data-testid="burn-hint">
@@ -435,22 +450,21 @@
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
         </button>
       }
-      <!-- Inspecionar: colado no móvel em que alguém reparou (cada tentativa gasta movimento) -->
-      @if (!charging() && inspectable(); as item) {
+      <!-- Inspecionar: o toque é na lupa do tabuleiro; este botão só aparece com o foco do teclado -->
+      @if (inspectable(); as item) {
         <button
           type="button"
-          class="paper inspect"
+          class="paper inspect keyboard-only"
           [disabled]="movesLeft() < searchRules.inspectCost"
-          [attr.aria-label]="(searchFails().get(item.id) ? 'Rolar de novo: inspecionar a ' : 'Inspecionar a ') + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'"
+          [attr.aria-label]="'Inspecionar a ' + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'"
           data-testid="inspect"
           (click)="inspect()">
-          <span class="stencil">{{ searchFails().get(item.id) ? 'Rolar de novo' : 'Inspecionar' }}</span>
+          <span class="stencil">Inspecionar</span>
           <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
-          @if (pad() && !canApproach() && !burnable()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
       <!-- Porta: colado numa porta, abre o menu (arrombar, pick lock, abrir) -->
-      @if (!charging() && nearDoor(); as door) {
+      @if (nearDoor(); as door) {
         <button
           type="button"
           class="paper door-btn"
@@ -475,39 +489,14 @@
           @if (pad() && !canApproach()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
-      <!-- Abordar só aparece com suspeito no raio: toque abre a prévia, segurar aborda direto -->
+      <!-- Abordar só aparece com suspeito no raio: o toque abre o modo de abordagem -->
       @if (phase() === 'moving-choice' && canApproach()) {
-        @if (charging()) {
-          <div class="slip hold-slip" role="status" aria-live="polite" data-testid="hold-hint">
-            <strong>Segure para abordar</strong>
-            <ul class="approach-list">
-              @for (e of approachPlan().surrender; track e.id) {
-                <li class="surrender">{{ e.name }} se rende</li>
-              }
-              @for (e of approachPlan().flee; track e.id) {
-                <li class="flee">{{ e.name }} vai correr</li>
-              }
-            </ul>
-            <span class="small">Solte antes para desistir.</span>
-          </div>
-        }
         <button
           type="button"
           class="paper approach"
-          [class.holding]="charging()"
-          [attr.aria-label]="'Abordar ' + approachCount() + (approachCount() === 1 ? ' suspeito' : ' suspeitos') + ' no raio. Toque para ver a prévia; segure para abordar direto.'"
+          [attr.aria-label]="'Abordar ' + approachCount() + (approachCount() === 1 ? ' suspeito' : ' suspeitos') + ' no raio: abre o modo de abordagem para confirmar ou cancelar'"
           data-testid="approach"
-          (pointerdown)="approachPress($event, 'pointer')"
-          (pointerup)="approachRelease()"
-          (pointercancel)="approachRelease()"
-          (keydown)="approachKey($event, true)"
-          (keyup)="approachKey($event, false)"
-          (contextmenu)="$event.preventDefault()"
-          (click)="approachClick()">
-          <svg class="hold-ring" viewBox="0 0 100 50" preserveAspectRatio="none" aria-hidden="true">
-            <rect x="1.5" y="1.5" width="97" height="47" pathLength="100" vector-effect="non-scaling-stroke"
-              [attr.stroke-dashoffset]="100 - holdProgress() * 100" />
-          </svg>
+          (click)="startApproach()">
           <span class="approach-stamp">Abordar</span>
           <span class="badge" aria-hidden="true">{{ approachCount() }}</span>
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
@@ -515,6 +504,88 @@
       }
     }
   </div>
+
+  <!--
+    Inspeção (toque na lupa): câmera travada atrás do agente, a HUD some e só fica o que dá
+    para tocar, no mesmo lugar e no mesmo jeito dos outros modos (bilhete, carimbo e Cancelar).
+  -->
+  @if (aiming(); as item) {
+    <div class="focus-stage" data-testid="inspect-focus">
+      @if (search(); as sv) {
+        <!-- uma rolagem por lance: "De novo!" recria o dado, que rola outra vez -->
+        @for (n of [sv.throw]; track n) {
+          <app-d20 class="focus-die" aria-hidden="true" [tone]="sv.pass === null ? 'gold' : sv.pass ? 'pass' : 'fail'" (rolled)="searchDieRolled($event)" />
+        }
+      }
+    </div>
+    <div class="aim-actions">
+      @if (search(); as sv) {
+        <div class="slip inspect-slip" [class.pass]="sv.pass === true" role="status" aria-live="polite" data-testid="search-focus">
+          @if (sv.pass === null) {
+            <strong>Rolando…</strong>
+            <span>{{ sv.who }} · {{ sv.furniture }}</span>
+            <span class="small">d20 · mais que {{ sv.target }}</span>
+          } @else if (sv.pass) {
+            <strong data-testid="search-result">Achou!</strong>
+            <span>{{ sv.seized }}</span>
+            <span class="small">tirou {{ sv.result }} no d20</span>
+          } @else {
+            <strong data-testid="search-result">Falhou</strong>
+            <span>Tirou {{ sv.result }}: nada na {{ sv.furniture }} ainda.</span>
+            <span class="small">
+              {{ movesLeft() >= searchRules.inspectCost ? 'Tentar de novo gasta ' + searchRules.inspectCost + ' mov. (resta ' + movesLeft() + ')' : 'Sem movimento para tentar de novo' }}
+            </span>
+          }
+        </div>
+        @if (sv.pass === false) {
+          <button type="button" class="stamp confirm" #searchClose data-testid="search-retry"
+            [disabled]="movesLeft() < searchRules.inspectCost" (click)="retryInspect()">
+            <span class="stamp-ring">
+              <span class="stamp-small">{{ searchRules.inspectCost }} mov.</span>
+              <span class="stamp-text">De novo!</span>
+            </span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+          </button>
+          <button type="button" class="paper side" data-testid="search-close" (click)="closeSearch()">
+            <span class="stencil">Fechar</span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+          </button>
+        } @else if (sv.pass) {
+          <button type="button" class="stamp confirm" #searchClose data-testid="search-close" (click)="closeSearch()">
+            <span class="stamp-ring"><span class="stamp-text">Fechar</span></span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+          </button>
+        }
+      } @else {
+        <div class="slip inspect-slip" role="status" aria-live="polite" data-testid="inspect-hint">
+          <strong>Inspecionar a {{ item.furniture }}?</strong>
+          <span>d20 · mais que {{ searchRules.find }} acha.</span>
+          <span class="small">Cada rolagem gasta {{ searchRules.inspectCost }} mov. (resta {{ movesLeft() }})</span>
+        </div>
+        <button type="button" class="stamp confirm inspect-stamp" data-testid="inspect-go" (click)="inspect()"
+          [attr.aria-label]="'Inspecionar a ' + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'">
+          <span class="stamp-ring">
+            <span class="stamp-small">d20 · {{ searchRules.inspectCost }} mov.</span>
+            <span class="stamp-text">Inspecionar</span>
+          </span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+        </button>
+        <button type="button" class="paper side" data-testid="inspect-cancel" (click)="cancelInspect()">
+          <span class="stencil">Cancelar</span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+        </button>
+      }
+    </div>
+  }
+
+  <!-- Modo de abordagem: cancelar fica sozinho na esquerda, longe do confirmar -->
+  @if (approaching()) {
+    <button type="button" class="approach-cancel" data-testid="approach-cancel" (click)="cancelApproach()" aria-label="Cancelar a abordagem">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+      <span>Cancelar</span>
+      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+    </button>
+  }
 
   @if (pad(); as p) {
     @if (padHelp()) {
@@ -542,20 +613,13 @@
 
   @if (phase() === 'rolling') {
     <div class="roll-stage" [class.settled]="rolled() > 0" role="dialog" aria-modal="true" aria-labelledby="roll-who" data-testid="roll">
-      <div class="roll-tray" #diceHost aria-hidden="true">
-        @if (flatDice()) {
-          <div class="dice big" [class.rolling]="rolled() === 0">
-            @for (v of dice(); track $index) {
-              <span class="d4" [style.animation-delay.ms]="$index * 90">
-                <svg viewBox="0 0 100 92"><polygon points="50,4 96,88 4,88" /><path d="M50 4V62L4 88M50 62L96 88" /></svg>
-                <span class="d4-value">{{ rolled() > 0 ? v : '?' }}</span>
-              </span>
-            }
-          </div>
+      <div class="roll-tray" aria-hidden="true">
+        @for (k of rollKeys(); track k) {
+          <app-d4 class="roll-die" [delay]="$index * 80" (rolled)="dieRolled(k, $index, $event)" />
         }
       </div>
       <header class="roll-head">
-        <span class="roll-kicker">Rolagem de movimento · {{ dice().length }}d{{ diceSides }}</span>
+        <span class="roll-kicker">Rolagem de movimento · {{ rollKeys().length }}d{{ diceSides }}</span>
         <span class="roll-who" id="roll-who">Vez de {{ active().name }}</span>
       </header>
       <div class="roll-result" aria-live="polite">

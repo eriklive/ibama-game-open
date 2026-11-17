@@ -11,6 +11,7 @@ import { StaticShadow, castsMovingShadow } from './static-shadow';
 import { HexTile, TileField } from './tile-field';
 import { Door, commonDoors, seeThroughDoors } from './door';
 import { DoorPush, DoorViews } from './door-view';
+import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -42,6 +43,7 @@ const COLORS = {
   enemyAlert: 0xff8a1f,
   enemySurrendered: 0xe9eef0,
   approachSurrender: 0x8fe08a,
+  approachRoll: 0xf5e663,
   approachFlee: 0xffb067,
   aura: 0x9dff8f,
   /** Chão "low poly" além do raio carregado: só uma cor de mata fechada sob a névoa. */
@@ -163,11 +165,38 @@ interface Fire {
   born: number;
 }
 
+/**
+ * Vista de inspeção: o mesmo enquadramento da cena da porta (arrombar / abrir fechadura).
+ * A câmera gira 45° a partir da de sempre, para o lado do agente, desce para 30° e chega
+ * perto, mirando entre o objeto e o agente.
+ */
+const INSPECT_CAM = {
+  /** Inclinação (a câmera de sempre fica a 55°). */
+  pitch: THREE.MathUtils.degToRad(30),
+  /** Distância até o ponto mirado (multiplicada em retrato, como a câmera de sempre). */
+  dist: 7.2,
+  /** Teto do multiplicador de retrato. */
+  portraitMax: 2.1,
+  /** Giro a partir da câmera de sempre. */
+  turn: Math.PI / 4,
+  /** Ponto mirado: do objeto até o agente (0 = objeto, 1 = agente), e altura. */
+  towardAgent: 0.45,
+  aimHeight: 1.15,
+  /** Rapidez da ida e da volta (taxa exponencial por segundo). */
+  blendRate: 5,
+} as const;
+
+function reducedMotionQuery(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export interface HexBoardCallbacks {
   /** Toque num hexágono vazio (ou fora do tabuleiro, com `null`). */
   onHexTap(hex: HexCoord | null): void;
   /** Toque numa peça de personagem (ou no hexágono em que ela está). */
   onUnitTap(id: string): void;
+  /** Toque na lupa (ou no móvel debaixo dela). */
+  onClueTap?(): void;
 }
 
 /**
@@ -251,8 +280,14 @@ export class HexBoard {
 
   private reachable = new Set<string>();
   private vision = new Set<string>();
-  /** Pré-visualização da abordagem: zona de rendição e zona de fuga. */
-  private approach: { surrender: Set<string>; flee: Set<string> } | null = null;
+  /** Pré-visualização da abordagem: zona de rendição, zona de rolagem e zona de fuga. */
+  private approach: { surrender: Set<string>; roll: Set<string>; flee: Set<string> } | null = null;
+  /** Escala de cinza do modo de abordagem (ver `setSpotlight`). */
+  private spotlight!: Spotlight;
+  private spot: { lit: THREE.Object3D[]; zone: THREE.InstancedMesh | null; tiles: HexTile[] } | null = null;
+  /** Etiquetas sobre os suspeitos (desenhadas por cima, depois do cinza). */
+  private readonly labelScene = new THREE.Scene();
+  private readonly labels = new Map<string, THREE.Sprite>();
   /** Onda de voz da abordagem: sai do agente e acende os hexágonos do raio. */
   private wave: { from: HexCoord; start: number; end: number } | null = null;
   private waveRing?: THREE.Mesh;
@@ -269,6 +304,13 @@ export class HexBoard {
   private readonly camTarget = new THREE.Vector3();
   private readonly camGoal = new THREE.Vector3();
   private zoom = 1;
+  /**
+   * Vista de inspeção (ver `inspectView`): ponto mirado e direção (do ponto até a câmera, no
+   * chão). `inspectBlend` vai de 0 (câmera de sempre) a 1 (inspeção) e volta.
+   */
+  private inspect: { target: THREE.Vector3; dir: THREE.Vector3 } | null = null;
+  private inspectLast: { target: THREE.Vector3; dir: THREE.Vector3 } | null = null;
+  private inspectBlend = 0;
   private readonly bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
   /** Mundo semiaberto: a câmera passeia num círculo (centro e raio no plano do mundo). */
   private worldBounds: { x: number; z: number; r: number } | null = null;
@@ -292,6 +334,7 @@ export class HexBoard {
     // contagem por quadro (a sombra móvel faz um `render` dentro do outro)
     this.renderer.info.autoReset = false;
     this.staticShadow = new StaticShadow(this.renderer, this.scene, this.sun);
+    this.spotlight = new Spotlight(this.renderer, this.scene, this.camera);
     this.area = playArea(map);
 
     this.scene.background = new THREE.Color(COLORS.background);
@@ -365,7 +408,8 @@ export class HexBoard {
   focus(id: string | null, moveCamera = true): void {
     this.focusId = id;
     const u = id ? this.units.get(id) : undefined;
-    if (u && moveCamera) {
+    // na vista de inspeção a câmera fica travada
+    if (u && moveCamera && !this.inspect) {
       this.camGoal.copy(this.worldOf(u.hex));
       this.clampGoal();
     }
@@ -391,9 +435,73 @@ export class HexBoard {
   }
 
   /** Mostra (ou esconde, com `null`) as zonas da abordagem. */
-  setApproachZones(zones: { surrender: Iterable<string>; flee: Iterable<string> } | null): void {
-    this.approach = zones && { surrender: new Set(zones.surrender), flee: new Set(zones.flee) };
+  setApproachZones(zones: { surrender: Iterable<string>; roll: Iterable<string>; flee: Iterable<string> } | null): void {
+    this.approach = zones && { surrender: new Set(zones.surrender), roll: new Set(zones.roll), flee: new Set(zones.flee) };
     this.paintTiles();
+  }
+
+  /**
+   * Modo de abordagem: o tabuleiro fica em cinza, menos os personagens de `units` (o da vez),
+   * os inimigos de `labels` (cada um com uma etiqueta: se rende, rola ou corre) e os hexágonos de
+   * `hexes` (o raio). `null` devolve a cor.
+   */
+  setSpotlight(
+    spot: {
+      units: readonly string[];
+      labels: readonly { id: string; text: string; tone: 'surrender' | 'roll' | 'flee' }[];
+      hexes: Iterable<string>;
+    } | null,
+  ): void {
+    // desfaz o destaque anterior
+    if (this.spot) {
+      for (const o of this.spot.lit) o.layers.disable(SPOTLIGHT_LAYER);
+      if (this.spot.zone) {
+        this.scene.remove(this.spot.zone);
+        this.spot.zone.geometry.dispose();
+        (this.spot.zone.material as THREE.Material).dispose();
+      }
+      this.spot = null;
+    }
+    for (const sprite of this.labels.values()) {
+      this.labelScene.remove(sprite);
+      sprite.material.map?.dispose();
+      sprite.material.dispose();
+    }
+    this.labels.clear();
+    this.spotlight.set(!!spot);
+    if (!spot) return;
+
+    const lit: THREE.Object3D[] = [];
+    const light = (root: THREE.Object3D) =>
+      root.traverse((o) => {
+        if (!(o as THREE.Mesh).isMesh) return;
+        o.layers.enable(SPOTLIGHT_LAYER);
+        lit.push(o);
+      });
+    for (const id of spot.units) {
+      const u = this.units.get(id);
+      if (u) light(u.group);
+    }
+    if (spot.units.includes(this.activeId ?? '')) light(this.activeMarker);
+    for (const l of spot.labels) {
+      const e = this.enemies.get(l.id);
+      if (!e) continue;
+      light(e.group);
+      const sprite = this.labelSprite(l.text, l.tone);
+      this.labels.set(l.id, sprite);
+      this.labelScene.add(sprite);
+    }
+    // o raio: prismas só na camada do destaque, por cima dos hexágonos do chão
+    const tiles = [...spot.hexes].map((k) => this.tiles.get(k)).filter((t): t is HexTile => !!t);
+    let zone: THREE.InstancedMesh | null = null;
+    if (tiles.length) {
+      zone = new THREE.InstancedMesh(this.field.prism.clone(), new THREE.MeshBasicMaterial(), tiles.length);
+      zone.layers.set(SPOTLIGHT_LAYER);
+      zone.frustumCulled = false;
+      this.scene.add(zone);
+    }
+    this.spot = { lit, zone, tiles };
+    this.updateSpotlight();
   }
 
   /**
@@ -436,8 +544,75 @@ export class HexBoard {
     this.cursor = hex && this.tiles.has(hexKey(hex)) ? hex : null;
   }
 
+  /**
+   * Vista de inspeção, no mesmo enquadramento da cena da porta (arrombar / abrir fechadura):
+   * a câmera gira 45° a partir da de sempre, para o lado em que o agente está, desce para 30°
+   * e chega perto, mirando entre o `target` (o móvel — um hexágono ou o próprio objeto 3D) e
+   * o agente `agentId`, que vira para o objeto. Enquanto durar, o jogador não mexe na câmera
+   * (arrastar, pinça, roda e controle são ignorados) e o tabuleiro só aceita toque na lupa.
+   * `endInspectView` volta, suave, para a câmera de sempre.
+   */
+  inspectView(agentId: string, target: HexCoord | THREE.Object3D): void {
+    const u = this.units.get(agentId);
+    if (!u) return;
+    const agent = this.worldOf(u.hex);
+    const center = target instanceof THREE.Object3D
+      ? target.getWorldPosition(new THREE.Vector3()).setY(0)
+      : this.worldOf(target);
+    const c = INSPECT_CAM;
+    const aim = center.clone().lerp(agent, c.towardAgent).setY(this.groundAt(agent.x, agent.z) + c.aimHeight);
+    // de que lado do objeto o agente está; a câmera fica do lado dele, 45° para um lado
+    const n = agent.clone().sub(center).setY(0);
+    if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
+    n.normalize();
+    const turn = (v: THREE.Vector3, a: number) =>
+      new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), 0, -v.x * Math.sin(a) + v.z * Math.cos(a));
+    // gira a partir da câmera de sempre (que olha de +Z), para o lado em que o agente aparece
+    const home = new THREE.Vector3(0, 0, 1);
+    const options = [turn(home, c.turn), turn(home, -c.turn)].sort((a, b) => b.dot(n) - a.dot(n));
+    const dir = options[0].dot(n) > 0.1 ? options[0] : turn(n, c.turn);
+    this.inspect = { target: aim, dir };
+    this.inspectLast = this.inspect;
+    if (reducedMotionQuery()) this.inspectBlend = 1;
+    // o agente vira para o objeto
+    u.yaw = Math.atan2(center.x - agent.x, center.z - agent.z);
+    this.pointers.clear();
+    this.tapStart = null;
+    this.pinchDist = 0;
+  }
+
+  /** Sai da vista de inspeção: a câmera volta, suave, para a de sempre. */
+  endInspectView(): void {
+    if (!this.inspect) return;
+    this.inspect = null;
+    if (reducedMotionQuery()) this.inspectBlend = 0;
+  }
+
+  /** Se a câmera está travada na vista de inspeção. */
+  get inspecting(): boolean {
+    return !!this.inspect;
+  }
+
+  /**
+   * Enquadra um grupo de hexágonos (quem aborda e os suspeitos): a câmera vai para o meio
+   * deles e afasta o que for preciso para todos caberem na tela (nunca aproxima).
+   */
+  frameHexes(hexes: readonly HexCoord[]): void {
+    if (this.inspect) return;
+    if (!hexes.length) return;
+    const pts = hexes.map((h) => this.worldOf(h));
+    const mid = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / pts.length);
+    const spread = Math.max(...pts.map((p) => Math.max(Math.abs(p.x - mid.x) / 1.9, Math.abs(p.z - mid.z))));
+    this.setZoom(Math.max(this.zoom, (spread + 2) / 3));
+    this.camGoal.copy(mid);
+    // a fita do topo cobre mais que o painel de baixo: o enquadramento desce um pouco
+    this.camGoal.z -= 0.9;
+    this.clampGoal();
+  }
+
   /** Desloca a câmera só o necessário para o hexágono ficar longe das bordas da tela. */
   keepInView(hex: HexCoord): void {
+    if (this.inspect) return;
     const p = this.worldOf(hex);
     const portrait = this.camera.aspect < 1;
     const mx = (portrait ? 1.6 : 4) * this.zoom;
@@ -449,6 +624,7 @@ export class HexBoard {
 
   /** Arrasta a câmera (em unidades de tela: x direita, y baixo), proporcional ao zoom. */
   panBy(dx: number, dy: number): void {
+    if (this.inspect) return;
     this.camGoal.x += dx * this.zoom;
     this.camGoal.z += dy * this.zoom * 1.3;
     this.clampGoal();
@@ -456,6 +632,7 @@ export class HexBoard {
 
   /** Aproxima (< 1) ou afasta (> 1) a câmera. */
   zoomBy(factor: number): void {
+    if (this.inspect) return;
     this.setZoom(this.zoom * factor);
   }
 
@@ -878,8 +1055,11 @@ export class HexBoard {
     });
   }
 
-  /** Mistura a câmera de sempre com a da cena da porta (ver `focusDoor`). */
-  private blendCine(dt: number, look: THREE.Vector3): void {
+  /**
+   * Mistura a câmera com a da cena da porta (ver `focusDoor`), como a inspeção: ajusta a
+   * posição e `look`, desloca a vista para a esquerda das fichas e devolve a distância.
+   */
+  private blendCine(dt: number, look: THREE.Vector3, dist: number): number {
     const goal = this.cine ? 1 : 0;
     this.cineBlend += (goal - this.cineBlend) * (1 - Math.exp(-dt * 5));
     if (Math.abs(goal - this.cineBlend) < 0.002) this.cineBlend = goal;
@@ -888,24 +1068,26 @@ export class HexBoard {
     const h = this.canvas.clientHeight;
     if (!c || this.cineBlend <= 0) {
       if (this.camera.view?.enabled) this.camera.clearViewOffset();
-      return;
+      return dist;
     }
     const e = this.cineBlend * this.cineBlend * (3 - 2 * this.cineBlend);
     const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
     // perto o bastante para ver o chute, longe o bastante para caber quem está do outro lado
     // da porta (e o balão de fala sobre a cabeça dele)
-    const dist = 8.8 * Math.min(portrait, 2.1);
+    const near = 8.8 * Math.min(portrait, 2.1);
     const pitch = THREE.MathUtils.degToRad(31);
     const pos = c.target
       .clone()
-      .addScaledVector(c.dir, Math.cos(pitch) * dist)
-      .setY(c.target.y + Math.sin(pitch) * dist);
+      .addScaledVector(c.dir, Math.cos(pitch) * near)
+      .setY(c.target.y + Math.sin(pitch) * near);
     this.camera.position.lerp(pos, e);
-    this.camera.lookAt(look.clone().lerp(c.target, e));
+    look.lerp(c.target, e);
     const off = c.offsetPx * e;
     if (off > 0.5) this.camera.setViewOffset(w, h, off, 0, w, h);
     else if (this.camera.view?.enabled) this.camera.clearViewOffset();
+    return THREE.MathUtils.lerp(dist, near, e);
   }
+
 
   dispose(): void {
     this.disposed = true;
@@ -922,6 +1104,8 @@ export class HexBoard {
       else mat?.dispose();
     });
     this.staticShadow.dispose();
+    this.setSpotlight(null);
+    this.spotlight.dispose();
     this.renderer.dispose();
   }
 
@@ -1796,9 +1980,11 @@ export class HexBoard {
       const reachColor = seen ? COLORS.visionReach : COLORS.reachable;
       const zone = this.approach?.surrender.has(key)
         ? COLORS.approachSurrender
-        : this.approach?.flee.has(key)
-          ? COLORS.approachFlee
-          : null;
+        : this.approach?.roll.has(key)
+          ? COLORS.approachRoll
+          : this.approach?.flee.has(key)
+            ? COLORS.approachFlee
+            : null;
       tile.color.set(
         zone ?? (isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? reachColor : seen ? COLORS.vision : tile.baseColor),
       );
@@ -1893,22 +2079,11 @@ export class HexBoard {
   }
 
   private updateCamera(dt: number): void {
-    const k = 1 - Math.exp(-dt * 6);
-    this.camTarget.lerp(this.camGoal, k);
-    // Em retrato a câmera recua para enxergar o mesmo número de colunas.
-    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
-    const dist = 11.5 * this.zoom * Math.min(portrait, 2.3);
-    const pitch = THREE.MathUtils.degToRad(55);
-    this.camera.position.set(
-      this.camTarget.x,
-      this.camTarget.y + Math.sin(pitch) * dist,
-      this.camTarget.z + Math.cos(pitch) * dist,
-    );
-    // mira um pouco "abaixo" do jogador: ele fica acima do centro e o painel inferior não cobre o alcance
-    const lead = this.camera.aspect < 1 ? 1.4 : 0.3;
-    this.camera.position.z += lead;
-    this.camera.lookAt(this.camTarget.x, this.camTarget.y, this.camTarget.z + lead);
-    this.blendCine(dt, new THREE.Vector3(this.camTarget.x, this.camTarget.y, this.camTarget.z + lead));
+    const look = new THREE.Vector3();
+    let dist = this.updatePerspectiveCamera(dt, look);
+    dist = this.blendInspect(dt, look, dist);
+    dist = this.blendCine(dt, look, dist);
+    this.camera.lookAt(look);
 
     // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
     // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
@@ -1928,6 +2103,53 @@ export class HexBoard {
     const sz = Math.round(this.camTarget.z / SHADOW_STEP) * SHADOW_STEP;
     this.sun.position.set(sx - 8, 16, sz + 6);
     this.sun.target.position.set(sx, 0, sz);
+  }
+
+  /**
+   * Mistura a câmera de sempre com a da inspeção (ver `inspectView`), como a cena da porta.
+   * Ajusta a posição da câmera e `look`; devolve a distância até o ponto mirado.
+   */
+  private blendInspect(dt: number, look: THREE.Vector3, dist: number): number {
+    const goal = this.inspect ? 1 : 0;
+    this.inspectBlend += (goal - this.inspectBlend) * (1 - Math.exp(-dt * INSPECT_CAM.blendRate));
+    if (Math.abs(goal - this.inspectBlend) < 0.002) this.inspectBlend = goal;
+    const v = this.inspect ?? this.inspectLast;
+    if (!v || this.inspectBlend <= 0) return dist;
+    const b = this.inspectBlend;
+    const e = b * b * (3 - 2 * b);
+    const c = INSPECT_CAM;
+    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
+    const near = c.dist * Math.min(portrait, c.portraitMax);
+    const pos = v.target
+      .clone()
+      .addScaledVector(v.dir, Math.cos(c.pitch) * near)
+      .setY(v.target.y + Math.sin(c.pitch) * near);
+    this.camera.position.lerp(pos, e);
+    look.lerp(v.target, e);
+    return THREE.MathUtils.lerp(dist, near, e);
+  }
+
+  /**
+   * Câmera normal: perspectiva inclinada que segue `camGoal`. Põe a câmera no lugar, escreve
+   * em `look` para onde ela olha e devolve a distância até o alvo.
+   */
+  private updatePerspectiveCamera(dt: number, look: THREE.Vector3): number {
+    const k = 1 - Math.exp(-dt * 6);
+    this.camTarget.lerp(this.camGoal, k);
+    // Em retrato a câmera recua para enxergar o mesmo número de colunas.
+    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
+    const dist = 11.5 * this.zoom * Math.min(portrait, 2.3);
+    const pitch = THREE.MathUtils.degToRad(55);
+    this.camera.position.set(
+      this.camTarget.x,
+      this.camTarget.y + Math.sin(pitch) * dist,
+      this.camTarget.z + Math.cos(pitch) * dist,
+    );
+    // mira um pouco "abaixo" do jogador: ele fica acima do centro e o painel inferior não cobre o alcance
+    const lead = this.camera.aspect < 1 ? 1.4 : 0.3;
+    this.camera.position.z += lead;
+    look.set(this.camTarget.x, this.camTarget.y, this.camTarget.z + lead);
+    return dist;
   }
 
   /**
@@ -2036,7 +2258,7 @@ export class HexBoard {
         changed = true;
       } else if (isSel) {
         goal = tile.lift + Math.sin(t * 3) * 0.03;
-      } else if (this.approach && (this.approach.surrender.has(key) || this.approach.flee.has(key))) {
+      } else if (this.approach && (this.approach.surrender.has(key) || this.approach.roll.has(key) || this.approach.flee.has(key))) {
         // na onda de voz, o hexágono pula e acende quando ela chega; antes, só pulsa
         const hit = wave ? waveBump(t - wave.start - waveArrival(hexDistance(wave.from, tile.coord))) : 0;
         const g = wave ? 0.04 + hit * 0.45 : 0.08 + Math.sin(t * 4) * 0.06;
@@ -2073,6 +2295,8 @@ export class HexBoard {
       const tile = this.tiles.get(hexKey(this.clue.hex));
       const p = tile ?? this.worldOf(this.clue.hex);
       this.clue.sprite.position.set(p.x, (tile?.y ?? 0) + 1.9 + Math.sin(t * 3) * 0.08, p.z);
+      // pulsa para mostrar que dá para tocar
+      this.clue.sprite.scale.setScalar(0.8 + Math.max(0, Math.sin(t * 4)) * 0.12);
     }
 
     this.updateCamera(dt);
@@ -2080,8 +2304,71 @@ export class HexBoard {
     // a mata que só faz sombra (fora da tela) entra apenas no quadro que redesenha a sombra
     this.stream.cull(this.camera, shadow ? this.sun : undefined);
     this.renderer.info.reset();
-    this.renderer.render(this.scene, this.camera);
+    this.updateSpotlight();
+    this.spotlight.render(dt);
+    if (this.labels.size) {
+      this.renderer.autoClear = false;
+      this.renderer.render(this.labelScene, this.camera);
+      this.renderer.autoClear = true;
+    }
   };
+
+  /** Acompanha o destaque: o raio sobe e desce com os hexágonos e as etiquetas seguem os suspeitos. */
+  private updateSpotlight(): void {
+    const zone = this.spot?.zone;
+    if (zone && this.spot) {
+      const m = new THREE.Matrix4();
+      this.spot.tiles.forEach((t, i) => zone.setMatrixAt(i, m.makeTranslation(t.x, t.y + 0.002, t.z)));
+      zone.instanceMatrix.needsUpdate = true;
+    }
+    for (const [id, sprite] of this.labels) {
+      const e = this.enemies.get(id);
+      if (!e) continue;
+      sprite.visible = e.group.visible;
+      sprite.position.set(e.group.position.x, e.group.position.y + e.signY - 0.2, e.group.position.z);
+    }
+  }
+
+  /** Etiqueta de um suspeito no modo de abordagem ("se rende" em verde, "rola" em amarelo, "corre" em laranja). */
+  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee'): THREE.Sprite {
+    const font = 'bold 40px "Special Elite", "Courier New", monospace';
+    const c = document.createElement('canvas');
+    const g = c.getContext('2d');
+    const pad = 22;
+    const tip = 14;
+    let width = 240;
+    if (g) {
+      g.font = font;
+      width = Math.ceil(g.measureText(text).width) + pad * 2;
+    }
+    c.width = width;
+    c.height = 64 + tip;
+    if (g) {
+      g.fillStyle = tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : '#c4621a';
+      g.beginPath();
+      g.roundRect(0, 0, width, 64, 12);
+      g.moveTo(width / 2 - tip, 64);
+      g.lineTo(width / 2, 64 + tip);
+      g.lineTo(width / 2 + tip, 64);
+      g.fill();
+      g.font = font;
+      g.fillStyle = '#ffffff';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(text, width / 2, 34);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, sizeAttenuation: false }),
+    );
+    // tamanho fixo na tela (cerca de 6% da altura), qualquer que seja o zoom
+    const h = 0.045;
+    sprite.scale.set((h * c.width) / c.height, h, 1);
+    // a ponta do balão fica em cima da cabeça
+    sprite.center.set(0.5, 0);
+    return sprite;
+  }
 
   /** Anel da onda de voz; devolve a onda em andamento (ou `null` quando acabou). */
   private updateWave(t: number): { from: HexCoord; start: number } | null {
@@ -2145,6 +2432,11 @@ export class HexBoard {
     if (!prev) return;
     const cur = { x: e.clientX, y: e.clientY };
     this.pointers.set(e.pointerId, cur);
+    // vista de inspeção: a câmera fica travada
+    if (this.inspect) {
+      if (this.tapStart && Math.hypot(cur.x - this.tapStart.x, cur.y - this.tapStart.y) > 10) this.dragged = true;
+      return;
+    }
 
     if (this.pointers.size >= 2) {
       const d = this.currentPinchDistance();
@@ -2182,6 +2474,7 @@ export class HexBoard {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    if (this.inspect) return;
     this.setZoom(this.zoom * (e.deltaY > 0 ? 1.1 : 0.9));
   };
 
@@ -2218,7 +2511,8 @@ export class HexBoard {
   }
 
   private handleTap(clientX: number, clientY: number): void {
-    if (!this.inputEnabled || this.moving) return;
+    // na vista de inspeção só a lupa (ou o móvel) responde, mesmo com o resto travado
+    if (this.moving || (!this.inputEnabled && !this.inspect)) return;
     const rect = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
@@ -2226,6 +2520,17 @@ export class HexBoard {
     );
     this.raycaster.setFromCamera(ndc, this.camera);
 
+    // a lupa (ou o móvel debaixo dela) vem antes de tudo
+    if (this.clue?.sprite.visible && this.callbacks.onClueTap) {
+      const onSprite = this.raycaster.intersectObject(this.clue.sprite, false).length > 0;
+      const ground = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+      const onFurniture = !!ground && sameHex(worldToHex(ground.x, ground.z, HEX_SIZE), this.clue.hex);
+      if (onSprite || onFurniture) {
+        this.callbacks.onClueTap();
+        return;
+      }
+    }
+    if (this.inspect) return;
     // peças primeiro: tocar perto da peça (ou no hexágono dela) seleciona o personagem
     const hitboxes = [...this.units.values()].map((u) => u.hitbox);
     const unitHit = this.raycaster.intersectObjects(hitboxes, false)[0];

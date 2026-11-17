@@ -1,18 +1,13 @@
-import { APPROACH_RULES } from './enemies';
+import { BASE_APPROACH } from './enemies';
 
 /**
- * Tempo da abordagem: o gesto de segurar, a onda de voz e o auto que aparece no fim.
+ * Tempo da abordagem: a onda de voz e o auto que aparece no fim.
  *
- * - Toque rápido no **Abordar** (até `tapMs`) abre a prévia de sempre.
- * - Segurando, o raio cresce anel por anel até `radius`; ao fechar (`holdMs` depois do
- *   toque rápido) a abordagem é confirmada. Soltar antes desiste.
- * - Confirmada, uma onda sai do agente a `waveSpeed` hexágonos por segundo; cada suspeito
- *   reage quando ela chega até ele (quem está perto reage primeiro).
+ * - Confirmada (no modo de abordagem), uma onda sai do agente a `waveSpeed` hexágonos por
+ *   segundo; cada suspeito reage quando ela chega até ele (quem está perto reage primeiro).
  * - Depois da onda, o auto de abordagem fica `reportMs` na tela e a vez passa.
  */
 export const APPROACH_FX = {
-  tapMs: 220,
-  holdMs: 800,
   /** Atraso entre a confirmação e a saída da onda (o grito). */
   waveDelay: 0.15,
   waveSpeed: 7,
@@ -23,19 +18,6 @@ export const APPROACH_FX = {
   reportMs: 2800,
 } as const;
 
-/** Progresso (0 a 1) do gesto de segurar, `ms` depois de apertar; 0 durante o toque rápido. */
-export function holdProgress(
-  ms: number,
-  fx: { tapMs: number; holdMs: number } = APPROACH_FX,
-): number {
-  return Math.min(1, Math.max(0, (ms - fx.tapMs) / fx.holdMs));
-}
-
-/** Até que anel o raio já cresceu com esse progresso (0 = nenhum, `radius` = completo). */
-export function holdRing(progress: number, radius: number = APPROACH_RULES.radius): number {
-  return progress <= 0 ? 0 : Math.min(radius, Math.ceil(progress * radius));
-}
-
 /** Segundos, a partir da confirmação, até a onda chegar a um hexágono a `distance` do agente. */
 export function waveArrival(
   distance: number,
@@ -45,7 +27,7 @@ export function waveArrival(
 }
 
 /** Duração total da onda (até o auto de abordagem aparecer), em segundos. */
-export function waveDuration(radius: number = APPROACH_RULES.radius): number {
+export function waveDuration(radius: number = BASE_APPROACH.radius): number {
   return waveArrival(radius) + APPROACH_FX.waveTail;
 }
 

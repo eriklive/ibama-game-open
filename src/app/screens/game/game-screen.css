@@ -246,17 +246,11 @@ button:disabled { cursor: not-allowed; }
 }
 .check-kicker { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted-paper); }
 .check-who { font-family: var(--marker); font-size: 15px; line-height: 1.1; }
-.d20 { position: relative; display: grid; place-items: center; width: 74px; height: 74px; margin: 2px 0; }
-.d20 svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.d20-body { fill: #fff; stroke: var(--ink-paper); stroke-width: 5; stroke-linejoin: round; }
-.d20 path { fill: none; stroke: rgba(35, 32, 26, .35); stroke-width: 2.5; stroke-linejoin: round; }
-.d20-value {
-  position: relative; top: 7px;
-  font-family: var(--stencil); font-weight: 700; font-size: 22px; line-height: 1;
+.check-die { width: 96px; height: 96px; margin: -6px 0 -10px; }
+.check-value {
+  font-family: var(--stencil); font-weight: 700; font-size: 20px; line-height: 1;
+  animation: slap .2s ease-out both;
 }
-.d20.rolling svg { animation: d20-spin .45s linear infinite; }
-.d20.rolling .d20-value { opacity: .55; }
-@keyframes d20-spin { to { transform: rotate(360deg); } }
 .check-need { font-size: 11px; line-height: 1.2; }
 .check-result {
   margin-top: 4px; padding: 1px 6px;
@@ -266,9 +260,7 @@ button:disabled { cursor: not-allowed; }
   animation: slap .2s ease-out both;
 }
 .check.pass .check-result { color: var(--green-ok); }
-.check.pass .d20-body { fill: #dff3d9; }
 .check.fail .check-result { color: var(--red-text); }
-.check.fail .d20-body { fill: #f6dcd6; }
 
 /* ---------- ações: um carimbo contextual + aba ---------- */
 .actions {
@@ -355,12 +347,72 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .stamp.confirm.fire { background: #f2b26b; }
 .burn-slip { background: #f6cf9a; }
 /* segurar para abordar: o contorno do papel vira um anel que se fecha */
-.approach { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.approach.holding { transform: rotate(-5deg) translateY(2px) scale(.97); box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.4); }
-.hold-ring { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); pointer-events: none; overflow: visible; }
-.hold-ring rect { fill: none; stroke: var(--red); stroke-width: 4; stroke-dasharray: 100; stroke-linejoin: round; opacity: 0; }
-.approach.holding .hold-ring rect { opacity: 1; }
-.slip.hold-slip { bottom: 122px; right: 56px; }
+
+/* ---------- inspeção em close-up: só o agente, o móvel e o d20 ---------- */
+.focus-mode .top, .focus-mode .agents, .focus-mode .suspects, .focus-mode .actions,
+.focus-mode .telegram, .focus-mode .check, .focus-mode .end-op { visibility: hidden; }
+.focus-stage { position: absolute; inset: 0; pointer-events: none; z-index: 4; animation: fade-in .3s ease-out both; }
+.focus-stage::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 40% 58% at 50% 58%, transparent 55%, rgba(8, 10, 8, .78) 100%);
+}
+.focus-stage::after {
+  content: ''; position: absolute; inset: 0;
+  border-block: calc(26px + var(--safe-top)) solid #0c0d0b;
+  border-bottom-width: calc(26px + var(--safe-bottom));
+}
+.focus-die {
+  position: absolute; left: 50%; top: calc(26px + var(--safe-top));
+  width: 200px; height: 200px; transform: translateX(-50%);
+}
+/* inspeção: os botões ficam onde ficam nos outros modos (bilhete, carimbo e Cancelar) */
+.aim-actions {
+  position: absolute; z-index: 5;
+  right: calc(14px + var(--safe-right));
+  bottom: calc(12px + var(--safe-bottom));
+  width: 250px; height: 150px;
+  pointer-events: none;
+}
+.aim-actions > * { pointer-events: auto; }
+.inspect-slip { width: 150px; }
+.aim-actions .side { width: 84px; right: 100px; }
+.aim-actions .side .stencil { font-size: 13px; }
+.stamp.inspect-stamp .stamp-text { font-size: 12px; }
+.inspect-slip.pass strong { color: var(--green-ok); }
+
+/* inspecionar pelo teclado: o botão só aparece quando recebe o foco */
+.inspect.keyboard-only:not(:focus-visible) { opacity: 0; pointer-events: none; }
+
+/* ---------- modo de abordagem: o resto da HUD apaga e a decisão fica em dois botões ---------- */
+.top, .suspects, .end-op { transition: filter .25s ease; }
+.approach-mode .top, .approach-mode .end-op { filter: grayscale(1) brightness(.75); }
+/* retratos e suspeitos saem da frente: as etiquetas no tabuleiro já dizem quem reage */
+.approach-mode .agents, .approach-mode .suspects { visibility: hidden; }
+.slip.approach-slip { right: 128px; bottom: 4px; width: max-content; max-width: 290px; transform: rotate(-1.5deg); }
+.slip .approach-tally { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.approach-tally .surrender { color: var(--green-ok); }
+.approach-tally .roll { color: #8a6d0f; }
+.approach-tally .flee { color: #b4520f; }
+.approach-confirm { width: 112px; height: 112px; border-radius: 56px; }
+.approach-confirm .stamp-ring { width: 96px; height: 96px; border-radius: 48px; }
+.approach-confirm .stamp-text { font-size: 19px; }
+.approach-cancel {
+  position: absolute;
+  left: calc(14px + var(--safe-left));
+  top: 50%;
+  width: 84px; height: 84px; border-radius: 42px;
+  border: 4px solid #fff;
+  background: #e3121b;
+  color: #fff;
+  box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.4), inset 0 -5px 0 rgba(0, 0, 0, 0.18);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-family: var(--stencil); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+  transform: translateY(-50%);
+  animation: slap .25s ease-out both;
+  z-index: 3;
+}
+.approach-cancel svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 3.4; stroke-linecap: round; }
+.approach-cancel:active { transform: translateY(calc(-50% + 3px)); box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.4); }
 
 /* bilhete da abordagem: quem se rende e quem corre */
 .slip {
@@ -381,6 +433,9 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .approach-list li.surrender { color: var(--green-ok); }
 .approach-list li.flee { color: var(--red-text); }
 .approach-list li.flee::before { content: '→ '; }
+.approach-list li.roll { color: var(--muted-paper); }
+.approach-list li.roll::before { content: '⬡ '; }
+.approach-list li.target { font-weight: 800; text-decoration: underline; text-decoration-thickness: 2px; }
 
 /* ---------- encerrar a operação: etiqueta vermelha no canto de baixo ---------- */
 .end-op {
@@ -477,6 +532,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .pola-img svg .pole { stroke: #5a3d1e; stroke-width: 2; fill: none; }
 .pola-img svg .flag { fill: #fff; }
 .pola-name { font-size: 10px; line-height: 1.15; min-height: 2.3em; display: grid; place-items: center; }
+.pola-roll { font-size: 9px; line-height: 1.1; text-align: center; color: var(--muted-paper); font-variant-numeric: tabular-nums; }
 .pola-stamp {
   position: absolute; left: 50%; top: 36px;
   padding: 0 4px; border: 2.5px solid currentColor; background: rgba(247, 242, 228, .7);
@@ -526,7 +582,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   z-index: 6;
   color: var(--paper-light);
 }
-.roll-tray { position: absolute; inset: 0; display: grid; place-items: center; }
+.roll-tray { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; }
 .roll-head, .roll-result { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
 .roll-head { animation: drop-in .4s ease-out both; }
 .roll-kicker {
@@ -546,11 +602,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .roll-total.rolling { animation: pulse 1s ease-in-out infinite; }
 .roll-confirm { margin-top: 18px; animation: rise .35s .25s ease-out both; }
 .roll-confirm .pad-glyph { top: -14px; right: -14px; }
-.dice.big { gap: 18px; }
-.dice.big .d4 { width: 92px; height: 84px; filter: drop-shadow(2px 4px 0 rgba(0, 0, 0, .35)); }
-.dice.big .d4-value { font-size: 36px; top: 38%; }
-.dice.big:not(.rolling) .d4 { animation: land .45s cubic-bezier(.3, 1.6, .5, 1) both; }
-.dice.big.rolling .d4 { animation: tumble .42s linear infinite; }
+.roll-die { width: min(44vw, 280px); height: min(56vh, 360px); }
 
 @keyframes reveal {
   0%   { opacity: 0; transform: scale(1.8); filter: blur(4px); }
@@ -566,17 +618,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   to   { opacity: 1; translate: 0 0; }
 }
 @keyframes pulse { 50% { opacity: .45; } }
-@keyframes tumble {
-  0%   { transform: translateY(0) rotate(0deg) scale(1); }
-  25%  { transform: translateY(-22px) rotate(100deg) scale(1.08); }
-  50%  { transform: translateY(0) rotate(200deg) scale(.94); }
-  75%  { transform: translateY(-12px) rotate(290deg) scale(1.04); }
-  100% { transform: translateY(0) rotate(360deg) scale(1); }
-}
-@keyframes land {
-  0%   { transform: translateY(-14px) scale(1.25); }
-  100% { transform: translateY(0) scale(1); }
-}
 /* carimbo batendo no papel */
 @keyframes slap {
   0%   { opacity: 0; scale: 1.5; }
@@ -585,12 +626,12 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .slip, .suspect, .check, .check-result, .d20.rolling svg, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
+  .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .slip, .suspect, .check, .check-result, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
 @media (min-width: 700px) and (min-height: 600px) {
-  .top, .agents, .suspects, .actions, .telegram, .check, .report, .end-op { zoom: 1.25; }
+  .top, .agents, .suspects, .actions, .telegram, .check, .report, .end-op, .approach-cancel, .aim-actions { zoom: 1.25; }
 }
 
 /* ---------- controle (DualShock 4) ---------- */
@@ -754,7 +795,11 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .door-opt-need.free { color: var(--green-ok); }
 .door-slot { position: relative; width: 56px; height: 56px; display: grid; place-items: center; }
 .door-slot.none::before { content: ''; width: 34px; height: 34px; border: 2px dashed rgba(35, 32, 26, .28); border-radius: 50%; }
-.door-slot .d20 { width: 56px; height: 56px; margin: 0; }
+.door-slot .d20 { position: relative; display: grid; place-items: center; width: 56px; height: 56px; margin: 0; }
+.door-slot .d20 svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.door-slot .d20-body { fill: #fff; stroke: var(--ink-paper); stroke-width: 5; stroke-linejoin: round; }
+.door-slot .d20 path { fill: none; stroke: rgba(35, 32, 26, .35); stroke-width: 2.5; stroke-linejoin: round; }
+.door-slot .d20-value { position: relative; font-family: var(--stencil); font-weight: 700; line-height: 1; }
 .door-slot .d20-value { top: 5px; font-size: 16px; }
 .door-slot .d20.never .d20-body { fill: #f6dcd6; }
 .door-slot .d20.never .d20-value { color: var(--red-text); }

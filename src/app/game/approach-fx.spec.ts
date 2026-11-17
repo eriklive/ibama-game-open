@@ -1,30 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   APPROACH_FX,
-  holdProgress,
-  holdRing,
   waveArrival,
   waveBump,
   waveDuration,
 } from './approach-fx';
-import { APPROACH_RULES } from './enemies';
-
-describe('segurar para abordar', () => {
-  it('não conta o toque rápido e fecha depois do tempo de segurar', () => {
-    expect(holdProgress(0)).toBe(0);
-    expect(holdProgress(APPROACH_FX.tapMs)).toBe(0);
-    expect(holdProgress(APPROACH_FX.tapMs + APPROACH_FX.holdMs / 2)).toBeCloseTo(0.5);
-    expect(holdProgress(APPROACH_FX.tapMs + APPROACH_FX.holdMs)).toBe(1);
-    expect(holdProgress(99999)).toBe(1);
-  });
-
-  it('o raio cresce anel por anel até o raio da abordagem', () => {
-    expect(holdRing(0)).toBe(0);
-    expect(holdRing(0.01)).toBe(1);
-    expect(holdRing(0.5)).toBe(2);
-    expect(holdRing(1)).toBe(APPROACH_RULES.radius);
-  });
-});
+import { BASE_APPROACH } from './enemies';
 
 describe('onda de voz', () => {
   it('chega primeiro em quem está perto', () => {
@@ -33,7 +14,7 @@ describe('onda de voz', () => {
   });
 
   it('termina depois de chegar no último anel', () => {
-    expect(waveDuration()).toBeGreaterThan(waveArrival(APPROACH_RULES.radius));
+    expect(waveDuration()).toBeGreaterThan(waveArrival(BASE_APPROACH.radius));
     // cabe no orçamento de ~2 s por abordagem (antes do auto)
     expect(waveDuration()).toBeLessThan(2);
   });
