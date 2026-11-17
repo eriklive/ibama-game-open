@@ -285,8 +285,8 @@ Quem não se rendeu não conversa.
   arma na prateleira da casa (inspeção, pista `item:arma`) libera **"De quem é essa arma?"** para
   todos os suspeitos com diálogo. O piloto não sabe; os garimpeiros também não, e cada um responde
   com uma fala de um **pool compartilhado** (a fala usada sai do pool, sem repetição entre eles;
-  acabou, "Não sei."). O caseiro tem a cadeia completa e, se ceder em qualquer nível, confessa que
-  é dele: a pista `dono-arma` faz a pergunta sumir de quem ainda não a fez (quem já fez continua
+  acabou, "Não sei."). O caseiro tem duas chances de ceder (pergunta e réplica; a tréplica é só a fala
+  sarcástica do agente, e ele responde "…") e, se ceder, confessa que é dele: a pista `dono-arma` faz a pergunta sumir de quem ainda não a fez (quem já fez continua
   vendo o cartão como "Perguntado"). Responder "não sei" não fecha a pergunta para os outros.
 - **Custo:** como a inspeção, a **primeira pergunta de cada conversa gasta 1 de movimento** (entrar e
   sair sem perguntar não gasta) e a vez continua. Ficam em `INTERROGATION_RULES` (`moveCost`,

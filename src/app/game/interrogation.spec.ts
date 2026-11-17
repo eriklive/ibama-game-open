@@ -401,25 +401,25 @@ describe('perguntas que surgem (e somem) com pistas da missão', () => {
     expect(owns.outcome.clue).toBe(GUN_OWNER);
   });
 
-  it('caseiro: "De quem é essa arma?" com três evasivas e uma verdade (em qualquer nível)', () => {
+  it('caseiro: "De quem é essa arma?" com duas evasivas e uma verdade (pergunta ou réplica)', () => {
     const asks3 = [
       WHOSE,
       'Não sabe de quem é a arma que tá dentro da sua casa?',
       'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
     ];
     let m = EMPTY_MEMORY;
-    const lies: string[] = [];
+    const lines: string[] = [];
     for (const q of asks3) {
       const r = ask(caseiro, m, q, 20, { clues: ARMA });
-      lies.push(r.answer.line);
+      lines.push(r.answer.line);
       m = r.memory;
     }
-    expect(lies).toEqual([
+    expect(lines).toEqual([
       'Sei não, senhor.',
       'Pode ser de um dos meninos… eles vivem entrando aqui.',
-      'Sei lá, doutor. Minha é que não é.',
+      '…',
     ]);
-    for (let level = 0; level < 3; level++) {
+    for (let level = 0; level < 2; level++) {
       let mem = EMPTY_MEMORY;
       let last;
       for (let i = 0; i <= level; i++) {
@@ -435,6 +435,30 @@ describe('perguntas que surgem (e somem) com pistas da missão', () => {
       expect(asks(piloto, EMPTY_MEMORY, after)).not.toContain(WHOSE);
       expect(asks(garimpeiro, EMPTY_MEMORY, after)).not.toContain(WHOSE);
     }
+  });
+
+  it('caseiro: a tréplica da arma não rola, não confessa e não registra o dono', () => {
+    let m = EMPTY_MEMORY;
+    m = ask(caseiro, m, WHOSE, 20, { clues: ARMA }).memory;
+    m = ask(caseiro, m, 'Não sabe de quem é a arma que tá dentro da sua casa?', 20, {
+      clues: ARMA,
+    }).memory;
+    const tre = keyOf(
+      dialogueOptions(caseiro, m, ARMA),
+      'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
+    );
+    let rolled = false;
+    const r = askQuestion(caseiro, m, tre, { die: () => ((rolled = true), 1), clues: ARMA })!;
+    expect(rolled).toBe(false);
+    expect(r.answer.passed).toBeNull();
+    expect(r.answer.dc).toBeNull();
+    expect(r.answer.line).toBe('…');
+    expect(r.answer.outcome.note).toBe('Mantém que a arma não é dele.');
+    expect(r.answer.outcome.clue).toBeUndefined();
+    expect(r.answer.outcome.confess).toBeFalsy();
+    expect(r.answer.unlocked).toBeNull();
+    // a pergunta segue aberta para os outros
+    expect(asks(piloto, EMPTY_MEMORY, ARMA)).toContain(WHOSE);
   });
 
   it('garimpeiros: falas de um pool compartilhado, sem repetição, e "Não sei." quando acaba', () => {
@@ -562,8 +586,8 @@ describe('dados de diálogo', () => {
   });
 
   it('árvores com no máximo pergunta → réplica → tréplica', () => {
-    const depth = (q: { followUp?: FollowUpQuestion }): number =>
-      q.followUp ? 1 + depth(q.followUp) : 0;
+    const depth = (q: FollowUpQuestion | RolledQuestion): number =>
+      'followUp' in q && q.followUp ? 1 + depth(q.followUp) : 0;
     for (const c of withDialogue)
       for (const q of c.questions) if (isRolled(q)) expect(depth(q)).toBeLessThanOrEqual(2);
   });

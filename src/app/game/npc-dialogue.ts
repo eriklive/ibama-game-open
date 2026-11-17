@@ -29,7 +29,9 @@ import {
  * nível tem a **sua mentira** (`pass`), mas a **verdade é uma só**: o `fail` fica só na
  * pergunta da raiz e vale para a cadeia inteira. Cedendo em qualquer nível, o NPC dá essa
  * resposta e a cadeia acaba (réplica e tréplica nem aceitam `fail`). As falas da réplica e da
- * tréplica são o agente insistindo. A intimidação do agente que conversa soma +1 à CD por ponto.
+ * tréplica são o agente insistindo. Uma réplica/tréplica pode também ser **sem rolagem**
+ * (`{ ask, answer }`): a fala do agente que fecha a insistência e a resposta fixa do NPC, sem
+ * chance de ceder (ex.: a tréplica do caseiro em "De quem é essa arma?"). A intimidação do agente que conversa soma +1 à CD por ponto.
  *
  * **Perguntas que surgem (ou somem) com o que a equipe descobre:**
  *
@@ -95,8 +97,9 @@ const GARIMPEIROS_ON_GUN: LinePool = {
 };
 
 /**
- * O caseiro: a arma é dele. Três evasivas (pergunta, réplica e tréplica) e uma verdade só:
- * cedendo em qualquer nível, confirma o dono e a pergunta some dos NPCs que ainda não a fizeram.
+ * O caseiro: a arma é dele. Duas chances de ceder (pergunta e réplica), com duas evasivas e uma
+ * verdade só: cedendo, confirma o dono e a pergunta some dos NPCs que ainda não a fizeram. A
+ * tréplica é só a fala sarcástica do agente, sem rolagem; ele responde "…".
  */
 const WHOSE_GUN_CASEIRO: RolledQuestion = {
   ...WHOSE_GUN,
@@ -113,9 +116,10 @@ const WHOSE_GUN_CASEIRO: RolledQuestion = {
       say: 'Pode ser de um dos meninos… eles vivem entrando aqui.',
       note: 'Diz que pode ser de um dos garimpeiros.',
     },
+    // a tréplica não rola: é o agente encerrando a insistência; ele só fica calado
     followUp: {
       ask: 'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
-      pass: { say: 'Sei lá, doutor. Minha é que não é.', note: 'Mantém que a arma não é dele.' },
+      answer: { say: '…', note: 'Mantém que a arma não é dele.' },
     },
   },
 };

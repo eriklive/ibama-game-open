@@ -109,10 +109,10 @@ export interface FixedQuestion extends Visibility {
 }
 
 /**
- * Réplica ou tréplica: só a mentira daquele nível (`pass`). A verdade é a da raiz (`fail` da
- * pergunta de onde a cadeia saiu): cedendo em qualquer nível, o NPC diz a mesma coisa.
+ * Réplica ou tréplica com rolagem: só a mentira daquele nível (`pass`). A verdade é a da raiz
+ * (`fail` da pergunta de onde a cadeia saiu): cedendo em qualquer nível, o NPC diz a mesma coisa.
  */
-export interface FollowUpQuestion {
+export interface RolledFollowUp {
   ask: string;
   /** CD própria; sem ela, a do nível (`INTERROGATION_RULES.dc`). */
   dc?: number;
@@ -121,6 +121,17 @@ export interface FollowUpQuestion {
   /** O próximo nível (a tréplica), que surge se ele passar de novo. */
   followUp?: FollowUpQuestion;
 }
+
+/**
+ * Réplica ou tréplica sem rolagem: a fala do agente que encerra a insistência e a resposta fixa
+ * do NPC (sem chance de ceder; a cadeia acaba aí).
+ */
+export interface FixedFollowUp {
+  ask: string;
+  answer: Outcome;
+}
+
+export type FollowUpQuestion = RolledFollowUp | FixedFollowUp;
 
 /**
  * Pergunta com rolagem escondida. Uma cadeia (pergunta → réplica → tréplica) tem uma mentira
@@ -160,7 +171,7 @@ export interface NpcClass {
   questions: readonly QuestionNode[];
 }
 
-export const isRolled = (q: AnyQuestion): q is RolledQuestion | FollowUpQuestion => 'pass' in q;
+export const isRolled = (q: AnyQuestion): q is RolledQuestion | RolledFollowUp => 'pass' in q;
 
 /** A classe tem diálogo (ganha aura e pode ser interrogada). */
 export const hasDialogue = (cls: NpcClass | null | undefined): cls is NpcClass =>
