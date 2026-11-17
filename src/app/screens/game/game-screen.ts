@@ -40,7 +40,7 @@ import {
   stationary,
   visionHexes,
 } from '../../game/enemies';
-import { HiddenItem, SEARCH_RULES, beats, canReach, entersRoom } from '../../game/search';
+import { HiddenItem, SEARCH_RULES, beats, canReach, needsNoticeRoll } from '../../game/search';
 import {
   BREAK_IN_RULES,
   BreakInRoll,
@@ -81,6 +81,7 @@ import {
   hasTalked,
   itemClue,
   noteKind,
+  noticedAfter,
   openingLine,
   pickLine,
   questionCost,
@@ -1267,9 +1268,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const item of this.map?.hidden ?? []) {
       for (const [who, path] of paths) {
         if (this.noticed().has(item.id)) break;
-        const key = `${item.id}:${who}`;
-        if (this.noticeRolled.has(key) || !entersRoom(path, item.room)) continue;
-        this.noticeRolled.add(key);
+        if (!needsNoticeRoll(item, who, path, this.noticed(), this.noticeRolled)) continue;
+        this.noticeRolled.add(`${item.id}:${who}`);
         this.phase.set('checking');
         const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice);
         if (pass === null) return false;
@@ -1886,6 +1886,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     ]);
     // entregou alguém: aparece no mapa ao encerrar (se a missão tiver essa unidade escondida)
     const hidden = out.reveal ? this.hiddenAccomplice(iv.enemyId) : null;
+    // entregou um esconderijo: conta como percebido (sem rolar percepção; a lupa aparece)
+    const noticed = noticedAfter(this.noticed(), out);
+    if (noticed !== this.noticed()) {
+      this.noticed.set(noticed);
+      const item = this.map?.hidden?.find((h) => h.id === out.notices);
+      if (item && !this.found().has(item.id)) this.board?.setClue(item.spot);
+    }
     // pista nova: pode liberar perguntas (neste e em outros NPCs)
     if (out.clue && !this.clueLog().has(out.clue)) this.clueLog.update((c) => new Set([...c, out.clue!]));
     const options = dialogueOptions(iv.cls, this.dialogues().get(iv.enemyId) ?? res.memory, this.clues());

@@ -289,6 +289,10 @@ Quem não se rendeu não conversa.
   à tréplica, o agente fecha com "Claro. A arma entrou sozinha e foi se esconder na prateleira."
   (fecho `closing`: sem cartão, sem rolagem, sem resposta). Se ceder, confessa que é dele: a pista `dono-arma` faz a pergunta sumir de quem ainda não a fez (quem já fez continua
   vendo o cartão como "Perguntado"). Responder "não sei" não fecha a pergunta para os outros.
+- **Confissão que entrega o esconderijo:** se o caseiro confessar em "Tem arma na casa?" ("Tem sim, tá
+  no quartinho de trás."), a arma da prateleira conta como **já percebida**: ninguém precisa rolar
+  percepção no quarto de trás, a lupa aparece e **Investigar a casa** fica cumprido. Achar e apreender
+  a arma ainda pede a inspeção (d20). No dado, é `notices: '<id do esconderijo>'` na resposta.
 - **Custo:** como a inspeção, a **primeira pergunta de cada conversa gasta 1 de movimento** (entrar e
   sair sem perguntar não gasta) e a vez continua. Ficam em `INTERROGATION_RULES` (`moveCost`,
   `endsTurn`).

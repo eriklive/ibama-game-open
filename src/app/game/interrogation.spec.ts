@@ -25,12 +25,16 @@ import {
   meets,
   nodeAt,
   noteKind,
+  noticedAfter,
+  Outcome,
   openingLine,
   pickLine,
   questionCost,
   talkTarget,
 } from './interrogation';
 import { MAPS } from './maps';
+import { objectiveState } from './mission';
+import { needsNoticeRoll } from './search';
 import { GUN_OWNER, MORE_PEOPLE, NPC_CLASSES, isMorePeople, npcClass } from './npc-dialogue';
 
 /** Dado viciado: devolve as faces na ordem (e repete a última). */
@@ -274,6 +278,66 @@ describe('cadeia: três mentiras, uma verdade', () => {
       expect(last.outcome.confess).toBe(true);
       expect(last.unlocked).toBeNull();
     }
+  });
+});
+
+describe('confissão que entrega o esconderijo', () => {
+  const ARMA_CASA = [
+    'Tem arma na casa?',
+    'Não tem? Casa no meio do garimpo e nenhuma arma?',
+    'Olha, é melhor falar agora. Se a gente achar, complica pra você.',
+  ];
+  const aeroporto = MAPS.find((m) => m.id === 'aeroporto')!;
+  const arma = aeroporto.hidden!.find((h) => h.id === 'arma')!;
+  // entrando no quarto de trás (o cômodo da prateleira)
+  const path = [
+    { col: 35, row: 29 },
+    { col: 36, row: 29 },
+  ];
+  const investigar = aeroporto.objectives!.find((o) => o.id === 'investigar-casa')!;
+  const progress = (noticed: ReadonlySet<string>) => ({
+    enemies: [],
+    noticed,
+    found: new Set<string>(),
+    burned: new Set<string>(),
+  });
+
+  it('o caseiro confessa (em qualquer nível): a arma conta como percebida e pula a percepção', () => {
+    for (let level = 0; level < 3; level++) {
+      let m = EMPTY_MEMORY;
+      let last;
+      for (let i = 0; i <= level; i++) {
+        last = ask(caseiro, m, ARMA_CASA[i], i === level ? 1 : 20);
+        m = last.memory;
+      }
+      const out = last!.answer.outcome;
+      expect(out.notices, `nível ${level}`).toBe('arma');
+      const noticed = noticedAfter(new Set(), out);
+      expect(noticed.has('arma')).toBe(true);
+      expect(needsNoticeRoll(arma, 'ana', path, noticed, new Set())).toBe(false);
+      expect(objectiveState(investigar, progress(noticed))).toBe('done');
+    }
+  });
+
+  it('sem confissão, tudo como antes: rola percepção ao entrar e o objetivo segue aberto', () => {
+    const lies = ARMA_CASA.reduce(
+      (acc, q) => {
+        const r = ask(caseiro, acc.m, q, 20);
+        return { m: r.memory, outs: [...acc.outs, r.answer.outcome] };
+      },
+      { m: EMPTY_MEMORY, outs: [] as Outcome[] },
+    ).outs;
+    let noticed: ReadonlySet<string> = new Set();
+    for (const o of lies) {
+      expect(o.notices).toBeUndefined();
+      noticed = noticedAfter(noticed, o);
+    }
+    expect(noticed.size).toBe(0);
+    expect(needsNoticeRoll(arma, 'ana', path, noticed, new Set())).toBe(true);
+    // quem já rolou ali não rola de novo; fora do cômodo, não rola
+    expect(needsNoticeRoll(arma, 'ana', path, noticed, new Set(['arma:ana']))).toBe(false);
+    expect(needsNoticeRoll(arma, 'ana', [{ col: 33, row: 29 }], noticed, new Set())).toBe(false);
+    expect(objectiveState(investigar, progress(noticed))).toBe('open');
   });
 });
 

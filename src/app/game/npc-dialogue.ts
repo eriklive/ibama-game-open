@@ -56,6 +56,11 @@ import {
  * Para uma pista nova, basta inventar o id e usá-lo no `clue` de quem a dá e no `requires` /
  * `hiddenWhen` de quem depende dela.
  *
+ **Respostas que entregam um esconderijo:** `notices: '<id>'` num desfecho (o id de um item em
+ * `hidden` do mapa) faz o esconderijo contar como já percebido: ninguém precisa rolar percepção
+ * no cômodo, a lupa aparece e objetivos `notice` desse item ficam cumpridos. Achar o item ainda
+ * pede a inspeção (d20). Ex.: o caseiro confessa "Tem sim, tá no quartinho de trás." → `arma`.
+ *
  * `resume` é a fala curta de quando o agente volta a conversar (sem ela, repete a de entrada).
  */
 export const MORE_PEOPLE = 'Tem mais gente com vocês?';
@@ -259,6 +264,8 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
           say: 'Tem sim, tá no quartinho de trás.',
           note: 'Há uma arma no quartinho de trás.',
           confess: true,
+          // entrega o esconderijo: a prateleira do quarto de trás conta como percebida
+          notices: 'arma',
         },
         followUp: {
           ask: 'Não tem? Casa no meio do garimpo e nenhuma arma?',

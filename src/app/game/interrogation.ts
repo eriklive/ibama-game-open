@@ -79,6 +79,11 @@ export interface Outcome {
   reveal?: boolean;
   /** Pista que esta resposta registra na missão (pode liberar perguntas em outros NPCs). */
   clue?: string;
+  /**
+   * Esconderijo (id de `HiddenItem`) que esta resposta entrega: conta como já percebido (dispensa
+   * a rolagem de percepção ao entrar no cômodo; a lupa aparece). Achar ainda pede a inspeção.
+   */
+  notices?: string;
 }
 
 /** Condição de desbloqueio: uma pista da missão, ou todas as de uma lista. */
@@ -454,6 +459,15 @@ export function talkTarget<E extends { hex: HexCoord; status: string; npc?: stri
   const enemy = enemies.find((e) => e.status === 'surrendered' && inAura(agent, e.hex));
   return enemy ? { enemy, silent: !hasDialogue(classOf(enemy.npc)) } : null;
 }
+
+/** Esconderijos percebidos depois da resposta (os de antes mais o que ela entrega). */
+export const noticedAfter = (
+  noticed: ReadonlySet<string>,
+  outcome: Outcome,
+): ReadonlySet<string> =>
+  outcome.notices && !noticed.has(outcome.notices)
+    ? new Set([...noticed, outcome.notices])
+    : noticed;
 
 /** Tipo da anotação na caderneta (o carimbo ao lado). */
 export type NoteKind = 'declarou' | 'sinal' | 'confessou';
