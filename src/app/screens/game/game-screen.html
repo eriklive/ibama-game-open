@@ -435,52 +435,79 @@
     }
   </div>
 
-  <!-- Mira da inspeção: câmera travada atrás do agente; só sobra o que dá para tocar -->
+  <!--
+    Inspeção (toque na lupa): câmera travada atrás do agente, a HUD some e só fica o que dá
+    para tocar, no mesmo lugar e no mesmo jeito dos outros modos (bilhete, carimbo e Cancelar).
+  -->
   @if (aiming(); as item) {
-    <div class="focus-stage aim-stage" data-testid="inspect-aim"></div>
-    <div class="aim-bar">
-      <button type="button" class="aim-cancel" data-testid="inspect-cancel" (click)="cancelInspect()" aria-label="Cancelar e voltar ao normal">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-        <span>Cancelar</span>
-        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
-      </button>
-      <button type="button" class="aim-inspect" data-testid="inspect-go" (click)="inspect()"
-        [attr.aria-label]="'Inspecionar a ' + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'">
-        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6" /><path d="M14.5 14.5L20 20" /></svg>
-        <span class="aim-inspect-text">
-          <span class="stencil">Inspecionar</span>
-          <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
+    <div class="focus-stage" data-testid="inspect-focus">
+      @if (search(); as sv) {
+        <span class="d20 focus-die" [class.rolling]="sv.result === null" [class.pass]="sv.pass === true" [class.fail]="sv.pass === false" aria-hidden="true">
+          <svg viewBox="0 0 100 100">
+            <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
+            <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
+          </svg>
+          <span class="d20-value">{{ sv.face }}</span>
         </span>
-        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-      </button>
+      }
     </div>
-  }
-
-  <!-- Inspeção em close-up: o d20 rola no meio da cena e o resultado espera o Fechar -->
-  @if (search(); as sv) {
-    <div class="focus-stage" data-testid="search-focus">
-      <span class="d20 focus-die" [class.rolling]="sv.result === null" [class.pass]="sv.pass === true" [class.fail]="sv.pass === false" aria-hidden="true">
-        <svg viewBox="0 0 100 100">
-          <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
-          <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
-        </svg>
-        <span class="d20-value">{{ sv.face }}</span>
-      </span>
-      <div class="focus-card" role="status" aria-live="polite">
-        <span class="focus-what">{{ sv.who }} · {{ sv.furniture }} · d20 · mais que {{ sv.target }}</span>
-        @if (sv.pass !== null) {
-          <span class="focus-result" [class.pass]="sv.pass" data-testid="search-result">
-            {{ sv.pass ? 'Achou! ' + sv.seized : 'Nada ainda' }}
-          </span>
-          <button type="button" class="focus-close" #searchClose (click)="closeSearch()" data-testid="search-close">
-            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-            Fechar
+    <div class="aim-actions">
+      @if (search(); as sv) {
+        <div class="slip inspect-slip" [class.pass]="sv.pass === true" role="status" aria-live="polite" data-testid="search-focus">
+          @if (sv.pass === null) {
+            <strong>Rolando…</strong>
+            <span>{{ sv.who }} · {{ sv.furniture }}</span>
+            <span class="small">d20 · mais que {{ sv.target }}</span>
+          } @else if (sv.pass) {
+            <strong data-testid="search-result">Achou!</strong>
+            <span>{{ sv.seized }}</span>
+            <span class="small">tirou {{ sv.result }} no d20</span>
+          } @else {
+            <strong data-testid="search-result">Falhou</strong>
+            <span>Tirou {{ sv.result }}: nada na {{ sv.furniture }} ainda.</span>
+            <span class="small">
+              {{ movesLeft() >= searchRules.inspectCost ? 'Tentar de novo gasta ' + searchRules.inspectCost + ' mov. (resta ' + movesLeft() + ')' : 'Sem movimento para tentar de novo' }}
+            </span>
+          }
+        </div>
+        @if (sv.pass === false) {
+          <button type="button" class="stamp confirm" #searchClose data-testid="search-retry"
+            [disabled]="movesLeft() < searchRules.inspectCost" (click)="retryInspect()">
+            <span class="stamp-ring">
+              <span class="stamp-small">{{ searchRules.inspectCost }} mov.</span>
+              <span class="stamp-text">De novo!</span>
+            </span>
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
           </button>
-        } @else {
-          <span class="focus-result rolling">Rolando…</span>
+          <button type="button" class="paper side" data-testid="search-close" (click)="closeSearch()">
+            <span class="stencil">Fechar</span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+          </button>
+        } @else if (sv.pass) {
+          <button type="button" class="stamp confirm" #searchClose data-testid="search-close" (click)="closeSearch()">
+            <span class="stamp-ring"><span class="stamp-text">Fechar</span></span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+          </button>
         }
-      </div>
+      } @else {
+        <div class="slip inspect-slip" role="status" aria-live="polite" data-testid="inspect-hint">
+          <strong>Inspecionar a {{ item.furniture }}?</strong>
+          <span>d20 · mais que {{ searchRules.find }} acha.</span>
+          <span class="small">Cada rolagem gasta {{ searchRules.inspectCost }} mov. (resta {{ movesLeft() }})</span>
+        </div>
+        <button type="button" class="stamp confirm inspect-stamp" data-testid="inspect-go" (click)="inspect()"
+          [attr.aria-label]="'Inspecionar a ' + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'">
+          <span class="stamp-ring">
+            <span class="stamp-small">d20 · {{ searchRules.inspectCost }} mov.</span>
+            <span class="stamp-text">Inspecionar</span>
+          </span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+        </button>
+        <button type="button" class="paper side" data-testid="inspect-cancel" (click)="cancelInspect()">
+          <span class="stencil">Cancelar</span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+        </button>
+      }
     </div>
   }
 

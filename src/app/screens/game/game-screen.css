@@ -377,66 +377,20 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .focus-die .d20-value { font-size: 28px; top: 9px; }
 .focus-die.pass .d20-body { fill: #dff3d9; }
 .focus-die.fail .d20-body { fill: #f6dcd6; }
-.focus-card {
-  position: absolute; left: 50%; bottom: calc(40px + var(--safe-bottom));
-  transform: translateX(-50%) rotate(-1deg);
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center;
-  max-width: calc(100% - 32px - var(--safe-left) - var(--safe-right));
-  padding: 10px 14px;
-  background: var(--paper-light);
-  box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.4);
-  font-size: 13px;
-  pointer-events: auto;
-  animation: slap .25s ease-out both;
-}
-.focus-result { font-family: var(--stencil); font-weight: 700; font-size: 17px; text-transform: uppercase; color: var(--red-text); }
-.focus-result.pass { color: var(--green-ok); }
-.focus-result.rolling { font-family: var(--typed); font-weight: 400; font-size: 13px; text-transform: none; color: var(--muted-paper); }
-.focus-close {
-  position: relative;
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 14px;
-  background: var(--ink-paper); color: var(--paper-light);
-  font-family: var(--stencil); font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: .5px;
-  box-shadow: 2px 3px 0 rgba(0, 0, 0, .35);
-  animation: slap .25s ease-out both;
-}
-.focus-close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 3.4; stroke-linecap: round; }
-.focus-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, .35); }
-/* mira da inspeção: a HUD some; sobram Cancelar e Inspecionar (amarelo, como a lupa) */
-.aim-stage::before { background: radial-gradient(ellipse 48% 52% at 50% 50%, transparent 60%, rgba(8, 10, 8, .6) 100%); }
-.aim-bar {
+/* inspeção: os botões ficam onde ficam nos outros modos (bilhete, carimbo e Cancelar) */
+.aim-actions {
   position: absolute; z-index: 5;
-  left: calc(16px + var(--safe-left)); right: calc(16px + var(--safe-right));
-  bottom: calc(40px + var(--safe-bottom));
-  display: flex; align-items: stretch; justify-content: center; gap: 12px;
+  right: calc(14px + var(--safe-right));
+  bottom: calc(12px + var(--safe-bottom));
+  width: 250px; height: 150px;
   pointer-events: none;
 }
-.aim-bar button { pointer-events: auto; position: relative; animation: slap .25s ease-out both; }
-.aim-bar svg { flex: none; fill: none; stroke: currentColor; stroke-width: 3.2; stroke-linecap: round; }
-.aim-cancel {
-  display: inline-flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  min-width: 76px; padding: 8px 10px;
-  border: 3px solid #fff; border-radius: 12px;
-  background: #e3121b; color: #fff;
-  font-family: var(--stencil); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
-  box-shadow: 3px 4px 0 rgba(0, 0, 0, .4), inset 0 -4px 0 rgba(0, 0, 0, .18);
-}
-.aim-cancel svg { width: 24px; height: 24px; }
-.aim-inspect {
-  display: inline-flex; align-items: center; gap: 10px;
-  flex: 0 1 260px; padding: 10px 16px;
-  border: 3px solid #0b1d24; border-radius: 12px;
-  background: #ffd43b; color: #0b1d24;
-  text-align: left;
-  box-shadow: 3px 4px 0 rgba(0, 0, 0, .4), inset 0 -4px 0 rgba(0, 0, 0, .12);
-}
-.aim-inspect svg { width: 34px; height: 34px; stroke-width: 3.4; }
-.aim-inspect-text { display: flex; flex-direction: column; min-width: 0; }
-.aim-inspect .stencil { font-family: var(--stencil); font-weight: 700; font-size: 19px; text-transform: uppercase; letter-spacing: .5px; line-height: 1.1; }
-.aim-inspect .typed { font-family: var(--typed); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.aim-cancel:active, .aim-inspect:active { transform: translateY(2px); box-shadow: 1px 2px 0 rgba(0, 0, 0, .4); }
-.aim-cancel:focus-visible, .aim-inspect:focus-visible { outline: 3px solid #fff; outline-offset: 3px; }
+.aim-actions > * { pointer-events: auto; }
+.inspect-slip { width: 150px; }
+.aim-actions .side { width: 84px; right: 100px; }
+.aim-actions .side .stencil { font-size: 13px; }
+.stamp.inspect-stamp .stamp-text { font-size: 12px; }
+.inspect-slip.pass strong { color: var(--green-ok); }
 
 /* inspecionar pelo teclado: o botão só aparece quando recebe o foco */
 .inspect.keyboard-only:not(:focus-visible) { opacity: 0; pointer-events: none; }
@@ -694,12 +648,12 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .focus-card, .focus-close, .aim-bar button, .slip, .suspect, .check, .check-result, .d20.rolling svg, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
+  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .slip, .suspect, .check, .check-result, .d20.rolling svg, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
 @media (min-width: 700px) and (min-height: 600px) {
-  .top, .agents, .suspects, .actions, .telegram, .check, .report, .end-op, .approach-cancel { zoom: 1.25; }
+  .top, .agents, .suspects, .actions, .telegram, .check, .report, .end-op, .approach-cancel, .aim-actions { zoom: 1.25; }
 }
 
 /* ---------- controle (DualShock 4) ---------- */

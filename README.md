@@ -169,13 +169,13 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
   aparece numa ficha no canto esquerdo da tela. Tirando **mais que 6**, ele repara em algo na
   **prateleira** da parede do leste, que ganha uma lupa.
 - Colado na prateleira percebida, **toque na lupa** (que pulsa; □ no controle, quando não há ninguém
-  para abordar): a câmera troca para uma vista **ortográfica a 45°**, atrás (por cima do ombro) do
-  agente, com a prateleira em foco — e fica **travada** (arrastar, pinça e roda não mexem nela). A HUD
-  some; sobram só **Cancelar** (vermelho, ○), que volta ao normal sem gastar nada, e **Inspecionar**
-  (amarelo, ✕ ou □) — tocar na lupa de novo também inspeciona. Aí um d20 rola no meio da cena.
-  Tirando **mais que 4**, acha a **arma escondida**, que é apreendida. O resultado fica na
-  tela até tocar em **Fechar** (✕ ou ○); aí a câmera volta. Se falhar, a lupa continua lá para tentar
-  de novo. Cada tentativa gasta **1 de movimento**. Longe da prateleira, tocar na lupa avisa que é
+  para abordar): a câmera gira para trás do agente (por cima do ombro, na mesma inclinação do jogo),
+  com a prateleira em foco, e fica **travada** (arrastar, pinça e roda não mexem nela). A HUD some;
+  sobram o bilhete e os botões de sempre: o carimbo **Inspecionar** (✕/□, ou a lupa de novo) rola o
+  d20 e **Cancelar** (○) volta ao normal sem gastar nada. Tirando **mais que 4**, acha a **arma
+  escondida**, que é apreendida. Se falhar, o d20 fica com o resultado, o bilhete diz que falhou e
+  dá para tentar **De novo!** ali mesmo ou **Fechar**. **Cada rolagem gasta 1 de movimento.**
+  Longe da prateleira, tocar na lupa avisa que é
   preciso chegar colado nela.
 - Se os três agentes falharem na percepção, a arma fica sem ser encontrada.
 

@@ -204,7 +204,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     });
     // resultado na tela: o foco vai para "Confirmar" (Enter/Espaço fecham)
     effect(() => this.rollConfirmBtn()?.nativeElement.focus({ preventScroll: true }));
-    // resultado da inspeção: o foco vai para "Fechar"
+    // resultado da inspeção: o foco vai para "De novo!" (falhou) ou "Fechar"
     effect(() => this.searchCloseBtn()?.nativeElement.focus({ preventScroll: true }));
     // troca de modo no menu: o tabuleiro remonta o mundo em segundo plano
     effect(() => {
@@ -287,11 +287,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    */
   protected readonly search = signal<SearchView | null>(null);
   /**
-   * Mira da inspeção (primeiro toque na lupa): a câmera trava atrás do agente, a 45°, com o
-   * móvel em foco; a HUD some e só ficam **Cancelar** e **Inspecionar** (e a própria lupa).
+   * Inspeção aberta (toque na lupa): a câmera trava atrás do agente com o móvel em foco; a
+   * HUD some e só fica o que dá para tocar (**Inspecionar!** e **Cancelar**, depois o resultado).
    */
   protected readonly aiming = signal<HiddenItem | null>(null);
-  private searchDone?: () => void;
   private searchSpin?: ReturnType<typeof setInterval>;
   private readonly searchCloseBtn = viewChild('searchClose', { read: ElementRef<HTMLButtonElement> });
   /** Esconderijos em que alguém reparou (o móvel ganha a lupa e pode ser inspecionado). */
@@ -1002,13 +1001,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return true;
   }
 
-  /** Toque na lupa: abre a mira da inspeção (ou, já mirando, rola o d20); senão, diz o que falta. */
+  /** Toque na lupa: abre a inspeção (ou, já nela, rola o d20); senão, diz o que falta. */
   protected tapClue(): void {
-    if (this.phase() !== 'moving-choice' || this.approaching() || this.burning() || this.grouping()) return;
     if (this.aiming()) {
-      void this.inspect();
+      if (this.search()?.pass === false) this.retryInspect();
+      else if (!this.search()) void this.inspect();
       return;
     }
+    if (this.phase() !== 'moving-choice' || this.approaching() || this.burning() || this.grouping()) return;
     const item = this.inspectable();
     if (item) {
       if (this.movesLeft() < SEARCH_RULES.inspectCost) this.say(`Sem movimento para inspecionar a ${item.furniture} agora`, 'info');
@@ -1020,9 +1020,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Mira da inspeção: a câmera vai para trás do agente da vez, a 45° (ortográfica), com o
-   * móvel em foco, e fica travada. Nada gasta movimento ainda: **Cancelar** volta ao normal
-   * e **Inspecionar** (o botão amarelo ou a lupa) rola o d20.
+   * Abre a inspeção do móvel percebido: a câmera gira para trás do agente da vez (mesma
+   * inclinação do jogo), com o móvel em foco, e fica travada. A HUD some; sobram
+   * **Inspecionar!** (rola o d20) e **Cancelar** (volta ao normal sem gastar nada).
    */
   protected startInspect(): void {
     const item = this.inspectable();
@@ -1038,39 +1038,33 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.aiming.set(item);
   }
 
-  /** **Cancelar** na mira da inspeção: a câmera volta ao normal e nada é gasto. */
-  protected cancelInspect(): void {
-    if (!this.aiming()) return;
-    this.aiming.set(null);
-    this.board?.endInspectView();
-    this.board?.setInputEnabled(true);
-    if (this.phase() === 'moving-choice') this.refreshBoard();
+  /** **Inspecionar** (botão de teclado, □): abre a inspeção; já nela, rola o d20. */
+  protected inspect(): Promise<void> {
+    if (!this.aiming()) {
+      this.startInspect();
+      return Promise.resolve();
+    }
+    return this.rollInspect();
+  }
+
+  /** **De novo!** depois de uma falha: rola outra vez (gasta mais 1 de movimento). */
+  protected retryInspect(): void {
+    if (this.search()?.pass !== false || this.movesLeft() < SEARCH_RULES.inspectCost) return;
+    void this.rollInspect();
   }
 
   /**
-   * Inspeciona o móvel percebido (toque na lupa ou □): gasta 1 de movimento, a câmera
-   * aproxima no agente e no móvel e o d20 rola ali (mais que 4 acha). O resultado fica na
-   * tela até o jogador fechar; só então a câmera volta e a vez segue.
+   * Rola o d20 da inspeção: gasta 1 de movimento a cada rolagem, o dado gira no meio da cena
+   * e para no resultado. Se achar, a arma é apreendida; se falhar, o d20 fica com o resultado
+   * e dá para tentar de novo (enquanto houver movimento) ou fechar.
    */
-  protected async inspect(): Promise<void> {
-    const item = this.inspectable();
-    const from = this.positions().get(this.active().id);
-    if (this.phase() !== 'moving-choice' || !item || !from || this.movesLeft() < SEARCH_RULES.inspectCost) return;
-    const epoch = this.epoch;
+  private async rollInspect(): Promise<void> {
+    const item = this.aiming();
     const id = this.active().id;
-    this.selected.set(null);
-    this.board?.setSelected(null);
-    this.board?.setReachable([]);
-    this.board?.setInputEnabled(false);
+    if (!item || this.search()?.result === null || this.movesLeft() < SEARCH_RULES.inspectCost) return;
+    const epoch = this.epoch;
     this.phase.set('checking');
     this.movesLeft.update((n) => n - SEARCH_RULES.inspectCost);
-    const aimed = !!this.aiming();
-    this.aiming.set(null);
-    this.board?.inspectView(id, item.spot);
-    const motion = !reducedMotion();
-    // primeiro a câmera chega (se ainda não estava mirando); depois o dado rola
-    await this.wait(motion && !aimed ? 600 : 0);
-    if (this.destroyed || this.epoch !== epoch) return;
     const result = rollDie(SEARCH_RULES.die);
     this.search.set({
       who: this.nameOf(id),
@@ -1081,6 +1075,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       pass: null,
       seized: item.seized,
     });
+    const motion = !reducedMotion();
     if (motion) {
       this.haptics.vibrate(ROLL_PATTERN);
       this.searchSpin = setInterval(
@@ -1088,24 +1083,42 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         70,
       );
     }
-    await this.wait(900);
+    await this.wait(motion ? 900 : 0);
     clearInterval(this.searchSpin);
     if (this.destroyed || this.epoch !== epoch) return;
     const pass = beats(result, SEARCH_RULES.find);
     this.search.update((v) => v && { ...v, face: result, result, pass });
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(pass ? 0.8 : 0.3, pass ? 0.5 : 0.2, pass ? 260 : 120);
-    // a mensagem fica até o jogador fechar
-    await new Promise<void>((done) => (this.searchDone = done));
-    if (this.destroyed || this.epoch !== epoch) return;
-    this.board?.endInspectView();
-    this.board?.setInputEnabled(true);
     if (pass) {
       this.found.update((s) => new Set([...s, item.id]));
       this.board?.setClue(null);
-      this.say(`${this.nameOf(id)} achou a ${item.name} na ${item.furniture}. ${item.seized}`, 'alert');
     } else {
       this.searchFails.update((m) => new Map(m).set(item.id, (m.get(item.id) ?? 0) + 1));
+    }
+  }
+
+  /** **Cancelar** antes de rolar: a câmera volta ao normal e nada é gasto. */
+  protected cancelInspect(): void {
+    if (!this.aiming() || this.search()) return;
+    this.aiming.set(null);
+    this.board?.endInspectView();
+    this.board?.setInputEnabled(true);
+    if (this.phase() === 'moving-choice') this.refreshBoard();
+  }
+
+  /** **Fechar** (depois de rolar): a câmera volta e a vez segue. */
+  protected closeSearch(): void {
+    const sv = this.search();
+    const item = this.aiming();
+    if (!sv || sv.result === null || !item) return;
+    this.search.set(null);
+    this.aiming.set(null);
+    this.board?.endInspectView();
+    this.board?.setInputEnabled(true);
+    if (sv.pass) {
+      this.say(`${sv.who} achou a ${item.name} na ${item.furniture}. ${item.seized}`, 'alert');
+    } else {
       this.say(
         this.movesLeft() >= SEARCH_RULES.inspectCost
           ? `Nada na ${item.furniture}… Toque na lupa para tentar de novo (1 de movimento).`
@@ -1116,20 +1129,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.afterMove();
   }
 
-  /** Fecha o resultado da inspeção (botão **Fechar**, ✕ ou ○). */
-  protected closeSearch(): void {
-    if (this.search()?.result == null) return;
-    this.search.set(null);
-    const done = this.searchDone;
-    this.searchDone = undefined;
-    done?.();
-  }
-
-  /** Recomeço ou saída no meio da inspeção: some com o close-up sem seguir a vez. */
+  /** Recomeço ou saída no meio da inspeção: some com a vista sem seguir a vez. */
   private dropSearch(): void {
     clearInterval(this.searchSpin);
     this.search.set(null);
-    this.searchDone = undefined;
     this.aiming.set(null);
     this.board?.endInspectView();
     this.board?.setInputEnabled(true);
@@ -1439,7 +1442,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     switch (b) {
       case 'cross':
-        if (this.search()) this.closeSearch();
+        if (this.search()?.pass === false && this.movesLeft() >= SEARCH_RULES.inspectCost) this.retryInspect();
+        else if (this.search()) this.closeSearch();
         else if (this.aiming()) void this.inspect();
         else if (this.report()) this.closeReport();
         else if (this.phase() === 'rolling') this.confirmRoll();
@@ -1465,7 +1469,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       case 'square':
         // □ abre o modo de abordagem (de novo, cancela);
         // sem ninguém no raio, queima o alvo ou inspeciona o móvel percebido ao lado
-        if (this.aiming()) void this.inspect();
+        if (this.search()?.pass === false) this.retryInspect();
+        else if (this.aiming()) { if (!this.search()) void this.inspect(); }
         else if (this.approaching()) this.cancelApproach();
         else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) break;
