@@ -205,8 +205,8 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
 /**
  * Aeroporto clandestino: o hangar fica ao norte, com um portão largo (12 hexágonos) e duas
  * portas nos fundos. A pista é um rastro de terra de 6 hexágonos de largura que sai do meio
- * do portão e corta a mata de sul a norte, até a borda do mapa. Por dentro cabem quatro aviões lado a lado (cada um ocupa
- * 4 colunas × 3 fileiras) em mais de uma fileira; por enquanto há um só, no meio. A carga
+ * do portão e corta a mata de sul a norte, até a borda do mapa. O avião é grande: ocupa
+ * 8 colunas × 6 fileiras, em escala dobrada); há um só, no lado oeste. A carga
  * empilhada (cobertura) faz duas fileiras com vãos a oeste, um "L" a leste e um canto de gaiolas
  * junto ao portão; os vãos são passagens e janelas de visão. O resto é
  * mata fechada, cortada por trilhas e clareiras: a equipe parte de uma clareira no canto sudoeste.
@@ -231,12 +231,12 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTT.....#____________________#.......TTTT',
   'TTTT....T..#_BMB_MB_____________#........TTT',
   'TTTTT...TT.#_S____S____RRR_____f#.TTT...TTTT',
-  'TTTTT..TT..#__________________B_#..TTT..TTTT',
-  'TTTTTT.....#________AAAA______M_#.......TTTT',
-  'TT.....TT..#________AAAA______Sf#..TTT....TT',
-  'TTT.T.TT...#________AAAA______S_#..TT....TTT',
-  'TTTT....T..#____________fSBMS___#........TTT',
-  'TTTTT..TT..#_SS_MSS_____________#..TTT..TTTT',
+  'TTTTT..TT..#____AAAAAAAA______B_#..TTT..TTTT',
+  'TTTTTT.....#____AAAAAAAA______M_#.......TTTT',
+  'TT.....TT..#____AAAAAAAA______Sf#..TTT....TT',
+  'TTT.T.TT...#____AAAAAAAA______S_#..TT....TTT',
+  'TTTT....T..#____AAAAAAAAfSBMS___#........TTT',
+  'TTTTT..TT..#_SS_AAAAAAAA________#..TTT..TTTT',
   'T.T.T.TT...#____________________#..TT....TTT',
   '......TTT.T#__________________GG#T.TTT.T....',
   'T.T...TTT..#f_________________GG#..TTT...TTT',

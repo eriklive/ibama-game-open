@@ -63,18 +63,21 @@ describe('mapas', () => {
     expect(reachableHexes(map.starts[0], 999, playArea(map), sealed).has(hexKey(inside))).toBe(false);
   });
 
-  it('aeroporto: o hangar comporta duas fileiras de quatro aviões e tem um no meio', () => {
+  it('aeroporto: o avião é grande (8 × 6 hexágonos) e cabe dentro do hangar, sem pegar carga', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
     const [c0, c1] = structureRect(map, 'hangar')!.cols;
     const [r0, r1] = structureRect(map, 'hangar')!.rows;
-    // por dentro das paredes: 4 vagas de 4 colunas e 2 fileiras de 3, com um corredor no meio
-    expect(c1 - c0 - 1).toBeGreaterThanOrEqual(4 * 4);
-    expect(r1 - r0 - 1).toBeGreaterThanOrEqual(2 * 3 + 1);
     const cols = map.plane!.map((h) => h.col);
     const rows = map.plane!.map((h) => h.row);
-    expect(map.plane!.length).toBe(12);
-    expect(Math.min(...cols) - c0).toBe(c1 - Math.max(...cols));
-    expect(Math.min(...rows) - r0).toBe(r1 - Math.max(...rows));
+    expect(map.plane!.length).toBe(48);
+    expect([Math.max(...cols) - Math.min(...cols) + 1, Math.max(...rows) - Math.min(...rows) + 1]).toEqual([8, 6]);
+    // por dentro das paredes
+    expect(Math.min(...cols)).toBeGreaterThan(c0);
+    expect(Math.max(...cols)).toBeLessThan(c1);
+    expect(Math.min(...rows)).toBeGreaterThan(r0);
+    expect(Math.max(...rows)).toBeLessThan(r1);
+    const plane = new Set(map.plane!.map(hexKey));
+    expect((map.cover ?? []).some((c) => plane.has(hexKey(c)))).toBe(false);
   });
 
   it('aeroporto: todo hexágono livre é alcançável (nenhuma clareira isolada, nem atrás da carga)', () => {

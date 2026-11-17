@@ -145,8 +145,8 @@ Os bônus ficam em `GROUP_RULES` (`moveBonus` e `approachBonus`, em `src/app/gam
 
 O mapa **Aeroporto** (desenho de 44×38, com a missão num círculo — ver abaixo) é o primeiro mapa "de verdade". O **hangar** fica ao norte, com um
 portão largo (12 hexágonos) e duas portas nos fundos. A **pista é um rastro de terra** de 6 hexágonos de
-largura, com sulcos de pneu, que sai do meio do portão e corta a mata de sul a norte. Por dentro cabem quatro aviões lado a lado (cada um ocupa
-4 colunas × 3 fileiras); por enquanto há um só, parado no meio. Dois postes de luz ficam do lado
+largura, com sulcos de pneu, que sai do meio do portão e corta a mata de sul a norte. O avião é grande (ocupa
+8 colunas × 6 fileiras); há um só, parado no lado oeste do hangar. Dois postes de luz ficam do lado
 de fora, nos cantos da frente, e duas lâmpadas pendem do telhado. A equipe começa numa
 clareira no canto sudoeste e avança pelas trilhas da mata ou pela pista.
 

@@ -49,6 +49,9 @@ const COLORS = {
   /** Aura de interrogatório em volta do suspeito rendido (âmbar; mais clara com o agente dentro). */
   interrogate: 0xe08a1e,
   interrogateHot: 0xffb347,
+  /** Aura do que se pode queimar (o avião, os suprimentos): vermelho de brasa. */
+  actionAura: 0xd9532b,
+  actionHot: 0xff7a45,
   interrogateReach: 0xe7b569,
   /** Aura de rendido sem diálogo: âmbar apagado. */
   interrogateMuted: 0xa79a80,
@@ -325,6 +328,9 @@ export class HexBoard {
   private interrogationAura = new Set<string>();
   private interrogationHot = new Set<string>();
   private interrogationMuted = new Set<string>();
+  /** Aura de ação em volta do avião (ver `setActionAura`). */
+  private actionAura = new Set<string>();
+  private actionHot = new Set<string>();
   /** Pré-visualização da abordagem: zona de rendição, zona de rolagem e zona de fuga. */
   private approach: { surrender: Set<string>; roll: Set<string>; flee: Set<string> } | null = null;
   /** Escala de cinza do modo de abordagem (ver `setSpotlight`). */
@@ -506,6 +512,20 @@ export class HexBoard {
     this.interrogationAura = aura;
     this.interrogationHot = warm;
     this.interrogationMuted = dim;
+    this.paintTiles();
+  }
+
+  /**
+   * Aura em volta de um objeto com ação (o avião, os suprimentos): hexágonos de brasa que respiram. `hot` são
+   * os em que o agente da vez está — ali o botão de ação aparece.
+   */
+  setActionAura(keys: Iterable<string>, hot: Iterable<string> = []): void {
+    const aura = new Set(keys);
+    const warm = new Set(hot);
+    const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((k) => b.has(k));
+    if (same(aura, this.actionAura) && same(warm, this.actionHot)) return;
+    this.actionAura = aura;
+    this.actionHot = warm;
     this.paintTiles();
   }
 
@@ -1488,6 +1508,7 @@ export class HexBoard {
       this.tiles.get(hexKey(h))?.baseColor.set(0x9c8c70);
     }
     const plane = buildPlane();
+    plane.scale.setScalar(2); // avião com o dobro do tamanho (cobre 8 × 6 hexágonos, ver `maps.ts`)
     this.planeModel = plane;
     const holder = this.housed(hexes[0], plane);
     holder.position.copy(center.divideScalar(hexes.length));
@@ -2138,7 +2159,11 @@ export class HexBoard {
             : COLORS.interrogate
         : this.interrogationMuted.has(key)
           ? COLORS.interrogateMuted
-          : null;
+          : this.actionAura.has(key)
+            ? this.actionHot.has(key)
+              ? COLORS.actionHot
+              : COLORS.actionAura
+            : null;
       tile.color.set(
         zone ??
           (isSel ? COLORS.selected : onPath ? COLORS.path : (aura ?? (isReach ? reachColor : seen ? COLORS.vision : tile.baseColor))),
@@ -2447,6 +2472,12 @@ export class HexBoard {
         const hot = this.interrogationHot.has(key);
         const g = (hot ? 0.2 : 0.1) + Math.sin(t * 3.9) * (hot ? 0.1 : 0.07);
         tile.emissive.setRGB(g, g * 0.55, g * 0.1);
+        changed = true;
+      } else if (this.actionAura.has(key)) {
+        // aura de ação: brasa que respira (mais forte com o agente dentro)
+        const hot = this.actionHot.has(key);
+        const g = (hot ? 0.22 : 0.1) + Math.sin(t * 3.2) * (hot ? 0.1 : 0.06);
+        tile.emissive.setRGB(g, g * 0.3, g * 0.08);
         changed = true;
       } else if (this.reachable.has(key)) {
         if (this.vision.has(key)) tile.emissive.setRGB(pulse, pulse * 0.4, pulse * 0.3);
