@@ -159,7 +159,7 @@
         [class.focused]="c.id === focused().id && !onTurn(c)"
         [style.--tilt]="tilts[i % tilts.length] + 'deg'"
         [attr.aria-pressed]="c.id === focused().id"
-        [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + '. Velocidade ' + signed(fieldStats(c).vel) + ', intimidação ' + signed(fieldStats(c).int) + ', alcance da abordagem ' + fieldStats(c).range + '. Toque para ver no tabuleiro.'"
+        [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + (isCaptain(c) ? ', Capitão' : ', Agente') + '. Vigor ' + signed(fieldStats(c).vig) + ', intimidação ' + signed(fieldStats(c).int) + ', alcance da abordagem ' + fieldStats(c).range + '. Toque para ver no tabuleiro.'"
         [attr.data-testid]="'chip-' + c.id"
         (click)="focusCharacter(c.id)">
         <span class="photo-img" [style.background]="hexColor(c)">
@@ -168,12 +168,15 @@
         <span class="photo-name">{{ c.name }}</span>
         @let fs = fieldStats(c);
         <span class="photo-stats" aria-hidden="true" [class.boosted]="inGroup(c) || breakInBoost() > 0" data-testid="photo-stats">
-          <span>vel {{ signed(fs.vel) }}</span>
+          <span>vig {{ signed(fs.vig) }}</span>
           <span>int {{ signed(fs.int) }}</span>
           @if (onTurn(c)) { <span>alc. {{ fs.range }}</span> }
         </span>
         @if (inGroup(c)) {
           <span class="group-tag" aria-hidden="true">grupo</span>
+        }
+        @if (isCaptain(c)) {
+          <span class="captain-tag" aria-hidden="true" data-testid="captain-tag">Capitão</span>
         }
         @if (onTurn(c)) {
           <span class="stamp-turn" aria-hidden="true">Na vez</span>
@@ -317,7 +320,7 @@
         <strong>Abordagem de {{ active().name }}</strong>
         @let ap = approachParts();
         <span class="small approach-range" data-testid="approach-range">
-          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}@if (ap.door) { · arrombamento +{{ ap.door }}}
+          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}@if (ap.leader) { · Capitão +{{ ap.leader }}}@if (ap.door) { · arrombamento +{{ ap.door }}}
         </span>
         <span class="small approach-range" data-testid="approach-bands">
           Rolagem {{ ap.zones.surrenderRange + 1 }}–{{ ap.zones.rollRange }} (d20 ≥ {{ approachRules.escapeDC }} escapa) · fuga até {{ ap.zones.radius }}
@@ -375,12 +378,16 @@
       <div class="slip" role="status" aria-live="polite" data-testid="group-hint">
         <strong>Agrupar a equipe</strong>
         @if (rallyPlan(); as plan) {
-          <span>Todos vão até o ponto destacado: {{ plan.cost }} {{ plan.cost === 1 ? 'passo' : 'passos' }}.</span>
+          @if (freeRally()) {
+            <span>Todos vão até o ponto destacado. Comando do Capitão: <strong>não gasta movimento</strong>.</span>
+          } @else {
+            <span>Todos vão até o ponto destacado: {{ plan.cost }} {{ plan.cost === 1 ? 'passo' : 'passos' }}.</span>
+          }
           <span class="small">Toque em outro hexágono claro para trocar.</span>
         } @else {
           <span>Toque no ponto de encontro (hexágonos claros).</span>
         }
-        <span class="small">Juntos: +{{ groupBonus }} de movimento e +{{ groupApproachBonus }} de alcance na abordagem.</span>
+        <span class="small">Juntos: +{{ rallyMove() }} de movimento e +{{ rallyInt() }} de intimidação.</span>
       </div>
       <button type="button" class="stamp confirm" [disabled]="!rallyPlan()" (click)="confirmGrouping()" data-testid="group-confirm">
         <span class="stamp-ring"><span class="stamp-text">Agrupar!</span></span>
@@ -443,16 +450,16 @@
       <!-- Agrupar: todos se encontram num ponto e andam juntos (+movimento) -->
       @if (phase() === 'moving-choice' && group().size) {
         <button type="button" class="paper group-btn" data-testid="ungroup" (click)="ungroup()"
-          [attr.aria-label]="'Desagrupar a equipe (juntos ganham +' + groupBonus + ' de movimento e +' + groupApproachBonus + ' de alcance na abordagem)'">
+          [attr.aria-label]="'Desagrupar a equipe (juntos ganham +' + groupMove() + ' de movimento e +' + groupInt() + ' de intimidação)'">
           <span class="stencil">Desagrupar</span>
-          <span class="typed">juntos +{{ groupBonus }}</span>
+          <span class="typed">juntos +{{ groupMove() }}</span>
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
         </button>
       } @else if (phase() === 'moving-choice' && canGroup()) {
         <button type="button" class="paper group-btn" data-testid="group" (click)="startGrouping()"
-          [attr.aria-label]="'Agrupar a equipe num ponto em comum: juntos ganham +' + groupBonus + ' de movimento e +' + groupApproachBonus + ' de alcance na abordagem'">
+          [attr.aria-label]="'Agrupar a equipe num ponto em comum: juntos ganham +' + rallyMove() + ' de movimento e +' + rallyInt() + ' de intimidação' + (freeRally() ? '. Comando do Capitão: não gasta movimento' : '')">
           <span class="stencil">Agrupar</span>
-          <span class="typed">+{{ groupBonus }} mov./alc.</span>
+          <span class="typed">@if (freeRally()) {grátis · }+{{ rallyMove() }} mov./int.</span>
           @if (pad()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('group') }}</span> }
         </button>
       }
@@ -484,12 +491,12 @@
           {{ t.silent ? 'sem diálogo' : t.enemy.name }}
         </button>
       }
-      <!-- Porta: colado numa porta, abre o menu (arrombar, pick lock, abrir) -->
+      <!-- Porta: colado numa porta, abre o menu (arrombar, destrancar, abrir) -->
       @if (nearDoor(); as door) {
         <button
           type="button"
           class="paper door-btn"
-          [attr.aria-label]="'Porta ' + doorStateLabel[door.broken ? 'aberta' : door.state].toLowerCase() + ': arrombar, pick lock ou abrir'"
+          [attr.aria-label]="'Porta ' + doorStateLabel[door.broken ? 'aberta' : door.state].toLowerCase() + ': arrombar, destrancar ou abrir'"
           data-testid="door"
           (click)="openDoorMenu(door)">
           <span class="stencil">Porta</span>
@@ -664,7 +671,7 @@
         @if (rolled() > 0) {
           <span class="roll-number">{{ movesLeft() }}</span>
           <span class="roll-total">
-            {{ dice().join(' + ') }}{{ speedTerm() }}@if (grouped()) { + {{ groupBonus }} (grupo)} = <strong>{{ movesLeft() }}</strong> de movimento
+            {{ dice().join(' + ') }}{{ speedTerm() }}@if (grouped()) { + {{ groupBonus }} (grupo)}@if (grouped() && led()) { + {{ leaderBonus.vigor }} (Capitão)} = <strong>{{ movesLeft() }}</strong> de movimento
           </span>
           <button type="button" appMainButton class="roll-confirm" #rollConfirm (click)="confirmRoll()" data-testid="roll-confirm">
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }

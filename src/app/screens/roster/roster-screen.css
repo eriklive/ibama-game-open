@@ -848,3 +848,115 @@ td.none {
     transform: none;
   }
 }
+
+/* ---------- classe (Capitão / Agente) ---------- */
+.cap-mark {
+  position: absolute;
+  left: 2px;
+  bottom: 2px;
+  padding: 0 3px;
+  border: 1.5px solid var(--red);
+  background: var(--paper-light);
+  color: var(--red);
+  font-family: var(--mono);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 12px;
+  text-transform: uppercase;
+}
+.class-block {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding-bottom: 14px;
+  border-bottom: 1px dashed #a99c78;
+}
+.class-pick {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.class-opt {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  border: 2px dashed var(--line);
+  background: transparent;
+  color: var(--muted-2);
+  text-align: left;
+  cursor: pointer;
+}
+.class-opt.on {
+  border: 2px solid var(--red);
+  background: var(--paper-light);
+  color: var(--ink);
+}
+.class-opt:disabled {
+  cursor: default;
+}
+.class-opt:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+.class-name {
+  font-family: var(--typed);
+  font-size: 16px;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+.class-opt.on .class-name {
+  color: var(--red);
+}
+.class-blurb {
+  font-family: var(--mono);
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--muted);
+}
+.perks {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.perk {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  min-width: 0;
+  padding: 6px 10px;
+  border-left: 4px solid var(--green);
+  background: var(--cream);
+  font-family: var(--mono);
+}
+.perk.per {
+  border-left-color: var(--yellow);
+}
+.perk-kind {
+  font-size: 10px;
+  letter-spacing: 1px;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.perk b {
+  font-size: 13px;
+  color: var(--ink);
+}
+.perk-val {
+  font-family: var(--typed);
+  color: var(--red);
+}
+.perk-text {
+  font-size: 11px;
+  color: var(--muted-2);
+}
+.pad-hint-inline {
+  font-family: var(--mono);
+  font-size: 11px;
+  color: var(--muted);
+}

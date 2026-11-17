@@ -323,13 +323,14 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .group-btn .stencil { font-size: 12px; }
 .group-btn .typed { font-size: 9px; }
 .stamp:disabled { opacity: .6; }
-.group-tag {
+.group-tag, .captain-tag {
   position: absolute; left: -6px; top: -6px; transform: rotate(-8deg);
   padding: 0 4px;
   background: var(--postit); color: var(--ink-paper);
   font-family: var(--typed); font-size: 9px; line-height: 13px; text-transform: uppercase;
   box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.3);
 }
+.captain-tag { left: auto; top: auto; right: -6px; bottom: -7px; color: var(--red-text); }
 .inspect { right: 60px; bottom: 116px; width: 112px; height: 46px; transform: rotate(2deg); background: var(--postit); animation: slap .25s ease-out both; }
 .inspect .stencil { font-size: 13px; }
 .inspect .typed { font-size: 9px; }

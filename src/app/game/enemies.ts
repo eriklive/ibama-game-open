@@ -42,7 +42,7 @@ export const ENEMY_RULES = {
  * ainda não fugiu pode ser abordado de novo e rola outra vez. Abordar encerra a vez.
  */
 export const APPROACH_RULES = {
-  surrenderRange: 2,
+  surrenderRange: 3,
   rollBand: 3,
   fleeBand: 1,
   escapeDie: 20,

@@ -190,7 +190,7 @@ describe('abordagem', () => {
   const from = { col: 5, row: 5 };
 
   it('as faixas vêm uma logo depois da outra: abordagem, rolagem (3) e fuga (1)', () => {
-    expect(BASE_APPROACH).toEqual({ surrenderRange: 2, rollRange: 5, radius: 6 });
+    expect(BASE_APPROACH).toEqual({ surrenderRange: 3, rollRange: 6, radius: 7 });
     expect(approachZones(4)).toEqual({ surrenderRange: 4, rollRange: 7, radius: 8 });
   });
 

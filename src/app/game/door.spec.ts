@@ -46,6 +46,25 @@ describe('doorNeed', () => {
   });
 });
 
+describe('Gazua (perícia do Agente)', () => {
+  it('baixa o valor da fechadura no destrancar, nunca abaixo de 1', () => {
+    expect(doorNeed('pick', door('trancada'), 6)).toBe(6);
+    expect(doorNeed('pick', door('trancada', { lock: 5 }), 6)).toBe(1);
+    expect(doorChance(doorNeed('pick', door('trancada'), 6))).toBe(0.75);
+  });
+
+  it('não muda o resto: sem tranca, bloqueada e arrombar', () => {
+    expect(doorNeed('pick', door('encostada'), 6)).toBe(0);
+    expect(doorNeed('pick', door('bloqueada'), 6)).toBe(Infinity);
+    expect(doorNeed('arrombar', door('trancada'), 6)).toBe(12);
+  });
+
+  it('o mesmo 9 no d20 destranca com a Gazua e falha sem ela', () => {
+    expect(resolveDoor('pick', door('trancada'), 9, 6)).toMatchObject({ pass: true, opened: true });
+    expect(resolveDoor('pick', door('trancada'), 9)).toMatchObject({ pass: false, opened: false });
+  });
+});
+
 describe('resolveDoor', () => {
   it('trancada: arromba com 12 ou mais', () => {
     expect(resolveDoor('arrombar', door('trancada'), 11).pass).toBe(false);

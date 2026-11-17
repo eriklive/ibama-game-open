@@ -61,6 +61,7 @@ import {
 } from '../../game/door';
 import { BURN_RULES, Burnable, burnTarget, seeFire } from '../../game/burn';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
+import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
@@ -529,15 +530,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const k = this.doorKey();
     return k ? (this.doors().get(k) ?? null) : null;
   });
-  /** Fichas do menu da porta: arrombar, pick lock e abrir. */
+  /** Fichas do menu da porta: arrombar, destrancar e abrir. */
   protected readonly doorOptions = computed<DoorOption[]>(() => {
     const door = this.openDoor();
     if (!door) return [];
     const busy = this.doorBusy();
     const open = isOpen(door);
     const st = door.state;
+    const gazua = this.pickBonus();
     const option = (action: DoorAction, name: string, note: string, extra: Partial<DoorOption> = {}): DoorOption => {
-      const need = doorNeed(action, door);
+      const need = doorNeed(action, door, action === 'pick' ? gazua : 0);
       const rolls = rollsDie(need);
       const tone = need === null || need === Infinity ? 'never' : rolls ? 'need' : 'free';
       const line = rolls && need !== Infinity ? `precisa de ${need}+ · ${note}` : note;
@@ -556,8 +558,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ),
       option(
         'pick',
-        'Pick lock',
-        open ? 'já está aberta' : noMoves ? 'sem movimento' : st === 'bloqueada' ? 'nunca passa' : st === 'trancada' ? `fechadura ${door.lock}` : 'precisa de 0, abre sozinha',
+        'Destrancar',
+        open ? 'já está aberta' : noMoves ? 'sem movimento' : st === 'bloqueada' ? 'nunca passa' : st === 'trancada' ? `fechadura ${door.lock}${gazua ? `, ${SKILLS.gazua.name} +${gazua}` : ''}` : 'precisa de 0, abre sozinha',
         { cost: `${DOOR_RULES.pickCost} mov.`, disabled: busy || open || noMoves },
       ),
       option(
@@ -633,27 +635,59 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly group = signal<ReadonlySet<string>>(wholeTeam());
   protected readonly groupBonus = GROUP_RULES.moveBonus;
   protected readonly groupApproachBonus = GROUP_RULES.approachBonus;
+  protected readonly leaderBonus = CLASS_RULES.leadership;
   protected readonly signed = signed;
 
+  /** Quem é o Capitão da equipe (escolhido na ficha). */
+  protected readonly captainId = this.roster.captain;
+  protected isCaptain(c: Character): boolean {
+    return c.id === this.captainId();
+  }
+  /** O grupo tem o Capitão: quem está nele ganha a Liderança. */
+  protected readonly led = computed(() => {
+    const id = this.captainId();
+    return !!id && this.group().has(id);
+  });
+  /** Bônus de grupo de movimento e de intimidação (com a Liderança, se o Capitão estiver no grupo). */
+  protected readonly groupMove = computed(() => GROUP_RULES.moveBonus + (this.led() ? CLASS_RULES.leadership.vigor : 0));
+  protected readonly groupInt = computed(
+    () => GROUP_RULES.approachBonus + (this.led() ? CLASS_RULES.leadership.intimidacao : 0),
+  );
+  /** Bônus de agrupar com o Capitão na equipe (o que o botão "Agrupar" promete). */
+  protected readonly rallyMove = computed(() => GROUP_RULES.moveBonus + (this.captainId() ? CLASS_RULES.leadership.vigor : 0));
+  protected readonly rallyInt = computed(
+    () => GROUP_RULES.approachBonus + (this.captainId() ? CLASS_RULES.leadership.intimidacao : 0),
+  );
+  /** Gazua do agente da vez (0 para quem não tem a perícia). */
+  protected readonly pickBonus = computed(() => skillBonus(this.roster.classOf(this.active().id), 'gazua'));
+  /** Vezes que o Comando já foi usado neste turno. */
+  private readonly commandsUsed = signal(0);
+  /** O Agrupar do agente da vez sai de graça (Comando do Capitão, ainda não usado no turno). */
+  protected readonly freeRally = computed(() =>
+    commandFree(this.roster.classOf(this.active().id), this.commandsUsed()),
+  );
+  protected readonly classInfo = CLASS_INFO;
+
   /** Atributos de um agente em campo (com o bônus do grupo, se ele estiver agrupado). */
-  protected fieldStats(c: Character): { vel: number; int: number; range: number } {
+  protected fieldStats(c: Character): { vig: number; int: number; range: number } {
     const loadout = this.roster.loadout(c.id);
     const grouped = this.group().has(c.id);
+    const led = this.led();
     const boost = this.breakInBoost();
     return {
-      vel: statBreakdown(loadout, 'velocidade', grouped).total,
-      int: statBreakdown(loadout, 'intimidacao', grouped).total + boost,
-      range: approachRulesFor(loadout, grouped, APPROACH_RULES, boost).surrenderRange,
+      vig: statBreakdown(loadout, 'vigor', grouped, led).total,
+      int: statBreakdown(loadout, 'intimidacao', grouped, led).total + boost,
+      range: approachRulesFor(loadout, grouped, APPROACH_RULES, boost, led).surrenderRange,
     };
   }
-  /** Velocidade do agente da vez que entra na rolagem (sem o grupo, que aparece à parte). */
+  /** Vigor do agente da vez que entra na rolagem (sem o grupo, que aparece à parte). */
   protected readonly activeSpeed = computed(
-    () => statBreakdown(this.roster.loadout(this.active().id), 'velocidade', false).total,
+    () => statBreakdown(this.roster.loadout(this.active().id), 'vigor', false).total,
   );
-  /** Parcela da velocidade na conta da rolagem (" + 1 (velocidade)"), vazia sem modificador. */
+  /** Parcela do vigor na conta da rolagem (" + 1 (vigor)"), vazia sem modificador. */
   protected readonly speedTerm = computed(() => {
     const v = this.activeSpeed();
-    return v ? ` ${v > 0 ? '+' : '−'} ${Math.abs(v)} (velocidade)` : '';
+    return v ? ` ${v > 0 ? '+' : '−'} ${Math.abs(v)} (vigor)` : '';
   });
   /** Partes do raio de abordagem do agente da vez (base, intimidação e grupo) e as faixas. */
   protected readonly approachParts = computed(() => {
@@ -663,6 +697,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       base: APPROACH_RULES.surrenderRange,
       int: statBreakdown(loadout, 'intimidacao', false).total,
       group: grouped ? GROUP_RULES.approachBonus : 0,
+      leader: grouped && this.led() ? CLASS_RULES.leadership.intimidacao : 0,
       door: this.breakInBoost(),
       total: this.activeApproach().surrenderRange,
       zones: this.activeApproach(),
@@ -710,11 +745,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
   /**
    * Faixas da abordagem do agente da vez: o raio de abordagem base (`APPROACH_RULES`) +
-   * intimidação, e +2 enquanto estiver agrupado; a zona de rolagem e a de fuga vêm logo depois
-   * (ver `approachRulesFor` em `stats.ts`).
+   * intimidação, +1 enquanto estiver agrupado e +1 com o Capitão no grupo; a zona de rolagem e a
+   * de fuga vêm logo depois (ver `approachRulesFor` em `stats.ts`).
    */
   protected readonly activeApproach = computed(() =>
-    approachRulesFor(this.roster.loadout(this.active().id), this.grouped(), APPROACH_RULES, this.breakInBoost()),
+    approachRulesFor(this.roster.loadout(this.active().id), this.grouped(), APPROACH_RULES, this.breakInBoost(), this.led()),
   );
   /** Quem se renderia, quem rolaria o teste de fuga e quem correria se o agente da vez abordasse agora. */
   protected readonly approachPlan = computed(() => {
@@ -837,6 +872,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private startTurn(): void {
     const active = this.active();
+    this.commandsUsed.set(0);
     this.closeApproach();
     this.closeGrouping();
     this.closeBurn();
@@ -872,7 +908,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const final = [...this.dieResults];
     this.dice.set(final);
     this.rolled.set(sum(final));
-    this.movesLeft.set(turnMovement(sum(final), this.roster.loadout(this.active().id), this.grouped()));
+    this.movesLeft.set(turnMovement(sum(final), this.roster.loadout(this.active().id), this.grouped(), this.led()));
     this.gamepad.rumble(0.3, 0.2, 120);
     this.haptics.vibrate(SETTLE_PATTERN);
   }
@@ -1230,11 +1266,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.board || !plan || !this.grouping() || this.phase() !== 'moving-choice') return;
     const id = this.active().id;
     this.closeGrouping();
+    const free = this.freeRally();
+    const cost = rallyCost(plan.cost, this.roster.classOf(id), this.commandsUsed());
     if (!(await this.walkUnits(id, plan.paths))) return;
     this.group.set(wholeTeam());
-    this.movesLeft.update((n) => Math.max(0, n - plan.cost));
+    if (free) this.commandsUsed.update((n) => n + 1);
+    this.movesLeft.update((n) => Math.max(0, n - cost));
     this.say(
-      `Equipe agrupada! Juntos: +${GROUP_RULES.moveBonus} de movimento e +${GROUP_RULES.approachBonus} de alcance na abordagem`,
+      `${free ? 'Comando do Capitão: agrupou sem gastar movimento! ' : 'Equipe agrupada! '}` +
+        `Juntos: +${this.groupMove()} de movimento e +${this.groupInt()} de intimidação` +
+        (this.led() ? ' (com a Liderança)' : ''),
       'info',
     );
     if (!(await this.perceive(plan.paths))) return;
@@ -1493,7 +1534,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Faz a ação na porta com animação: **arrombar** é um chute (o d20 gira na ficha e para
-   * quando o pé bate); **pick lock** agacha, rola enquanto mexe na fechadura e levanta, dê
+   * quando o pé bate); **destrancar** agacha, rola enquanto mexe na fechadura e levanta, dê
    * certo ou não; **abrir** empurra a folha. Uma porta sem tranca arrombada faz o inimigo
    * mais perto comentar.
    */
@@ -1501,14 +1542,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const door = this.openDoor();
     const board = this.board;
     if (!door || !board || this.phase() !== 'door' || this.doorBusy()) return;
-    const need = doorNeed(action, door);
+    const gazua = action === 'pick' ? this.pickBonus() : 0;
+    const need = doorNeed(action, door, gazua);
     if (action === 'pick' && (need === null || this.movesLeft() < DOOR_RULES.pickCost)) return;
     if (action === 'abrir' && isOpen(door)) return;
     const epoch = this.epoch;
     const stale = () => this.destroyed || this.epoch !== epoch;
     const id = this.active().id;
     const roll = rollDie(DOOR_RULES.die);
-    const out = resolveDoor(action, door, roll);
+    const out = resolveDoor(action, door, roll, gazua);
     this.doorBusy.set(true);
     this.movesLeft.update((n) => n - out.cost);
     const settle = (mode: 'swing' | 'slam') => {
@@ -1530,7 +1572,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
           board.pushDoor(door.hex, id, 'rattle');
           await this.wait(260);
           board.pushDoor(door.hex, id, 'rattle');
-          this.say(door.state === 'trancada' ? 'Trancada. Tente pick lock ou arrombar' : 'Bloqueada: não abre', 'alert');
+          this.say(door.state === 'trancada' ? 'Trancada. Tente destrancar ou arrombar' : 'Bloqueada: não abre', 'alert');
         }
         await this.wait(450);
       } else if (action === 'pick') {
@@ -1539,7 +1581,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         board.crouchAtDoor(id, true);
         await this.wait(450);
         if (out.rolled) {
-          const reveal = this.startDoorCheck('Pick lock', this.nameOf(id), this.needText(need!), 'Destrancou!', 'Não deu', roll, 1300);
+          const reveal = this.startDoorCheck('Destrancar', this.nameOf(id), this.needText(need!, gazua), 'Destrancou!', 'Não deu', roll, 1300);
           await this.wait(1300); // mexendo na fechadura
           if (stale()) return;
           reveal(roll, out.pass);
@@ -1611,8 +1653,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     };
   }
 
-  private needText(need: number): string {
-    return need === Infinity ? 'nunca passa' : `precisa de ${need} ou mais`;
+  /** "precisa de 6 ou mais (Gazua +6)": com a perícia, o valor já vem descontado. */
+  private needText(need: number, skill = 0): string {
+    if (need === Infinity) return 'nunca passa';
+    return `precisa de ${need} ou mais${skill ? ` (${SKILLS.gazua.name} +${skill})` : ''}`;
   }
 
   /**
@@ -2274,7 +2318,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (b === 'options') this.padHelp.update((v) => !v);
       return;
     }
-    // menu da porta: ○ volta; ✕ arromba, □ pick lock, △ abre
+    // menu da porta: ○ volta; ✕ arromba, □ destranca, △ abre
     if (this.phase() === 'door') {
       const act: Partial<Record<PadButton, DoorAction>> = { cross: 'arrombar', square: 'pick', triangle: 'abrir' };
       const option = this.doorOptions().find((o) => o.action === act[b]);

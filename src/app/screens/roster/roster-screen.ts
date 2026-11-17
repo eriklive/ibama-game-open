@@ -14,6 +14,15 @@ import { AgentViewer } from '../../game/agent-viewer';
 import { PadButton, Stick, glyphFor } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
 import { CHARACTERS, Character, findMap } from '../../game/maps';
+import {
+  AGENT_CLASSES,
+  AgentClass,
+  CLASS_INFO,
+  CLASS_RULES,
+  classAbilities,
+  classOf,
+  classSkills,
+} from '../../game/agent-class';
 import { RosterService } from '../../game/roster.service';
 import {
   GROUP_STAT_BONUS,
@@ -35,9 +44,9 @@ const STAT_TEXT: Record<
   StatKey,
   { name: string; aria: string; on: string; off: string; field: string }
 > = {
-  velocidade: {
-    name: 'Velocidade',
-    aria: 'velocidade',
+  vigor: {
+    name: 'Vigor',
+    aria: 'vigor',
     on: 'de movimento',
     off: 'Movimento sem modificador',
     field: 'Movimento',
@@ -53,7 +62,8 @@ const STAT_TEXT: Record<
 
 /**
  * Escalação: a ficha de cada agente, entre escolher o mapa e começar a partida. O jogador
- * distribui o ponto de cada agente (velocidade ou intimidação), vê o modelo 3D e confirma.
+ * escolhe a classe (um Capitão na equipe, os demais Agentes), distribui o ponto de cada agente
+ * (vigor ou intimidação), vê o modelo 3D e confirma.
  * Uma tela só: larga vira o layout "web" (abas na lateral), estreita vira o de celular.
  */
 @Component({
@@ -80,6 +90,9 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
   protected readonly points = signal<Record<string, Stats>>(
     Object.fromEntries(CHARACTERS.map((c) => [c.id, this.roster.spent(c.id)])),
   );
+  /** Capitão da equipe (começa com o da última escalação confirmada). */
+  protected readonly captain = signal<string | null>(this.roster.captain());
+  protected readonly classInfo = CLASS_INFO;
   /** Atributo destacado pelo controle (cima/baixo escolhe, esquerda/direita tira/põe). */
   protected readonly padStat = signal(0);
 
@@ -91,9 +104,50 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
   protected readonly tabs = computed(() =>
     CHARACTERS.map((c, i) => {
       const done = freePoints(this.points()[c.id]) <= 0;
-      return { c, i, done, selected: i === this.cur() };
+      return { c, i, done, selected: i === this.cur(), captain: c.id === this.captain() };
     }),
   );
+
+  /** Classe do agente da ficha. */
+  protected readonly cls = computed<AgentClass>(() => classOf(this.agent().id, this.captain()));
+  /** Opções de classe: o Capitão atual não vira Agente por aqui (marque outro como Capitão). */
+  protected readonly classes = computed(() => {
+    const cls = this.cls();
+    const captain = this.captain();
+    const holder = CHARACTERS.find((c) => c.id === captain);
+    return AGENT_CLASSES.map((key) => ({
+      key,
+      ...CLASS_INFO[key],
+      selected: key === cls,
+      disabled: key === 'agente' && cls === 'capitao',
+      hint:
+        key === 'capitao' && cls !== 'capitao' && holder
+          ? `${holder.name} volta a ser Agente`
+          : key === 'agente' && cls === 'capitao'
+            ? 'Marque outro agente como Capitão'
+            : '',
+    }));
+  });
+  /** O que a classe dá: habilidades (regras) e perícias (bônus na rolagem). */
+  protected readonly perks = computed(() => {
+    const cls = this.cls();
+    return [
+      ...classAbilities(cls).map(({ key, ability }) => ({
+        key,
+        kind: 'hab' as const,
+        name: ability.name,
+        value: '',
+        text: ability.summary,
+      })),
+      ...classSkills(cls).map(({ key, skill, bonus }) => ({
+        key,
+        kind: 'per' as const,
+        name: skill.name,
+        value: signed(bonus),
+        text: skill.action,
+      })),
+    ];
+  });
 
   protected readonly stats = computed(() => {
     const spent = this.spent();
@@ -110,6 +164,7 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
         canInc: canAddPoint(spent, key),
         canDec: canRemovePoint(spent, key),
         group: GROUP_STAT_BONUS[key],
+        leader: this.captain() ? CLASS_RULES.leadership[key] : 0,
       };
     });
   });
@@ -168,6 +223,13 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
     this.update((s) => addPoint(s, key));
   }
 
+  /** Troca a classe do agente da ficha (marcar Capitão tira a classe de quem era). */
+  protected setClass(key: AgentClass): void {
+    const id = this.agent().id;
+    if (key === 'capitao') this.captain.set(id);
+    // o Capitão só deixa de ser marcando outro (a equipe tem sempre um)
+  }
+
   protected dec(key: StatKey): void {
     this.update((s) => removePoint(s, key));
   }
@@ -186,7 +248,7 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
       this.go(this.cur() + 1);
       return;
     }
-    this.roster.confirm(this.points());
+    this.roster.confirm(this.points(), this.captain());
     this.router.navigate(['/jogo', this.mapId]);
   }
 
@@ -203,7 +265,7 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
     return `rgb(${r}, ${g}, ${b})`;
   }
 
-  protected glyph(action: 'confirm' | 'cancel' | 'prev' | 'next'): string {
+  protected glyph(action: 'confirm' | 'cancel' | 'prev' | 'next' | 'endTurn'): string {
     const p = this.pad();
     return p ? glyphFor(p.kind, action) : '';
   }
@@ -229,5 +291,6 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
     else if (b === 'cross' || b === 'options') this.next();
     else if (b === 'circle') this.router.navigate(['/']);
     else if (b === 'square') this.turnModel();
+    else if (b === 'triangle') this.setClass('capitao');
   }
 }

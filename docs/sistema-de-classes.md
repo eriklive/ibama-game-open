@@ -1,6 +1,6 @@
 # Sistema de classes (e modificadores por ação)
 
-> Proposta de design · status: **rascunho para discussão** · nada aqui está implementado em `src/` ainda.
+> Design · status: **implementado** (classes, grupo, abordagem e Gazua; código em `src/app/game/agent-class.ts`). Força e Destreza (3.3) seguem só como proposta.
 
 Primeira versão, propositalmente pequena: **duas classes** (Capitão e Agente) e uma regra geral
 para dizer **qual atributo e qual perícia pesam em cada ação**. A ideia é que tudo continue
