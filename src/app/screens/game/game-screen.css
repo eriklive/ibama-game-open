@@ -675,6 +675,9 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .menu-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35); }
 
 /* ---------- portas ---------- */
+/* bônus do arrombamento: anotação a caneta na fita, enquanto durar */
+.boost-tag { font-family: var(--marker); font-size: 12px; line-height: 1.1; color: var(--green-ok); }
+
 /* botão "Porta": post-it colado no canto das ações, quando o agente está colado numa porta */
 .door-btn { right: 176px; bottom: 112px; width: 74px; height: 44px; transform: rotate(-3deg); background: var(--postit); animation: slap .25s ease-out both; }
 .door-btn .stencil { font-size: 13px; }

@@ -1,4 +1,6 @@
+import type { EnemyState } from './enemies';
 import { HexCoord, hexDistance, hexKey, hexNeighbors } from './hex';
+import type { HexRect } from './maps';
 
 /**
  * Estado de uma porta comum:
@@ -28,6 +30,23 @@ export const DOOR_RULES = {
   pickCost: 1,
   /** Até quantos hexágonos da porta um inimigo vê o arrombamento à toa e comenta. */
   witnessRange: 4,
+} as const;
+
+/**
+ * Arrombamento (só quando a porta cede):
+ * - A equipe ganha `intimidation` de intimidação por `rounds` turnos (rodadas), contando o atual.
+ * - Quem está **no cômodo** do outro lado, a até `surrenderRange` hexágonos da porta, se rende
+ *   na hora — a não ser que resista, tirando no d20 pelo menos `resist[d − 1]` (d = distância da
+ *   porta: colado nela é mais difícil). Quem resiste tenta correr.
+ * - Quem está mais longe no cômodo tenta correr, mas só se tiver **atitude**: precisa tirar
+ *   **mais que** `fleeAttitude` no d20. Sem atitude, fica parado onde está.
+ */
+export const BREAK_IN_RULES = {
+  intimidation: 1,
+  rounds: 5,
+  surrenderRange: 3,
+  resist: [19, 18, 17],
+  fleeAttitude: 12,
 } as const;
 
 /** Falas de quem vê alguém arrombar uma porta que nem estava trancada. */
@@ -170,3 +189,108 @@ export const seeThroughDoors = (
 /** Colado na porta: dá para interagir. */
 export const nextToDoor = (agent: HexCoord, door: HexCoord): boolean =>
   hexDistance(agent, door) === 1;
+
+const inRect = (h: HexCoord, r: HexRect): boolean =>
+  h.col >= r.cols[0] && h.col <= r.cols[1] && h.row >= r.rows[0] && h.row <= r.rows[1];
+
+/** Hexágonos ligados a `from` dentro da planta, sem atravessar `blocked` nem `skip`. */
+function flood(
+  from: readonly HexCoord[],
+  rect: HexRect,
+  blocked: ReadonlySet<string>,
+  skip: ReadonlySet<string>,
+): Set<string> {
+  const seen = new Set<string>();
+  const open = (h: HexCoord) => inRect(h, rect) && !blocked.has(hexKey(h)) && !skip.has(hexKey(h));
+  const queue = from.filter(open);
+  for (const h of queue) seen.add(hexKey(h));
+  while (queue.length) {
+    const h = queue.shift()!;
+    for (const n of hexNeighbors(h)) {
+      const k = hexKey(n);
+      if (seen.has(k) || !open(n)) continue;
+      seen.add(k);
+      queue.push(n);
+    }
+  }
+  return seen;
+}
+
+/**
+ * O cômodo do outro lado da porta, visto de quem está em `agent` (colado nela): os hexágonos
+ * da planta da estrutura ligados à porta sem passar por parede (`blocked`, que deve incluir as
+ * outras portas fechadas) nem pelo lado do agente.
+ */
+export function roomBehind(
+  door: HexCoord,
+  agent: HexCoord,
+  rect: HexRect,
+  blocked: ReadonlySet<string>,
+): Set<string> {
+  const skip = new Set([hexKey(door)]);
+  const mine = flood([agent], rect, blocked, skip);
+  const starts = hexNeighbors(door).filter(
+    (n) => !mine.has(hexKey(n)) && hexKey(n) !== hexKey(agent),
+  );
+  return flood(starts, rect, blocked, new Set([...skip, ...mine]));
+}
+
+/** O que acontece com cada inimigo do cômodo arrombado. */
+export interface BreakInRoll {
+  enemy: EnemyState;
+  /** Distância até a porta. */
+  distance: number;
+  /** `resist`: perto, tenta resistir à rendição; `attitude`: longe, tenta tomar coragem para correr. */
+  test: 'resist' | 'attitude';
+  /** Texto do que precisa tirar. */
+  need: number;
+  roll: number;
+  /** Passou no teste (resistiu ou teve atitude). */
+  pass: boolean;
+  /** Como fica: rendido, correndo (alerta) ou parado. */
+  outcome: 'surrender' | 'flee' | 'stay';
+}
+
+/**
+ * Resolve o arrombamento para os inimigos do cômodo (`room`, de `roomBehind`). `roll` sorteia
+ * o d20 de cada um (na ordem da lista). Rendidos e quem já fugiu ficam de fora.
+ */
+export function resolveBreakIn(
+  door: HexCoord,
+  room: ReadonlySet<string>,
+  enemies: readonly EnemyState[],
+  roll: () => number,
+): BreakInRoll[] {
+  const out: BreakInRoll[] = [];
+  for (const enemy of enemies) {
+    if (enemy.status === 'surrendered' || enemy.status === 'fled' || !room.has(hexKey(enemy.hex)))
+      continue;
+    const distance = Math.max(1, hexDistance(enemy.hex, door));
+    const r = roll();
+    if (distance <= BREAK_IN_RULES.surrenderRange) {
+      const need = BREAK_IN_RULES.resist[distance - 1];
+      const pass = meets(r, need);
+      out.push({
+        enemy,
+        distance,
+        test: 'resist',
+        need,
+        roll: r,
+        pass,
+        outcome: pass ? 'flee' : 'surrender',
+      });
+    } else {
+      const pass = r > BREAK_IN_RULES.fleeAttitude;
+      out.push({
+        enemy,
+        distance,
+        test: 'attitude',
+        need: BREAK_IN_RULES.fleeAttitude,
+        roll: r,
+        pass,
+        outcome: pass ? 'flee' : 'stay',
+      });
+    }
+  }
+  return out.sort((a, b) => a.distance - b.distance);
+}

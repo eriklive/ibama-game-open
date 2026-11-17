@@ -24,6 +24,7 @@ import {
   canAct,
   facingBetween,
   isBorder,
+  lineOfSight,
   onBoard,
   planFlee,
   planPatrol,
@@ -35,6 +36,8 @@ import {
 } from '../../game/enemies';
 import { HiddenItem, SEARCH_RULES, beats, canReach, entersRoom } from '../../game/search';
 import {
+  BREAK_IN_RULES,
+  BreakInRoll,
   DOOR_REACTIONS,
   DOOR_RULES,
   Door,
@@ -44,7 +47,9 @@ import {
   doorNeed,
   isOpen,
   nextToDoor,
+  resolveBreakIn,
   resolveDoor,
+  roomBehind,
   rollsDie,
   spawnDoors,
 } from '../../game/door';
@@ -54,7 +59,7 @@ import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } fro
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { APPROACH_FX, holdProgress, holdRing, waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
+import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../game/stats';
 
@@ -346,6 +351,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   // ---------- portas ----------
 
+  /**
+   * Arrombamento recente: a equipe ganha intimidação até o começo deste turno (rodada).
+   * `0` = sem bônus. Ver `BREAK_IN_RULES`.
+   */
+  protected readonly breakInUntil = signal(0);
+  /** Intimidação extra da equipe agora (o arrombamento assusta por alguns turnos). */
+  protected readonly breakInBoost = computed(() =>
+    this.round() < this.breakInUntil() ? BREAK_IN_RULES.intimidation : 0,
+  );
+  /** Turnos que ainda restam do bônus do arrombamento (contando o atual). */
+  protected readonly breakInLeft = computed(() => Math.max(0, this.breakInUntil() - this.round()));
+
   /** Porta com o menu aberto (câmera de cena, fichas na direita). */
   protected readonly doorKey = signal<string | null>(null);
   /** Animação de porta em andamento: as fichas ficam travadas. */
@@ -474,10 +491,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected fieldStats(c: Character): { vel: number; int: number; range: number } {
     const loadout = this.roster.loadout(c.id);
     const grouped = this.group().has(c.id);
+    const boost = this.breakInBoost();
     return {
       vel: statBreakdown(loadout, 'velocidade', grouped).total,
-      int: statBreakdown(loadout, 'intimidacao', grouped).total,
-      range: approachRulesFor(loadout, grouped).radius,
+      int: statBreakdown(loadout, 'intimidacao', grouped).total + boost,
+      range: approachRulesFor(loadout, grouped, APPROACH_RULES, boost).radius,
     };
   }
   /** Velocidade do agente da vez que entra na rolagem (sem o grupo, que aparece à parte). */
@@ -497,6 +515,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       base: APPROACH_RULES.radius,
       int: statBreakdown(loadout, 'intimidacao', false).total,
       group: grouped ? GROUP_RULES.approachBonus : 0,
+      door: this.breakInBoost(),
       total: this.activeApproach().radius,
     };
   });
@@ -545,12 +564,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * estiver agrupado (ver `approachRulesFor` em `stats.ts`).
    */
   protected readonly activeApproach = computed(() =>
-    approachRulesFor(this.roster.loadout(this.active().id), this.grouped()),
+    approachRulesFor(this.roster.loadout(this.active().id), this.grouped(), APPROACH_RULES, this.breakInBoost()),
   );
   /** Quem se renderia e quem tentaria correr se o agente da vez abordasse agora. */
   protected readonly approachPlan = computed(() => {
     const from = this.positions().get(this.active().id);
-    return from ? resolveApproach(from, this.enemies(), this.activeApproach()) : { surrender: [], flee: [] };
+    // só quem o agente alcança direto (sem parede nem porta fechada no meio)
+    return from ? resolveApproach(from, this.enemies(), this.activeApproach(), this.walls()) : { surrender: [], flee: [] };
   });
   protected readonly canApproach = computed(
     () => this.approachPlan().surrender.length + this.approachPlan().flee.length > 0,
@@ -1233,7 +1253,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       board.setDoors(this.doors());
       board.pushDoor(door.hex, id, mode);
       this.refreshVision();
-      this.checkAllSpotted(this.positions());
+      // no arrombamento, quem está do lado de lá só reage depois do susto (ver `breakIn`)
+      if (mode !== 'slam') this.checkAllSpotted(this.positions());
     };
     try {
       if (action === 'abrir') {
@@ -1255,10 +1276,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         board.crouchAtDoor(id, true);
         await this.wait(450);
         if (out.rolled) {
-          const reveal = this.startDoorCheck('Pick lock', id, need!, roll, 'Destrancou!', 'Não deu');
+          const reveal = this.startDoorCheck('Pick lock', this.nameOf(id), this.needText(need!), 'Destrancou!', 'Não deu');
           await this.wait(1300); // mexendo na fechadura
           if (stale()) return;
-          reveal();
+          reveal(roll, out.pass);
           if (out.opened) {
             await this.wait(250);
             settle('swing');
@@ -1275,11 +1296,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       } else {
         await board.stepToDoor(id, door.hex, 1.05);
         if (stale()) return;
-        const reveal = out.rolled ? this.startDoorCheck('Arrombar', id, need!, roll, 'Arrombou!', door.state === 'bloqueada' ? 'Não cedeu' : 'Aguentou') : null;
+        const reveal = out.rolled
+          ? this.startDoorCheck('Arrombar', this.nameOf(id), this.needText(need!), 'Arrombou!', door.state === 'bloqueada' ? 'Não cedeu' : 'Aguentou')
+          : null;
         if (reveal) await this.wait(500);
         await board.kick(id, () => {
           if (stale()) return;
-          reveal?.();
+          reveal?.(roll, out.pass);
           if (out.pass) settle('slam');
           else board.pushDoor(door.hex, id, 'rattle');
           this.gamepad.rumble(out.pass ? 1 : 0.6, 0.5, 220);
@@ -1287,6 +1310,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         });
         if (stale()) return;
         if (out.reaction) this.reactToBreakIn(door.hex, id);
+        if (out.opened) {
+          await this.wait(400);
+          if (!(await this.breakIn(door.hex, id, stale))) return;
+        }
         await this.wait(400);
       }
       if (stale()) return;
@@ -1300,13 +1327,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Põe a ficha do d20 da porta na tela girando; a função devolvida para o dado no
    * resultado (no chute, na hora do impacto) e carimba.
    */
-  private startDoorCheck(kicker: string, who: string, need: number, result: number, passText: string, failText: string): () => void {
+  private startDoorCheck(kicker: string, who: string, need: string, passText: string, failText: string): (result: number, pass: boolean) => void {
     clearTimeout(this.checkTimer);
     clearInterval(this.checkSpin);
     this.check.set({
       kicker,
-      who: this.nameOf(who),
-      need: need === Infinity ? 'nunca passa' : `precisa de ${need} ou mais`,
+      who,
+      need,
       passText,
       failText,
       face: rollDie(DOOR_RULES.die),
@@ -1320,12 +1347,81 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         70,
       );
     }
-    return () => {
+    return (result, pass) => {
       clearInterval(this.checkSpin);
-      const pass = need !== Infinity && result >= need;
       this.check.update((c) => c && { ...c, face: result, result, pass });
+      this.haptics.vibrate(SETTLE_PATTERN);
       this.checkTimer = setTimeout(() => this.check.set(null), 3200);
     };
+  }
+
+  private needText(need: number): string {
+    return need === Infinity ? 'nunca passa' : `precisa de ${need} ou mais`;
+  }
+
+  /**
+   * Depois de arrombar: a equipe ganha intimidação por alguns turnos, e cada inimigo do
+   * cômodo arrombado rola o seu d20 (ver `BREAK_IN_RULES`): perto da porta, só não se rende
+   * quem resiste; mais longe, só corre quem tem atitude. Na ficha, o verde é sempre o que é
+   * bom para a equipe (rendeu, ficou parado). Devolve `false` se a partida foi recomeçada.
+   */
+  private async breakIn(doorHex: HexCoord, agentId: string, stale: () => boolean): Promise<boolean> {
+    const map = this.map;
+    const board = this.board;
+    if (!map || !board) return true;
+    this.breakInUntil.set(this.round() + BREAK_IN_RULES.rounds);
+    const rect = map.structures?.find((st) => inStructure(doorHex, st.rect))?.rect;
+    const agent = this.positions().get(agentId);
+    const rolls: BreakInRoll[] =
+      rect && agent
+        ? resolveBreakIn(
+            doorHex,
+            roomBehind(doorHex, agent, rect, new Set([...map.walls.map(hexKey), ...this.closedDoors()])),
+            this.enemies(),
+            () => rollDie(DOOR_RULES.die),
+          )
+        : [];
+    for (const r of rolls) {
+      const e = r.enemy;
+      const resist = r.test === 'resist';
+      const reveal = this.startDoorCheck(
+        resist ? 'Resistir à rendição' : 'Atitude para correr',
+        e.name,
+        resist ? `resiste com ${r.need} ou mais` : `corre com mais que ${r.need}`,
+        resist ? 'Rendido!' : 'Ficou parado',
+        resist ? 'Resistiu: vai correr' : 'Vai correr',
+      );
+      board.focusHex(e.hex);
+      await this.wait(1000);
+      if (stale()) return false;
+      reveal(r.roll, r.outcome !== 'flee');
+      const facing = facingBetween(e.hex, doorHex);
+      board.setEnemyFacing(e.id, facing);
+      board.startleEnemy(e.id);
+      if (r.outcome === 'surrender') {
+        this.updateEnemy(e.id, { status: 'surrendered', facing });
+        board.setEnemySurrendered(e.id, true);
+      } else if (r.outcome === 'flee') {
+        this.updateEnemy(e.id, { status: 'alert', facing });
+        board.setEnemyAlert(e.id, true);
+      } else this.updateEnemy(e.id, { facing });
+      this.refreshVision();
+      await this.wait(1100);
+      if (stale()) return false;
+    }
+    this.checkAllSpotted(this.positions());
+    const said = (o: BreakInRoll['outcome']) => rolls.filter((r) => r.outcome === o).map((r) => r.enemy);
+    const parts = [
+      said('surrender').length && `${namesOf(said('surrender'))} se ${said('surrender').length === 1 ? 'rendeu' : 'renderam'}`,
+      said('flee').length && `${namesOf(said('flee'))} vai correr`,
+      said('stay').length && `${namesOf(said('stay'))} ficou parado`,
+    ].filter(Boolean);
+    this.say(
+      `Porta arrombada! Equipe +${BREAK_IN_RULES.intimidation} de intimidação por ${BREAK_IN_RULES.rounds} turnos.` +
+        (parts.length ? ` ${parts.join('; ')}.` : ''),
+      'alert',
+    );
+    return true;
   }
 
   /** Arrombou uma porta sem tranca: o inimigo mais perto (que esteja vendo) comenta. */
@@ -1359,10 +1455,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private paintApproachZones(upTo: number): void {
     const from = this.positions().get(this.active().id);
     if (!from) return;
+    const walls = this.walls();
     const zone = (min: number, max: number) =>
       hexesInRange(from, Math.min(max, upTo), this.area)
         .filter((h) => !this.solid().has(hexKey(h)))
         .filter((h) => hexDistance(from, h) > min)
+        .filter((h) => lineOfSight(from, h, walls))
         .map(hexKey);
     const rules = this.activeApproach();
     this.board?.setApproachZones({
@@ -1629,6 +1727,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setClue(null);
     this.doorKey.set(null);
     this.doorBusy.set(false);
+    this.breakInUntil.set(0);
     this.board?.releaseDoorFocus();
     this.doors.set(this.initialDoors());
     this.board?.setDoors(this.doors(), true);

@@ -28,7 +28,8 @@ export const ENEMY_RULES = {
  * Abordagem: o agente da vez anuncia a abordagem ("Ibama! Parados!") e todos os
  * inimigos no raio reagem. Quem está a até `surrenderRange` hexágonos se rende; quem
  * está mais longe, mas dentro de `radius`, entra em alerta e tenta correr no turno
- * inimigo. A distância é em linha reta (paredes não abafam o grito, por enquanto).
+ * inimigo. A distância é em linha reta, mas só conta quem o agente alcança **direto**: parede,
+ * porta fechada ou carga alta no meio do caminho tiram o inimigo da abordagem.
  * Abordar encerra a vez do agente.
  */
 export const APPROACH_RULES = {
@@ -280,16 +281,21 @@ export const onBoard = (e: Pick<EnemyState, 'status'>): boolean => e.status !== 
 /** Ainda age no turno inimigo: em patrulha ou em alerta. */
 export const canAct = (e: Pick<EnemyState, 'status'>): boolean => e.status === 'patrol' || e.status === 'alert';
 
-/** Quem se rende e quem tenta correr se o agente em `from` iniciar uma abordagem. */
+/**
+ * Quem se rende e quem tenta correr se o agente em `from` iniciar uma abordagem. Com `walls`,
+ * só entra quem está em linha de visão direta (sem parede, porta fechada ou carga alta no meio).
+ */
 export function resolveApproach(
   from: HexCoord,
   enemies: readonly EnemyState[],
   rules: { radius: number; surrenderRange: number } = APPROACH_RULES,
+  walls?: ReadonlySet<string>,
 ): { surrender: EnemyState[]; flee: EnemyState[] } {
   const surrender: EnemyState[] = [];
   const flee: EnemyState[] = [];
   for (const e of enemies) {
     if (!canAct(e)) continue;
+    if (walls && !lineOfSight(from, e.hex, walls)) continue;
     const d = hexDistance(from, e.hex);
     if (d <= rules.surrenderRange) surrender.push(e);
     else if (d <= rules.radius) flee.push(e);

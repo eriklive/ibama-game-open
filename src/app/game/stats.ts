@@ -120,8 +120,10 @@ export function approachRulesFor(
   loadout: Loadout,
   grouped: boolean,
   base: { radius: number; surrenderRange: number } = APPROACH_RULES,
+  /** Intimidação extra de fora da ficha (o arrombamento dá +1 à equipe por alguns turnos). */
+  extra = 0,
 ): { radius: number; surrenderRange: number } {
-  const bonus = statBreakdown(loadout, 'intimidacao', grouped).total;
+  const bonus = statBreakdown(loadout, 'intimidacao', grouped).total + extra;
   // sempre dá para abordar quem está colado (raio ≥ 1), e a rendição nunca passa do raio
   const radius = Math.max(1, base.radius + (APPROACH_SCALING.radius ? bonus : 0));
   const surrender = Math.max(0, base.surrenderRange + (APPROACH_SCALING.surrender ? bonus : 0));

@@ -14,6 +14,11 @@
         </span>
         <span class="op">Op. {{ map?.name }}</span>
       </div>
+      @if (breakInBoost()) {
+        <span class="boost-tag" data-testid="break-in-boost">
+          Arrombamento: equipe +{{ breakInBoost() }} intimidação · {{ breakInLeft() }} {{ breakInLeft() === 1 ? 'turno' : 'turnos' }}
+        </span>
+      }
       <ol class="timeline" [attr.aria-label]="'Linha do tempo: turno ' + round() + ' de ' + deadline + '. No turno ' + deadline + ' o carro foge.'">
         @for (t of timeline; track t) {
           <li class="box" [class.final]="t === deadline" [class.done]="t <= round()" aria-hidden="true">
@@ -160,7 +165,7 @@
         </span>
         <span class="photo-name">{{ c.name }}</span>
         @let fs = fieldStats(c);
-        <span class="photo-stats" aria-hidden="true" [class.boosted]="inGroup(c)" data-testid="photo-stats">
+        <span class="photo-stats" aria-hidden="true" [class.boosted]="inGroup(c) || breakInBoost() > 0" data-testid="photo-stats">
           <span>vel {{ signed(fs.vel) }}</span>
           <span>int {{ signed(fs.int) }}</span>
           @if (onTurn(c)) { <span>alc. {{ fs.range }}</span> }
@@ -303,7 +308,7 @@
         <strong>Abordagem de {{ active().name }}</strong>
         @let ap = approachParts();
         <span class="small approach-range" data-testid="approach-range">
-          Alcance {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+          Alcance {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}@if (ap.door) { · arrombamento +{{ ap.door }}}
         </span>
         <ul class="approach-list" data-testid="approach-list">
           @for (e of approachPlan().surrender; track e.id) {

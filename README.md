@@ -76,7 +76,8 @@ abordagem antes de confirmar: hexágonos **verdes** são a zona de rendição (a
 hexágonos) e os **laranja**, o resto do raio. O raio é **4 + intimidação** do agente, e **+2**
 enquanto ele estiver agrupado (ex.: com 1 ponto em intimidação e em grupo, 7). O painel mostra
 essa conta (base · intimidação · grupo) e lista quem se rende e quem vai tentar correr. O botão
-**Abordar** só aparece com algum suspeito dentro do raio de quem está na vez. **Abordar!**
+**Abordar** só aparece com algum suspeito dentro do raio de quem está na vez **e com acesso direto** a ele:
+parede, porta fechada ou carga alta no meio do caminho tiram o suspeito da abordagem (e da prévia). **Abordar!**
 confirma; tocar no tabuleiro ou em **Cancelar** desiste.
 
 **Segurar para abordar:** um toque rápido no **Abordar** abre essa prévia, mas dá para
@@ -205,6 +206,16 @@ sempre abertas.
   não, só treme. Arrombar uma porta que **não estava trancada** faz o inimigo mais perto (a até 4
   hexágonos) olhar para o agente e soltar uma fala num balão ("Precisava disso não, senhor.", "Pô, a porta
   tava aberta!").
+- **Arrombar com sucesso** (a porta cede) assusta quem está do outro lado:
+  - a **equipe toda** ganha **+1 de intimidação** (alcance da abordagem) por **5 turnos**, contando o
+    atual. A fita no topo mostra o bônus e quantos turnos faltam;
+  - quem está **no cômodo arrombado** a até **3 hexágonos** da porta se **rende na hora**, a não ser que
+    resista: rola um d20 e precisa tirar **19** (colado na porta), **18** (a 2) ou **17** (a 3). Quem
+    resiste entra em alerta e tenta correr;
+  - quem está **mais longe** no cômodo tenta correr, mas só se tiver **atitude**: d20 **mais que 12**.
+    Sem atitude, fica parado onde está;
+  - cada rolagem aparece na ficha do d20 (o verde é sempre o que é bom para a equipe). Chutar uma porta
+    que já estava aberta não assusta ninguém (só rende a fala do morador).
 - **Pick lock** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
   dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0).
 - **Abrir** empurra a folha: só abre a encostada.

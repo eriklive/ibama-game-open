@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+import { EnemyState } from './enemies';
+import { hexKey } from './hex';
 import {
   DOOR_RULES,
   Door,
@@ -7,7 +9,9 @@ import {
   commonDoors,
   doorChance,
   doorNeed,
+  resolveBreakIn,
   resolveDoor,
+  roomBehind,
   seeThroughDoors,
   spawnDoors,
 } from './door';
@@ -131,5 +135,56 @@ describe('portas do mapa', () => {
     expect(doorChance(3)).toBeCloseTo(0.9);
     expect(doorChance(0)).toBe(1);
     expect(doorChance(Infinity)).toBe(0);
+  });
+});
+
+describe('arrombamento', () => {
+  // casinha: colunas 0–6, fileiras 0–4; divisória na coluna 3 com porta em (3,2)
+  const rect = { cols: [0, 6] as [number, number], rows: [0, 4] as [number, number] };
+  const walls = new Set<string>();
+  for (let c = 0; c <= 6; c++) for (const r of [0, 4]) walls.add(hexKey({ col: c, row: r }));
+  for (let r = 0; r <= 4; r++) for (const c of [0, 6]) walls.add(hexKey({ col: c, row: r }));
+  for (const r of [1, 3]) walls.add(hexKey({ col: 3, row: r }));
+  const door = { col: 3, row: 2 };
+  const enemy = (
+    id: string,
+    col: number,
+    row: number,
+    status: EnemyState['status'] = 'patrol',
+  ): EnemyState => ({
+    id,
+    name: id,
+    hex: { col, row },
+    facing: 0,
+    status,
+    patrol: [{ col, row }],
+    waypoint: 0,
+    dir: 1,
+  });
+
+  it('roomBehind pega só o cômodo do outro lado da porta', () => {
+    const room = roomBehind(door, { col: 2, row: 2 }, rect, walls);
+    expect(room.has('4,2')).toBe(true);
+    expect(room.has('5,1')).toBe(true);
+    expect(room.has('1,2')).toBe(false);
+    expect(room.has('3,2')).toBe(false);
+  });
+
+  it('perto da porta se rende, a não ser que tire 19/18/17; longe só corre com atitude (mais que 12)', () => {
+    const room = new Set(['4,2', '5,2', '9,2']);
+    const es = [
+      enemy('colado', 4, 2),
+      enemy('dois', 5, 2),
+      enemy('longe', 9, 2),
+      enemy('fora', 1, 2),
+      enemy('rendido', 4, 2, 'surrendered'),
+    ];
+    const rolls = [18, 18, 12];
+    const out = resolveBreakIn(door, room, es, () => rolls.shift()!);
+    expect(out.map((o) => [o.enemy.id, o.test, o.need, o.outcome])).toEqual([
+      ['colado', 'resist', 19, 'surrender'],
+      ['dois', 'resist', 18, 'flee'],
+      ['longe', 'attitude', 12, 'stay'],
+    ]);
   });
 });
