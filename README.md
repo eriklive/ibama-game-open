@@ -99,7 +99,7 @@ Ao abordar, uma **onda de voz** sai do agente: cada hexágono do raio pula e ace
 passa, e cada suspeito leva um susto e reage (rende-se ou fica em alerta) quando a onda chega
 até ele, então quem está mais perto reage primeiro. Em seguida aparece o **auto de abordagem**:
 uma ficha com a foto de cada suspeito, carimbo verde **Rendido** ou círculo vermelho **Vai
-correr**, com a conta do d20 de quem rolou. Ela some sozinha em uns 3 s (ou com um toque em **Fechar**) e a vez passa. Os tempos
+correr**, com a conta do d20 de quem rolou. Ela fica na tela até o jogador tocar em **Fechar** (✕ no controle); só então a vez passa. Os tempos
 ficam em `APPROACH_FX` (`src/app/game/approach-fx.ts`).
 
 - Quem **se rende**: a base fica branca, ele se agacha com uma bandeira branca, para de agir e
@@ -180,7 +180,8 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
   sem rendê-lo é avistado.
 - **Cômodo 2:** ao entrar (mesmo só de passagem), cada agente rola **percepção** uma vez — um **d20** que
   aparece numa ficha no canto esquerdo da tela. Tirando **mais que 6**, ele repara em algo na
-  **prateleira** da parede do leste, que ganha uma lupa.
+  **prateleira** da parede do leste, que ganha uma lupa. O resultado fica na ficha até o jogador tocar
+  em **Continuar** (✕ no controle); só então o jogo segue.
 - Colado na prateleira percebida, **toque na lupa** (que pulsa; □ no controle, quando não há ninguém
   para abordar): a câmera faz o mesmo enquadramento da cena da porta (arrombar / abrir fechadura) —
   gira 45° para o lado do agente, desce para 30° e chega perto, mirando entre a prateleira e o

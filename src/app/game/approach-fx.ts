@@ -5,7 +5,7 @@ import { BASE_APPROACH } from './enemies';
  *
  * - Confirmada (no modo de abordagem), uma onda sai do agente a `waveSpeed` hexágonos por
  *   segundo; cada suspeito reage quando ela chega até ele (quem está perto reage primeiro).
- * - Depois da onda, o auto de abordagem fica `reportMs` na tela e a vez passa.
+ * - Depois da onda, o auto de abordagem fica na tela até o jogador fechar; só então a vez passa.
  */
 export const APPROACH_FX = {
   /** Atraso entre a confirmação e a saída da onda (o grito). */
@@ -15,7 +15,6 @@ export const APPROACH_FX = {
   bumpTime: 0.35,
   /** Folga depois que a onda chega no último anel, antes do auto aparecer (s). */
   waveTail: 0.55,
-  reportMs: 2800,
 } as const;
 
 /** Segundos, a partir da confirmação, até a onda chegar a um hexágono a `distance` do agente. */

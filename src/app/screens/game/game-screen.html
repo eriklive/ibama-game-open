@@ -106,7 +106,7 @@
     </div>
   }
 
-  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); some sozinho -->
+  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); espera o Fechar -->
   @if (report(); as r) {
     <div class="report" role="status" aria-live="polite" data-testid="approach-report" (click)="closeReport()">
       <div class="report-head">
@@ -142,7 +142,7 @@
         <span>{{ reportTally() }}</span>
         <span class="sig">{{ r.agent }}</span>
       </div>
-      <button type="button" class="report-close" (click)="$event.stopPropagation(); closeReport()">
+      <button type="button" class="report-close" #reportClose data-testid="report-close" (click)="$event.stopPropagation(); closeReport()">
         Fechar &#8250;
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
       </button>
@@ -251,7 +251,7 @@
       <ul class="door-opts">
         @for (o of doorOptions(); track o.action; let i = $index) {
           <li>
-            <button type="button" class="door-opt" [style.--i]="i" [disabled]="o.disabled" [attr.aria-label]="o.label" [attr.data-testid]="'door-' + o.action" (click)="doorAction(o.action)">
+            <button type="button" class="door-opt" [style.--i]="i" [style.--tilt]="['-1deg', '.8deg', '-.6deg'][i]" [disabled]="o.disabled" [attr.aria-label]="o.label" [attr.data-testid]="'door-' + o.action" (click)="doorAction(o.action)">
               <span class="door-slot" [class.none]="!o.rolls" aria-hidden="true">
                 @if (o.rolls) {
                   <span class="d20" [class.never]="o.tone === 'never'">
@@ -278,7 +278,7 @@
     </aside>
   }
 
-  <!-- Teste de d20 (percepção, inspecionar, portas): uma ficha na lateral -->
+  <!-- Teste de d20 (percepção, portas): uma ficha na lateral; a percepção espera o Continuar -->
   @for (ck of checks(); track ck.id) {
     <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
       <span class="check-kicker">{{ ck.kicker }} · d20</span>
@@ -296,6 +296,12 @@
         <span class="check-result" data-testid="check-result">{{ ck.pass ? ck.passText : ck.failText }}</span>
       } @else {
         <span class="sr-only">Rolando o d20…</span>
+      }
+      @if (ck.waiting) {
+        <button type="button" class="check-close" #checkClose data-testid="check-close" (click)="closeCheck()">
+          Continuar &#8250;
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+        </button>
       }
     </aside>
   }

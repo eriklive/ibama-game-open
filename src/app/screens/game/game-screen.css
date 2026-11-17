@@ -261,6 +261,18 @@ button:disabled { cursor: not-allowed; }
 }
 .check.pass .check-result { color: var(--green-ok); }
 .check.fail .check-result { color: var(--red-text); }
+.check-close {
+  margin-top: 8px;
+  white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: var(--ink-paper); color: var(--paper-light);
+  font-family: var(--stencil); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .5px;
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, .35);
+  pointer-events: auto;
+  animation: slap .25s ease-out both;
+}
+.check-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, .35); }
 
 /* ---------- ações: um carimbo contextual + aba ---------- */
 .actions {
@@ -626,7 +638,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .slip, .suspect, .check, .check-result, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
+  .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .check-close, .slip, .suspect, .check, .check-result, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
@@ -725,11 +737,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .door-btn .typed { font-size: 9px; }
 
 /* menu da porta: a papelada da HUD sai de cena; as ações entram como fichas na direita */
-.game .top, .game .agents, .game .suspects, .game .actions, .game .end-op { transition: opacity .3s, translate .3s; }
-.game.door-focus .top { opacity: 0; translate: 0 -14px; pointer-events: none; }
-.game.door-focus .agents { opacity: 0; translate: -14px 0; pointer-events: none; }
-.game.door-focus .suspects, .game.door-focus .actions { opacity: 0; translate: 14px 0; pointer-events: none; }
-.game.door-focus .end-op { opacity: 0; pointer-events: none; }
+.game.door-focus :is(.top, .agents, .suspects, .actions, .end-op) { opacity: 0; pointer-events: none; }
 .game.door-focus .telegram { left: calc((100% - var(--door-w)) / 2); }
 
 .game { --door-w: calc(min(300px, 40vw) + 14px); }
@@ -768,7 +776,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   animation: slap .25s ease-out both;
 }
 .door-state.st-aberta { color: var(--green-ok); }
-.door-state.st-encostada { color: var(--ink-paper); }
 .door-state.st-trancada, .door-state.st-bloqueada { color: var(--red-text); }
 .door-state.st-bloqueada { border-style: double; border-width: 4px; }
 .door-opts { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
@@ -783,8 +790,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   animation: slap .25s calc(var(--i, 0) * .06s) ease-out both;
   transition: transform .12s;
 }
-.door-opts li:nth-child(2) .door-opt { --tilt: .8deg; }
-.door-opts li:nth-child(3) .door-opt { --tilt: -.6deg; }
 .door-opt:hover:not(:disabled) { transform: rotate(0deg) translateX(-4px); }
 .door-opt:active:not(:disabled) { transform: rotate(0deg) translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, .4); }
 .door-opt:disabled { opacity: .5; }
@@ -825,8 +830,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @media (max-height: 520px) {
   .door-opts { gap: 8px; }
   .door-opt { padding-block: 5px; }
-  .door-slot, .door-slot .d20 { width: 40px; height: 40px; }
-  .door-opt-name { font-size: 20px; }
 }
 @media (prefers-reduced-motion: reduce) {
   .door-sheet, .door-opt, .door-state, .door-back, .door-btn { animation: none; }
