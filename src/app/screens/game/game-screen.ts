@@ -20,6 +20,7 @@ import { RENDER_PROFILES, RenderMode, RenderSettings } from '../../game/render-s
 import {
   APPROACH_RULES,
   ENEMY_RULES,
+  EscapeRoll,
   EnemyState,
   canAct,
   facingBetween,
@@ -28,6 +29,7 @@ import {
   planFlee,
   planPatrol,
   resolveApproach,
+  rollEscape,
   spawnEnemy,
   spotted,
   stationary,
@@ -247,7 +249,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Quando o último gesto de segurar acabou (o clique que vem logo depois é ignorado). */
   private holdEndedAt = -Infinity;
   /** Auto de abordagem na tela: quem se rendeu e quem vai tentar correr. */
-  protected readonly report = signal<{ agent: string; surrender: EnemyState[]; flee: EnemyState[] } | null>(null);
+  protected readonly report = signal<{
+    agent: string;
+    surrender: EnemyState[];
+    flee: EnemyState[];
+    /** Testes de fuga rolados na zona de rolagem (por id do inimigo). */
+    rolls: ReadonlyMap<string, EscapeRoll>;
+  } | null>(null);
   protected readonly reportTally = computed(() => {
     const r = this.report();
     if (!r) return '';
@@ -360,7 +368,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return {
       vel: statBreakdown(loadout, 'velocidade', grouped).total,
       int: statBreakdown(loadout, 'intimidacao', grouped).total,
-      range: approachRulesFor(loadout, grouped).radius,
+      range: approachRulesFor(loadout, grouped).surrenderRange,
     };
   }
   /** Velocidade do agente da vez que entra na rolagem (sem o grupo, que aparece à parte). */
@@ -372,15 +380,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const v = this.activeSpeed();
     return v ? ` ${v > 0 ? '+' : '−'} ${Math.abs(v)} (velocidade)` : '';
   });
-  /** Partes do alcance da abordagem do agente da vez: base, intimidação e grupo. */
+  /** Partes do raio de abordagem do agente da vez (base, intimidação e grupo) e as faixas. */
   protected readonly approachParts = computed(() => {
     const loadout = this.roster.loadout(this.active().id);
     const grouped = this.grouped();
     return {
-      base: APPROACH_RULES.radius,
+      base: APPROACH_RULES.surrenderRange,
       int: statBreakdown(loadout, 'intimidacao', false).total,
       group: grouped ? GROUP_RULES.approachBonus : 0,
-      total: this.activeApproach().radius,
+      total: this.activeApproach().surrenderRange,
+      zones: this.activeApproach(),
     };
   });
   /** Escolhendo o ponto de encontro do "Agrupar". */
@@ -424,24 +433,38 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return `rgb(${r}, ${g}, ${b})`;
   }
   /**
-   * Raio da abordagem do agente da vez: o base (`APPROACH_RULES`) + intimidação, e +2 enquanto
-   * estiver agrupado (ver `approachRulesFor` em `stats.ts`).
+   * Faixas da abordagem do agente da vez: o raio de abordagem base (`APPROACH_RULES`) +
+   * intimidação, e +2 enquanto estiver agrupado; a zona de rolagem e a de fuga vêm logo depois
+   * (ver `approachRulesFor` em `stats.ts`).
    */
   protected readonly activeApproach = computed(() =>
     approachRulesFor(this.roster.loadout(this.active().id), this.grouped()),
   );
-  /** Quem se renderia e quem tentaria correr se o agente da vez abordasse agora. */
+  /** Quem se renderia, quem rolaria o teste de fuga e quem correria se o agente da vez abordasse agora. */
   protected readonly approachPlan = computed(() => {
     const from = this.positions().get(this.active().id);
-    return from ? resolveApproach(from, this.enemies(), this.activeApproach()) : { surrender: [], flee: [] };
+    return from
+      ? resolveApproach(from, this.enemies(), this.activeApproach())
+      : { surrender: [], roll: [], flee: [] };
   });
-  protected readonly canApproach = computed(
-    () => this.approachPlan().surrender.length + this.approachPlan().flee.length > 0,
+  protected readonly canApproach = computed(() => this.approachCount() > 0);
+  /** Inimigos que a missão pede para render (o alvo, como o Garimpeiro Jô): a prévia avisa a chance deles. */
+  protected readonly missionTargets = computed(
+    () => new Set((this.map?.objectives ?? []).flatMap((o) => ('surrender' in o ? [o.surrender] : []))),
   );
+  /** Modificador do teste como parcela da conta (" −1"), vazio quando é 0. */
+  protected modTerm(v: number): string {
+    return v ? ` ${signed(v)}` : '';
+  }
+  /** Chance em porcentagem, para a prévia ("65%"). */
+  protected percent(p: number): string {
+    return `${Math.round(p * 100)}%`;
+  }
 
-  protected readonly approachCount = computed(
-    () => this.approachPlan().surrender.length + this.approachPlan().flee.length,
-  );
+  protected readonly approachCount = computed(() => {
+    const p = this.approachPlan();
+    return p.surrender.length + p.roll.length + p.flee.length;
+  });
 
   protected readonly active = computed<Character>(() => CHARACTERS[this.activeIndex()]);
   protected readonly focused = computed<Character>(
@@ -1002,15 +1025,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private paintApproachZones(upTo: number): void {
     const from = this.positions().get(this.active().id);
     if (!from) return;
-    const zone = (min: number, max: number) =>
+    const ring = (min: number, max: number) =>
       hexesInRange(from, Math.min(max, upTo), this.area)
         .filter((h) => !this.solid.has(hexKey(h)))
         .filter((h) => hexDistance(from, h) > min)
         .map(hexKey);
     const rules = this.activeApproach();
     this.board?.setApproachZones({
-      surrender: zone(0, rules.surrenderRange),
-      flee: zone(rules.surrenderRange, rules.radius),
+      surrender: ring(0, rules.surrenderRange),
+      roll: ring(rules.surrenderRange, rules.rollRange),
+      flee: ring(rules.rollRange, rules.radius),
     });
   }
 
@@ -1108,14 +1132,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Aborda: rendições e alertas valem na hora, mas no tabuleiro cada suspeito reage quando
+   * Aborda: quem está na zona de rolagem rola o teste de fuga (passou, corre; falhou, se
+   * rende). Rendições e alertas valem na hora, mas no tabuleiro cada suspeito reage quando
    * a onda de voz chega até ele. Depois da onda aparece o auto de abordagem e a vez acaba.
    */
   private executeApproach(): void {
     if (this.phase() !== 'moving-choice') return;
     const from = this.positions().get(this.active().id);
-    const { surrender, flee } = this.approachPlan();
-    if (!from || surrender.length + flee.length === 0) return;
+    const plan = this.approachPlan();
+    if (!from || this.approachCount() === 0) return;
+    const rolled = plan.roll.map((c) => rollEscape(c, () => rollDie(APPROACH_RULES.escapeDie)));
+    const rolls = new Map(rolled.map((r) => [r.enemy.id, r]));
+    const surrender = [...plan.surrender, ...rolled.filter((r) => !r.passed).map((r) => r.enemy)];
+    const flee = [...rolled.filter((r) => r.passed).map((r) => r.enemy), ...plan.flee];
     this.approaching.set(false);
     this.paintApproachZones(this.activeApproach().radius);
     this.phase.set('ending');
@@ -1139,7 +1168,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     this.later(motion ? waveDuration(radius) * 1000 : 300, () => {
       this.board?.setApproachZones(null);
-      this.report.set({ agent: this.active().name, surrender, flee });
+      this.report.set({ agent: this.active().name, surrender, flee, rolls });
       this.later(motion ? APPROACH_FX.reportMs : 1800, () => this.closeReport());
     });
   }

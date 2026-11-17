@@ -1,4 +1,4 @@
-import { APPROACH_RULES } from './enemies';
+import { BASE_APPROACH } from './enemies';
 
 /**
  * Tempo da abordagem: o gesto de segurar, a onda de voz e o auto que aparece no fim.
@@ -32,7 +32,7 @@ export function holdProgress(
 }
 
 /** Até que anel o raio já cresceu com esse progresso (0 = nenhum, `radius` = completo). */
-export function holdRing(progress: number, radius: number = APPROACH_RULES.radius): number {
+export function holdRing(progress: number, radius: number = BASE_APPROACH.radius): number {
   return progress <= 0 ? 0 : Math.min(radius, Math.ceil(progress * radius));
 }
 
@@ -45,7 +45,7 @@ export function waveArrival(
 }
 
 /** Duração total da onda (até o auto de abordagem aparecer), em segundos. */
-export function waveDuration(radius: number = APPROACH_RULES.radius): number {
+export function waveDuration(radius: number = BASE_APPROACH.radius): number {
   return waveArrival(radius) + APPROACH_FX.waveTail;
 }
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { APPROACH_RULES } from './enemies';
+import { APPROACH_RULES, BASE_APPROACH, approachZones } from './enemies';
 import { GROUP_RULES } from './group';
 import {
   STAT_RULES,
@@ -99,29 +99,20 @@ describe('valores em campo', () => {
     expect(turnMovement(2, { attributes: { velocidade: -5, intimidacao: 0 } }, false)).toBe(0);
   });
 
-  it('alcance = raio base + intimidação (+2 agrupado); a rendição não muda', () => {
-    expect(approachRulesFor({ attributes: ZERO_STATS }, false)).toEqual(APPROACH_RULES);
-    expect(approachRulesFor(scary, false)).toEqual({
-      radius: APPROACH_RULES.radius + 1,
-      surrenderRange: APPROACH_RULES.surrenderRange,
-    });
-    expect(approachRulesFor(scary, true)).toEqual({
-      radius: APPROACH_RULES.radius + 1 + GROUP_RULES.approachBonus,
-      surrenderRange: APPROACH_RULES.surrenderRange,
-    });
-    expect(approachRulesFor(fast, true).radius).toBe(
-      APPROACH_RULES.radius + GROUP_RULES.approachBonus,
-    );
+  it('raio de abordagem = base + intimidação (+2 agrupado); rolagem e fuga se afastam junto', () => {
+    const base = APPROACH_RULES.surrenderRange;
+    expect(approachRulesFor({ attributes: ZERO_STATS }, false)).toEqual(BASE_APPROACH);
+    expect(approachRulesFor(scary, false)).toEqual(approachZones(base + 1));
+    expect(approachRulesFor(scary, false)).toEqual({ surrenderRange: 3, rollRange: 6, radius: 7 });
+    expect(approachRulesFor(scary, true)).toEqual(approachZones(base + 1 + GROUP_RULES.approachBonus));
+    expect(approachRulesFor(fast, true).surrenderRange).toBe(base + GROUP_RULES.approachBonus);
   });
 
-  it('com intimidação negativa o raio encolhe, mas fica ≥ 1 e a rendição não passa dele', () => {
+  it('com intimidação negativa o raio de abordagem encolhe, mas fica ≥ 1', () => {
     const timid = { attributes: { velocidade: 0, intimidacao: -3 } };
-    expect(approachRulesFor(timid, false, { radius: 4, surrenderRange: 2 })).toEqual({
-      radius: 1,
-      surrenderRange: 1,
-    });
+    expect(approachRulesFor(timid, false)).toEqual({ surrenderRange: 1, rollRange: 4, radius: 5 });
     const mute = { attributes: { velocidade: 0, intimidacao: -5 } };
-    expect(approachRulesFor(mute, false, { radius: 4, surrenderRange: 2 }).radius).toBe(1);
+    expect(approachRulesFor(mute, false).surrenderRange).toBe(1);
   });
 });
 

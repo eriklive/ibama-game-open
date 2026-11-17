@@ -1,6 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   APPROACH_RULES,
+  BASE_APPROACH,
+  approachZones,
+  escapeChance,
+  escapeModifier,
+  passesEscape,
+  rollEscape,
   ENEMY_RULES,
   behindLowCover,
   canAct,
@@ -178,24 +184,63 @@ describe('abordagem', () => {
     ...spawnEnemy({ id, name: id, patrol: [{ col, row }] }),
     status,
   });
-  const rules = { radius: 4, surrenderRange: 2 };
+  const zones = approachZones(2); // abordagem 1–2, rolagem 3–5, fuga 6
+  const from = { col: 5, row: 5 };
 
-  it('perto se rende, no raio tenta correr, fora do raio nem percebe', () => {
-    const from = { col: 5, row: 5 };
-    const r = resolveApproach(from, [at('perto', 5, 7), at('medio', 5, 9), at('longe', 5, 10)], rules);
+  it('as faixas vêm uma logo depois da outra: abordagem, rolagem (3) e fuga (1)', () => {
+    expect(BASE_APPROACH).toEqual({ surrenderRange: 2, rollRange: 5, radius: 6 });
+    expect(approachZones(4)).toEqual({ surrenderRange: 4, rollRange: 7, radius: 8 });
+  });
+
+  it('o raio de abordagem nunca fica menor que 1', () => {
+    expect(approachZones(-3)).toEqual({ surrenderRange: 1, rollRange: 4, radius: 5 });
+  });
+
+  it('perto se rende, na zona de rolagem rola, na zona de fuga corre, fora nem percebe', () => {
+    const r = resolveApproach(
+      from,
+      [at('perto', 5, 7), at('rola', 5, 9), at('foge', 5, 11), at('longe', 5, 12)],
+      zones,
+    );
     expect(r.surrender.map((e) => e.id)).toEqual(['perto']);
-    expect(r.flee.map((e) => e.id)).toEqual(['medio']);
+    expect(r.roll.map((c) => [c.enemy.id, c.distance, c.modifier])).toEqual([['rola', 4, 0]]);
+    expect(r.flee.map((e) => e.id)).toEqual(['foge']);
   });
 
-  it('inimigo já em alerta também pode se render; rendidos e fugidos não contam', () => {
-    const from = { col: 5, row: 5 };
-    const r = resolveApproach(from, [at('a', 5, 6, 'alert'), at('r', 5, 4, 'surrendered'), at('f', 6, 5, 'fled')], rules);
+  it('o modificador vai de −1 (perto da abordagem) a +1 (perto da fuga)', () => {
+    expect([3, 4, 5].map((d) => escapeModifier(d, zones))).toEqual([-1, 0, 1]);
+    expect(escapeModifier(2, zones)).toBe(0);
+    expect(escapeModifier(6, zones)).toBe(0);
+    // com mais intimidação a faixa se afasta e o −1 vai junto
+    expect(escapeModifier(5, approachZones(4))).toBe(-1);
+  });
+
+  it('passa no teste com 8 ou mais (dado + modificador)', () => {
+    expect(APPROACH_RULES.escapeDC).toBe(8);
+    expect(passesEscape(8, 0)).toBe(true);
+    expect(passesEscape(7, 0)).toBe(false);
+    expect(passesEscape(8, -1)).toBe(false);
+    expect(passesEscape(7, 1)).toBe(true);
+    expect([-1, 0, 1].map((m) => escapeChance(m))).toEqual([0.6, 0.65, 0.7]);
+    expect(escapeChance(-20)).toBe(0);
+    expect(escapeChance(20)).toBe(1);
+  });
+
+  it('rolar: passou corre, falhou se rende', () => {
+    const [check] = resolveApproach(from, [at('rola', 5, 8)], zones).roll; // 3 hex: −1
+    expect(rollEscape(check, () => 9)).toEqual(expect.objectContaining({ roll: 9, total: 8, passed: true }));
+    expect(rollEscape(check, () => 8)).toEqual(expect.objectContaining({ roll: 8, total: 7, passed: false }));
+  });
+
+  it('inimigo já em alerta também reage (e rola de novo); rendidos e fugidos não contam', () => {
+    const r = resolveApproach(
+      from,
+      [at('a', 5, 6, 'alert'), at('b', 5, 9, 'alert'), at('r', 5, 4, 'surrendered'), at('f', 6, 5, 'fled')],
+      zones,
+    );
     expect(r.surrender.map((e) => e.id)).toEqual(['a']);
+    expect(r.roll.map((c) => c.enemy.id)).toEqual(['b']);
     expect(r.flee).toEqual([]);
-  });
-
-  it('as regras padrão têm a rendição dentro do raio', () => {
-    expect(APPROACH_RULES.surrenderRange).toBeLessThan(APPROACH_RULES.radius);
     expect(canAct(at('x', 1, 1, 'surrendered'))).toBe(false);
   });
 });

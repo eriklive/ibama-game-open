@@ -101,7 +101,7 @@
     </div>
   }
 
-  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr; some sozinho -->
+  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); some sozinho -->
   @if (report(); as r) {
     <div class="report" role="status" aria-live="polite" data-testid="approach-report" (click)="closeReport()">
       <div class="report-head">
@@ -115,6 +115,7 @@
               <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" /><circle cx="20" cy="12" r="5.5" /><path class="pole" d="M27 24 L33 6" /><rect class="flag" x="31" y="5" width="7" height="5" /></svg>
             </span>
             <span class="pola-name">{{ e.name }}</span>
+            @if (r.rolls.get(e.id); as t) { <span class="pola-roll">d20 {{ t.roll }}{{ modTerm(t.modifier) }} = {{ t.total }}</span> }
             <span class="pola-stamp">Rendido</span>
           </li>
         }
@@ -124,6 +125,7 @@
               <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" transform="rotate(12 20 25)" /><circle cx="22" cy="12" r="5.5" /></svg>
             </span>
             <span class="pola-name">{{ e.name }}</span>
+            @if (r.rolls.get(e.id); as t) { <span class="pola-roll">d20 {{ t.roll }}{{ modTerm(t.modifier) }} = {{ t.total }}</span> }
             <span class="pola-stamp">Vai correr</span>
             <svg class="pola-circle" viewBox="0 0 100 130" preserveAspectRatio="none" aria-hidden="true">
               <path pathLength="100" d="M50 4 C 88 2, 98 40, 96 70 C 94 108, 70 126, 44 124 C 14 122, 2 96, 4 62 C 6 28, 22 6, 58 8" />
@@ -261,14 +263,20 @@
         <strong>Abordagem de {{ active().name }}</strong>
         @let ap = approachParts();
         <span class="small approach-range" data-testid="approach-range">
-          Alcance {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+        </span>
+        <span class="small approach-range" data-testid="approach-bands">
+          Rolagem {{ ap.zones.surrenderRange + 1 }}–{{ ap.zones.rollRange }} (d20 ≥ {{ approachRules.escapeDC }} escapa) · fuga até {{ ap.zones.radius }}
         </span>
         <ul class="approach-list" data-testid="approach-list">
           @for (e of approachPlan().surrender; track e.id) {
             <li class="surrender">{{ e.name }} se rende</li>
           }
+          @for (c of approachPlan().roll; track c.enemy.id) {
+            <li class="roll" [class.target]="missionTargets().has(c.enemy.id)">{{ c.enemy.name }} rola d20{{ modTerm(c.modifier) }}: {{ percent(c.chance) }} de escapar@if (missionTargets().has(c.enemy.id)) { · alvo!}</li>
+          }
           @for (e of approachPlan().flee; track e.id) {
-            <li class="flee">{{ e.name }} vai correr</li>
+            <li class="flee" [class.target]="missionTargets().has(e.id)">{{ e.name }} vai correr@if (missionTargets().has(e.id)) { · alvo!}</li>
           }
         </ul>
         <span class="small">Encerra a vez.</span>
@@ -424,8 +432,11 @@
               @for (e of approachPlan().surrender; track e.id) {
                 <li class="surrender">{{ e.name }} se rende</li>
               }
+              @for (c of approachPlan().roll; track c.enemy.id) {
+                <li class="roll" [class.target]="missionTargets().has(c.enemy.id)">{{ c.enemy.name }} rola d20{{ modTerm(c.modifier) }}: {{ percent(c.chance) }} de escapar@if (missionTargets().has(c.enemy.id)) { · alvo!}</li>
+              }
               @for (e of approachPlan().flee; track e.id) {
-                <li class="flee">{{ e.name }} vai correr</li>
+                <li class="flee" [class.target]="missionTargets().has(e.id)">{{ e.name }} vai correr@if (missionTargets().has(e.id)) { · alvo!}</li>
               }
             </ul>
             <span class="small">Solte antes para desistir.</span>

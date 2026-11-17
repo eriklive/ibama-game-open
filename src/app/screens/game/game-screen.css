@@ -381,6 +381,9 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .approach-list li.surrender { color: var(--green-ok); }
 .approach-list li.flee { color: var(--red-text); }
 .approach-list li.flee::before { content: '→ '; }
+.approach-list li.roll { color: var(--muted-paper); }
+.approach-list li.roll::before { content: '⬡ '; }
+.approach-list li.target { font-weight: 800; text-decoration: underline; text-decoration-thickness: 2px; }
 
 /* ---------- encerrar a operação: etiqueta vermelha no canto de baixo ---------- */
 .end-op {
@@ -477,6 +480,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .pola-img svg .pole { stroke: #5a3d1e; stroke-width: 2; fill: none; }
 .pola-img svg .flag { fill: #fff; }
 .pola-name { font-size: 10px; line-height: 1.15; min-height: 2.3em; display: grid; place-items: center; }
+.pola-roll { font-size: 9px; line-height: 1.1; text-align: center; color: var(--muted-paper); font-variant-numeric: tabular-nums; }
 .pola-stamp {
   position: absolute; left: 50%; top: 36px;
   padding: 0 4px; border: 2.5px solid currentColor; background: rgba(247, 242, 228, .7);

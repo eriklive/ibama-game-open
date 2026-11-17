@@ -7,7 +7,7 @@ import {
   waveBump,
   waveDuration,
 } from './approach-fx';
-import { APPROACH_RULES } from './enemies';
+import { BASE_APPROACH } from './enemies';
 
 describe('segurar para abordar', () => {
   it('não conta o toque rápido e fecha depois do tempo de segurar', () => {
@@ -21,8 +21,9 @@ describe('segurar para abordar', () => {
   it('o raio cresce anel por anel até o raio da abordagem', () => {
     expect(holdRing(0)).toBe(0);
     expect(holdRing(0.01)).toBe(1);
-    expect(holdRing(0.5)).toBe(2);
-    expect(holdRing(1)).toBe(APPROACH_RULES.radius);
+    expect(holdRing(0.5, 4)).toBe(2);
+    expect(holdRing(0.5)).toBe(Math.ceil(BASE_APPROACH.radius / 2));
+    expect(holdRing(1)).toBe(BASE_APPROACH.radius);
   });
 });
 
@@ -33,7 +34,7 @@ describe('onda de voz', () => {
   });
 
   it('termina depois de chegar no último anel', () => {
-    expect(waveDuration()).toBeGreaterThan(waveArrival(APPROACH_RULES.radius));
+    expect(waveDuration()).toBeGreaterThan(waveArrival(BASE_APPROACH.radius));
     // cabe no orçamento de ~2 s por abordagem (antes do auto)
     expect(waveDuration()).toBeLessThan(2);
   });
