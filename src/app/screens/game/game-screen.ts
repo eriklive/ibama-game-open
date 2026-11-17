@@ -59,13 +59,27 @@ import {
   rollsDie,
   spawnDoors,
 } from '../../game/door';
-import { BURN_RULES, Burnable, burnTarget, seeFire } from '../../game/burn';
+import { BURN_RULES, Burnable, burnTarget, canBurn, seeFire } from '../../game/burn';
+import {
+  KEY_PANEL_ID,
+  KEY_TAKEN,
+  PLANE_LOCKED,
+  PlaneState,
+  WITNESS_LINE,
+  keyKnown,
+  leftKey,
+  lookInside,
+  needsKeyRoll,
+  nextToPanel,
+  seesKey,
+  witness,
+} from '../../game/plane';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
-import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
+import { HexCoord, hexDistance, hexKey, hexNeighbors, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import {
@@ -99,7 +113,7 @@ const MISSION_DEADLINE = 5;
  * `interrogating`: interrogatório em close-up (balões e cartões de pergunta na tela).
  * `over`: a operação foi encerrada (fica o relatório na tela).
  */
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'interrogating' | 'ending' | 'enemy' | 'over';
+type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'plane' | 'interrogating' | 'ending' | 'enemy' | 'over';
 
 /** Anotação da caderneta de campo (vai para o relatório da operação). */
 export interface FieldNote {
@@ -314,11 +328,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     });
     // aura de interrogatório em volta dos suspeitos rendidos com diálogo (some no close-up)
     effect(() => {
-      const show = this.phase() !== 'interrogating' && this.phase() !== 'door' && this.phase() !== 'over';
+      const show = this.phase() !== 'interrogating' && this.phase() !== 'door' && this.phase() !== 'plane' && this.phase() !== 'over';
       const { talk, muted } = this.auraKeys();
       const here = this.positions().get(this.active().id);
       const hot = this.canTalk() && here && show ? [hexKey(here)] : [];
       this.board?.setInterrogationAura(show ? talk : [], hot, show ? muted : []);
+    });
+    // aura de brasa em volta de cada queimável (o avião, os suprimentos): chegar nela mostra o botão de ação
+    effect(() => {
+      const show = !['interrogating', 'door', 'plane', 'over'].includes(this.phase()) && !this.search() && !this.aiming();
+      const { ring, hot } = this.actionAuraKeys();
+      this.board?.setActionAura(show ? ring : [], show ? hot : []);
     });
     // cartão em foco no interrogatório (controle): o foco do teclado acompanha
     effect(() => {
@@ -606,8 +626,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly burnable = computed<Burnable | null>(() => {
     if (this.phase() !== 'moving-choice' || this.viewingOther()) return null;
     const from = this.positions().get(this.active().id);
-    return from ? burnTarget(from, this.map?.burnables ?? [], this.burned()) : null;
+    if (!from) return null;
+    const burnables = this.map?.burnables ?? [];
+    // o avião (`inspect`) só se queima pelo menu de inspecionar (`planeBurn`)
+    const direct = burnTarget(from, burnables.filter((t) => !t.inspect), this.burned());
+    if (direct || !this.planeBurn()) return direct;
+    return burnables.find((t) => t.inspect && !this.burned().has(t.id) && canBurn(from, t)) ?? null;
   });
+  /** O "Queimar" do menu do avião está valendo (o avião entra como alvo para a confirmação). */
+  private readonly planeBurn = signal(false);
   /** Quem está vigiando perto e veria o fogo (entra em alerta ao queimar). */
   protected readonly burnWitnesses = computed(() => {
     const target = this.burnable();
@@ -908,7 +935,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         })),
       },
     );
-    this.board.setBurnTargets(this.map.burnables ?? []);
+    // os queimáveis não levam ícone de chama: cada um tem a sua aura (ver `actionAuraKeys`)
+    this.board.setBurnTargets([]);
     this.board.setDoors(this.doors(), true);
     this.refreshVision();
     this.startTurn();
@@ -924,6 +952,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.stopPad?.();
     this.clearTimers();
     clearTimeout(this.noticeTimer);
+    clearTimeout(this.speechTimer);
     clearInterval(this.statsTicker);
     removeEventListener('resize', this.onDoorResize);
     removeEventListener('resize', this.onInterrogationResize);
@@ -989,7 +1018,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected endTurn(): void {
-    if (['walking', 'checking', 'door', 'interrogating', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
+    if (['walking', 'checking', 'door', 'plane', 'interrogating', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
     this.clearTimers();
     this.phase.set('ending');
     this.closeApproach();
@@ -2226,6 +2255,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private closeBurn(): void {
     this.burning.set(false);
+    this.planeBurn.set(false);
   }
 
   /** Confirma: o alvo pega fogo, quem vigia perto entra em alerta e a vez do agente acaba. */
@@ -2257,6 +2287,183 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     this.phase.set('ending');
     this.later(reducedMotion() ? 400 : 2000, () => this.endTurn());
+  }
+
+  // ---------- avião trancado e quadro de chaves ----------
+
+  /** Alguém já tentou olhar dentro do avião (sabe que aquela chave é a dele). */
+  private readonly planeTried = signal(false);
+  /** A equipe pegou a chave. */
+  protected readonly hasKey = signal(false);
+  /** Quem viu a chave no quadro e deixou lá. */
+  private readonly keySeenBy = signal<readonly string[]>([]);
+  /** Quem já mexeu no quadro rolando percepção (uma vez por agente). */
+  private readonly keyRolled = new Set<string>();
+  /** O agente da vez viu a chave e escolhe entre pegar e deixar. */
+  protected readonly keyPrompt = signal(false);
+  /** Linha do que se vê no menu do avião ("O avião está trancado."). */
+  protected readonly planeNote = signal<string | null>(null);
+  /** Fala embaixo da tela, com o avatar de quem fala. */
+  protected readonly speech = signal<{ who: Character; text: string } | null>(null);
+  private speechTimer?: ReturnType<typeof setTimeout>;
+
+  /** O que a equipe sabe do avião e da chave (a regra está em `plane.ts`). */
+  private readonly planeState = computed<PlaneState>(() => ({
+    tried: this.planeTried(),
+    hasKey: this.hasKey(),
+    // o piloto contou onde está a chave: `notices` põe o quadro entre os percebidos
+    told: this.noticed().has(KEY_PANEL_ID),
+    seenBy: this.keySeenBy(),
+  }));
+
+  /** Avião ainda inteiro, colado no agente da vez (abre o menu de inspecionar). */
+  protected readonly nearPlane = computed<Burnable | null>(() => {
+    if (this.phase() !== 'moving-choice' || this.viewingOther()) return null;
+    const from = this.positions().get(this.active().id);
+    if (!from) return null;
+    return (this.map?.burnables ?? []).find((t) => t.inspect && !this.burned().has(t.id) && canBurn(from, t)) ?? null;
+  });
+  /** Hexágonos da aura dos queimáveis ainda inteiros (a coroa em volta deles) e os em que o agente da vez está. */
+  private readonly actionAuraKeys = computed(() => {
+    const planes = (this.map?.burnables ?? []).filter((t) => !this.burned().has(t.id));
+    const own = new Set(planes.flatMap((t) => t.hexes.map(hexKey)));
+    const ring = new Set<string>();
+    for (const t of planes)
+      for (const h of t.hexes)
+        for (const n of hexNeighbors(h)) {
+          const k = hexKey(n);
+          if (!own.has(k) && this.area.has(n) && !this.solid().has(k)) ring.add(k);
+        }
+    const here = this.positions().get(this.active().id);
+    return { ring: [...ring], hot: here && ring.has(hexKey(here)) ? [hexKey(here)] : [] };
+  });
+  /** A equipe já vê a chave no quadro: dá para pegar sem rolar percepção. */
+  protected readonly keySeen = computed(() => keyKnown(this.planeState()));
+  /** Quadro de chaves colado no agente da vez (a chave ainda está lá). */
+  protected readonly nearPanel = computed(() => {
+    const panel = this.map?.keyPanel;
+    if (!panel || this.hasKey() || this.phase() !== 'moving-choice' || this.viewingOther()) return null;
+    const from = this.positions().get(this.active().id);
+    return from && nextToPanel(from, panel) ? panel : null;
+  });
+
+  /** Fala embaixo da tela (some sozinha ou ao tocar). */
+  private speak(who: string, text: string, ms = 5200): void {
+    const c = CHARACTERS.find((x) => x.id === who);
+    if (!c) return;
+    this.speech.set({ who: c, text });
+    clearTimeout(this.speechTimer);
+    this.speechTimer = setTimeout(() => this.speech.set(null), reducedMotion() ? ms + 1500 : ms);
+  }
+
+  protected closeSpeech(): void {
+    clearTimeout(this.speechTimer);
+    this.speech.set(null);
+  }
+
+  /** Abre o menu de inspecionar do avião (olhar dentro / queimar), como o da porta. */
+  protected openPlaneMenu(): void {
+    const plane = this.nearPlane();
+    if (!plane || this.phase() !== 'moving-choice' || !this.board) return;
+    this.closeApproach();
+    this.closeGrouping();
+    this.closeBurn();
+    this.keyPrompt.set(false);
+    this.focusCharacter(this.active().id);
+    this.selected.set(null);
+    this.board.setSelected(null);
+    this.board.setReachable([]);
+    this.planeNote.set(null);
+    this.phase.set('plane');
+    this.board.focusSpot(plane.hexes, this.active().id, this.doorPanelWidth() / 2, 1.2);
+    addEventListener('resize', this.onDoorResize);
+  }
+
+  protected closePlaneMenu(): void {
+    if (this.phase() !== 'plane') return;
+    this.board?.releaseDoorFocus();
+    removeEventListener('resize', this.onDoorResize);
+    this.planeNote.set(null);
+    this.afterMove();
+  }
+
+  /**
+   * "Olhar dentro": sem a chave, só um leve zoom out e o aviso de que está trancado — e as
+   * perguntas sobre a chave passam a existir nos interrogatórios. Quem já viu a chave e deixou
+   * lá comenta embaixo da tela. Com a chave, o avião abre.
+   */
+  protected planeLook(): void {
+    if (this.phase() !== 'plane') return;
+    if (lookInside(this.planeState()) === 'open') {
+      this.planeNote.set('Destrancado com a chave. Dentro: galões e caixas lacradas de combustível para o garimpo.');
+      return;
+    }
+    this.planeTried.set(true);
+    this.clueLog.update((c) => new Set([...c, PLANE_LOCKED]));
+    this.planeNote.set('O avião está trancado. Pergunte ao piloto e aos ajudantes onde está a chave.');
+    this.board?.setCineZoom(1.45);
+    const who = witness(this.planeState());
+    if (who) this.speak(who, WITNESS_LINE);
+  }
+
+  /** "Queimar" do menu do avião: volta ao tabuleiro e abre a confirmação de queimar. */
+  protected planeBurnPick(): void {
+    if (this.phase() !== 'plane') return;
+    this.planeBurn.set(true);
+    this.board?.releaseDoorFocus();
+    removeEventListener('resize', this.onDoorResize);
+    this.planeNote.set(null);
+    this.phase.set('moving-choice');
+    this.startBurn();
+  }
+
+  /**
+   * Mexer no quadro de chaves: rola percepção (uma vez por agente), a não ser que a equipe já
+   * reconheça a chave do avião (alguém tentou o avião ou o piloto contou). Vendo a chave, o
+   * agente escolhe pegar ou deixar.
+   */
+  protected async touchKeyPanel(): Promise<void> {
+    const panel = this.nearPanel();
+    if (!panel || this.phase() !== 'moving-choice' || this.keyPrompt()) return;
+    const who = this.active().id;
+    const state = this.planeState();
+    let pass = false;
+    if (needsKeyRoll(state, who, this.keyRolled)) {
+      this.keyRolled.add(who);
+      this.phase.set('checking');
+      const rolled = await this.rollCheck('notice', who, SEARCH_RULES.notice);
+      if (rolled === null) return;
+      pass = rolled;
+      this.phase.set('moving-choice');
+      this.refreshBoard();
+    } else if (!seesKey(state, false)) {
+      this.say(`${this.nameOf(who)} já olhou o quadro: só chaves de cadeado e gaveta`, 'info');
+      return;
+    }
+    if (!seesKey(state, pass)) {
+      this.say(`${this.nameOf(who)} não viu nada de interessante no quadro de chaves`, 'info');
+      return;
+    }
+    this.keyPrompt.set(true);
+  }
+
+  /** Pega a chave do avião: as perguntas sobre ela somem. */
+  protected takeKey(): void {
+    if (!this.keyPrompt()) return;
+    this.keyPrompt.set(false);
+    this.hasKey.set(true);
+    this.keySeenBy.set([]);
+    this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
+    this.closeSpeech();
+    this.say(`${this.active().name} pegou a chave do avião`, 'info');
+  }
+
+  /** Deixa a chave lá: o agente lembra que viu (ver `witness`). */
+  protected leaveKey(): void {
+    if (!this.keyPrompt()) return;
+    this.keyPrompt.set(false);
+    this.keySeenBy.update((l) => leftKey({ ...this.planeState(), seenBy: l }, this.active().id).seenBy);
+    this.say(`${this.active().name} deixou a chave no quadro`, 'info');
   }
 
   // ---------- encerrar a operação ----------
@@ -2316,6 +2523,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.dropInterrogation();
     this.dialogues.set(new Map());
     this.clueLog.set(new Set());
+    this.planeTried.set(false);
+    this.hasKey.set(false);
+    this.keySeenBy.set([]);
+    this.keyRolled.clear();
+    this.keyPrompt.set(false);
+    this.planeNote.set(null);
+    this.planeBurn.set(false);
+    this.closeSpeech();
     this.linePools.set(new Map());
     this.fieldNotes.set([]);
     this.board?.setClue(null);
@@ -2384,9 +2599,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (option && !option.disabled) void this.doorAction(option.action);
       return;
     }
+    // menu do avião: ○ volta; ✕ olha dentro, □ queima
+    if (this.phase() === 'plane') {
+      if (b === 'circle') this.closePlaneMenu();
+      else if (b === 'cross') this.planeLook();
+      else if (b === 'square') this.planeBurnPick();
+      return;
+    }
     switch (b) {
       case 'cross':
-        if (this.search()?.pass === false && this.movesLeft() >= SEARCH_RULES.inspectCost) this.retryInspect();
+        if (this.keyPrompt()) this.takeKey();
+        else if (this.search()?.pass === false && this.movesLeft() >= SEARCH_RULES.inspectCost) this.retryInspect();
         else if (this.search()) this.closeSearch();
         else if (this.check()?.waiting) this.closeCheck();
         else if (this.aiming()) void this.inspect();
@@ -2400,7 +2623,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else this.focusUnitUnderCursor();
         break;
       case 'circle':
-        if (this.search()) this.closeSearch();
+        if (this.keyPrompt()) this.leaveKey();
+        else if (this.search()) this.closeSearch();
         else if (this.aiming()) this.cancelInspect();
         else if (this.approaching()) this.cancelApproach();
         else if (this.burning()) this.cancelBurn();
@@ -2421,6 +2645,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else if (this.grouping()) break;
         else if (this.canApproach()) this.startApproach();
         else if (this.burnable()) this.startBurn();
+        else if (this.nearPlane()) this.openPlaneMenu();
+        else if (this.nearPanel()) void this.touchKeyPanel();
         else if (this.inspectable()) this.startInspect();
         else if (this.canTalk()) void this.startInterrogation();
         else if (this.nearDoor()) this.openDoorMenu();
@@ -2465,7 +2691,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     const map = this.map;
-    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'door' || this.approaching() || this.burning() || this.aiming() || this.debrief()) return;
+    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'door' || this.phase() === 'plane' || this.approaching() || this.burning() || this.aiming() || this.debrief()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
     const next = neighborToward(from, dir);

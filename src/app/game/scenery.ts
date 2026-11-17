@@ -683,7 +683,7 @@ function cage(w: number, h: number, d: number): THREE.Group {
   return g;
 }
 
-export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shelf' | 'supplies';
+export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shelf' | 'supplies' | 'keys';
 
 /**
  * Monta a carga de um hexágono. `seed` varia a arrumação (giro, quantas peças, quais
@@ -692,6 +692,7 @@ export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shel
 export function buildCover(kind: CoverKind, seed: number): THREE.Group {
   if (kind === 'table') return diningTable();
   if (kind === 'shelf') return shelf(seed);
+  if (kind === 'keys') return keyBoard();
   if (kind === 'supplies') return supplyPile(seed);
   const rnd = seeded(seed);
   const g = new THREE.Group();
@@ -815,6 +816,32 @@ function shelf(seed: number): THREE.Group {
       else g.add(solid(new THREE.BoxGeometry(0.22, 0.08, 0.22), m.rag, x, y + 0.06, z));
     }
   });
+  return g;
+}
+
+/**
+ * Quadro de chaves encostado na parede do fundo (norte, -Z): uma tábua com fileiras de
+ * ganchos e chaves penduradas, uma delas com etiqueta vermelha.
+ */
+function keyBoard(): THREE.Group {
+  const m = cargo();
+  const g = new THREE.Group();
+  const z = -0.42;
+  g.add(solid(new THREE.BoxGeometry(0.95, 0.8, 0.05), m.woodDark, 0, 1.0, z));
+  for (const y of [0.78, 1.16]) g.add(solid(new THREE.BoxGeometry(0.88, 0.03, 0.04), m.wood, 0, y, z + 0.04));
+  const metal = m.tin;
+  for (const [row, y] of [[0, 1.2], [1, 0.82]] as const) {
+    for (let k = 0; k < 5; k++) {
+      const x = -0.36 + k * 0.18;
+      g.add(solid(new THREE.CylinderGeometry(0.015, 0.015, 0.05, 6), metal, x, y + 0.14, z + 0.06));
+      const key = solid(new THREE.BoxGeometry(0.035, 0.16, 0.012), metal, x, y, z + 0.07);
+      g.add(key);
+      // a chave do avião: etiqueta vermelha
+      if (row === 1 && k === 2) g.add(solid(new THREE.BoxGeometry(0.09, 0.07, 0.015), new THREE.MeshStandardMaterial({ color: 0xc23a2e }), x, y - 0.1, z + 0.08));
+    }
+  }
+  // base: mesinha de chapa sob o quadro, só para ocupar o hexágono
+  g.add(solid(new THREE.BoxGeometry(0.95, 0.5, 0.3), m.woodDark, 0, 0.25, z + 0.17));
   return g;
 }
 

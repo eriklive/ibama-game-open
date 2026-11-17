@@ -145,8 +145,8 @@ Os bônus ficam em `GROUP_RULES` (`moveBonus` e `approachBonus`, em `src/app/gam
 
 O mapa **Aeroporto** (desenho de 44×38, com a missão num círculo — ver abaixo) é o primeiro mapa "de verdade". O **hangar** fica ao norte, com um
 portão largo (12 hexágonos) e duas portas nos fundos. A **pista é um rastro de terra** de 6 hexágonos de
-largura, com sulcos de pneu, que sai do meio do portão e corta a mata de sul a norte. Por dentro cabem quatro aviões lado a lado (cada um ocupa
-4 colunas × 3 fileiras); por enquanto há um só, parado no meio. Dois postes de luz ficam do lado
+largura, com sulcos de pneu, que sai do meio do portão e corta a mata de sul a norte. O avião é grande (ocupa
+8 colunas × 6 fileiras); há um só, parado no lado oeste do hangar. Dois postes de luz ficam do lado
 de fora, nos cantos da frente, e duas lâmpadas pendem do telhado. A equipe começa numa
 clareira no canto sudoeste e avança pelas trilhas da mata ou pela pista.
 
@@ -347,6 +347,23 @@ As regras ficam em `BURN_RULES` (`src/app/game/burn.ts`) e os objetivos/resultad
 (`primary` marca o objetivo principal, `unlocksEnd` o que libera o encerramento). No mapa, `burnables`
 lista os alvos e a pilha é desenhada com `R` no texto (`buildCover` em `scenery.ts`). O fogo é montado em
 `hex-board.ts` (`ignite`, `clearFires`, `setBurnTargets`).
+
+### Avião trancado e quadro de chaves
+
+O avião do hangar está **trancado**; a chave fica no **quadro de chaves**, na parede do fundo do hangar
+(cobertura alta, `K` no esboço). Regras em `game/plane.ts`:
+
+- **Avião:** colado nele, aparece **Inspecionar** (no lugar de Queimar). O menu (como o das portas) tem
+  **Olhar dentro** e **Queimar**. Sem a chave, olhar dentro só dá um leve zoom out e o aviso "O avião está
+  trancado", e libera, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave).
+- **Diálogos:** os dois ajudantes do hangar (garimpeiros) respondem "Não sei não.". O piloto pode mentir
+  (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e, cedendo, diz
+  **"No painel ali atrás."**, o que faz a equipe reconhecer a chave no quadro.
+- **Quadro de chaves:** quem mexe nele rola **percepção** (d20, uma vez por agente): passando, vê a chave do avião
+  e escolhe **Pegar** ou **Deixar**; falhando, não vê nada. Não rola se alguém já tentou o avião, se o piloto contou
+  ou se alguém já viu a chave lá.
+- **Quem viu e deixou:** ao olhar dentro do avião trancado, esse agente comenta embaixo da tela, com o avatar
+  dele: "Eu vi uma chave no quadro dos fundos."
 
 ### Mundo semiaberto: área da missão
 
