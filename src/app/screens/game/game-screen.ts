@@ -41,7 +41,7 @@ import { BURN_RULES, Burnable, burnTarget, seeFire } from '../../game/burn';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
-import { APPROACH_FX, waveArrival, waveDuration } from '../../game/approach-fx';
+import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
@@ -78,6 +78,8 @@ interface CheckView {
   /** Resultado final; `null` enquanto rola. */
   result: number | null;
   pass: boolean | null;
+  /** O resultado já foi visto e o jogo espera o **Continuar**. */
+  waiting?: boolean;
 }
 
 /** "Fulano", "Fulano e Beltrano", "Fulano, Beltrano e Sicrano". */
@@ -191,6 +193,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     effect(() => this.rollConfirmBtn()?.nativeElement.focus({ preventScroll: true }));
     // resultado da inspeção: o foco vai para "Fechar"
     effect(() => this.searchCloseBtn()?.nativeElement.focus({ preventScroll: true }));
+    // ficha do d20 e auto de abordagem: o foco vai para "Continuar"/"Fechar"
+    effect(() => this.checkCloseBtn()?.nativeElement.focus({ preventScroll: true }));
+    effect(() => this.reportCloseBtn()?.nativeElement.focus({ preventScroll: true }));
     // troca de modo no menu: o tabuleiro remonta o mundo em segundo plano
     effect(() => {
       const mode = this.renderMode();
@@ -269,7 +274,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Teste de d20 na ficha da lateral (percepção ao entrar no cômodo, inspecionar o móvel). */
   protected readonly check = signal<CheckView | null>(null);
-  private checkTimer?: ReturnType<typeof setTimeout>;
+  /** Quem espera o jogador fechar a ficha (**Continuar**, ✕). */
+  private checkDone?: () => void;
   /** A ficha como lista (0 ou 1 item), para o `@for` recriar o d20 a cada teste novo. */
   protected readonly checks = computed(() => {
     const c = this.check();
@@ -288,6 +294,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Quem espera o d20 da inspeção parar. */
   private searchRolled?: (value: number) => void;
   private readonly searchCloseBtn = viewChild('searchClose', { read: ElementRef<HTMLButtonElement> });
+  private readonly checkCloseBtn = viewChild('checkClose', { read: ElementRef<HTMLButtonElement> });
+  private readonly reportCloseBtn = viewChild('reportClose', { read: ElementRef<HTMLButtonElement> });
   /** Esconderijos em que alguém reparou (o móvel ganha a lupa e pode ser inspecionado). */
   protected readonly noticed = signal<ReadonlySet<string>>(new Set());
   /** Esconderijos já achados (o que havia lá foi apreendido). */
@@ -559,7 +567,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.stopPad?.();
     this.clearTimers();
     clearTimeout(this.noticeTimer);
-    clearTimeout(this.checkTimer);
     clearInterval(this.statsTicker);
     this.board?.dispose();
   }
@@ -1107,11 +1114,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Rola 1d20 na ficha da lateral (um `app-d20` que cai, para e brilha verde ou vermelho).
-   * Devolve se passou (mais que `target`), ou `null` se a partida foi recomeçada.
+   * O resultado fica na tela até o jogador tocar em **Continuar** (ou ✕); só então o jogo
+   * segue. Devolve se passou (mais que `target`), ou `null` se a partida foi recomeçada.
    */
   private async rollCheck(kind: CheckView['kind'], who: string, target: number): Promise<boolean | null> {
     const epoch = this.epoch;
-    clearTimeout(this.checkTimer);
     const rolled = new Promise<number>((done) => (this.checkRolled = done));
     this.check.set({ id: ++this.checkSeq, kind, who: this.nameOf(who), target, result: null, pass: null });
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
@@ -1121,11 +1128,23 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.check.update((c) => c && { ...c, result, pass });
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.3, 0.2, 120);
-    await this.wait(1100);
+    // um instante para o carimbo aparecer antes do botão (evita fechar sem querer)
+    await this.wait(450);
     if (this.destroyed || this.epoch !== epoch) return null;
-    // a ficha fica mais um pouco na tela, sem segurar o jogo
-    this.checkTimer = setTimeout(() => this.check.set(null), 2400);
+    const closed = new Promise<void>((done) => (this.checkDone = done));
+    this.check.update((c) => c && { ...c, waiting: true });
+    await closed;
+    if (this.destroyed || this.epoch !== epoch) return null;
     return pass;
+  }
+
+  /** Fecha a ficha do d20 (**Continuar** ou ✕) e deixa o jogo seguir. */
+  protected closeCheck(): void {
+    if (!this.check()?.waiting) return;
+    this.check.set(null);
+    const done = this.checkDone;
+    this.checkDone = undefined;
+    done?.();
   }
 
   /** O d20 da ficha parou. */
@@ -1250,12 +1269,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     this.later(motion ? waveDuration(radius) * 1000 : 300, () => {
       this.board?.setApproachZones(null);
+      // o auto fica na tela até o jogador fechar (com as rolagens de quem tentou escapar)
       this.report.set({ agent: this.active().name, surrender, flee, rolls });
-      this.later(motion ? APPROACH_FX.reportMs : 1800, () => this.closeReport());
     });
   }
 
-  /** Fecha o auto de abordagem (sozinho ou com um toque) e passa a vez. */
+  /** Fecha o auto de abordagem (**Fechar**, ✕ ou toque) e passa a vez. */
   protected closeReport(): void {
     if (!this.report()) return;
     this.report.set(null);
@@ -1377,8 +1396,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.found.set(new Set());
     this.searchFails.set(new Map());
     this.noticeRolled.clear();
-    clearTimeout(this.checkTimer);
     this.checkRolled = undefined;
+    this.checkDone = undefined;
     this.check.set(null);
     this.dropSearch();
     this.board?.setClue(null);
@@ -1425,6 +1444,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     switch (b) {
       case 'cross':
         if (this.search()) this.closeSearch();
+        else if (this.check()?.waiting) this.closeCheck();
         else if (this.report()) this.closeReport();
         else if (this.phase() === 'rolling') this.confirmRoll();
         else if (this.approaching()) this.confirmApproach();

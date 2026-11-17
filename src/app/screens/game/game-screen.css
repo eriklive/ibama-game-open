@@ -261,6 +261,18 @@ button:disabled { cursor: not-allowed; }
 }
 .check.pass .check-result { color: var(--green-ok); }
 .check.fail .check-result { color: var(--red-text); }
+.check-close {
+  margin-top: 8px;
+  white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 6px 12px;
+  background: var(--ink-paper); color: var(--paper-light);
+  font-family: var(--stencil); font-weight: 700; font-size: 13px; text-transform: uppercase; letter-spacing: .5px;
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, .35);
+  pointer-events: auto;
+  animation: slap .25s ease-out both;
+}
+.check-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, .35); }
 
 /* ---------- ações: um carimbo contextual + aba ---------- */
 .actions {
@@ -637,7 +649,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .focus-card, .focus-close, .slip, .suspect, .check, .check-result, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
+  .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .focus-card, .focus-close, .check-close, .slip, .suspect, .check, .check-result, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
