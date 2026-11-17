@@ -4,22 +4,34 @@ import { NpcClass, QuestionNode } from './interrogation';
  * Diálogos dos suspeitos, por classe de NPC (ver `interrogation.ts` para as regras).
  *
  * Para adicionar um NPC, crie uma entrada aqui e ligue-a a um inimigo do mapa com `npc` (em
- * `maps.ts`). Para adicionar uma pergunta, ponha mais um nó em `questions`:
+ * `maps.ts`). Para adicionar uma pergunta, ponha mais um nó em `questions` (cada classe abre
+ * com umas 3 perguntas, sempre com "Tem mais gente com vocês?", `MORE_PEOPLE`):
  *
  * - `{ ask, answer }`: sem rolagem, resposta fixa;
- * - `{ ask, pass, fail }`: rolagem escondida (CD 10, ou `dc`); `pass` é a evasiva e `fail`
+ * - `{ ask, pass, fail }`: rolagem escondida (CD 8, ou `dc`); `pass` é a evasiva e `fail`
  *   a confissão (`confess`) ou a resposta com sinal de mentira (`tell`);
- * - `followUp` dentro de um nó com rolagem é a réplica (CD 15), que surge quando o NPC passa;
- *   um `followUp` dentro da réplica é a tréplica (CD 18);
+ * - `followUp` dentro de um nó com rolagem é a réplica (CD 12), que surge quando o NPC passa;
+ *   um `followUp` dentro da réplica é a tréplica (CD 14). A intimidação do agente que conversa
+ *   soma +1 à CD por ponto;
  * - `say` aceita uma fala ou uma lista (o jogo sorteia uma);
  * - `reveal` entrega alguém escondido: no mapa, aparece a unidade ligada ao suspeito
  *   (`reveals` no inimigo); sem unidade, só fica anotado.
  *
- * "Tem mais gente com vocês?" (`MORE_PEOPLE`) está em toda classe com diálogo e sempre aparece.
+ * **Perguntas que surgem com o que a equipe descobre:** ponha `requires` no nó com o id de uma
+ * pista (ou uma lista, para exigir todas). Enquanto a pista não estiver registrada na missão, a
+ * pergunta fica oculta; registrada, ela aparece na próxima conversa com qualquer NPC da classe.
+ * Pistas que já existem:
+ *
+ * - `item:<id>` (`itemClue`): a inspeção achou o item escondido de id `<id>` (ex.: `item:arma`);
+ * - `clue` numa resposta (`Outcome.clue`): registrada quando o NPC dá aquela resposta (ex.: o
+ *   piloto confessa o contrabando → `contrabando-combustivel`). Para uma pista nova, basta
+ *   inventar o id e usá-lo nos dois lugares.
+ *
+ * `resume` é a fala curta de quando o agente volta a conversar (sem ela, repete a de entrada).
  */
 export const MORE_PEOPLE = 'Tem mais gente com vocês?';
 
-/** É a pergunta de "mais gente" (sempre entre as que abrem o interrogatório). */
+/** É a pergunta de "mais gente" (toda classe com diálogo tem, sem condição). */
 export const isMorePeople = (q: QuestionNode): boolean => q.ask === MORE_PEOPLE;
 
 export type NpcClassId = 'garimpeiro' | 'piloto' | 'cacador' | 'pescador' | 'seguranca';
@@ -34,6 +46,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
       posture: 'de joelhos, mãos na cabeça, encara o chão',
       say: 'Pode revistar. Não devo nada.',
     },
+    resume: ['Ainda isso?', 'Já falei, doutor. Pode revistar.'],
     questions: [
       {
         ask: MORE_PEOPLE,
@@ -80,6 +93,31 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
           fail: { say: '…Não tem nota nenhuma, doutor.', note: 'Carga sem nota.', confess: true },
         },
       },
+      // surgem com o que a equipe descobre (ver o topo do arquivo)
+      {
+        ask: 'E aquela arma escondida na prateleira da casa?',
+        requires: 'item:arma',
+        pass: { say: 'Arma? Nunca vi arma nenhuma.', note: 'Nega conhecer a arma da casa.' },
+        fail: {
+          say: 'É do Jô… é pra onça, doutor.',
+          tell: 'esfrega as mãos na calça',
+          note: 'Diz que a arma da casa é do Jô.',
+          confess: true,
+        },
+      },
+      {
+        ask: 'O piloto contou do diesel pras balsas. Quem recebe?',
+        requires: 'contrabando-combustivel',
+        pass: {
+          say: 'Piloto fala demais. Não conheço balsa nenhuma.',
+          note: 'Nega receber o diesel.',
+        },
+        fail: {
+          say: '…O Zé. É ele que recebe na balsa, lá pra cima.',
+          note: 'O "Zé" recebe o diesel na balsa.',
+          confess: true,
+        },
+      },
     ],
   },
 
@@ -93,6 +131,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
       posture: 'rendido ao lado do avião, mãos na cabeça',
       say: 'Calma, doutor, calma. Eu só piloto.',
     },
+    resume: 'De novo, doutor? Já falei o que sei.',
     questions: [
       {
         ask: MORE_PEOPLE,
@@ -110,6 +149,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
           say: 'Combustível… pro garimpo.',
           note: 'Combustível para garimpo.',
           confess: true,
+          clue: 'contrabando-combustivel',
         },
         followUp: {
           ask: 'Não sabe? Tava pilotando vendado?',
@@ -131,6 +171,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
               say: 'Tá bom… é combustível pro garimpo. Contrabando. Vai pras balsas lá dentro.',
               note: 'Contrabando de combustível para garimpo.',
               confess: true,
+              clue: 'contrabando-combustivel',
             },
           },
         },
@@ -159,6 +200,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
       posture: 'mãos na cabeça, sorrindo de canto',
       say: 'Que exagero. Tudo isso por causa de uma paca?',
     },
+    resume: 'Vai demorar muito? A paca tá esfriando.',
     questions: [
       {
         ask: MORE_PEOPLE,
@@ -211,6 +253,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
       posture: 'mãos na cabeça, tremendo',
       say: 'Pelo amor de Deus, doutor, eu sou trabalhador.',
     },
+    resume: 'Doutor, eu falo, eu falo.',
     questions: [
       {
         ask: MORE_PEOPLE,
@@ -240,7 +283,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
     ],
   },
 
-  // calado: rende-se, mas não há o que interrogar (sem aura, sem ação)
+  // calado: rende-se, mas não há o que conversar (a ação aparece bloqueada, "sem diálogo")
   seguranca: { id: 'seguranca', name: 'Segurança', trait: 'calado', mod: 0, questions: [] },
 };
 

@@ -356,7 +356,7 @@ export const MAPS: GameMap[] = [
         id: 'piloto',
         name: 'Piloto',
         model: MODELS.piloto,
-        // interrogado, pode entregar os carregadores escondidos no barraco atrás do hangar
+        // na conversa, pode entregar os carregadores escondidos no barraco atrás do hangar
         npc: 'piloto',
         reveals: 'carregador',
         patrol: [{ col: 14, row: 6 }],
