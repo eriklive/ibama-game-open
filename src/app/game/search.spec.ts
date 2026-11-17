@@ -29,7 +29,7 @@ describe('testes de d20', () => {
   });
 });
 
-describe('aeroporto: casa do Garimpeiro Jô', () => {
+describe('aeroporto: casa do Caseiro Jô', () => {
   const map = MAPS.find((m) => m.id === 'aeroporto')!;
   const area = playArea(map);
   const solid = new Set([...blockedHexes(map), ...lowCoverHexes(map)]);

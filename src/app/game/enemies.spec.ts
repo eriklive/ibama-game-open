@@ -258,7 +258,7 @@ describe('abordagem', () => {
 
 describe('inimigo escondido', () => {
   it('começa escondido: não age, não ocupa hexágono e a equipe não sabe dele', () => {
-    const e = spawnEnemy({ id: 'carregador', name: 'Carregador', hidden: true, patrol: [{ col: 2, row: 2 }] });
+    const e = spawnEnemy({ id: 'comparsa', name: 'Comparsa', hidden: true, patrol: [{ col: 2, row: 2 }] });
     expect(e.status).toBe('hidden');
     expect(canAct(e)).toBe(false);
     expect(onBoard(e)).toBe(false);
@@ -268,7 +268,7 @@ describe('inimigo escondido', () => {
   });
 
   it('guarda a classe de NPC e quem ele pode entregar', () => {
-    const e = spawnEnemy({ id: 'p', name: 'Piloto', npc: 'piloto', reveals: 'carregador', patrol: [{ col: 0, row: 0 }] });
-    expect([e.npc, e.reveals]).toEqual(['piloto', 'carregador']);
+    const e = spawnEnemy({ id: 'p', name: 'Piloto', npc: 'piloto', reveals: 'comparsa', patrol: [{ col: 0, row: 0 }] });
+    expect([e.npc, e.reveals]).toEqual(['piloto', 'comparsa']);
   });
 });

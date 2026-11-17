@@ -1,40 +1,126 @@
-import { NpcClass, QuestionNode } from './interrogation';
+import {
+  FixedQuestion,
+  LinePool,
+  Lines,
+  NpcClass,
+  QuestionNode,
+  RolledQuestion,
+  itemClue,
+} from './interrogation';
 
 /**
  * Diálogos dos suspeitos, por classe de NPC (ver `interrogation.ts` para as regras).
  *
  * Para adicionar um NPC, crie uma entrada aqui e ligue-a a um inimigo do mapa com `npc` (em
  * `maps.ts`). Para adicionar uma pergunta, ponha mais um nó em `questions` (cada classe abre
- * com umas 3 perguntas, sempre com "Tem mais gente com vocês?", `MORE_PEOPLE`):
+ * com umas 3 perguntas, sempre com uma de "tem mais gente?", ver `MORE_PEOPLE_ASKS`):
  *
  * - `{ ask, answer }`: sem rolagem, resposta fixa;
  * - `{ ask, pass, fail }`: rolagem escondida (CD 8, ou `dc`); `pass` é a evasiva e `fail`
  *   a confissão (`confess`) ou a resposta com sinal de mentira (`tell`);
- * - `followUp` dentro de um nó com rolagem é a réplica (CD 12), que surge quando o NPC passa;
- *   um `followUp` dentro da réplica é a tréplica (CD 14). A intimidação do agente que conversa
- *   soma +1 à CD por ponto;
- * - `say` aceita uma fala ou uma lista (o jogo sorteia uma);
+ * - `say` aceita uma fala, uma lista (o jogo sorteia uma) ou um **pool compartilhado na missão**
+ *   (`LinePool`: `{ pool, lines, fallback }`). Do pool, cada fala sai uma vez só entre todos os
+ *   NPCs que usam o mesmo `pool` (o id); acabou, vale `fallback`. Ex.: `GARIMPEIROS_ON_GUN`;
  * - `reveal` entrega alguém escondido: no mapa, aparece a unidade ligada ao suspeito
  *   (`reveals` no inimigo); sem unidade, só fica anotado.
  *
- * **Perguntas que surgem com o que a equipe descobre:** ponha `requires` no nó com o id de uma
- * pista (ou uma lista, para exigir todas). Enquanto a pista não estiver registrada na missão, a
- * pergunta fica oculta; registrada, ela aparece na próxima conversa com qualquer NPC da classe.
+ * **Cadeia pergunta → réplica → tréplica:** `followUp` num nó com rolagem é a réplica (CD 12),
+ * que surge quando o NPC passa; um `followUp` dentro da réplica é a tréplica (CD 14). Cada
+ * nível tem a **sua mentira** (`pass`), mas a **verdade é uma só**: o `fail` fica só na
+ * pergunta da raiz e vale para a cadeia inteira. Cedendo em qualquer nível, o NPC dá essa
+ * resposta e a cadeia acaba (réplica e tréplica nem aceitam `fail`). As falas da réplica e da
+ * tréplica são o agente insistindo. A intimidação do agente que conversa soma +1 à CD por ponto.
+ *
+ * **Perguntas que surgem (ou somem) com o que a equipe descobre:**
+ *
+ * - `requires`: a pergunta só aparece quando a pista (ou todas, numa lista) estiver registrada
+ *   na missão; até lá, fica oculta;
+ * - `hiddenWhen`: a pergunta some quando a pista estiver registrada — menos para quem já a fez,
+ *   que continua vendo o cartão como "perguntado";
+ * - para uma pergunta valer para vários NPCs, defina o nó uma vez e ponha-o nas classes (como
+ *   `WHOSE_GUN_UNKNOWN`). Um nó em que o NPC confirma algo registra a pista com `clue`.
+ *
  * Pistas que já existem:
  *
  * - `item:<id>` (`itemClue`): a inspeção achou o item escondido de id `<id>` (ex.: `item:arma`);
- * - `clue` numa resposta (`Outcome.clue`): registrada quando o NPC dá aquela resposta (ex.: o
- *   piloto confessa o contrabando → `contrabando-combustivel`). Para uma pista nova, basta
- *   inventar o id e usá-lo nos dois lugares.
+ * - `dono-arma` (`GUN_OWNER`): alguém confirmou de quem é a arma da casa (o caseiro, ao ceder em
+ *   qualquer nível da cadeia de "De quem é essa arma?").
+ *
+ * Para uma pista nova, basta inventar o id e usá-lo no `clue` de quem a dá e no `requires` /
+ * `hiddenWhen` de quem depende dela.
  *
  * `resume` é a fala curta de quando o agente volta a conversar (sem ela, repete a de entrada).
  */
 export const MORE_PEOPLE = 'Tem mais gente com vocês?';
+/** O jeito de cada um perguntar "tem mais gente?" (o caseiro mora sozinho na casa). */
+export const MORE_PEOPLE_ASKS: readonly string[] = [MORE_PEOPLE, 'Tem mais alguém por aqui?'];
 
 /** É a pergunta de "mais gente" (toda classe com diálogo tem, sem condição). */
-export const isMorePeople = (q: QuestionNode): boolean => q.ask === MORE_PEOPLE;
+export const isMorePeople = (q: QuestionNode): boolean => MORE_PEOPLE_ASKS.includes(q.ask);
 
-export type NpcClassId = 'garimpeiro' | 'piloto' | 'cacador' | 'pescador' | 'seguranca';
+/** Pista: alguém confirmou de quem é a arma escondida na prateleira da casa. */
+export const GUN_OWNER = 'dono-arma';
+
+/**
+ * "De quem é essa arma?": aparece para todo NPC com diálogo da missão depois que a inspeção acha
+ * a arma (`item:arma`) e some de quem ainda não perguntou assim que alguém confirma o dono.
+ */
+const WHOSE_GUN = {
+  ask: 'De quem é essa arma?',
+  requires: itemClue('arma'),
+  hiddenWhen: GUN_OWNER,
+} as const;
+
+/** Quem não sabe de quem é a arma (resposta fixa). Para outro NPC poder confirmar o dono no
+ * futuro, troque por um nó com rolagem cujo `fail` tenha `clue: GUN_OWNER` (como o do caseiro). */
+const whoseGunUnknown = (say: Lines): FixedQuestion => ({
+  ...WHOSE_GUN,
+  answer: { say, note: 'Diz não saber de quem é a arma.' },
+});
+
+/**
+ * O que os garimpeiros dizem da arma: um pool compartilhado na missão (sem repetição entre
+ * eles); acabou, "Não sei.".
+ */
+const GARIMPEIROS_ON_GUN: LinePool = {
+  pool: 'garimpeiros-arma',
+  lines: [
+    'Não sei.',
+    'Já perguntou pro caseiro?',
+    'Como eu vou saber?',
+    'Eu só trabalho aqui, cara, sei de arma não.',
+    'Eu não moro com o caseiro pra saber.',
+  ],
+  fallback: 'Não sei.',
+};
+
+/**
+ * O caseiro: a arma é dele. Três evasivas (pergunta, réplica e tréplica) e uma verdade só:
+ * cedendo em qualquer nível, confirma o dono e a pergunta some dos NPCs que ainda não a fizeram.
+ */
+const WHOSE_GUN_CASEIRO: RolledQuestion = {
+  ...WHOSE_GUN,
+  pass: { say: 'Sei não, senhor.', note: 'Diz não saber de quem é a arma.' },
+  fail: {
+    say: '…É minha, doutor. É pra onça, juro.',
+    note: 'A arma da prateleira é dele.',
+    confess: true,
+    clue: GUN_OWNER,
+  },
+  followUp: {
+    ask: 'Não sabe de quem é a arma que tá dentro da sua casa?',
+    pass: {
+      say: 'Pode ser de um dos meninos… eles vivem entrando aqui.',
+      note: 'Diz que pode ser de um dos garimpeiros.',
+    },
+    followUp: {
+      ask: 'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
+      pass: { say: 'Sei lá, doutor. Minha é que não é.', note: 'Mantém que a arma não é dele.' },
+    },
+  },
+};
+
+export type NpcClassId = 'garimpeiro' | 'piloto' | 'caseiro' | 'cacador' | 'pescador' | 'seguranca';
 
 export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
   garimpeiro: {
@@ -50,29 +136,14 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
     questions: [
       {
         ask: MORE_PEOPLE,
-        pass: { say: ['Só nós dois.', 'Só nós. Pode olhar.'], note: 'Diz que são só dois.' },
-        fail: {
-          say: '…O Zé tá lá pra cima, na balsa.',
-          note: '+1 ao norte: "Zé", na balsa.',
-          reveal: true,
+        pass: {
+          say: 'Só a turma do hangar. Mais ninguém.',
+          note: 'Diz que só há a turma do hangar.',
         },
-        followUp: {
-          ask: 'E essas três marmitas na caçamba?',
-          pass: { say: 'Uma é a janta. Garimpeiro come bastante.', note: 'Explica as marmitas.' },
-          fail: {
-            say: 'Tá… tem o Zé. Mas ele só cozinha.',
-            note: '+1 ao norte: "Zé".',
-            reveal: true,
-          },
-          followUp: {
-            ask: 'Se tiver mais alguém lá e você mentiu, quem se complica é você.',
-            pass: { say: ['…', 'Já falei. Só nós dois.'], note: 'Mantém a versão.' },
-            fail: {
-              say: 'O Zé ficou na balsa. Só ele, juro.',
-              note: '+1 ao norte: "Zé", na balsa.',
-              reveal: true,
-            },
-          },
+        fail: {
+          say: 'Tem o piloto, o vigia da pista… e o Jô, que cuida da casa.',
+          tell: 'olha de relance pra pista',
+          note: 'Cita o piloto, o vigia da pista e o caseiro Jô.',
         },
       },
       {
@@ -81,47 +152,18 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
       },
       {
         ask: 'Essa carga tem nota?',
-        pass: { say: 'Tem. Tá no porta-luvas.', note: 'Diz que tem nota no porta-luvas.' },
+        pass: { say: 'Tem. Tá com o patrão.', note: 'Diz que a nota está com o patrão.' },
         fail: {
           say: 'Tem… tem nota sim.',
-          tell: 'a voz falha e ele evita olhar pra cabine',
-          note: 'Diz que tem nota. Hesitou, evitou a cabine.',
-        },
-        followUp: {
-          ask: 'Então pega pra mim.',
-          pass: { say: 'A chave ficou com o patrão.', note: 'Chave "com o patrão".' },
-          fail: { say: '…Não tem nota nenhuma, doutor.', note: 'Carga sem nota.', confess: true },
+          tell: 'a voz falha e ele evita olhar pros caixotes',
+          note: 'Diz que tem nota. Hesitou, evitou olhar a carga.',
         },
       },
-      // surgem com o que a equipe descobre (ver o topo do arquivo)
-      {
-        ask: 'E aquela arma escondida na prateleira da casa?',
-        requires: 'item:arma',
-        pass: { say: 'Arma? Nunca vi arma nenhuma.', note: 'Nega conhecer a arma da casa.' },
-        fail: {
-          say: 'É do Jô… é pra onça, doutor.',
-          tell: 'esfrega as mãos na calça',
-          note: 'Diz que a arma da casa é do Jô.',
-          confess: true,
-        },
-      },
-      {
-        ask: 'O piloto contou do diesel pras balsas. Quem recebe?',
-        requires: 'contrabando-combustivel',
-        pass: {
-          say: 'Piloto fala demais. Não conheço balsa nenhuma.',
-          note: 'Nega receber o diesel.',
-        },
-        fail: {
-          say: '…O Zé. É ele que recebe na balsa, lá pra cima.',
-          note: 'O "Zé" recebe o diesel na balsa.',
-          confess: true,
-        },
-      },
+      whoseGunUnknown(GARIMPEIROS_ON_GUN),
     ],
   },
 
-  // a sequência da missão do aeroporto
+  // a cadeia da missão do aeroporto: três mentiras, uma verdade
   piloto: {
     id: 'piloto',
     name: 'Piloto',
@@ -135,21 +177,23 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
     questions: [
       {
         ask: MORE_PEOPLE,
-        pass: { say: 'Só eu e o ajudante.', note: 'Diz que são só dois.' },
+        pass: {
+          say: 'Só os rapaz do hangar, que descarregam. Mais ninguém.',
+          note: 'Diz que só há os garimpeiros do hangar.',
+        },
         fail: {
-          say: 'Tem o pessoal que descarrega… tão no barraco ali em cima.',
-          note: '+ carregadores no barraco ao norte.',
-          reveal: true,
+          say: 'Tem os rapaz do hangar… e o caseiro, lá na casa.',
+          note: 'Cita os garimpeiros do hangar e o caseiro na casa.',
         },
       },
       {
         ask: 'O que você carregava no avião?',
         pass: { say: 'Não sei, doutor.', note: 'Diz não saber o que levava.' },
+        // a verdade da cadeia: cedendo na pergunta, na réplica ou na tréplica
         fail: {
-          say: 'Combustível… pro garimpo.',
-          note: 'Combustível para garimpo.',
+          say: 'Tá bom… é combustível pro garimpo. Contrabando. Vai pras balsas lá dentro.',
+          note: 'Contrabando de combustível para garimpo.',
           confess: true,
-          clue: 'contrabando-combustivel',
         },
         followUp: {
           ask: 'Não sabe? Tava pilotando vendado?',
@@ -157,21 +201,11 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
             say: 'A gente não olha o conteúdo não. É o ajudante que carrega.',
             note: 'Joga a culpa no ajudante.',
           },
-          fail: {
-            say: 'É diesel, doutor. Uns tambor de diesel.',
-            note: 'Admite tambores de diesel.',
-          },
           followUp: {
             ask: 'É melhor você não mentir pra gente. Você não vai ser preso agora.',
             pass: {
               say: ['…', 'Tô falando pro senhor que não sei de nada.'],
               note: 'Mantém que não sabe.',
-            },
-            fail: {
-              say: 'Tá bom… é combustível pro garimpo. Contrabando. Vai pras balsas lá dentro.',
-              note: 'Contrabando de combustível para garimpo.',
-              confess: true,
-              clue: 'contrabando-combustivel',
             },
           },
         },
@@ -188,6 +222,56 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
           note: '"Uma fazenda". Olhou pro GPS.',
         },
       },
+      whoseGunUnknown('Arma? Eu só piloto, doutor. Não sei de quem é.'),
+      // FUTURO (não implementado): inspecionar o avião vai achar uma chave no painel (pista, ex.:
+      // `item:chave-aviao`), que libera aqui uma pergunta sobre a chave do avião
+      // (`requires: itemClue('chave-aviao')`).
+    ],
+  },
+
+  // o Jô mora na casa e cuida dela
+  caseiro: {
+    id: 'caseiro',
+    name: 'Caseiro',
+    trait: 'manso · protege a casa',
+    mod: 0,
+    intro: {
+      posture: 'rendido ao lado da mesa, mãos na cabeça',
+      say: 'Calma, calma… eu só cuido da casa, doutor.',
+    },
+    resume: 'Pode perguntar, doutor. A casa tá aí.',
+    questions: [
+      {
+        ask: 'Tem arma na casa?',
+        pass: { say: 'Arma? Aqui não tem nada disso, doutor.', note: 'Nega ter arma na casa.' },
+        // a verdade da cadeia: cedendo em qualquer nível
+        fail: {
+          say: 'Tem sim, tá no quartinho de trás.',
+          note: 'Há uma arma no quartinho de trás.',
+          confess: true,
+        },
+        followUp: {
+          ask: 'Não tem? Casa no meio do garimpo e nenhuma arma?',
+          pass: {
+            say: 'Aqui é só panela e rede, pode olhar.',
+            note: 'Diz que só tem panela e rede.',
+          },
+          followUp: {
+            ask: 'Olha, é melhor falar agora. Se a gente achar, complica pra você.',
+            pass: { say: ['…', 'Já disse que não tem, doutor.'], note: 'Mantém que não tem arma.' },
+          },
+        },
+      },
+      {
+        ask: 'Tem mais alguém por aqui?',
+        pass: { say: 'Só eu, doutor. Moro aqui sozinho.', note: 'Diz que mora sozinho.' },
+        fail: {
+          say: 'Só os rapaz do hangar, que vêm comer aqui de vez em quando.',
+          tell: 'olha pela janela, pro lado da pista',
+          note: 'Diz que os garimpeiros do hangar comem na casa.',
+        },
+      },
+      WHOSE_GUN_CASEIRO,
     ],
   },
 
@@ -218,18 +302,13 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
           note: 'Diz que é arma de pressão.',
         },
         fail: {
-          say: 'Só uma de pressão…',
-          tell: 'olha pra espingarda calibre 20 caída no mato',
-          note: '"De pressão". Olhou pra uma 20 no mato.',
+          say: 'Tá, é a 20. Mas é pra defesa, tem onça aqui.',
+          note: 'Espingarda calibre 20.',
+          confess: true,
         },
         followUp: {
           ask: 'De pressão? Com cartucho no bolso?',
           pass: { say: 'Cartucho é do meu primo.', note: '"Cartucho é do primo".' },
-          fail: {
-            say: 'Tá, é a 20. Mas é pra defesa, tem onça aqui.',
-            note: 'Espingarda calibre 20.',
-            confess: true,
-          },
         },
       },
       {

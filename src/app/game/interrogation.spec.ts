@@ -3,6 +3,8 @@ import { spawnEnemy } from './enemies';
 import { hexKey, hexNeighbors, rectArea } from './hex';
 import {
   DialogueMemory,
+  PoolUsage,
+  FollowUpQuestion,
   EMPTY_MEMORY,
   INTERROGATION_RULES,
   NpcClass,
@@ -12,6 +14,7 @@ import {
   auraHexes,
   dcFor,
   dialogueOptions,
+  drawLine,
   hasDialogue,
   hasOpenQuestions,
   hasTalked,
@@ -28,7 +31,7 @@ import {
   talkTarget,
 } from './interrogation';
 import { MAPS } from './maps';
-import { MORE_PEOPLE, NPC_CLASSES, isMorePeople, npcClass } from './npc-dialogue';
+import { GUN_OWNER, MORE_PEOPLE, NPC_CLASSES, isMorePeople, npcClass } from './npc-dialogue';
 
 /** Dado viciado: devolve as faces na ordem (e repete a última). */
 const dice = (...faces: number[]) => {
@@ -38,6 +41,8 @@ const dice = (...faces: number[]) => {
 
 const piloto = NPC_CLASSES.piloto;
 const garimpeiro = NPC_CLASSES.garimpeiro;
+const caseiro = NPC_CLASSES.caseiro;
+const CONFESSION = 'Tá bom… é combustível pro garimpo. Contrabando. Vai pras balsas lá dentro.';
 const keyOf = (options: readonly QuestionOption[], ask: string) =>
   options.find((o) => o.node.ask === ask)!.key;
 const CARGA = 'O que você carregava no avião?';
@@ -112,11 +117,14 @@ describe('rolagem escondida do NPC', () => {
 });
 
 describe('perguntas, réplica e tréplica', () => {
-  it('abre com as perguntas sem condição, sempre com "Tem mais gente com vocês?"', () => {
+  it('abre com as perguntas sem condição, sempre com uma de "tem mais gente?"', () => {
     for (const cls of Object.values(NPC_CLASSES).filter(hasDialogue)) {
-      const asks = dialogueOptions(cls, EMPTY_MEMORY).map((o) => o.node.ask);
-      expect(asks.length, cls.id).toBe(3);
-      expect(asks, cls.id).toContain(MORE_PEOPLE);
+      const opts = dialogueOptions(cls, EMPTY_MEMORY);
+      expect(opts.length, cls.id).toBeGreaterThanOrEqual(2);
+      expect(
+        opts.some((o) => isMorePeople(o.node as never)),
+        cls.id,
+      ).toBe(true);
     }
   });
 
@@ -137,12 +145,11 @@ describe('perguntas, réplica e tréplica', () => {
     expect(r.answer.passed).toBe(true);
     expect(r.answer.unlocked?.node.ask).toBe(TREPLICA);
     expect(r.answer.unlocked?.depth).toBe(2);
-    // tréplica (CD 14): tira 14 (não é mais que 14) → confessa e registra a pista
+    // tréplica (CD 14): tira 14 (não é mais que 14) → confessa
     r = ask(piloto, r.memory, TREPLICA, 14);
     expect(r.answer.dc).toBe(14);
     expect(r.answer.passed).toBe(false);
     expect(r.answer.outcome.confess).toBe(true);
-    expect(r.answer.outcome.clue).toBe('contrabando-combustivel');
     expect(r.answer.unlocked).toBeNull();
     expect(noteKind(r.answer.outcome)).toBe('confessou');
     opts = dialogueOptions(piloto, r.memory);
@@ -152,20 +159,15 @@ describe('perguntas, réplica e tréplica', () => {
   it('falhou na pergunta: confessa e não surge réplica', () => {
     const r = ask(piloto, EMPTY_MEMORY, CARGA, 3);
     expect(r.answer.passed).toBe(false);
-    expect(r.answer.line).toBe('Combustível… pro garimpo.');
+    expect(r.answer.line).toBe(
+      'Tá bom… é combustível pro garimpo. Contrabando. Vai pras balsas lá dentro.',
+    );
     expect(r.answer.unlocked).toBeNull();
     expect(r.memory.unlocked).toEqual([]);
   });
 
   it('pergunta sem réplica: passar não libera nada', () => {
     const r = ask(piloto, EMPTY_MEMORY, 'Pra onde ia esse voo?', 20);
-    expect(r.answer.passed).toBe(true);
-    expect(r.answer.unlocked).toBeNull();
-  });
-
-  it('réplica sem tréplica: passar na réplica não libera nada', () => {
-    let r = ask(garimpeiro, EMPTY_MEMORY, 'Essa carga tem nota?', 20);
-    r = ask(garimpeiro, r.memory, 'Então pega pra mim.', 20);
     expect(r.answer.passed).toBe(true);
     expect(r.answer.unlocked).toBeNull();
   });
@@ -187,8 +189,17 @@ describe('perguntas, réplica e tréplica', () => {
     expect(noteKind(r.answer.outcome)).toBe('declarou');
   });
 
-  it('"Tem mais gente?" falhou: entrega alguém (revela a unidade)', () => {
-    expect(ask(piloto, EMPTY_MEMORY, MORE_PEOPLE, 2).answer.outcome.reveal).toBe(true);
+  it('"Tem mais gente?" no aeroporto: só anotação, ninguém é entregue', () => {
+    for (const cls of [piloto, garimpeiro, caseiro]) {
+      const q = cls.questions.find(isMorePeople)!;
+      expect(q.ask, cls.id).toBeTruthy();
+      for (const face of [1, 20]) {
+        const r = ask(cls, EMPTY_MEMORY, q.ask, face);
+        expect(r.answer.outcome.reveal, cls.id).toBeFalsy();
+        expect(r.answer.unlocked, cls.id).toBeNull();
+      }
+    }
+    expect(caseiro.questions.find(isMorePeople)!.ask).toBe('Tem mais alguém por aqui?');
   });
 
   it('acabam as perguntas', () => {
@@ -204,6 +215,65 @@ describe('perguntas, réplica e tréplica', () => {
     expect(nodeAt(piloto, '1.r.r')?.ask).toBe(TREPLICA);
     expect(nodeAt(piloto, '1.r.r.r')).toBeNull();
     expect(nodeAt(piloto, '9')).toBeNull();
+  });
+});
+
+describe('cadeia: três mentiras, uma verdade', () => {
+  const chain = (cls: NpcClass, asks: string[], faces: number[]) => {
+    let m = EMPTY_MEMORY;
+    const out = [];
+    for (let i = 0; i < faces.length; i++) {
+      const r = ask(cls, m, asks[i], faces[i]);
+      out.push(r);
+      m = r.memory;
+    }
+    return { out, memory: m };
+  };
+
+  it('piloto: três mentiras distintas, uma por nível', () => {
+    const { out } = chain(piloto, [CARGA, REPLICA, TREPLICA], [20, 20, 20]);
+    expect(out[0].answer.line).toBe('Não sei, doutor.');
+    expect(out[1].answer.line).toBe('A gente não olha o conteúdo não. É o ajudante que carrega.');
+    expect(['…', 'Tô falando pro senhor que não sei de nada.']).toContain(out[2].answer.line);
+    expect(new Set(out.map((r) => r.answer.outcome.note)).size).toBe(3);
+  });
+
+  it('piloto: cedendo em qualquer nível, a mesma confissão e a cadeia acaba', () => {
+    const asks = [CARGA, REPLICA, TREPLICA];
+    for (let level = 0; level < 3; level++) {
+      const faces = [...Array(level).fill(20), 1];
+      const { out, memory } = chain(piloto, asks, faces);
+      const last = out.at(-1)!.answer;
+      expect(last.passed, `nível ${level}`).toBe(false);
+      expect(last.line).toBe(CONFESSION);
+      expect(last.outcome).toBe(
+        piloto.questions[1] && (piloto.questions[1] as RolledQuestion).fail,
+      );
+      expect(last.unlocked).toBeNull();
+      // nada novo da cadeia para perguntar depois
+      expect(
+        dialogueOptions(piloto, memory).filter((o) => o.key.startsWith('1') && !o.done),
+      ).toEqual([]);
+    }
+    expect(CONFESSION).not.toContain('diesel');
+  });
+
+  it('caseiro: "Tem arma na casa?" com três mentiras e uma verdade', () => {
+    const asks = [
+      'Tem arma na casa?',
+      'Não tem? Casa no meio do garimpo e nenhuma arma?',
+      'Olha, é melhor falar agora. Se a gente achar, complica pra você.',
+    ];
+    const lies = chain(caseiro, asks, [20, 20, 20]).out.map((r) => r.answer.line);
+    expect(lies[0]).toBe('Arma? Aqui não tem nada disso, doutor.');
+    expect(lies[1]).toBe('Aqui é só panela e rede, pode olhar.');
+    expect(['…', 'Já disse que não tem, doutor.']).toContain(lies[2]);
+    for (let level = 0; level < 3; level++) {
+      const last = chain(caseiro, asks, [...Array(level).fill(20), 1]).out.at(-1)!.answer;
+      expect(last.line, `nível ${level}`).toBe('Tem sim, tá no quartinho de trás.');
+      expect(last.outcome.confess).toBe(true);
+      expect(last.unlocked).toBeNull();
+    }
   });
 });
 
@@ -293,9 +363,11 @@ describe('custo e ação de conversa', () => {
   });
 });
 
-describe('perguntas que surgem com pistas da missão', () => {
-  const ARMA = 'E aquela arma escondida na prateleira da casa?';
-  const DIESEL = 'O piloto contou do diesel pras balsas. Quem recebe?';
+describe('perguntas que surgem (e somem) com pistas da missão', () => {
+  const WHOSE = 'De quem é essa arma?';
+  const ARMA = new Set([itemClue('arma')]);
+  const asks = (cls: NpcClass, memory: DialogueMemory, clues: Set<string>) =>
+    dialogueOptions(cls, memory, clues).map((o) => o.node.ask);
 
   it('condição: uma pista ou todas de uma lista', () => {
     const clues = new Set(['a', 'b']);
@@ -306,25 +378,128 @@ describe('perguntas que surgem com pistas da missão', () => {
     expect(meets(['a', 'c'], clues)).toBe(false);
   });
 
-  it('a inspeção acha a arma: o garimpeiro ganha uma pergunta nova', () => {
-    const asks = (clues: Set<string>) =>
-      dialogueOptions(garimpeiro, EMPTY_MEMORY, clues).map((o) => o.node.ask);
-    expect(asks(new Set())).not.toContain(ARMA);
-    // pergunta oculta não pode ser feita
-    expect(askQuestion(garimpeiro, EMPTY_MEMORY, '3', { die: dice(1) })).toBeNull();
-    const clues = new Set([itemClue('arma')]);
-    expect(asks(clues)).toContain(ARMA);
-    const r = ask(garimpeiro, EMPTY_MEMORY, ARMA, 1, { clues });
-    expect(r.answer.outcome.confess).toBe(true);
+  it('achar a arma libera "De quem é essa arma?" para todos os NPCs com diálogo da missão', () => {
+    for (const cls of [piloto, garimpeiro, caseiro]) {
+      expect(asks(cls, EMPTY_MEMORY, new Set()), cls.id).not.toContain(WHOSE);
+      expect(asks(cls, EMPTY_MEMORY, ARMA), cls.id).toContain(WHOSE);
+    }
+    // oculta, não pode ser feita
+    const key = String(garimpeiro.questions.findIndex((q) => q.ask === WHOSE));
+    expect(askQuestion(garimpeiro, EMPTY_MEMORY, key, { die: dice(1) })).toBeNull();
   });
 
-  it('o piloto confessa o contrabando: o garimpeiro ganha a pergunta do diesel', () => {
-    const confession = ask(piloto, EMPTY_MEMORY, CARGA, 1).answer.outcome;
-    const clues = new Set([confession.clue!]);
-    expect(dialogueOptions(garimpeiro, EMPTY_MEMORY).map((o) => o.node.ask)).not.toContain(DIESEL);
-    expect(dialogueOptions(garimpeiro, EMPTY_MEMORY, clues).map((o) => o.node.ask)).toContain(
-      DIESEL,
+  it('os outros não sabem; o caseiro passa e diz que não sabe, falha e confessa', () => {
+    expect(
+      ask(piloto, EMPTY_MEMORY, WHOSE, 1, { clues: ARMA }).answer.outcome.clue,
+    ).toBeUndefined();
+    expect(ask(garimpeiro, EMPTY_MEMORY, WHOSE, 1, { clues: ARMA }).answer.passed).toBeNull();
+    const dodge = ask(caseiro, EMPTY_MEMORY, WHOSE, 20, { clues: ARMA }).answer;
+    expect(dodge.line).toBe('Sei não, senhor.');
+    expect(dodge.outcome.clue).toBeUndefined();
+    const owns = ask(caseiro, EMPTY_MEMORY, WHOSE, 1, { clues: ARMA }).answer;
+    expect(owns.outcome.confess).toBe(true);
+    expect(owns.outcome.clue).toBe(GUN_OWNER);
+  });
+
+  it('caseiro: "De quem é essa arma?" com três evasivas e uma verdade (em qualquer nível)', () => {
+    const asks3 = [
+      WHOSE,
+      'Não sabe de quem é a arma que tá dentro da sua casa?',
+      'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
+    ];
+    let m = EMPTY_MEMORY;
+    const lies: string[] = [];
+    for (const q of asks3) {
+      const r = ask(caseiro, m, q, 20, { clues: ARMA });
+      lies.push(r.answer.line);
+      m = r.memory;
+    }
+    expect(lies).toEqual([
+      'Sei não, senhor.',
+      'Pode ser de um dos meninos… eles vivem entrando aqui.',
+      'Sei lá, doutor. Minha é que não é.',
+    ]);
+    for (let level = 0; level < 3; level++) {
+      let mem = EMPTY_MEMORY;
+      let last;
+      for (let i = 0; i <= level; i++) {
+        last = ask(caseiro, mem, asks3[i], i === level ? 1 : 20, { clues: ARMA });
+        mem = last.memory;
+      }
+      const a = last!.answer;
+      expect(a.line, `nível ${level}`).toBe('…É minha, doutor. É pra onça, juro.');
+      expect(a.outcome.clue).toBe(GUN_OWNER);
+      expect(a.unlocked).toBeNull();
+      // e fecha a pergunta para quem ainda não perguntou
+      const after = new Set([...ARMA, GUN_OWNER]);
+      expect(asks(piloto, EMPTY_MEMORY, after)).not.toContain(WHOSE);
+      expect(asks(garimpeiro, EMPTY_MEMORY, after)).not.toContain(WHOSE);
+    }
+  });
+
+  it('garimpeiros: falas de um pool compartilhado, sem repetição, e "Não sei." quando acaba', () => {
+    let pools: PoolUsage = new Map();
+    const lines: string[] = [];
+    // sete garimpeiros diferentes (cada um com a sua memória) perguntam
+    for (let i = 0; i < 7; i++) {
+      const key = keyOf(dialogueOptions(garimpeiro, EMPTY_MEMORY, ARMA), WHOSE);
+      const r = askQuestion(garimpeiro, EMPTY_MEMORY, key, {
+        die: dice(1),
+        clues: ARMA,
+        pools,
+        rng: () => 0.5,
+      })!;
+      expect(r.answer.passed).toBeNull();
+      lines.push(r.answer.line);
+      pools = r.pools;
+    }
+    const pool = [
+      'Não sei.',
+      'Já perguntou pro caseiro?',
+      'Como eu vou saber?',
+      'Eu só trabalho aqui, cara, sei de arma não.',
+      'Eu não moro com o caseiro pra saber.',
+    ];
+    expect([...lines.slice(0, 5)].sort()).toEqual([...pool].sort());
+    expect(lines.slice(5)).toEqual(['Não sei.', 'Não sei.']);
+    // o piloto não usa o pool
+    const p = ask(piloto, EMPTY_MEMORY, WHOSE, 1, { clues: ARMA, pools } as never);
+    expect(p.answer.line).toBe('Arma? Eu só piloto, doutor. Não sei de quem é.');
+  });
+
+  it('pool: drawLine tira a fala sorteada para os próximos', () => {
+    const pool = { pool: 'p', lines: ['a', 'b'], fallback: 'z' };
+    const one = drawLine(pool, new Map(), () => 0);
+    expect(one.line).toBe('a');
+    const two = drawLine(pool, one.usage, () => 0);
+    expect(two.line).toBe('b');
+    expect(drawLine(pool, two.usage).line).toBe('z');
+    // fala comum não mexe no estado
+    const plain = drawLine('oi', two.usage);
+    expect([plain.line, plain.usage]).toEqual(['oi', two.usage]);
+  });
+
+  it('confirmado o dono, a pergunta some de quem não perguntou e fica para quem perguntou', () => {
+    // o garimpeiro perguntou antes ("não sei"); o caseiro confessa; o piloto ainda não perguntou
+    const garimpeiroMem = ask(garimpeiro, EMPTY_MEMORY, WHOSE, 1, { clues: ARMA }).memory;
+    const caseiroRes = ask(caseiro, EMPTY_MEMORY, WHOSE, 1, { clues: ARMA });
+    const after = new Set([...ARMA, caseiroRes.answer.outcome.clue!]);
+    expect(asks(piloto, EMPTY_MEMORY, after)).not.toContain(WHOSE);
+    const kept = dialogueOptions(garimpeiro, garimpeiroMem, after).find(
+      (o) => o.node.ask === WHOSE,
     );
+    expect(kept?.done).toBe(true);
+    const own = dialogueOptions(caseiro, caseiroRes.memory, after).find(
+      (o) => o.node.ask === WHOSE,
+    );
+    expect(own?.done).toBe(true);
+  });
+
+  it('"não sei" não fecha a pergunta para os outros', () => {
+    const r = ask(caseiro, EMPTY_MEMORY, WHOSE, 20, { clues: ARMA });
+    const clues = new Set([...ARMA, ...(r.answer.outcome.clue ? [r.answer.outcome.clue] : [])]);
+    expect(asks(piloto, EMPTY_MEMORY, clues)).toContain(WHOSE);
+    expect(asks(garimpeiro, EMPTY_MEMORY, clues)).toContain(WHOSE);
   });
 
   it('a pista "item:<id>" bate com o esconderijo do mapa', () => {
@@ -362,27 +537,38 @@ describe('aura de diálogo', () => {
 describe('dados de diálogo', () => {
   const withDialogue = Object.values(NPC_CLASSES).filter(hasDialogue);
 
-  it('toda classe com diálogo tem fala de entrada, "Tem mais gente?" e mod 0', () => {
+  it('toda classe com diálogo tem fala de entrada, "tem mais gente?" (sem condição) e mod 0', () => {
     expect(withDialogue.map((c) => c.id).sort()).toEqual([
       'cacador',
+      'caseiro',
       'garimpeiro',
       'pescador',
       'piloto',
     ]);
     for (const c of withDialogue) {
       expect(c.intro?.say, c.id).toBeTruthy();
-      expect(c.questions.some(isMorePeople), c.id).toBe(true);
+      expect(
+        c.questions.some((q) => isMorePeople(q) && !q.requires),
+        c.id,
+      ).toBe(true);
       expect(c.mod, c.id).toBe(0);
     }
   });
 
+  it('nos mapas, só o piloto (1) e o caseiro (2) têm cadeia de réplica', () => {
+    const chains = (c: NpcClass) => c.questions.filter((q) => isRolled(q) && q.followUp).length;
+    expect([piloto, caseiro].map(chains)).toEqual([1, 2]);
+    expect(chains(garimpeiro)).toBe(0);
+  });
+
   it('árvores com no máximo pergunta → réplica → tréplica', () => {
-    const depth = (q: RolledQuestion): number => (q.followUp ? 1 + depth(q.followUp) : 0);
+    const depth = (q: { followUp?: FollowUpQuestion }): number =>
+      q.followUp ? 1 + depth(q.followUp) : 0;
     for (const c of withDialogue)
       for (const q of c.questions) if (isRolled(q)) expect(depth(q)).toBeLessThanOrEqual(2);
   });
 
-  it('os suspeitos dos mapas usam classes que existem; quem entrega alguém aponta para um escondido', () => {
+  it('os suspeitos dos mapas usam classes que existem; o Jô é o caseiro; ninguém escondido no aeroporto', () => {
     for (const map of MAPS.filter((m) => m.available)) {
       for (const e of map.enemies) {
         if (e.npc) expect(npcClass(e.npc), `${map.id}/${e.id}`).toBeDefined();
@@ -393,10 +579,11 @@ describe('dados de diálogo', () => {
       }
     }
     const aeroporto = MAPS.find((m) => m.id === 'aeroporto')!;
-    const pilot = aeroporto.enemies.find((e) => e.id === 'piloto')!;
-    expect(pilot.npc).toBe('piloto');
-    expect(spawnEnemy(aeroporto.enemies.find((e) => e.id === pilot.reveals)!).status).toBe(
-      'hidden',
-    );
+    expect(aeroporto.enemies.find((e) => e.id === 'piloto')?.npc).toBe('piloto');
+    expect(aeroporto.enemies.find((e) => e.id === 'piloto')?.reveals).toBeUndefined();
+    const jo = aeroporto.enemies.find((e) => e.id === 'jo')!;
+    expect([jo.name, jo.npc]).toEqual(['Caseiro Jô', 'caseiro']);
+    expect(aeroporto.enemies.some((e) => e.hidden)).toBe(false);
+    expect(spawnEnemy(jo).status).toBe('patrol');
   });
 });

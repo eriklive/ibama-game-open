@@ -73,6 +73,7 @@ import {
   EMPTY_MEMORY,
   INTERROGATION_RULES,
   NoteKind,
+  PoolUsage,
   askQuestion,
   auraHexes,
   dialogueOptions,
@@ -453,6 +454,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly questionPick = signal(0);
   /** Memória de cada NPC na missão: perguntas feitas e réplicas liberadas (por id do inimigo). */
   protected readonly dialogues = signal<ReadonlyMap<string, DialogueMemory>>(new Map());
+  /** Falas já usadas dos pools compartilhados da missão (ver `LinePool`). */
+  private readonly linePools = signal<PoolUsage>(new Map());
   /** Pistas registradas pelas respostas (`Outcome.clue`). */
   private readonly clueLog = signal<ReadonlySet<string>>(new Set());
   /** Pistas da missão: o que a inspeção achou (`item:<id>`) e o que as respostas registraram. */
@@ -721,7 +724,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       : { surrender: [], roll: [], flee: [] };
   });
   protected readonly canApproach = computed(() => this.approachCount() > 0);
-  /** Inimigos que a missão pede para render (o alvo, como o Garimpeiro Jô): a prévia avisa a chance deles. */
+  /** Inimigos que a missão pede para render (o alvo, como o Caseiro Jô): a prévia avisa a chance deles. */
   protected readonly missionTargets = computed(
     () => new Set((this.map?.objectives ?? []).flatMap((o) => ('surrender' in o ? [o.surrender] : []))),
   );
@@ -1846,8 +1849,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       clues: this.clues(),
       // a intimidação do próprio agente (sem o bônus do grupo nem o do arrombamento) sobe a CD
       intimidation: this.talkIntimidation(),
+      pools: this.linePools(),
     });
     if (!res) return;
+    this.linePools.set(res.pools);
     const epoch = this.epoch;
     const alive = () => this.interrogating(epoch, iv.enemyId);
     const { answer } = res;
@@ -2195,6 +2200,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.dropInterrogation();
     this.dialogues.set(new Map());
     this.clueLog.set(new Set());
+    this.linePools.set(new Map());
     this.fieldNotes.set([]);
     this.board?.setClue(null);
     this.doorKey.set(null);

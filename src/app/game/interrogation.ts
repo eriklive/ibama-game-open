@@ -15,11 +15,14 @@ import { beats } from './search';
  *   NPC cede mais fácil.
  * - Quando o NPC **passa** numa pergunta que tem réplica, ela surge logo abaixo; passando na
  *   réplica e havendo tréplica, surge a tréplica. As CDs padrão vêm de `dc` (pergunta 8,
- *   réplica 12, tréplica 14); um nó pode trazer a sua.
+ *   réplica 12, tréplica 14); um nó pode trazer a sua. Cada nível tem a sua mentira (`pass`),
+ *   mas a **verdade é uma só** (o `fail` da pergunta da raiz): cedendo em qualquer nível, o
+ *   NPC dá essa resposta e a cadeia acaba.
  * - **Memória por NPC** (`DialogueMemory`): pergunta feita fica bloqueada para sempre (marcada
  *   como já perguntada); réplica liberada fica disponível nas próximas entradas.
  * - **Pistas da missão**: pergunta com `requires` só aparece quando a pista (ou todas, numa
- *   lista) estiver registrada. Pistas vêm do que a equipe descobre (`item:<id>` ao achar algo
+ *   lista) estiver registrada; com `hiddenWhen`, some quando a pista aparece (menos para quem
+ *   já a fez). Pistas vêm do que a equipe descobre (`item:<id>` ao achar algo
  *   escondido) e de respostas com `clue`.
  * - Tudo é opcional por nó: sem rolagem (`answer`, resposta fixa), sem réplica, réplica sem
  *   tréplica. Classe sem perguntas não tem diálogo.
@@ -46,7 +49,22 @@ export const INTERROGATION_RULES = {
 export const LEVEL_LABEL = ['', 'Réplica', 'Tréplica'] as const;
 
 /** Uma fala ou várias (o jogo sorteia uma). */
-export type Lines = string | readonly string[];
+export type Lines = string | readonly string[] | LinePool;
+
+/**
+ * Falas sorteadas de um **pool compartilhado na missão** (por `pool`, o id): a fala que um NPC
+ * usa sai do pool para os outros (sem repetição entre eles). Esvaziou, usa `fallback`.
+ */
+export interface LinePool {
+  pool: string;
+  lines: readonly string[];
+  fallback: string;
+}
+
+/** Falas já usadas de cada pool compartilhado (estado da missão, por id do pool). */
+export type PoolUsage = ReadonlyMap<string, readonly string[]>;
+
+const isPool = (l: Lines): l is LinePool => typeof l === 'object' && !Array.isArray(l);
 
 /** Desfecho de uma pergunta: o que o suspeito diz e o que vai para a caderneta. */
 export interface Outcome {
@@ -73,29 +91,58 @@ export type Clues = ReadonlySet<string>;
 export const itemClue = (id: string): string => `item:${id}`;
 
 /** Pergunta sem rolagem: a resposta é sempre a mesma. */
-export interface FixedQuestion {
-  ask: string;
+/** Quando uma pergunta (da raiz da árvore) aparece. */
+interface Visibility {
   /** Só aparece quando a pista (ou todas as da lista) estiver registrada na missão. */
   requires?: Requires;
+  /**
+   * Some quando a pista (ou todas as da lista) estiver registrada — menos para quem já fez a
+   * pergunta, que continua vendo o cartão como "perguntado". Ex.: "De quem é essa arma?" some
+   * de todos assim que alguém confirma o dono (`dono-arma`).
+   */
+  hiddenWhen?: Requires;
+}
+
+export interface FixedQuestion extends Visibility {
+  ask: string;
   answer: Outcome;
 }
 
-/** Pergunta com rolagem escondida (e, opcionalmente, a réplica que surge se ele passar). */
-export interface RolledQuestion {
+/**
+ * Réplica ou tréplica: só a mentira daquele nível (`pass`). A verdade é a da raiz (`fail` da
+ * pergunta de onde a cadeia saiu): cedendo em qualquer nível, o NPC diz a mesma coisa.
+ */
+export interface FollowUpQuestion {
   ask: string;
-  /** Só aparece quando a pista (ou todas as da lista) estiver registrada na missão. */
-  requires?: Requires;
   /** CD própria; sem ela, a do nível (`INTERROGATION_RULES.dc`). */
   dc?: number;
-  /** NPC passou (tirou mais que a CD): evasiva. */
+  /** NPC passou (tirou mais que a CD): a mentira deste nível. */
   pass: Outcome;
-  /** NPC falhou: confissão ou resposta com sinal de mentira. */
-  fail: Outcome;
-  /** Réplica (e, dentro dela, a tréplica): surge quando o NPC passa. */
-  followUp?: RolledQuestion;
+  /** O próximo nível (a tréplica), que surge se ele passar de novo. */
+  followUp?: FollowUpQuestion;
 }
 
+/**
+ * Pergunta com rolagem escondida. Uma cadeia (pergunta → réplica → tréplica) tem uma mentira
+ * por nível, mas uma **verdade só** (`fail`): falhando em qualquer nível, o NPC dá esta resposta
+ * e a cadeia acaba — o jogador tem até 3 chances de arrancar a verdade.
+ */
+export interface RolledQuestion extends Visibility {
+  ask: string;
+  /** CD própria; sem ela, a do nível (`INTERROGATION_RULES.dc`). */
+  dc?: number;
+  /** NPC passou (tirou mais que a CD): evasiva (a mentira do primeiro nível). */
+  pass: Outcome;
+  /** NPC falhou em qualquer nível da cadeia: a verdade (confissão) ou a resposta com sinal de mentira. */
+  fail: Outcome;
+  /** Réplica (e, dentro dela, a tréplica): surge quando o NPC passa. */
+  followUp?: FollowUpQuestion;
+}
+
+/** Pergunta da raiz da árvore (o que vai em `NpcClass.questions`). */
 export type QuestionNode = FixedQuestion | RolledQuestion;
+/** Qualquer cartão: pergunta da raiz, réplica ou tréplica. */
+export type AnyQuestion = QuestionNode | FollowUpQuestion;
 
 /** Classe de NPC: personalidade, fala de entrada e a árvore de perguntas. */
 export interface NpcClass {
@@ -113,7 +160,7 @@ export interface NpcClass {
   questions: readonly QuestionNode[];
 }
 
-export const isRolled = (q: QuestionNode): q is RolledQuestion => 'pass' in q;
+export const isRolled = (q: AnyQuestion): q is RolledQuestion | FollowUpQuestion => 'pass' in q;
 
 /** A classe tem diálogo (ganha aura e pode ser interrogada). */
 export const hasDialogue = (cls: NpcClass | null | undefined): cls is NpcClass =>
@@ -123,7 +170,7 @@ export const hasDialogue = (cls: NpcClass | null | undefined): cls is NpcClass =
  * CD de uma pergunta no nível `depth` (0 pergunta, 1 réplica, 2 tréplica), somada à intimidação
  * do agente (`intimidation` pontos × `intimidationPerPoint`); `null` sem rolagem.
  */
-export function dcFor(q: QuestionNode, depth: number, intimidation = 0): number | null {
+export function dcFor(q: AnyQuestion, depth: number, intimidation = 0): number | null {
   if (!isRolled(q)) return null;
   const dcs = INTERROGATION_RULES.dc;
   return (
@@ -145,7 +192,25 @@ export function hiddenRoll(
 /** Sorteia uma das falas (`rng` em [0, 1), como `Math.random`). */
 export function pickLine(lines: Lines, rng: () => number = Math.random): string {
   if (typeof lines === 'string') return lines;
-  return lines[Math.min(lines.length - 1, Math.floor(rng() * lines.length))] ?? '';
+  const list = isPool(lines) ? lines.lines : lines;
+  return list[Math.min(list.length - 1, Math.floor(rng() * list.length))] ?? '';
+}
+
+/**
+ * Sorteia a fala levando em conta os pools compartilhados: de um pool, só as que ninguém usou
+ * ainda (a sorteada sai do pool); vazio, a reserva. Fala comum: como `pickLine`.
+ */
+export function drawLine(
+  lines: Lines,
+  usage: PoolUsage = new Map(),
+  rng: () => number = Math.random,
+): { line: string; usage: PoolUsage } {
+  if (!isPool(lines)) return { line: pickLine(lines, rng), usage };
+  const used = usage.get(lines.pool) ?? [];
+  const left = lines.lines.filter((l) => !used.includes(l));
+  if (!left.length) return { line: lines.fallback, usage };
+  const line = pickLine(left, rng);
+  return { line, usage: new Map(usage).set(lines.pool, [...used, line]) };
 }
 
 /** A condição de desbloqueio está cumprida (sem condição, sempre). */
@@ -173,7 +238,7 @@ export const hasTalked = (m: DialogueMemory | undefined): boolean => !!m && m.as
 export interface QuestionOption {
   /** Único por NPC (o caminho na árvore: "1", "1.r", "1.r.r"). */
   key: string;
-  node: QuestionNode;
+  node: AnyQuestion;
   /** 0 pergunta, 1 réplica, 2 tréplica. */
   depth: number;
   /** Já perguntada: fica marcada e bloqueada. */
@@ -196,9 +261,9 @@ export interface Answer {
 }
 
 /** O nó da árvore na chave `key` ("2", "2.r", "2.r.r"); `null` se não existir. */
-export function nodeAt(cls: NpcClass, key: string): QuestionNode | null {
+export function nodeAt(cls: NpcClass, key: string): AnyQuestion | null {
   const [base, ...rest] = key.split('.');
-  let node: QuestionNode | undefined = cls.questions[Number(base)];
+  let node: AnyQuestion | undefined = cls.questions[Number(base)];
   if (!node || !/^\d+$/.test(base)) return null;
   for (const step of rest) {
     if (step !== 'r' || !isRolled(node) || !node.followUp) return null;
@@ -207,10 +272,15 @@ export function nodeAt(cls: NpcClass, key: string): QuestionNode | null {
   return node;
 }
 
+/** A pergunta aparece com estas pistas: `requires` cumprido e `hiddenWhen` não. */
+export const visibleWith = (q: QuestionNode, clues: Clues): boolean =>
+  meets(q.requires, clues) && (q.hiddenWhen === undefined || !meets(q.hiddenWhen, clues));
+
 /**
- * Cartões da conversa com o NPC: as perguntas cuja condição (`requires`) está cumprida, cada
- * uma seguida das réplicas que ele já liberou. As feitas vêm marcadas (`done`) e continuam na
- * lista, para o jogador ver o histórico.
+ * Cartões da conversa com o NPC: as perguntas visíveis com as pistas da missão (`requires`
+ * cumprido, `hiddenWhen` não), cada uma seguida das réplicas que ele já liberou. As feitas vêm
+ * marcadas (`done`) e continuam na lista (mesmo que deixem de estar visíveis), para o jogador
+ * ver o histórico.
  */
 export function dialogueOptions(
   cls: NpcClass,
@@ -223,9 +293,9 @@ export function dialogueOptions(
   cls.questions.forEach((q, i) => {
     const key = String(i);
     // pergunta já feita fica no histórico mesmo que a condição deixe de valer
-    if (!meets(q.requires, clues) && !asked.has(key)) return;
+    if (!visibleWith(q, clues) && !asked.has(key)) return;
     out.push({ key, node: q, depth: 0, done: asked.has(key) });
-    let node: QuestionNode = q;
+    let node: AnyQuestion = q;
     let k = key;
     let depth = 0;
     while (isRolled(node) && node.followUp && unlocked.has(`${k}.r`)) {
@@ -239,29 +309,39 @@ export function dialogueOptions(
 }
 
 /**
- * Faz a pergunta `key`: rola escondido (se houver CD, mais a intimidação do agente), sorteia
- * a fala e, se o NPC passou e o nó tem réplica (até a tréplica), libera a réplica. Devolve a
- * memória nova e a resposta. Pergunta já feita, oculta ou inexistente: `null`.
+ * Faz a pergunta `key`: rola escondido (se houver CD, mais a intimidação do agente) e sorteia
+ * a fala. Passou: a mentira daquele nível e, se houver, libera a réplica (até a tréplica).
+ * Falhou em qualquer nível: a verdade da cadeia (o `fail` da pergunta da raiz), e a cadeia acaba.
+ * Devolve a memória nova e a resposta. Pergunta já feita, oculta ou inexistente: `null`.
  */
 export function askQuestion(
   cls: NpcClass,
   memory: DialogueMemory,
   key: string,
-  opts: { die: () => number; rng?: () => number; clues?: Clues; intimidation?: number },
-): { memory: DialogueMemory; answer: Answer } | null {
+  opts: {
+    die: () => number;
+    rng?: () => number;
+    clues?: Clues;
+    intimidation?: number;
+    pools?: PoolUsage;
+  },
+): { memory: DialogueMemory; answer: Answer; pools: PoolUsage } | null {
   const option = dialogueOptions(cls, memory, opts.clues).find((o) => o.key === key);
   if (!option || option.done) return null;
   const node = option.node;
   const done: QuestionOption = { ...option, done: true };
   const asked = [...memory.asked, key];
   const rng = opts.rng ?? Math.random;
+  const pools = opts.pools ?? new Map();
   if (!isRolled(node)) {
+    const drawn = drawLine(node.answer.say, pools, rng);
     return {
+      pools: drawn.usage,
       memory: { asked, unlocked: memory.unlocked },
       answer: {
         option: done,
         outcome: node.answer,
-        line: pickLine(node.answer.say, rng),
+        line: drawn.line,
         roll: null,
         dc: null,
         passed: null,
@@ -271,18 +351,22 @@ export function askQuestion(
   }
   const dc = dcFor(node, option.depth, opts.intimidation ?? 0)!;
   const { roll, pass } = hiddenRoll(dc, cls.mod, opts.die);
-  const outcome = pass ? node.pass : node.fail;
+  // a verdade é uma só na cadeia: a da pergunta da raiz
+  const root = cls.questions[Number(key.split('.')[0])] as RolledQuestion;
+  const outcome = pass ? node.pass : root.fail;
   const maxDepth = INTERROGATION_RULES.dc.length - 1;
   const unlocked: QuestionOption | null =
     pass && node.followUp && option.depth < maxDepth
       ? { key: `${key}.r`, node: node.followUp, depth: option.depth + 1, done: false }
       : null;
+  const drawn = drawLine(outcome.say, pools, rng);
   return {
+    pools: drawn.usage,
     memory: { asked, unlocked: unlocked ? [...memory.unlocked, unlocked.key] : memory.unlocked },
     answer: {
       option: done,
       outcome,
-      line: pickLine(outcome.say, rng),
+      line: drawn.line,
       roll,
       dc,
       passed: pass,

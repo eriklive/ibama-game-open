@@ -4,7 +4,7 @@ import { LEVEL_LABEL, NpcClass, QuestionOption } from '../../game/interrogation'
 /** Conversa em close-up (modo diálogo): com quem, as perguntas (cartões) e os balões. */
 export interface InterrogationView {
   enemyId: string;
-  /** Nome do suspeito no balão ("Piloto", "Garimpeiro Jô"). */
+  /** Nome do suspeito no balão ("Piloto", "Caseiro Jô"). */
   suspect: string;
   cls: NpcClass;
   options: QuestionOption[];

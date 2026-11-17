@@ -204,7 +204,7 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  *
  * A leste da pista, numa clareira, fica a **casa** dos garimpeiros (colunas 29–41, fileiras
  * 26–32): dois cômodos de 5 × 5 separados por uma divisória com porta. Entra-se pela porta
- * do oeste, que dá para a pista. No cômodo 1 o Garimpeiro Jô come de costas para a entrada,
+ * do oeste, que dá para a pista. No cômodo 1 o caseiro Jô come de costas para a entrada,
  * na mesa (`m`); no cômodo 2, a prateleira (`P`) na parede do leste esconde uma arma.
  *
  * A missão principal é queimar o **avião** e a pilha de **suprimentos do garimpo** (`R`), no
@@ -334,7 +334,7 @@ export const MAPS: GameMap[] = [
     objectives: [
       { id: 'queimar-aviao', text: 'Queimar o avião', burn: 'aviao', primary: true, unlocksEnd: true },
       { id: 'queimar-suprimentos', text: 'Queimar os suprimentos do garimpo', burn: 'suprimentos', primary: true },
-      { id: 'render-jo', text: 'Render o Garimpeiro Jô', surrender: 'jo' },
+      { id: 'render-jo', text: 'Render o Caseiro Jô', surrender: 'jo' },
       // a casa vem primeiro; achar a arma na prateleira (percepção) abre o passo seguinte
       { id: 'investigar-casa', text: 'Investigar a casa', notice: 'arma' },
       { id: 'apreender-arma', text: 'Apreender a arma escondida', find: 'arma', after: 'investigar-casa' },
@@ -356,9 +356,7 @@ export const MAPS: GameMap[] = [
         id: 'piloto',
         name: 'Piloto',
         model: MODELS.piloto,
-        // na conversa, pode entregar os carregadores escondidos no barraco atrás do hangar
         npc: 'piloto',
-        reveals: 'carregador',
         patrol: [{ col: 14, row: 6 }],
         wander: { cols: [12, 21], rows: [5, 17] },
       },
@@ -375,28 +373,19 @@ export const MAPS: GameMap[] = [
         id: 'vigia-pista',
         name: 'Vigia da pista',
         model: MODELS.garimpeiro,
-        // segurança: rende-se, mas é calado (sem diálogo, sem aura)
+        // segurança: rende-se, mas é calado (sem diálogo: ação bloqueada e aura apagada)
         npc: 'seguranca',
         patrol: [{ col: 21, row: 20 }, { col: 21, row: 36 }],
       },
       // na casa: parado, comendo na mesa, de costas para a porta
       {
         id: 'jo',
-        name: 'Garimpeiro Jô',
+        name: 'Caseiro Jô',
         model: MODELS.garimpeiro,
-        npc: 'garimpeiro',
+        // mora na casa e cuida dela
+        npc: 'caseiro',
         patrol: [{ col: 32, row: 29 }],
         facing: { col: 33, row: 29 },
-      },
-      // escondido no barraco atrás do hangar: só aparece se o piloto entregar no interrogatório
-      {
-        id: 'carregador',
-        name: 'Carregador',
-        model: { ...MODELS.garimpeiroPa, tint: 0xb98d5c },
-        npc: 'garimpeiro',
-        hidden: true,
-        patrol: [{ col: 20, row: 2 }],
-        facing: { col: 20, row: 3 },
       },
     ],
   },
