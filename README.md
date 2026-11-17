@@ -249,6 +249,45 @@ As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testada
 `door-view.ts`. A biblioteca de clipes não tem chute: a perna é dobrada à mão por cima do `idle`
 (`CharacterRig.pose`); o pick lock usa o `crouch`.
 
+### Interrogatório
+
+Suspeito **rendido** pode ser interrogado, se a classe dele tiver diálogo. Em volta dele surge uma
+**aura âmbar** de 1 hexágono (mais clara sob o agente que está dentro dela). Com o agente da vez na
+aura, aparece o papel **Interrogar** (□ no controle, quando não há ninguém para abordar, nada para
+queimar nem para inspecionar).
+
+- **Close-up:** a câmera faz o mesmo enquadramento da inspeção e das portas (desce para 30° e chega
+  perto), mas de lado para a dupla: agente em pé e suspeito na pose de rendido, na faixa de cima
+  da tela. Faixas pretas, vinheta, a HUD sai e a papelada entra com o "slap". Encerrar volta a câmera.
+- O suspeito abre com a **postura e a fala de entrada** da classe. Embaixo ficam até **3 perguntas**
+  em cartões de papel (sempre com "Tem mais gente com vocês?"); cada uma só pode ser feita uma vez.
+  A pergunta do agente sai num balão; a resposta, no balão do canto de baixo.
+- **Rolagem escondida** (como no Baldur's Gate 3): a pergunta pode ter CD e o suspeito rola um d20 que
+  o jogador não vê (nada de dado, número ou CD na tela). Passa quem tira **mais que** a CD (`beats`).
+  Passou: resposta evasiva. Falhou: confissão ou resposta com um **sinal** de mentira (entre
+  parênteses, em itálico, e o suspeito dá um tranco). Cada desfecho pode ter várias falas (sorteia uma).
+- **Réplica e tréplica:** quando o suspeito **passa** numa pergunta que tem réplica, surge logo abaixo
+  o cartão **Réplica** (CD 15); passando nela e havendo tréplica, surge a **Tréplica** (CD 18). A
+  pergunta base usa CD 10. Tudo é opcional por nó: sem CD (resposta fixa), sem réplica, réplica sem
+  tréplica.
+- **Custo:** como a inspeção, a **primeira pergunta gasta 1 de movimento** (encerrar sem perguntar
+  não gasta) e a vez continua. Ficam em `INTERROGATION_RULES` (`moveCost`, `endsTurn`).
+- **Caderneta de campo:** cada resposta vira uma anotação (*declarou*, *sinal* ou *confessou*), que sai
+  no **relatório da operação**; ao encerrar, um telegrama resume.
+- **Entregar alguém:** se "Tem mais gente?" (ou a réplica/tréplica dela) falhar, o suspeito entrega quem
+  está escondido. No Aeroporto, o **piloto** pode entregar o **Carregador**, escondido no barraco atrás do
+  hangar: ao encerrar, ele aparece no mapa (e passa a vigiar). Sem unidade escondida, só fica anotado.
+- Interrogado (com ao menos uma pergunta feita), o suspeito perde a aura. Com controle: direcional
+  escolhe o cartão, ✕ pergunta, ○ encerra.
+
+Os diálogos são dados: as classes de NPC (garimpeiro, piloto, caçador, pescador e segurança, que é calado
+e não tem diálogo), com traço de personalidade, fala de entrada, `mod` (0, ainda sem uso) e a árvore de
+perguntas, ficam em `src/app/game/npc-dialogue.ts`. Para ligar uma classe a um suspeito, use `npc` no
+inimigo do mapa (`maps.ts`); `hidden: true` deixa um inimigo escondido e `reveals` diz quem o suspeito
+pode entregar. As regras (CDs, raio da aura, custo) e a lógica pura ficam em
+`src/app/game/interrogation.ts`; a papelada em `src/app/ui/interrogation/` e a câmera em
+`HexBoard.closeUp` (a mesma da inspeção, com `frame: 'pair'`).
+
 ### Missão principal: queimar o avião e os suprimentos
 
 O objetivo principal no Aeroporto é **queimar o avião** e a **pilha de suprimentos do garimpo** (caixotes
@@ -322,7 +361,8 @@ símbolo correspondente.
 | Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
 | ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
 | ○ | Cancela |
-| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, inspecionar ou abrir o menu da porta) |
+| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, inspecionar, interrogar ou abrir o menu da porta) |
+| No interrogatório | direcional escolhe a pergunta, ✕ pergunta, ○ encerra |
 | No menu da porta | ✕ arromba, □ pick lock, △ abre, ○ volta |
 | L3 | Encerrar a operação (depois de queimar o avião) |
 | △ | Passar a vez |
