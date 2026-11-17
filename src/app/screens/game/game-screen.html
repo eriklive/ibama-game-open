@@ -101,7 +101,7 @@
     </div>
   }
 
-  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr; some sozinho -->
+  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); some sozinho -->
   @if (report(); as r) {
     <div class="report" role="status" aria-live="polite" data-testid="approach-report" (click)="closeReport()">
       <div class="report-head">
@@ -115,6 +115,7 @@
               <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" /><circle cx="20" cy="12" r="5.5" /><path class="pole" d="M27 24 L33 6" /><rect class="flag" x="31" y="5" width="7" height="5" /></svg>
             </span>
             <span class="pola-name">{{ e.name }}</span>
+            @if (r.rolls.get(e.id); as t) { <span class="pola-roll">d20 {{ t.roll }}{{ modTerm(t.modifier) }} = {{ t.total }}</span> }
             <span class="pola-stamp">Rendido</span>
           </li>
         }
@@ -124,6 +125,7 @@
               <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" transform="rotate(12 20 25)" /><circle cx="22" cy="12" r="5.5" /></svg>
             </span>
             <span class="pola-name">{{ e.name }}</span>
+            @if (r.rolls.get(e.id); as t) { <span class="pola-roll">d20 {{ t.roll }}{{ modTerm(t.modifier) }} = {{ t.total }}</span> }
             <span class="pola-stamp">Vai correr</span>
             <svg class="pola-circle" viewBox="0 0 100 130" preserveAspectRatio="none" aria-hidden="true">
               <path pathLength="100" d="M50 4 C 88 2, 98 40, 96 70 C 94 108, 70 126, 44 124 C 14 122, 2 96, 4 62 C 6 28, 22 6, 58 8" />
@@ -256,11 +258,15 @@
         <strong>Abordagem de {{ active().name }}</strong>
         @let ap = approachParts();
         <span class="small approach-range" data-testid="approach-range">
-          Alcance {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+        </span>
+        <span class="small approach-range" data-testid="approach-bands">
+          Rolagem {{ ap.zones.surrenderRange + 1 }}–{{ ap.zones.rollRange }} (d20 ≥ {{ approachRules.escapeDC }} escapa) · fuga até {{ ap.zones.radius }}
         </span>
         @let plan = approachPlan();
         <span class="approach-tally" aria-hidden="true">
           @if (plan.surrender.length) { <span class="surrender">{{ plan.surrender.length }} se {{ plan.surrender.length === 1 ? 'rende' : 'rendem' }}</span> }
+          @if (plan.roll.length) { <span class="roll">{{ plan.roll.length }} {{ plan.roll.length === 1 ? 'rola' : 'rolam' }} d20</span> }
           @if (plan.flee.length) { <span class="flee">{{ plan.flee.length }} {{ plan.flee.length === 1 ? 'vai' : 'vão' }} correr</span> }
           <span class="small">· encerra a vez</span>
         </span>
@@ -269,8 +275,11 @@
           @for (e of plan.surrender; track e.id) {
             <li>{{ e.name }} se rende</li>
           }
+          @for (c of plan.roll; track c.enemy.id) {
+            <li>{{ c.enemy.name }} rola d20{{ modTerm(c.modifier) }}: {{ percent(c.chance) }} de escapar@if (missionTargets().has(c.enemy.id)) { · alvo da missão}</li>
+          }
           @for (e of plan.flee; track e.id) {
-            <li>{{ e.name }} vai correr</li>
+            <li>{{ e.name }} vai correr@if (missionTargets().has(e.id)) { · alvo da missão}</li>
           }
         </ul>
       </div>

@@ -5,7 +5,7 @@ import {
   waveBump,
   waveDuration,
 } from './approach-fx';
-import { APPROACH_RULES } from './enemies';
+import { BASE_APPROACH } from './enemies';
 
 describe('onda de voz', () => {
   it('chega primeiro em quem está perto', () => {
@@ -14,7 +14,7 @@ describe('onda de voz', () => {
   });
 
   it('termina depois de chegar no último anel', () => {
-    expect(waveDuration()).toBeGreaterThan(waveArrival(APPROACH_RULES.radius));
+    expect(waveDuration()).toBeGreaterThan(waveArrival(BASE_APPROACH.radius));
     // cabe no orçamento de ~2 s por abordagem (antes do auto)
     expect(waveDuration()).toBeLessThan(2);
   });

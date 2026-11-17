@@ -25,16 +25,74 @@ export const ENEMY_RULES = {
 } as const;
 
 /**
- * Abordagem: o agente da vez anuncia a abordagem ("Ibama! Parados!") e todos os
- * inimigos no raio reagem. Quem está a até `surrenderRange` hexágonos se rende; quem
- * está mais longe, mas dentro de `radius`, entra em alerta e tenta correr no turno
- * inimigo. A distância é em linha reta (paredes não abafam o grito, por enquanto).
- * Abordar encerra a vez do agente.
+ * Abordagem: o agente da vez anuncia a abordagem ("Ibama! Parados!") e os inimigos em volta
+ * reagem conforme a distância (em linha reta: paredes não abafam o grito, por enquanto).
+ * São três faixas, uma logo depois da outra:
+ *
+ * 1. **Raio de abordagem** (até `surrenderRange`): se rende.
+ * 2. **Zona de rolagem** (`rollBand` hexágonos): rola 1d`escapeDie` + modificador e passa
+ *    no teste com `escapeDC` ou mais. Passando, não se rende: entra em alerta e corre no
+ *    turno inimigo. Falhando, se rende. O modificador vem de `rollMods`, do hexágono mais
+ *    perto da abordagem (mais difícil) ao mais perto da fuga (mais fácil).
+ * 3. **Zona de fuga** (`fleeBand` hexágonos): entra em alerta e corre, sem rolar.
+ *
+ * A intimidação (e o grupo) aumentam o raio de abordagem, e as outras faixas se afastam
+ * junto (ver `approachZones` e `approachRulesFor` em `stats.ts`). Quem passou no teste e
+ * ainda não fugiu pode ser abordado de novo e rola outra vez. Abordar encerra a vez.
  */
 export const APPROACH_RULES = {
-  radius: 4,
   surrenderRange: 2,
+  rollBand: 3,
+  fleeBand: 1,
+  escapeDie: 20,
+  escapeDC: 8,
+  /** Modificador do teste em cada hexágono da zona de rolagem (um por hexágono, de dentro para fora). */
+  rollMods: [-1, 0, 1],
 } as const;
+
+/** Onde termina cada faixa da abordagem (distâncias em hexágonos a partir do agente). */
+export interface ApproachZones {
+  /** Raio de abordagem: até aqui, se rende. */
+  surrenderRange: number;
+  /** Fim da zona de rolagem. */
+  rollRange: number;
+  /** Fim da zona de fuga: o alcance total do grito. */
+  radius: number;
+}
+
+/** As três faixas a partir de um raio de abordagem (nunca menor que 1). */
+export function approachZones(
+  surrenderRange: number = APPROACH_RULES.surrenderRange,
+  rules: Pick<typeof APPROACH_RULES, 'rollBand' | 'fleeBand'> = APPROACH_RULES,
+): ApproachZones {
+  const s = Math.max(1, surrenderRange);
+  return { surrenderRange: s, rollRange: s + rules.rollBand, radius: s + rules.rollBand + rules.fleeBand };
+}
+
+/** As faixas de um agente sem intimidação nem grupo. */
+export const BASE_APPROACH: ApproachZones = approachZones();
+
+/** Modificador do teste de fuga a `distance` hexágonos (0 fora da zona de rolagem). */
+export function escapeModifier(
+  distance: number,
+  zones: ApproachZones,
+  mods: readonly number[] = APPROACH_RULES.rollMods,
+): number {
+  return mods[distance - zones.surrenderRange - 1] ?? 0;
+}
+
+/** Passa no teste de fuga: dado + modificador alcança a dificuldade. */
+export const passesEscape = (roll: number, modifier: number, dc: number = APPROACH_RULES.escapeDC): boolean =>
+  roll + modifier >= dc;
+
+/** Chance (0..1) de passar no teste de fuga com esse modificador. */
+export function escapeChance(
+  modifier: number,
+  dc: number = APPROACH_RULES.escapeDC,
+  sides: number = APPROACH_RULES.escapeDie,
+): number {
+  return Math.min(1, Math.max(0, (sides + 1 - (dc - modifier)) / sides));
+}
 
 /** Retângulo (colunas e fileiras, inclusive) onde um inimigo vagueia. */
 export interface WanderZone {
@@ -280,19 +338,48 @@ export const onBoard = (e: Pick<EnemyState, 'status'>): boolean => e.status !== 
 /** Ainda age no turno inimigo: em patrulha ou em alerta. */
 export const canAct = (e: Pick<EnemyState, 'status'>): boolean => e.status === 'patrol' || e.status === 'alert';
 
-/** Quem se rende e quem tenta correr se o agente em `from` iniciar uma abordagem. */
+/** Inimigo na zona de rolagem: vai rolar o teste de fuga. */
+export interface EscapeCheck {
+  enemy: EnemyState;
+  distance: number;
+  modifier: number;
+  /** Chance (0..1) de passar no teste e correr. */
+  chance: number;
+}
+
+/** O teste rolado: a face do dado, o total e se passou. */
+export interface EscapeRoll extends EscapeCheck {
+  roll: number;
+  total: number;
+  passed: boolean;
+}
+
+/**
+ * Quem se rende, quem rola o teste de fuga e quem corre sem rolar se o agente em `from`
+ * iniciar uma abordagem. Rendidos e fugidos não contam; quem já está em alerta, sim.
+ */
 export function resolveApproach(
   from: HexCoord,
   enemies: readonly EnemyState[],
-  rules: { radius: number; surrenderRange: number } = APPROACH_RULES,
-): { surrender: EnemyState[]; flee: EnemyState[] } {
+  zones: ApproachZones = BASE_APPROACH,
+): { surrender: EnemyState[]; roll: EscapeCheck[]; flee: EnemyState[] } {
   const surrender: EnemyState[] = [];
+  const roll: EscapeCheck[] = [];
   const flee: EnemyState[] = [];
   for (const e of enemies) {
     if (!canAct(e)) continue;
     const d = hexDistance(from, e.hex);
-    if (d <= rules.surrenderRange) surrender.push(e);
-    else if (d <= rules.radius) flee.push(e);
+    if (d <= zones.surrenderRange) surrender.push(e);
+    else if (d <= zones.rollRange) {
+      const modifier = escapeModifier(d, zones);
+      roll.push({ enemy: e, distance: d, modifier, chance: escapeChance(modifier) });
+    } else if (d <= zones.radius) flee.push(e);
   }
-  return { surrender, flee };
+  return { surrender, roll, flee };
+}
+
+/** Rola o teste de fuga de quem está na zona de rolagem (`die` devolve a face do dado). */
+export function rollEscape(check: EscapeCheck, die: () => number): EscapeRoll {
+  const roll = die();
+  return { ...check, roll, total: roll + check.modifier, passed: passesEscape(roll, check.modifier) };
 }

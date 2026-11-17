@@ -33,8 +33,8 @@ agente: abas com a foto 3x4 (ponto **amarelo** = ponto livre, **verde** = distri
 equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a ficha em papel.
 
 - **Velocidade:** cada ponto vale **+1 de movimento** no turno (somado aos 2d4).
-- **Intimidação:** cada ponto vale **+1 no alcance da abordagem** (o raio total, de alerta). A
-  zona de rendição continua a mesma.
+- **Intimidação:** cada ponto vale **+1 no raio de abordagem** (a zona de rendição). A zona de
+  rolagem e a de fuga se afastam junto.
 - Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
   direita, negativo em vermelho para a esquerda; o tracejado mostra onde o ponto livre pode
   entrar). Todo agente começa com 0 nos dois.
@@ -73,11 +73,21 @@ uma base vermelha; o corpo mostra para onde olham).
 
 Na vez de um agente, um toque no botão **Abordar** (com o número de inimigos no raio) abre o
 **modo de abordagem**, e nada acontece até confirmar. O tabuleiro fica em **escala de cinza**:
-só ficam em cor quem está na vez, os suspeitos no raio (cada um com uma etiqueta: *se rende* ou
-*vai correr*) e o próprio raio. A câmera enquadra todos eles. Hexágonos **verdes** são a zona de rendição (até 2
-hexágonos) e os **laranja**, o resto do raio. O raio é **4 + intimidação** do agente, e **+2**
-enquanto ele estiver agrupado (ex.: com 1 ponto em intimidação e em grupo, 7). O painel mostra
-essa conta (base · intimidação · grupo) e quantos se rendem e quantos vão correr. O botão
+só ficam em cor quem está na vez, os suspeitos no raio (cada um com uma etiqueta: *se rende*,
+*X% de escapar* ou *vai correr*; o alvo da missão ganha um *alvo!*) e o próprio raio. A câmera
+enquadra todos eles. São três faixas, uma logo depois da outra:
+
+- **Verde, raio de abordagem:** **2 + intimidação** do agente, **+2** enquanto ele estiver
+  agrupado, nunca menor que 1. Quem está nele se rende.
+- **Amarelo, zona de rolagem (3 hexágonos):** cada suspeito rola **d20 + modificador** e passa
+  no teste com **8 ou mais**. O modificador é **−1** no hexágono mais perto da abordagem, **0** no
+  meio e **+1** no mais perto da fuga (60%, 65% e 70% de escapar). Passou: não se rende, fica em
+  alerta e corre no turno inimigo. Falhou: se rende.
+- **Laranja, zona de fuga (1 hexágono):** fica em alerta e corre, sem rolar.
+
+Sem bônus, as faixas são 1–2, 3–5 e 6. O painel mostra a conta (base · intimidação · grupo), as
+faixas e quantos se rendem, rolam e vão correr. Os números ficam em `APPROACH_RULES`
+(`src/app/game/enemies.ts`). O botão
 **Abordar** só aparece com algum suspeito dentro do raio de quem está na vez. A decisão fica em
 dois botões separados: o carimbo **Abordar!** (embaixo, à direita; ✕ no controle) confirma e o
 botão **vermelho** de **Cancelar** (na esquerda; ○ no controle) desiste. Tocar no tabuleiro não
@@ -87,13 +97,12 @@ Ao abordar, uma **onda de voz** sai do agente: cada hexágono do raio pula e ace
 passa, e cada suspeito leva um susto e reage (rende-se ou fica em alerta) quando a onda chega
 até ele, então quem está mais perto reage primeiro. Em seguida aparece o **auto de abordagem**:
 uma ficha com a foto de cada suspeito, carimbo verde **Rendido** ou círculo vermelho **Vai
-correr**. Ela some sozinha em uns 3 s (ou com um toque em **Fechar**) e a vez passa. Os tempos
+correr**, com a conta do d20 de quem rolou. Ela some sozinha em uns 3 s (ou com um toque em **Fechar**) e a vez passa. Os tempos
 ficam em `APPROACH_FX` (`src/app/game/approach-fx.ts`).
 
-- Inimigos a até 2 hexágonos **se rendem**: a base fica branca, eles se agacham com uma bandeira branca, param de
-  agir e continuam ocupando o hexágono. Vale também para quem já estava em alerta.
-- Inimigos entre 3 hexágonos e o fim do raio (4 sem bônus) são **alertados** e tentam correr no
-  turno inimigo.
+- Quem **se rende**: a base fica branca, ele se agacha com uma bandeira branca, para de agir e
+  continua ocupando o hexágono. Vale também para quem já estava em alerta.
+- Quem passou no teste e ainda não fugiu pode ser abordado de novo e rola outra vez.
 - A distância é em linha reta: por enquanto, paredes não abafam o grito.
 - Abordar **encerra a vez** do agente. Se o movimento acabar com inimigos no raio, a vez
   não passa sozinha, para dar tempo de abordar.

@@ -41,6 +41,7 @@ const COLORS = {
   enemyAlert: 0xff8a1f,
   enemySurrendered: 0xe9eef0,
   approachSurrender: 0x8fe08a,
+  approachRoll: 0xf5e663,
   approachFlee: 0xffb067,
   aura: 0x9dff8f,
   /** Chão "low poly" além do raio carregado: só uma cor de mata fechada sob a névoa. */
@@ -238,8 +239,8 @@ export class HexBoard {
 
   private reachable = new Set<string>();
   private vision = new Set<string>();
-  /** Pré-visualização da abordagem: zona de rendição e zona de fuga. */
-  private approach: { surrender: Set<string>; flee: Set<string> } | null = null;
+  /** Pré-visualização da abordagem: zona de rendição, zona de rolagem e zona de fuga. */
+  private approach: { surrender: Set<string>; roll: Set<string>; flee: Set<string> } | null = null;
   /** Escala de cinza do modo de abordagem (ver `setSpotlight`). */
   private spotlight!: Spotlight;
   private spot: { lit: THREE.Object3D[]; zone: THREE.InstancedMesh | null; tiles: HexTile[] } | null = null;
@@ -387,20 +388,20 @@ export class HexBoard {
   }
 
   /** Mostra (ou esconde, com `null`) as zonas da abordagem. */
-  setApproachZones(zones: { surrender: Iterable<string>; flee: Iterable<string> } | null): void {
-    this.approach = zones && { surrender: new Set(zones.surrender), flee: new Set(zones.flee) };
+  setApproachZones(zones: { surrender: Iterable<string>; roll: Iterable<string>; flee: Iterable<string> } | null): void {
+    this.approach = zones && { surrender: new Set(zones.surrender), roll: new Set(zones.roll), flee: new Set(zones.flee) };
     this.paintTiles();
   }
 
   /**
    * Modo de abordagem: o tabuleiro fica em cinza, menos os personagens de `units` (o da vez),
-   * os inimigos de `labels` (cada um com uma etiqueta: se rende ou corre) e os hexágonos de
+   * os inimigos de `labels` (cada um com uma etiqueta: se rende, rola ou corre) e os hexágonos de
    * `hexes` (o raio). `null` devolve a cor.
    */
   setSpotlight(
     spot: {
       units: readonly string[];
-      labels: readonly { id: string; text: string; tone: 'surrender' | 'flee' }[];
+      labels: readonly { id: string; text: string; tone: 'surrender' | 'roll' | 'flee' }[];
       hexes: Iterable<string>;
     } | null,
   ): void {
@@ -1601,9 +1602,11 @@ export class HexBoard {
       const reachColor = seen ? COLORS.visionReach : COLORS.reachable;
       const zone = this.approach?.surrender.has(key)
         ? COLORS.approachSurrender
-        : this.approach?.flee.has(key)
-          ? COLORS.approachFlee
-          : null;
+        : this.approach?.roll.has(key)
+          ? COLORS.approachRoll
+          : this.approach?.flee.has(key)
+            ? COLORS.approachFlee
+            : null;
       tile.color.set(
         zone ?? (isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? reachColor : seen ? COLORS.vision : tile.baseColor),
       );
@@ -1840,7 +1843,7 @@ export class HexBoard {
         changed = true;
       } else if (isSel) {
         goal = tile.lift + Math.sin(t * 3) * 0.03;
-      } else if (this.approach && (this.approach.surrender.has(key) || this.approach.flee.has(key))) {
+      } else if (this.approach && (this.approach.surrender.has(key) || this.approach.roll.has(key) || this.approach.flee.has(key))) {
         // na onda de voz, o hexágono pula e acende quando ela chega; antes, só pulsa
         const hit = wave ? waveBump(t - wave.start - waveArrival(hexDistance(wave.from, tile.coord))) : 0;
         const g = wave ? 0.04 + hit * 0.45 : 0.08 + Math.sin(t * 4) * 0.06;
@@ -1909,8 +1912,8 @@ export class HexBoard {
     }
   }
 
-  /** Etiqueta de um suspeito no modo de abordagem ("se rende" em verde, "corre" em laranja). */
-  private labelSprite(text: string, tone: 'surrender' | 'flee'): THREE.Sprite {
+  /** Etiqueta de um suspeito no modo de abordagem ("se rende" em verde, "rola" em amarelo, "corre" em laranja). */
+  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee'): THREE.Sprite {
     const font = 'bold 40px "Special Elite", "Courier New", monospace';
     const c = document.createElement('canvas');
     const g = c.getContext('2d');
@@ -1924,7 +1927,7 @@ export class HexBoard {
     c.width = width;
     c.height = 64 + tip;
     if (g) {
-      g.fillStyle = tone === 'surrender' ? '#2f7a3e' : '#c4621a';
+      g.fillStyle = tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : '#c4621a';
       g.beginPath();
       g.roundRect(0, 0, width, 64, 12);
       g.moveTo(width / 2 - tip, 64);

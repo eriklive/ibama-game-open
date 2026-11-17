@@ -1,4 +1,4 @@
-import { APPROACH_RULES } from './enemies';
+import { BASE_APPROACH } from './enemies';
 
 /**
  * Tempo da abordagem: a onda de voz e o auto que aparece no fim.
@@ -27,7 +27,7 @@ export function waveArrival(
 }
 
 /** Duração total da onda (até o auto de abordagem aparecer), em segundos. */
-export function waveDuration(radius: number = APPROACH_RULES.radius): number {
+export function waveDuration(radius: number = BASE_APPROACH.radius): number {
   return waveArrival(radius) + APPROACH_FX.waveTail;
 }
 
