@@ -102,8 +102,8 @@ button:disabled { cursor: not-allowed; }
 /* ---------- coluna da esquerda: agentes (o selecionado no topo) e ferramentas ---------- */
 .left {
   position: absolute;
-  left: calc(14px + var(--safe-left));
-  top: calc(12px + var(--safe-top));
+  left: calc(18px + var(--safe-left));
+  top: calc(26px + var(--safe-top));
   width: 150px;
   display: flex; flex-direction: column; gap: 10px;
 }
@@ -710,6 +710,8 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   .tool-icon { width: 26px; height: 26px; }
 }
 @media (min-width: 700px) and (min-height: 600px) {
+  /* o zoom de 1,25 também alarga o bilhete: descontar para não passar por cima da coluna da esquerda */
+  .goal { width: clamp(190px, calc((100vw - 440px) / 1.25), 340px); }
   .corner, .goal, .left, .suspects, .actions, .telegram, .check, .report, .end-op, .approach-cancel, .aim-actions { zoom: 1.25; }
 }
 

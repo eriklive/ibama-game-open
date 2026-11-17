@@ -287,9 +287,9 @@
       <ul class="door-opts">
         @for (o of doorOptions(); track o.action; let i = $index) {
           <li>
-            <button type="button" class="door-opt" [class.locked]="o.disabled || o.locked" [style.--i]="i" [style.--tilt]="['-1deg', '.8deg', '-.6deg'][i]" [disabled]="o.disabled" [attr.aria-label]="o.label" [attr.data-testid]="'door-' + o.action" (click)="doorAction(o.action)">
-              <span class="door-slot" [class.none]="!o.rolls && !o.disabled && !o.locked" [class.locked]="o.disabled || o.locked" aria-hidden="true">
-                @if (o.disabled || o.locked) {
+            <button type="button" class="door-opt" [class.locked]="o.locked" [style.--i]="i" [style.--tilt]="['-1deg', '.8deg', '-.6deg'][i]" [disabled]="o.disabled" [attr.aria-label]="o.label" [attr.data-testid]="'door-' + o.action" (click)="doorAction(o.action)">
+              <span class="door-slot" [class.none]="!o.rolls && !o.locked" [class.locked]="o.locked" aria-hidden="true">
+                @if (o.locked) {
                   <svg class="door-lock" viewBox="0 0 24 24"><path class="shackle" d="M8 11V8a4 4 0 0 1 8 0v3" /><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M12 15v2.5" /></svg>
                 } @else if (o.rolls) {
                   <span class="d20" [class.never]="o.tone === 'never'">

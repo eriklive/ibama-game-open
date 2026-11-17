@@ -557,18 +557,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         'arrombar',
         'Arrombar',
         st === 'bloqueada' && !door.broken ? 'nunca passa' : open ? 'já está aberta' : st === 'encostada' ? 'sem tranca, chama atenção' : 'porta trancada',
+        { disabled: busy || open, locked: open },
       ),
       option(
         'pick',
         'Destrancar',
         open ? 'já está aberta' : noMoves ? 'sem movimento' : st === 'bloqueada' ? 'nunca passa' : st === 'trancada' ? `fechadura ${door.lock}${gazua ? `, ${SKILLS.gazua.name} +${gazua}` : ''}` : 'precisa de 0, abre sozinha',
-        { cost: `${DOOR_RULES.pickCost} mov.`, disabled: busy || open || noMoves },
+        { cost: `${DOOR_RULES.pickCost} mov.`, disabled: busy || open || noMoves, locked: open || noMoves },
       ),
       option(
         'abrir',
         'Abrir',
         open ? 'já dá para passar' : st === 'encostada' ? 'só empurrar' : st === 'trancada' ? 'está trancada' : 'está bloqueada',
-        { disabled: busy || open, locked: !open && st !== 'encostada' },
+        { disabled: busy || open, locked: open || st !== 'encostada' },
       ),
     ];
   });
