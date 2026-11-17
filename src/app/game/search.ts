@@ -44,3 +44,18 @@ export const entersRoom = (path: readonly HexCoord[], room: HexRect): boolean =>
 
 /** Colado no móvel: dá para inspecionar. */
 export const canReach = (agent: HexCoord, spot: HexCoord): boolean => hexDistance(agent, spot) === 1;
+
+/**
+ * Precisa rolar percepção: o agente `who` entrou (pelo `path`) no cômodo do esconderijo, ainda
+ * não rolou ali e ninguém reparou nele. Já percebido — por um teste ou porque alguém contou
+ * (um suspeito que confessa, ver `Outcome.notices` em `interrogation.ts`) — não rola mais.
+ */
+export function needsNoticeRoll(
+  item: Pick<HiddenItem, 'id' | 'room'>,
+  who: string,
+  path: readonly HexCoord[],
+  noticed: ReadonlySet<string>,
+  rolled: ReadonlySet<string>,
+): boolean {
+  return !noticed.has(item.id) && !rolled.has(`${item.id}:${who}`) && entersRoom(path, item.room);
+}

@@ -104,7 +104,11 @@ export interface WanderZone {
 /** Distância mínima até o próximo destino sorteado de quem vagueia (para não ficar dando passinhos). */
 const WANDER_MIN_LEG = 3;
 
-export type EnemyStatus = 'patrol' | 'alert' | 'surrendered' | 'fled';
+/**
+ * `hidden`: escondido (ainda não apareceu no mapa). Não age, não ocupa hexágono e ninguém sabe
+ * dele até ser revelado — por exemplo, quando um suspeito o entrega no interrogatório.
+ */
+export type EnemyStatus = 'patrol' | 'alert' | 'surrendered' | 'fled' | 'hidden';
 
 /** Inimigo como definido no mapa. */
 export interface EnemySpawn {
@@ -124,6 +128,12 @@ export interface EnemySpawn {
   wander?: WanderZone;
   /** Modelo 3D do inimigo; sem ele, o tabuleiro mostra a peça simples. */
   model?: ModelDef;
+  /** Classe de NPC (diálogo do interrogatório, em `npc-dialogue.ts`); sem ela, não há o que interrogar. */
+  npc?: string;
+  /** Começa escondido: só aparece no mapa quando alguém o entrega (ver `reveals`). */
+  hidden?: boolean;
+  /** Id do inimigo escondido que este suspeito pode entregar no interrogatório. */
+  reveals?: string;
 }
 
 export interface EnemyState {
@@ -142,6 +152,10 @@ export interface EnemyState {
   wander?: WanderZone;
   /** Destino sorteado de quem vagueia (sem isso, sorteia um no próximo turno). */
   target?: HexCoord;
+  /** Classe de NPC (ver `EnemySpawn.npc`). */
+  npc?: string;
+  /** Inimigo escondido que este pode entregar (ver `EnemySpawn.reveals`). */
+  reveals?: string;
 }
 
 export function spawnEnemy(spawn: EnemySpawn): EnemyState {
@@ -151,11 +165,13 @@ export function spawnEnemy(spawn: EnemySpawn): EnemyState {
     name: spawn.name,
     hex: { ...start },
     facing: facingBetween(start, spawn.facing ?? next),
-    status: 'patrol',
+    status: spawn.hidden ? 'hidden' : 'patrol',
     patrol: spawn.patrol.map((h) => ({ ...h })),
     waypoint: spawn.patrol.length > 1 ? 1 : 0,
     dir: 1,
     ...(spawn.wander ? { wander: spawn.wander } : {}),
+    ...(spawn.npc ? { npc: spawn.npc } : {}),
+    ...(spawn.reveals ? { reveals: spawn.reveals } : {}),
   };
 }
 
@@ -333,8 +349,11 @@ export function planFlee(
   return { path, full, escapes: path.length === full.length, cornered: false };
 }
 
-/** Ainda no tabuleiro (ocupa um hexágono): em patrulha, em alerta ou rendido. */
-export const onBoard = (e: Pick<EnemyState, 'status'>): boolean => e.status !== 'fled';
+/** Ainda no tabuleiro (ocupa um hexágono): em patrulha, em alerta ou rendido (escondido e fugido, não). */
+export const onBoard = (e: Pick<EnemyState, 'status'>): boolean => e.status !== 'fled' && e.status !== 'hidden';
+
+/** A equipe sabe dele (já apareceu no mapa, mesmo que tenha fugido). */
+export const known = (e: Pick<EnemyState, 'status'>): boolean => e.status !== 'hidden';
 
 /** Ainda age no turno inimigo: em patrulha ou em alerta. */
 export const canAct = (e: Pick<EnemyState, 'status'>): boolean => e.status === 'patrol' || e.status === 'alert';
