@@ -27,7 +27,8 @@ de ter um Capitão nele. O alcance da abordagem segue a mesma lógica e passa a 
 ## 2. Classes
 
 Cada agente tem **uma** classe, que pode ser trocada no menu (ficha) antes da missão.
-**Não há limite de Agentes** na equipe nem no grupo; o limite é **um Capitão por grupo**. A classe dá
+A equipe tem **um único Capitão**: o menu só deixa marcar um. Hoje são três personagens, então
+a formação é sempre **1 Capitão + 2 Agentes** (Agentes não têm limite, se a equipe crescer). A classe dá
 **habilidades** (regras que mudam uma ação) e/ou **perícias** (bônus fixo numa rolagem).
 
 ### 2.1 Capitão
@@ -40,8 +41,9 @@ Cada agente tem **uma** classe, que pode ser trocada no menu (ficha) antes da mi
 Regras de borda propostas:
 
 - O +1 do Capitão **só vale agrupado** (Capitão sozinho não ganha nada de movimento).
-- **Um Capitão por grupo**: o Agrupar nunca junta dois Capitães. Proposta: quando outro Capitão
-  está em campo, ele aparece no Agrupar como "não pode entrar" e fica de fora.
+- **Um Capitão na equipe**: quem garante é o menu (marcar outro como Capitão tira a classe do
+  anterior, que volta a ser Agente). Assim o jogo nunca precisa lidar com dois Capitães em campo
+  e o grupo único que existe hoje no código continua bastando.
 - "Comando" só vale quando o Capitão **lidera** o Agrupar (é a vez dele). Se outro agente chama
   o Agrupar e o Capitão só vem junto, o custo é o normal.
 
@@ -215,7 +217,7 @@ investe passa a se destacar. Cada agente pode ter um alcance diferente conforme 
 | Habilidade | Classe | Tipo | Quando vale | Efeito | Acumula? |
 |---|---|---|---|---|---|
 | Comando | Capitão | ativa | Capitão chama o Agrupar na vez dele | Encontro custa 0 de movimento | — |
-| Liderança | Capitão | passiva | Capitão está no grupo | +1 no bônus de movimentação do grupo | Máx. 1 Capitão por grupo |
+| Liderança | Capitão | passiva | Capitão está no grupo | +1 no bônus de movimentação do grupo | Não se aplica: 1 Capitão na equipe |
 
 A tabela de ações (3.1) vira o índice que liga as duas: cada ação diz qual atributo e qual
 perícia somam e quais habilidades mexem nela, sem guardar números de classe.
@@ -225,17 +227,15 @@ perícia somam e quais habilidades mexem nela, sem guardar números de classe.
 ## 4. Perguntas em aberto
 
 1. O Capitão dá +1 de **intimidação** ao grupo, como dá de movimento? (Hoje: não; só movimento.)
-2. Hoje o código tem **um grupo só**. Com o limite de um Capitão por grupo, uma equipe com dois
-   Capitães precisa poder ter **dois grupos**, ou o segundo Capitão só fica de fora?
-3. "Comando" deveria valer também para **desagrupar/reagrupar** no mesmo turno, ou só uma vez por
+2. "Comando" deveria valer também para **desagrupar/reagrupar** no mesmo turno, ou só uma vez por
    turno?
-4. Interrogar: qual a **dificuldade base** e o que o NPC entrega quando falha (pista, localização
+3. Interrogar: qual a **dificuldade base** e o que o NPC entrega quando falha (pista, localização
    de item, rendição)?
-5. Vigor faz mais alguma coisa além do movimento já nesta versão (ex.: custo de carregar
+4. Vigor faz mais alguma coisa além do movimento já nesta versão (ex.: custo de carregar
    equipamento pesado), ou começa só como o novo nome da Velocidade?
 
 ### Decidido
 
 - Bônus de grupo: +1 de movimento e +1 de intimidação. Raio de abordagem base 3.
 - Qualquer agente pode destrancar; o Agente tem Gazua +6.
-- A classe é trocada no menu. Sem limite de Agentes; um Capitão por grupo.
+- A classe é trocada no menu. Um Capitão por equipe (o menu só permite um); hoje: 1 Capitão + 2 Agentes.
