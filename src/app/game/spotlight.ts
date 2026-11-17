@@ -6,16 +6,25 @@ export const SPOTLIGHT_LAYER = 2;
 /** Quanto tempo o tabuleiro leva para perder (ou recuperar) a cor, em segundos. */
 const FADE_TIME = 0.25;
 
+/** A máscara sai em uma fração da resolução da tela (ela é borrada de qualquer jeito). */
+const MASK_SCALE = 0.5;
+
 /**
  * Destaque em escala de cinza (modo de abordagem): o quadro inteiro perde a cor, menos o
  * que está na camada `SPOTLIGHT_LAYER`.
  *
- * Com o destaque ligado, cada quadro sai em três passes:
- * 1. a cena normal num alvo fora da tela;
- * 2. a máscara: a cena toda em preto (só para a profundidade) e, por cima, o que está na
- *    camada do destaque em branco. Quem fica atrás de uma árvore ou parede continua
- *    escondido, e quem está em pé sobre o raio (os colegas) cobre o chão colorido;
+ * Com o destaque ligado, cada quadro sai assim:
+ * 1. a cena normal, direto na tela (como sempre), copiada depois para uma textura;
+ * 2. a máscara, em meia resolução: a cena toda em preto (só para a profundidade) e, por
+ *    cima, o que está na camada do destaque em branco. Quem fica atrás de uma árvore ou
+ *    parede continua escondido, e quem está em pé sobre o raio (os colegas) cobre o chão
+ *    colorido;
  * 3. a composição na tela: cor onde a máscara é branca, cinza no resto.
+ *
+ * A cena não é desenhada num alvo fora da tela de propósito: isso mudaria o espaço de cor
+ * da saída e obrigaria o three.js a recompilar o shader de cada material visível no
+ * primeiro quadro do destaque (o engasgo ao abrir a abordagem). Os únicos shaders novos
+ * (máscara e composição) são compilados antes, em `warm`.
  *
  * Desligado (e depois de a cor voltar), o quadro é desenhado direto, sem custo extra.
  */
@@ -23,7 +32,7 @@ export class Spotlight {
   private on = false;
   /** 0 = colorido, 1 = cinza por inteiro (anima entre os dois). */
   private amount = 0;
-  private color?: THREE.WebGLRenderTarget;
+  private color?: THREE.FramebufferTexture;
   private mask?: THREE.WebGLRenderTarget;
   private readonly black = new THREE.MeshBasicMaterial({ color: 0x000000, fog: false });
   private readonly white = new THREE.MeshBasicMaterial({
@@ -62,20 +71,23 @@ export class Spotlight {
           uniform vec2 texel;
           uniform float amount;
           varying vec2 vUv;
+          // a cópia da tela já vem em sRGB: o cinza é calculado em linear e volta para sRGB
+          vec3 toLinear(vec3 c) { return pow(c, vec3(2.2)); }
+          vec3 toSRGB(vec3 c) { return pow(c, vec3(1.0 / 2.2)); }
           void main() {
             vec4 c = texture2D(tColor, vUv);
             // borda macia: média da máscara em volta do ponto
             float m = 0.0;
             for (int x = -1; x <= 1; x++) {
               for (int y = -1; y <= 1; y++) {
-                m += texture2D(tMask, vUv + vec2(float(x), float(y)) * texel * 1.5).r;
+                m += texture2D(tMask, vUv + vec2(float(x), float(y)) * texel).r;
               }
             }
             m /= 9.0;
-            float l = dot(c.rgb, vec3(0.2126, 0.7152, 0.0722));
+            vec3 lin = toLinear(c.rgb);
+            float l = dot(lin, vec3(0.2126, 0.7152, 0.0722));
             vec3 gray = vec3(l) * 0.7;
-            gl_FragColor = vec4(mix(c.rgb, gray, amount * (1.0 - m)), 1.0);
-            #include <colorspace_fragment>
+            gl_FragColor = vec4(toSRGB(mix(lin, gray, amount * (1.0 - m))), 1.0);
           }`,
         depthTest: false,
         depthWrite: false,
@@ -94,23 +106,51 @@ export class Spotlight {
     return this.on || this.amount > 0;
   }
 
+  /**
+   * Desenha o destaque uma vez na tela, sem cinza, para a GPU compilar e preparar tudo o que
+   * ele usa (shaders da máscara e da composição, texturas, estados de desenho). Quem chama
+   * desenha o quadro normal logo em seguida, por cima, então nada aparece. Sem isso, o
+   * primeiro quadro do destaque engasga.
+   */
+  warm(): void {
+    if (this.amount > 0) return;
+    this.renderer.copyFramebufferToTexture(this.targets().color);
+    this.composite(0);
+  }
+
   /** Desenha o quadro (com ou sem o destaque). */
   render(dt: number): void {
     const target = this.on ? 1 : 0;
-    const step = dt / FADE_TIME;
+    // um quadro lento não pode pular a transição inteira
+    const step = Math.min(dt, 1 / 30) / FADE_TIME;
     this.amount = target > this.amount ? Math.min(target, this.amount + step) : Math.max(target, this.amount - step);
-    if (this.amount <= 0) {
-      this.renderer.render(this.scene, this.camera);
-      return;
-    }
+    const r = this.renderer;
+    r.render(this.scene, this.camera);
+    if (this.amount <= 0) return;
+
+    r.copyFramebufferToTexture(this.targets().color);
+    this.composite(this.amount);
+  }
+
+  /** Máscara e composição na tela, com `amount` de cinza. */
+  private composite(amount: number): void {
     const r = this.renderer;
     const { color, mask } = this.targets();
+    this.renderMask(mask);
+    const u = this.quad.material.uniforms;
+    u['tColor'].value = color;
+    u['tMask'].value = mask.texture;
+    u['texel'].value.set(1 / mask.width, 1 / mask.height);
+    u['amount'].value = amount;
+    r.setRenderTarget(null);
+    r.render(this.quadScene, this.quadCamera);
+  }
 
-    r.setRenderTarget(color);
-    r.render(this.scene, this.camera);
-
-    // máscara: sem fundo, sem névoa, sem sombra
+  /** Máscara do destaque: sem fundo, sem névoa, sem sombra. */
+  private renderMask(mask: THREE.WebGLRenderTarget): void {
+    const r = this.renderer;
     const prev = {
+      target: r.getRenderTarget(),
       background: this.scene.background,
       override: this.scene.overrideMaterial,
       layers: this.camera.layers.mask,
@@ -138,15 +178,8 @@ export class Spotlight {
       r.shadowMap.enabled = prev.shadows;
       r.setClearColor(prev.clear, prev.alpha);
       r.autoClear = prev.autoClear;
+      r.setRenderTarget(prev.target);
     }
-
-    const u = this.quad.material.uniforms;
-    u['tColor'].value = color.texture;
-    u['tMask'].value = mask.texture;
-    u['texel'].value.set(1 / mask.width, 1 / mask.height);
-    u['amount'].value = this.amount;
-    r.setRenderTarget(null);
-    r.render(this.quadScene, this.quadCamera);
   }
 
   dispose(): void {
@@ -158,14 +191,17 @@ export class Spotlight {
     this.quad.material.dispose();
   }
 
-  /** Alvos do tamanho da tela (recriados quando ela muda). */
-  private targets(): { color: THREE.WebGLRenderTarget; mask: THREE.WebGLRenderTarget } {
+  /** Cópia da tela e máscara (recriadas quando a tela muda de tamanho). */
+  private targets(): { color: THREE.FramebufferTexture; mask: THREE.WebGLRenderTarget } {
     const { x: w, y: h } = this.renderer.getDrawingBufferSize(this.size);
-    if (!this.color || this.color.width !== w || this.color.height !== h) {
+    if (!this.color || this.color.image.width !== w || this.color.image.height !== h) {
       this.color?.dispose();
       this.mask?.dispose();
-      this.color = new THREE.WebGLRenderTarget(w, h, { samples: 4, type: THREE.HalfFloatType });
-      this.mask = new THREE.WebGLRenderTarget(w, h);
+      this.color = new THREE.FramebufferTexture(w, h);
+      this.mask = new THREE.WebGLRenderTarget(
+        Math.max(1, Math.round(w * MASK_SCALE)),
+        Math.max(1, Math.round(h * MASK_SCALE)),
+      );
     }
     return { color: this.color, mask: this.mask! };
   }

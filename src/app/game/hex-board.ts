@@ -269,6 +269,10 @@ export class HexBoard {
   /** Escala de cinza do modo de abordagem (ver `setSpotlight`). */
   private spotlight!: Spotlight;
   private spot: { lit: THREE.Object3D[]; zone: THREE.InstancedMesh | null; tiles: HexTile[] } | null = null;
+  /** Etiqueta que só aparece no quadro de aquecimento do destaque (fica na cena para o shader não ser descartado). */
+  private readonly warmLabel: THREE.Sprite;
+  /** Pede um quadro de aquecimento do destaque (ver `warmSpotlight`). */
+  private spotWarmDue = true;
   /** Etiquetas sobre os suspeitos (desenhadas por cima, depois do cinza). */
   private readonly labelScene = new THREE.Scene();
   private readonly labels = new Map<string, THREE.Sprite>();
@@ -314,11 +318,18 @@ export class HexBoard {
   ) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
     this.renderer.shadowMap.enabled = true;
-    this.renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // PCFSoftShadowMap saiu do three.js: ele troca sozinho para PCF na primeira sombra, o que
+    // recompila os shaders já prontos (inclusive os aquecidos para a abordagem)
+    this.renderer.shadowMap.type = THREE.PCFShadowMap;
     // contagem por quadro (a sombra móvel faz um `render` dentro do outro)
     this.renderer.info.autoReset = false;
     this.staticShadow = new StaticShadow(this.renderer, this.scene, this.sun);
     this.spotlight = new Spotlight(this.renderer, this.scene, this.camera);
+    // etiqueta escondida para o aquecimento do destaque (ver `warmSpotlight`)
+    this.warmLabel = this.labelSprite('…', 'roll');
+    this.warmLabel.visible = false;
+    this.warmLabel.frustumCulled = false;
+    this.labelScene.add(this.warmLabel);
     this.area = playArea(map);
 
     this.scene.background = new THREE.Color(COLORS.background);
@@ -799,6 +810,8 @@ export class HexBoard {
     this.staticShadow.dispose();
     this.setSpotlight(null);
     this.spotlight.dispose();
+    this.warmLabel.material.map?.dispose();
+    this.warmLabel.material.dispose();
     this.renderer.dispose();
   }
 
@@ -919,6 +932,8 @@ export class HexBoard {
     this.stream?.setRadii(profile.loadRadius, profile.viewRadius);
     this.setZoom(this.zoom);
     this.resize();
+    // tamanho da tela e sombras mudaram: o destaque aquece de novo
+    this.spotWarmDue = true;
   }
 
   /**
@@ -1493,6 +1508,8 @@ export class HexBoard {
     e.flagSprite.position.y = BASE_TOP + def.height * 0.68 + 0.45;
     rig.play(e.surrendered ? 'crouch' : 'idle', 0);
     e.rig = rig;
+    // o destaque aquece de novo com o personagem animado (ver `warmSpotlight`)
+    this.spotWarmDue = true;
   }
 
   private async loadRig(id: string, def: ModelDef): Promise<CharacterRig | null> {
@@ -1626,6 +1643,8 @@ export class HexBoard {
     u.hitbox.position.y = def.height / 2;
     rig.play(this.restClip(u), 0);
     u.rig = rig;
+    // o destaque aquece de novo com o personagem animado (ver `warmSpotlight`)
+    this.spotWarmDue = true;
   }
 
   private buildMarker(color: number, radius: number, tube: number): THREE.Mesh {
@@ -1984,6 +2003,7 @@ export class HexBoard {
     this.stream.cull(this.camera, shadow ? this.sun : undefined);
     this.renderer.info.reset();
     this.updateSpotlight();
+    if (this.spotWarmDue && !this.spot) this.warmSpotlight();
     this.spotlight.render(dt);
     if (this.labels.size) {
       this.renderer.autoClear = false;
@@ -1991,6 +2011,44 @@ export class HexBoard {
       this.renderer.autoClear = true;
     }
   };
+
+  /**
+   * Quadro de aquecimento do modo de abordagem: desenha o destaque uma vez, com os
+   * personagens na camada do destaque e uma etiqueta visível, logo antes do quadro normal
+   * (que cobre tudo). Assim a GPU já tem prontos os shaders e os estados de desenho que o
+   * destaque usa, e abrir a abordagem não engasga. Roda no começo e quando um personagem
+   * animado termina de carregar.
+   */
+  private warmSpotlight(): void {
+    this.spotWarmDue = false;
+    const lit: THREE.Object3D[] = [];
+    const light = (root: THREE.Object3D) =>
+      root.traverse((o) => {
+        if (!(o as THREE.Mesh).isMesh || o.layers.isEnabled(SPOTLIGHT_LAYER)) return;
+        o.layers.enable(SPOTLIGHT_LAYER);
+        lit.push(o);
+      });
+    for (const u of this.units.values()) light(u.group);
+    for (const e of this.enemies.values()) light(e.group);
+    // um raio de um hexágono só, como o de `setSpotlight`
+    const zone = new THREE.InstancedMesh(this.field.prism, new THREE.MeshBasicMaterial(), 1);
+    zone.layers.set(SPOTLIGHT_LAYER);
+    zone.frustumCulled = false;
+    this.scene.add(zone);
+    this.warmLabel.visible = true;
+    try {
+      this.spotlight.warm();
+      this.renderer.autoClear = false;
+      this.renderer.render(this.labelScene, this.camera);
+    } finally {
+      this.renderer.autoClear = true;
+      this.warmLabel.visible = false;
+      for (const o of lit) o.layers.disable(SPOTLIGHT_LAYER);
+      this.scene.remove(zone);
+      zone.material.dispose();
+      zone.dispose();
+    }
+  }
 
   /** Acompanha o destaque: o raio sobe e desce com os hexágonos e as etiquetas seguem os suspeitos. */
   private updateSpotlight(): void {

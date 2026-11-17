@@ -101,7 +101,7 @@
     </div>
   }
 
-  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); some sozinho -->
+  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); espera o Fechar -->
   @if (report(); as r) {
     <div class="report" role="status" aria-live="polite" data-testid="approach-report" (click)="closeReport()">
       <div class="report-head">
@@ -137,7 +137,7 @@
         <span>{{ reportTally() }}</span>
         <span class="sig">{{ r.agent }}</span>
       </div>
-      <button type="button" class="report-close" (click)="$event.stopPropagation(); closeReport()">
+      <button type="button" class="report-close" #reportClose data-testid="report-close" (click)="$event.stopPropagation(); closeReport()">
         Fechar &#8250;
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
       </button>
@@ -229,7 +229,7 @@
     </div>
   }
 
-  <!-- Teste de d20 (percepção, inspecionar): uma ficha na lateral -->
+  <!-- Teste de d20 (percepção): uma ficha na lateral; o jogo espera o Continuar -->
   @for (ck of checks(); track ck.id) {
     <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
       <span class="check-kicker">{{ ck.kind === 'notice' ? 'Percepção' : 'Inspecionar' }} · d20</span>
@@ -243,6 +243,12 @@
         </span>
       } @else {
         <span class="sr-only">Rolando o d20…</span>
+      }
+      @if (ck.waiting) {
+        <button type="button" class="check-close" #checkClose data-testid="check-close" (click)="closeCheck()">
+          Continuar &#8250;
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+        </button>
       }
     </aside>
   }
