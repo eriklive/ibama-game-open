@@ -88,7 +88,7 @@ passa se total ≥ dificuldade
 | Arrombar | **Força** | — | 3 (encostada) / 12 (trancada) |
 | Destrancar | **Destreza** | Gazua +6 (Agente) | fechadura da porta (padrão 12) |
 | Interrogar / conversar | **Intimidação** (do agente, vira penalidade do NPC) | — | a definir |
-| Mover | Velocidade | Liderança +1 (Capitão, agrupado) | — |
+| Mover | **Vigor** (hoje "Velocidade") | — (ver bônus de movimentação, 3.4) | — |
 
 Em código seria só uma tabela, algo como:
 
@@ -131,6 +131,41 @@ Hoje a ficha só tem **Velocidade** e **Intimidação**, com 1 ponto para distri
 Recomendação: **opção 2 agora, opção 1 quando as classes estiverem testadas.** A perícia +6 do
 Agente já carrega a diferença que importa; a Destreza seria o "tempero" (como no BG1/BG2).
 
+### 3.4 Movimento: atributo Vigor + bônus de movimentação
+
+Proposta: renomear **Velocidade → Vigor** e separar duas coisas que hoje andam juntas:
+
+- **Vigor** é o atributo da ficha (−5 … +5). É o "modificador" do movimento, do mesmo jeito que
+  Força é o de arrombar. Mais tarde pode pesar em outras coisas físicas (aguentar carga,
+  perseguir, resistir a cansaço) — "Velocidade" só serviria para andar.
+- **Bônus de movimentação** é tudo o que vem de fora do personagem e soma por cima: grupo (+1),
+  Liderança do Capitão (+1), equipamento (botas, peso negativo), efeitos temporários.
+
+```
+movimento do turno = 2d4 + Vigor + bônus de movimentação   (nunca abaixo de 0)
+```
+
+| Fonte | Entra como | Valor |
+|---|---|---|
+| Ficha | Vigor | −5 … +5 |
+| Grupo | bônus de movimentação | +1 |
+| Capitão no grupo (Liderança) | bônus de movimentação | +1 |
+| Equipamento / peso | bônus de movimentação | a definir (pode ser negativo) |
+
+Vantagens:
+
+- Bate com o BG3: lá o deslocamento base vem da raça e **não** de um atributo; o que muda o
+  movimento são **bônus** (talento *Móvel*, magia *Passos Largos*, *Disparada*, peso). Aqui o
+  Vigor faz o papel da "base pessoal" e o resto é bônus — mesma leitura para o jogador.
+- Encaixa no código: `statBreakdown` já separa `attribute`, `equipment` e `group`. Basta trocar
+  `group` por um `bonus` genérico (lista de fontes, para a UI mostrar "+1 grupo, +1 Capitão") e
+  a chave `velocidade` por `vigor`.
+- O teto −5 … +5 vale **só para o Vigor**; os bônus somam por fora (como já acontece com o grupo
+  hoje), então o Capitão nunca "desperdiça" bônus num agente com Vigor +5.
+
+Ficha resultante (médio prazo): **Vigor, Força, Destreza, Intimidação** — um atributo por
+família de ação (mover, arrombar, destrancar, abordar/interrogar).
+
 ---
 
 ## 4. Perguntas em aberto
@@ -144,5 +179,7 @@ Agente já carrega a diferença que importa; a Destreza seria o "tempero" (como 
    (Proposta: pode — a classe dá vantagem, não exclusividade.)
 5. Interrogar: qual a **dificuldade base** e o que o NPC entrega quando falha (pista, localização
    de item, rendição)?
-6. A classe é **fixa por personagem** (Ana é sempre Capitã) ou escolhida na ficha antes de cada
+6. Vigor faz mais alguma coisa além do movimento já nesta versão (ex.: custo de carregar
+   equipamento pesado), ou começa só como o novo nome da Velocidade?
+7. A classe é **fixa por personagem** (Ana é sempre Capitã) ou escolhida na ficha antes de cada
    missão?
