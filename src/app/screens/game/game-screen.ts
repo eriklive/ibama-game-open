@@ -11,12 +11,14 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { rollDie, sum } from '../../game/dice';
-import { HexBoard } from '../../game/hex-board';
+import { CloseUpInsets, HexBoard } from '../../game/hex-board';
 import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
 import { MainButton } from '../../ui/main-button';
 import { D4 } from '../../ui/dice/d4';
 import { D20 } from '../../ui/dice/d20';
+import { TalkButton } from '../../ui/interrogation/talk-button';
+import { InterrogationPanel, InterrogationView } from '../../ui/interrogation/interrogation-panel';
 import { RENDER_PROFILES, RenderMode, RenderSettings } from '../../game/render-settings';
 import {
   APPROACH_RULES,
@@ -26,6 +28,7 @@ import {
   canAct,
   facingBetween,
   isBorder,
+  known,
   lineOfSight,
   onBoard,
   planFlee,
@@ -37,7 +40,7 @@ import {
   stationary,
   visionHexes,
 } from '../../game/enemies';
-import { HiddenItem, SEARCH_RULES, beats, canReach, entersRoom } from '../../game/search';
+import { HiddenItem, SEARCH_RULES, beats, canReach, needsNoticeRoll } from '../../game/search';
 import {
   BREAK_IN_RULES,
   BreakInRoll,
@@ -64,6 +67,27 @@ import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
+import {
+  Clues,
+  DialogueMemory,
+  EMPTY_MEMORY,
+  INTERROGATION_RULES,
+  NoteKind,
+  PoolUsage,
+  askQuestion,
+  auraHexes,
+  dialogueOptions,
+  hasDialogue,
+  hasTalked,
+  itemClue,
+  noteKind,
+  noticedAfter,
+  openingLine,
+  pickLine,
+  questionCost,
+  talkTarget,
+} from '../../game/interrogation';
+import { npcClass } from '../../game/npc-dialogue';
 import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../game/stats';
 
 /** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
@@ -71,9 +95,20 @@ const MISSION_DEADLINE = 5;
 
 /**
  * `checking`: rolando um d20 (percepção, inspecionar) — nada mais anda até o dado parar.
+ * `interrogating`: interrogatório em close-up (balões e cartões de pergunta na tela).
  * `over`: a operação foi encerrada (fica o relatório na tela).
  */
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'ending' | 'enemy' | 'over';
+type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'interrogating' | 'ending' | 'enemy' | 'over';
+
+/** Anotação da caderneta de campo (vai para o relatório da operação). */
+export interface FieldNote {
+  id: number;
+  suspect: string;
+  text: string;
+  kind: NoteKind;
+  /** 0 pergunta, 1 réplica, 2 tréplica. */
+  depth: number;
+}
 
 /** Inspeção em close-up: quem procura, onde e o resultado do d20 (quando parar). */
 interface SearchView {
@@ -126,6 +161,9 @@ interface DoorOption {
   label: string;
 }
 
+/** Carimbo de cada tipo de anotação na caderneta. */
+const NOTE_LABEL: Record<NoteKind, string> = { declarou: 'declarou', sinal: 'sinal', confessou: 'confessou' };
+
 const DOOR_STATE_LABEL: Record<Door['state'], string> = {
   aberta: 'Aberta',
   encostada: 'Encostada',
@@ -147,7 +185,7 @@ const reducedMotion = (): boolean =>
 
 @Component({
   selector: 'app-game-screen',
-  imports: [MainButton, D4, D20],
+  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel],
   templateUrl: './game-screen.html',
   styleUrl: './game-screen.css',
 })
@@ -271,6 +309,23 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const keys = free ? this.nearDoors().filter((d) => !isOpen(d)).map((d) => hexKey(d.hex)) : [];
       this.board?.setDoorHints(keys);
     });
+    // aura de interrogatório em volta dos suspeitos rendidos com diálogo (some no close-up)
+    effect(() => {
+      const show = this.phase() !== 'interrogating' && this.phase() !== 'door' && this.phase() !== 'over';
+      const { talk, muted } = this.auraKeys();
+      const here = this.positions().get(this.active().id);
+      const hot = this.canTalk() && here && show ? [hexKey(here)] : [];
+      this.board?.setInterrogationAura(show ? talk : [], hot, show ? muted : []);
+    });
+    // cartão em foco no interrogatório (controle): o foco do teclado acompanha
+    effect(() => {
+      const i = this.questionPick();
+      const iv = this.interrogation();
+      if (!iv || iv.busy) return;
+      queueMicrotask(() =>
+        (document.querySelectorAll<HTMLButtonElement>('.question-card:not(.done)')[i] ?? null)?.focus({ preventScroll: true }),
+      );
+    });
   }
 
   /** Símbolo do botão do controle para uma ação (✕, ○, □, △ no DualShock 4). */
@@ -332,7 +387,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     alert: 'em fuga!',
     surrendered: 'rendido',
     fled: 'fugiu',
+    hidden: 'escondido',
   };
+  /** Suspeitos que a equipe conhece (os escondidos só entram depois de revelados). */
+  protected readonly knownEnemies = computed(() => this.enemies().filter(known));
 
   // ---------- percepção e esconderijos ----------
 
@@ -386,6 +444,55 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const found = this.found();
     return (this.map?.hidden ?? []).find((h) => noticed.has(h.id) && !found.has(h.id) && canReach(from, h.spot)) ?? null;
   });
+
+  // ---------- interrogatório ----------
+
+  protected readonly interrogationRules = INTERROGATION_RULES;
+  protected readonly noteLabel = NOTE_LABEL;
+  /** Interrogatório aberto (close-up no agente e no suspeito). */
+  protected readonly interrogation = signal<InterrogationView | null>(null);
+  /** Cartão destacado pelo controle (índice entre as perguntas abertas). */
+  protected readonly questionPick = signal(0);
+  /** Memória de cada NPC na missão: perguntas feitas e réplicas liberadas (por id do inimigo). */
+  protected readonly dialogues = signal<ReadonlyMap<string, DialogueMemory>>(new Map());
+  /** Falas já usadas dos pools compartilhados da missão (ver `LinePool`). */
+  private readonly linePools = signal<PoolUsage>(new Map());
+  /** Pistas registradas pelas respostas (`Outcome.clue`). */
+  private readonly clueLog = signal<ReadonlySet<string>>(new Set());
+  /** Pistas da missão: o que a inspeção achou (`item:<id>`) e o que as respostas registraram. */
+  protected readonly clues = computed<Clues>(() => new Set([...[...this.found()].map(itemClue), ...this.clueLog()]));
+  /** Caderneta de campo: o que cada suspeito disse (sai no relatório da operação). */
+  protected readonly fieldNotes = signal<readonly FieldNote[]>([]);
+  private noteSeq = 0;
+
+  /** Todo rendido ganha a aura (a dos que não têm diálogo fica apagada). */
+  private readonly surrenderedEnemies = computed(() => this.enemies().filter((e) => e.status === 'surrendered'));
+  /** Hexágonos da aura: dos rendidos com diálogo (`talk`) e dos sem diálogo (`muted`). */
+  private readonly auraKeys = computed(() => {
+    const ring = (e: EnemyState) => auraHexes(e.hex, this.area, this.solid()).map(hexKey);
+    const es = this.surrenderedEnemies();
+    return {
+      talk: es.filter((e) => hasDialogue(npcClass(e.npc))).flatMap(ring),
+      muted: es.filter((e) => !hasDialogue(npcClass(e.npc))).flatMap(ring),
+    };
+  });
+  /**
+   * Rendido em cuja aura o agente da vez está: a ação de conversa aparece (bloqueada, se ele não
+   * tem diálogo). Dá para conversar quantas vezes quiser.
+   */
+  protected readonly talkTarget = computed(() => {
+    if (this.phase() !== 'moving-choice' || this.viewingOther()) return null;
+    const from = this.positions().get(this.active().id);
+    return from ? talkTarget(from, this.enemies(), npcClass) : null;
+  });
+  /** Já conversou com esse suspeito nesta missão. */
+  protected talked(id: string): boolean {
+    return hasTalked(this.dialogues().get(id));
+  }
+  /** Conversa possível agora (o rendido ao lado tem diálogo). */
+  protected readonly canTalk = computed(() => !!this.talkTarget() && !this.talkTarget()!.silent);
+  /** Perguntas ainda abertas, na ordem dos cartões. */
+  protected readonly openQuestions = computed(() => this.interrogation()?.options.filter((o) => !o.done) ?? []);
 
   // ---------- portas ----------
 
@@ -618,7 +725,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       : { surrender: [], roll: [], flee: [] };
   });
   protected readonly canApproach = computed(() => this.approachCount() > 0);
-  /** Inimigos que a missão pede para render (o alvo, como o Garimpeiro Jô): a prévia avisa a chance deles. */
+  /** Inimigos que a missão pede para render (o alvo, como o Caseiro Jô): a prévia avisa a chance deles. */
   protected readonly missionTargets = computed(
     () => new Set((this.map?.objectives ?? []).flatMap((o) => ('surrender' in o ? [o.surrender] : []))),
   );
@@ -699,6 +806,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
           start: e.hex,
           facing: e.facing,
           model: this.map!.enemies.find((s) => s.id === e.id)?.model,
+          hidden: e.status === 'hidden',
         })),
       },
     );
@@ -720,6 +828,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     clearTimeout(this.noticeTimer);
     clearInterval(this.statsTicker);
     removeEventListener('resize', this.onDoorResize);
+    removeEventListener('resize', this.onInterrogationResize);
     clearTimeout(this.doorCheckTimer);
     this.board?.dispose();
   }
@@ -780,7 +889,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected endTurn(): void {
-    if (['walking', 'checking', 'door', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
+    if (['walking', 'checking', 'door', 'interrogating', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
     this.clearTimers();
     this.phase.set('ending');
     this.closeApproach();
@@ -1159,9 +1268,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const item of this.map?.hidden ?? []) {
       for (const [who, path] of paths) {
         if (this.noticed().has(item.id)) break;
-        const key = `${item.id}:${who}`;
-        if (this.noticeRolled.has(key) || !entersRoom(path, item.room)) continue;
-        this.noticeRolled.add(key);
+        if (!needsNoticeRoll(item, who, path, this.noticed(), this.noticeRolled)) continue;
+        this.noticeRolled.add(`${item.id}:${who}`);
         this.phase.set('checking');
         const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice);
         if (pass === null) return false;
@@ -1208,7 +1316,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(null);
     this.board?.setReachable([]);
     this.board?.setInputEnabled(false);
-    this.board?.inspectView(this.active().id, item.spot);
+    this.board?.closeUp(this.active().id, item.spot);
     this.aiming.set(item);
   }
 
@@ -1270,7 +1378,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected cancelInspect(): void {
     if (!this.aiming() || this.search()) return;
     this.aiming.set(null);
-    this.board?.endInspectView();
+    this.board?.endCloseUp();
     this.board?.setInputEnabled(true);
     if (this.phase() === 'moving-choice') this.refreshBoard();
   }
@@ -1282,7 +1390,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!sv || sv.result === null || !item) return;
     this.search.set(null);
     this.aiming.set(null);
-    this.board?.endInspectView();
+    this.board?.endCloseUp();
     this.board?.setInputEnabled(true);
     if (sv.pass) {
       this.say(`${sv.who} achou a ${item.name} na ${item.furniture}. ${item.seized}`, 'alert');
@@ -1309,7 +1417,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.searchRolled = undefined;
     this.search.set(null);
     this.aiming.set(null);
-    this.board?.endInspectView();
+    this.board?.endCloseUp();
     this.board?.setInputEnabled(true);
   }
 
@@ -1605,6 +1713,259 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return CHARACTERS.find((c) => c.id === id)?.name ?? id;
   }
 
+  // ---------- interrogatório ----------
+
+  /**
+   * Quanto da tela a papelada do interrogatório cobre (igual ao CSS de `.interro`): embaixo, em
+   * retrato e na tela larga; à direita, em paisagem baixa (celular deitado).
+   */
+  private interrogationInsets(): CloseUpInsets {
+    const el = this.canvasRef().nativeElement;
+    const w = el.clientWidth || innerWidth;
+    const h = el.clientHeight || innerHeight;
+    if (w > h && h <= 560) return { bottom: 0, right: Math.min(440, w * 0.52) / w };
+    return { bottom: h > w ? 0.52 : 0.46, right: 0 };
+  }
+
+  private readonly onInterrogationResize = (): void => this.board?.setCloseUpInsets(this.interrogationInsets());
+
+  /** Vinheta do close-up (elipse clara) em cima da dupla, acompanhando o que a papelada cobre. */
+  protected interrogationVignette(): string {
+    const { bottom, right } = this.interrogationInsets();
+    return right ? '30% 46% at 26% 50%' : `52% 30% at 50% ${Math.round((1 - bottom) * 50)}%`;
+  }
+
+  /**
+   * **Conversar** (dentro da aura de um suspeito rendido com diálogo, a qualquer momento): close-up
+   * no agente e no suspeito, como na inspeção e nas portas; a HUD sai e o suspeito abre com a fala
+   * de entrada da classe (ou a de retomada, se já conversaram). As perguntas são as que ele tem
+   * guardadas na memória: as feitas aparecem marcadas; as pendentes, inclusive réplicas, seguem.
+   */
+  protected async startInterrogation(): Promise<void> {
+    const e = this.talkTarget()?.enemy;
+    const cls = npcClass(e?.npc);
+    if (!e || !hasDialogue(cls) || this.phase() !== 'moving-choice' || !this.board) return;
+    if (this.movesLeft() < INTERROGATION_RULES.moveCost) {
+      this.say(`Sem movimento para conversar com ${e.name} agora`, 'info');
+      return;
+    }
+    const memory = this.dialogues().get(e.id) ?? EMPTY_MEMORY;
+    const epoch = this.epoch;
+    this.focusCharacter(this.active().id);
+    this.closeApproach();
+    this.closeGrouping();
+    this.closeBurn();
+    this.selected.set(null);
+    this.board.setSelected(null);
+    this.board.setReachable([]);
+    this.board.setInputEnabled(false);
+    this.phase.set('interrogating');
+    this.board.closeUp(this.active().id, e.hex, { frame: 'pair', faceEnemy: e.id, insets: this.interrogationInsets() });
+    addEventListener('resize', this.onInterrogationResize);
+    this.questionPick.set(0);
+    const opening = openingLine(cls, memory);
+    this.interrogation.set({
+      enemyId: e.id,
+      suspect: e.name,
+      cls,
+      options: dialogueOptions(cls, memory, this.clues()),
+      agentLine: null,
+      suspectLine: null,
+      busy: true,
+      asked: 0,
+      reveal: null,
+    });
+    // a câmera chega; o suspeito abre com a postura e a fala da classe
+    await this.wait(450);
+    if (!this.interrogating(epoch, e.id)) return;
+    if (opening) {
+      const ok = await this.suspectSays(pickLine(opening), { posture: cls.intro?.posture, think: 300 }, epoch, e.id);
+      if (!ok) return;
+    }
+    this.patchInterrogation({ busy: false });
+  }
+
+  /** O interrogatório de `enemyId` ainda está aberto (e a partida não recomeçou). */
+  private interrogating(epoch: number, enemyId: string): boolean {
+    return !this.destroyed && this.epoch === epoch && this.interrogation()?.enemyId === enemyId;
+  }
+
+  private patchInterrogation(patch: Partial<InterrogationView>): void {
+    this.interrogation.update((v) => v && { ...v, ...patch });
+  }
+
+  /** Escreve o texto aos poucos (máquina de escrever); sem animação, de uma vez. */
+  private async typeOut(text: string, speed: number, set: (t: string) => void, alive: () => boolean): Promise<boolean> {
+    if (reducedMotion()) {
+      set(text);
+      return alive();
+    }
+    let shown = '';
+    for (const ch of text) {
+      shown += ch;
+      set(shown);
+      await new Promise<void>((r) => this.later(',.…?!'.includes(ch) ? speed * 6 : speed, r));
+      if (!alive()) return false;
+    }
+    return true;
+  }
+
+  /** Balão do suspeito: "…" pensando, a fala aparecendo e, se houver, o sinal de mentira. */
+  private async suspectSays(
+    text: string,
+    opts: { posture?: string; tell?: string; think?: number },
+    epoch: number,
+    enemyId: string,
+  ): Promise<boolean> {
+    const alive = () => this.interrogating(epoch, enemyId);
+    this.patchInterrogation({ suspectLine: { text: '', full: text, posture: opts.posture, thinking: true } });
+    if (opts.think) await this.wait(opts.think);
+    if (!alive()) return false;
+    const set = (t: string) =>
+      this.interrogation.update((v) => v && v.suspectLine ? { ...v, suspectLine: { ...v.suspectLine, text: t, thinking: false } } : v);
+    if (!(await this.typeOut(text, 22, set, alive))) return false;
+    if (opts.tell) {
+      await this.wait(350);
+      if (!alive()) return false;
+      this.interrogation.update((v) => v && v.suspectLine ? { ...v, suspectLine: { ...v.suspectLine, tell: opts.tell } } : v);
+      // a pequena reação: um tranco no lugar
+      if (!reducedMotion()) this.board?.startleEnemy(enemyId);
+      this.gamepad.rumble(0.25, 0.15, 90);
+    }
+    return true;
+  }
+
+  /**
+   * Faz uma pergunta (cartão de papel, uma vez só): o agente pergunta no balão de cima; o
+   * suspeito rola d20 escondido (passa com mais que a CD) e responde no balão de baixo. Passou
+   * e há réplica (ou tréplica): ela surge logo abaixo. A resposta vai para a caderneta.
+   */
+  protected async ask(key: string): Promise<void> {
+    const iv = this.interrogation();
+    if (!iv || iv.busy || this.phase() !== 'interrogating') return;
+    const before = this.dialogues().get(iv.enemyId) ?? EMPTY_MEMORY;
+    const res = askQuestion(iv.cls, before, key, {
+      die: () => rollDie(INTERROGATION_RULES.die),
+      clues: this.clues(),
+      // a intimidação do próprio agente (sem o bônus do grupo nem o do arrombamento) sobe a CD
+      intimidation: this.talkIntimidation(),
+      pools: this.linePools(),
+    });
+    if (!res) return;
+    this.linePools.set(res.pools);
+    const epoch = this.epoch;
+    const alive = () => this.interrogating(epoch, iv.enemyId);
+    const { answer } = res;
+    // a pergunta fica bloqueada para sempre, seja qual for a resposta
+    this.dialogues.update((m) => new Map(m).set(iv.enemyId, res.memory));
+    // a primeira pergunta de cada entrada gasta o movimento (como a rolagem da inspeção)
+    const cost = questionCost(iv.asked);
+    if (cost) this.movesLeft.update((n) => Math.max(0, n - cost));
+    // o cartão feito fica marcado na hora; a réplica só aparece depois da resposta
+    this.patchInterrogation({
+      busy: true,
+      asked: iv.asked + 1,
+      options: iv.options.map((o) => (o.key === key ? { ...o, done: true } : o)),
+      agentLine: '',
+      suspectLine: null,
+    });
+    const node = answer.option.node;
+    if (!(await this.typeOut(node.ask, 13, (t) => this.patchInterrogation({ agentLine: t }), alive))) return;
+    const out = answer.outcome;
+    if (!(await this.suspectSays(answer.line, { tell: out.tell, think: 600 }, epoch, iv.enemyId))) return;
+    // resistiu ao último nível: o agente fecha a insistência (sem cartão, sem resposta)
+    if (answer.closing) {
+      await this.wait(500);
+      if (!alive()) return;
+      this.patchInterrogation({ agentLine: '' });
+      if (!(await this.typeOut(answer.closing, 13, (t) => this.patchInterrogation({ agentLine: t }), alive))) return;
+    }
+    this.fieldNotes.update((ns) => [
+      ...ns,
+      { id: ++this.noteSeq, suspect: iv.suspect, text: out.note, kind: noteKind(out), depth: answer.option.depth },
+    ]);
+    // entregou alguém: aparece no mapa ao encerrar (se a missão tiver essa unidade escondida)
+    const hidden = out.reveal ? this.hiddenAccomplice(iv.enemyId) : null;
+    // entregou um esconderijo: conta como percebido (sem rolar percepção; a lupa aparece)
+    const noticed = noticedAfter(this.noticed(), out);
+    if (noticed !== this.noticed()) {
+      this.noticed.set(noticed);
+      const item = this.map?.hidden?.find((h) => h.id === out.notices);
+      if (item && !this.found().has(item.id)) this.board?.setClue(item.spot);
+    }
+    // pista nova: pode liberar perguntas (neste e em outros NPCs)
+    if (out.clue && !this.clueLog().has(out.clue)) this.clueLog.update((c) => new Set([...c, out.clue!]));
+    const options = dialogueOptions(iv.cls, this.dialogues().get(iv.enemyId) ?? res.memory, this.clues());
+    const open = options.filter((o) => !o.done);
+    const pick = answer.unlocked ? open.findIndex((o) => o.key === answer.unlocked!.key) : 0;
+    this.questionPick.set(Math.max(0, pick));
+    this.patchInterrogation({ options, busy: false, ...(hidden ? { reveal: hidden } : {}) });
+  }
+
+  /** Intimidação do agente que conversa: só o ponto dele (atributo + equipamento, sem grupo). */
+  private talkIntimidation(): number {
+    return statBreakdown(this.roster.loadout(this.active().id), 'intimidacao', false).total;
+  }
+
+  /** O comparsa escondido que o suspeito pode entregar (ainda não revelado), se houver. */
+  private hiddenAccomplice(enemyId: string): string | null {
+    const id = this.enemy(enemyId)?.reveals;
+    return id && this.enemy(id)?.status === 'hidden' ? id : null;
+  }
+
+  /**
+   * **Encerrar**: a câmera volta e o jogo segue com o que foi anotado. Se o suspeito entregou
+   * alguém escondido, a unidade aparece no mapa.
+   */
+  protected endInterrogation(): void {
+    const iv = this.interrogation();
+    if (!iv || iv.busy) return;
+    this.dropInterrogation();
+    this.phase.set('moving-choice');
+    const revealed = !!iv.reveal && this.revealAccomplice(iv.reveal, iv.suspect);
+    if (!revealed && iv.asked) {
+      const n = this.fieldNotes().filter((note) => note.suspect === iv.suspect).length;
+      this.say(`Conversa com ${iv.suspect}: ${n} ${n === 1 ? 'anotação' : 'anotações'} na caderneta`, 'info');
+    }
+    const next = () => (INTERROGATION_RULES.endsTurn && iv.asked ? this.endTurn() : this.afterMove());
+    if (!revealed) return next();
+    // dá tempo de ver quem apareceu antes de seguir
+    this.phase.set('ending');
+    this.later(reducedMotion() ? 300 : 1400, () => {
+      this.phase.set('moving-choice');
+      next();
+    });
+  }
+
+  /** Some com o close-up do interrogatório (sem seguir a vez). */
+  private dropInterrogation(): void {
+    if (!this.interrogation()) return;
+    this.interrogation.set(null);
+    this.board?.endCloseUp();
+    this.board?.setInputEnabled(true);
+    removeEventListener('resize', this.onInterrogationResize);
+  }
+
+  /** A unidade escondida aparece no mapa (no lugar dela ou no hexágono livre mais perto). */
+  private revealAccomplice(id: string, by: string): boolean {
+    const e = this.enemy(id);
+    if (!e || e.status !== 'hidden') return false;
+    const taken = new Set([...this.positions().values(), ...this.onBoardEnemies().map((o) => o.hex)].map(hexKey));
+    const free = (h: HexCoord) => !taken.has(hexKey(h)) && !this.solid().has(hexKey(h));
+    let hex = e.hex;
+    for (let r = 0; r < 4 && !free(hex); r++) {
+      hex = hexesInRange(e.hex, r + 1, this.area).find(free) ?? hex;
+    }
+    this.updateEnemy(id, { status: 'patrol', hex });
+    this.board?.revealEnemy(id, hex, e.facing);
+    this.board?.focusHex(hex);
+    this.refreshVision();
+    this.checkSpotted(id);
+    this.gamepad.rumble(0.7, 0.4, 260);
+    this.say(`${by} entregou: ${e.name} apareceu no mapa!`, 'alert');
+    return true;
+  }
+
   // ---------- abordagem ----------
 
   /**
@@ -1850,6 +2211,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.checkDone = undefined;
     this.check.set(null);
     this.dropSearch();
+    this.dropInterrogation();
+    this.dialogues.set(new Map());
+    this.clueLog.set(new Set());
+    this.linePools.set(new Map());
+    this.fieldNotes.set([]);
     this.board?.setClue(null);
     this.doorKey.set(null);
     this.doorBusy.set(false);
@@ -1862,7 +2228,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeBurn();
     this.debrief.set(null);
     this.board?.clearFires();
-    this.board?.placeEnemies(this.enemies().map((e) => ({ ...e, alert: false, surrendered: false, gone: false })));
+    this.board?.placeEnemies(
+      this.enemies().map((e) => ({ ...e, alert: false, surrendered: false, gone: e.status === 'hidden' })),
+    );
     this.refreshVision();
     this.notice.set(null);
     this.activeIndex.set(0);
@@ -1895,6 +2263,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (b === 'cross' && this.debrief() === 'confirm') this.confirmEnd();
       else if (b === 'cross') this.restart();
       else if (b === 'circle') this.closeDebrief();
+      else if (b === 'options') this.padHelp.update((v) => !v);
+      return;
+    }
+    // interrogatório: direcional escolhe o cartão, ✕ pergunta e ○ encerra
+    if (this.interrogation()) {
+      const open = this.openQuestions();
+      if (b === 'cross' && open.length) void this.ask(open[Math.min(this.questionPick(), open.length - 1)].key);
+      else if (b === 'circle') this.endInterrogation();
       else if (b === 'options') this.padHelp.update((v) => !v);
       return;
     }
@@ -1944,6 +2320,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else if (this.canApproach()) this.startApproach();
         else if (this.burnable()) this.startBurn();
         else if (this.inspectable()) this.startInspect();
+        else if (this.canTalk()) void this.startInterrogation();
         else if (this.nearDoor()) this.openDoorMenu();
         break;
       case 'l3':
@@ -1979,6 +2356,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Anda o cursor um hexágono; sobre um destino alcançável, já mostra o caminho (como o 1º toque). */
   private moveCursor(dir: Stick): void {
+    // no interrogatório, cima/baixo escolhem o cartão de pergunta
+    if (this.interrogation()) {
+      const n = this.openQuestions().length;
+      if (n && Math.abs(dir.y) >= Math.abs(dir.x)) this.questionPick.update((i) => (i + (dir.y > 0 ? 1 : n - 1)) % n);
+      return;
+    }
     const map = this.map;
     if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'door' || this.approaching() || this.burning() || this.aiming() || this.debrief()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
@@ -2051,7 +2434,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Quando não sobra ninguém agindo, mostra o resultado da missão. */
   private announceIfOver(): void {
-    if (this.actingEnemies().length || !this.enemies().length) return;
+    if (this.actingEnemies().length || !this.knownEnemies().length) return;
     const { surrendered, fled } = this.enemyCounts();
     this.say(
       `Fim da abordagem: ${surrendered} ${surrendered === 1 ? 'rendido' : 'rendidos'}, ${fled} ${fled === 1 ? 'fugiu' : 'fugiram'}`,

@@ -168,13 +168,13 @@ ou chega a até 2 hexágonos do portão ou de uma porta **aberta**: porta fechad
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
-### Casa do Garimpeiro Jô e testes de percepção (d20)
+### Casa do Caseiro Jô e testes de percepção (d20)
 
 A leste da pista, numa clareira, fica a **casa** dos garimpeiros: dois cômodos de 5 × 5 hexágonos, de
 tábuas e com telhado de chapa enferrujada (que some quando um agente entra, como o do hangar). Entra-se
 pela porta do oeste, que dá para a pista; uma divisória com porta separa os cômodos.
 
-- **Cômodo 1:** o **Garimpeiro Jô** come parado na mesa, **de costas para a entrada**. Ele não anda no
+- **Cômodo 1:** o **Caseiro Jô** come parado na mesa, **de costas para a entrada**. Ele não anda no
   turno inimigo, mas o cone de visão dele cobre a porta do cômodo 2: entre por trás e **aborde** (a até 2
   hexágonos ele se rende). A porta do meio está **trancada** (ver [Portas](#portas)); quem passa por ela
   sem rendê-lo é avistado.
@@ -196,7 +196,7 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
 
 Os **objetivos** da missão ficam num bilhete embaixo da pilha de suspeitos. Da casa, de início, aparece só
 **Investigar a casa**: quando alguém repara na prateleira (percepção), ele fica cumprido (✓) e surge o passo
-seguinte, **Apreender a arma escondida**, cumprido ao inspecionar e achar a arma. Também há **Render o Garimpeiro
+seguinte, **Apreender a arma escondida**, cumprido ao inspecionar e achar a arma. Também há **Render o Caseiro
 Jô**. Passos assim usam `after` no objetivo (só aparece depois do objetivo com aquele id); `notice` cumpre ao
 reparar num esconderijo. As regras dos testes ficam em `SEARCH_RULES` (`src/app/game/search.ts`); a casa, o esconderijo
 e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
@@ -248,6 +248,69 @@ sempre abertas.
 As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testadas), as folhas e o indicador em
 `door-view.ts`. A biblioteca de clipes não tem chute: a perna é dobrada à mão por cima do `idle`
 (`CharacterRig.pose`); o pick lock usa o `crouch`.
+
+### Modo diálogo (interrogatório)
+
+Todo suspeito **rendido** ganha uma **aura** de 1 hexágono. Com o agente da vez nela, aparece o papel
+**Conversar** (□ no controle, quando não há ninguém para abordar, nada para queimar nem para
+inspecionar), **a qualquer momento e quantas vezes quiser**. Se a classe do suspeito não tem diálogo
+(o segurança), o papel aparece **bloqueado** ("sem diálogo") e a aura fica apagada, sem pulsar.
+Quem não se rendeu não conversa.
+
+- **Close-up:** a câmera faz o mesmo enquadramento da inspeção e das portas (desce para 30° e chega
+  perto), mas de lado para a dupla: agente em pé e suspeito na pose de rendido, na faixa de cima
+  da tela. Faixas pretas, vinheta, a HUD sai e a papelada entra com o "slap". Encerrar volta a câmera.
+- O suspeito abre com a **postura e a fala de entrada** da classe; ao voltar, com uma **fala de
+  retomada** ("De novo, doutor?"). As perguntas ficam em cartões de papel (sempre com "Tem mais
+  gente com vocês?"), com o tom de interrogatório. A pergunta do agente sai num balão; a resposta,
+  no balão do canto de baixo.
+- **Memória por suspeito:** pergunta feita uma vez fica **bloqueada para sempre**, seja qual for a
+  resposta, e continua na lista riscada, com o carimbo **Perguntado** (o histórico). As que faltam
+  seguem disponíveis em qualquer conversa futura; uma **réplica** liberada e não feita também fica lá.
+- **Rolagem escondida** (como no Baldur's Gate 3): a pergunta pode ter CD e o suspeito rola um d20 que
+  o jogador não vê (nada de dado, número ou CD na tela). Passa quem tira **mais que** a CD (`beats`).
+  Passou: resposta evasiva. Falhou: confissão ou resposta com um **sinal** de mentira (entre
+  parênteses, em itálico, e o suspeito dá um tranco). Cada desfecho pode ter várias falas (sorteia uma).
+- **CDs:** pergunta **8**, réplica **12**, tréplica **14**, e a **intimidação do agente que conversa
+  soma +1 por ponto** (atributo + equipamento da ficha, sem o bônus do grupo nem o do arrombamento):
+  quanto mais intimidador, mais fácil o suspeito ceder.
+- **Réplica e tréplica:** quando o suspeito **passa** numa pergunta que tem réplica, surge logo abaixo
+  o cartão **Réplica** (o agente insiste); passando nela e havendo tréplica, surge a **Tréplica**. Cada
+  nível tem a sua mentira, mas a **verdade é uma só**: cedendo em qualquer nível, o suspeito dá a mesma
+  resposta e a cadeia acaba. O jogador tem até 3 chances de arrancar a verdade. Por enquanto só o
+  piloto ("O que você carregava no avião?") e o caseiro ("Tem arma na casa?" e "De quem é essa
+  arma?") têm cadeia.
+- **Perguntas que surgem e somem com pistas:** uma pergunta pode exigir uma pista da missão
+  (`requires`) e pode sumir quando outra aparece (`hiddenWhen`, menos para quem já a fez). Achar a
+  arma na prateleira da casa (inspeção, pista `item:arma`) libera **"De quem é essa arma?"** para
+  todos os suspeitos com diálogo. O piloto não sabe; os garimpeiros também não, e cada um responde
+  com uma fala de um **pool compartilhado** (a fala usada sai do pool, sem repetição entre eles;
+  acabou, "Não sei."). O caseiro tem três chances de ceder (pergunta, réplica e tréplica); resistindo
+  à tréplica, o agente fecha com "Claro. A arma entrou sozinha e foi se esconder na prateleira."
+  (fecho `closing`: sem cartão, sem rolagem, sem resposta). Se ceder, confessa que é dele: a pista `dono-arma` faz a pergunta sumir de quem ainda não a fez (quem já fez continua
+  vendo o cartão como "Perguntado"). Responder "não sei" não fecha a pergunta para os outros.
+- **Confissão que entrega o esconderijo:** se o caseiro confessar em "Tem arma na casa?" ("Tem sim, tá
+  no quartinho de trás."), a arma da prateleira conta como **já percebida**: ninguém precisa rolar
+  percepção no quarto de trás, a lupa aparece e **Investigar a casa** fica cumprido. Achar e apreender
+  a arma ainda pede a inspeção (d20). No dado, é `notices: '<id do esconderijo>'` na resposta.
+- **Custo:** como a inspeção, a **primeira pergunta de cada conversa gasta 1 de movimento** (entrar e
+  sair sem perguntar não gasta) e a vez continua. Ficam em `INTERROGATION_RULES` (`moveCost`,
+  `endsTurn`).
+- **Caderneta de campo:** cada resposta vira uma anotação (*declarou*, *sinal* ou *confessou*), que sai
+  no **relatório da operação**; ao encerrar, um telegrama resume.
+- **Entregar alguém:** uma resposta pode revelar uma unidade escondida no mapa (`reveal` na resposta,
+  `reveals` e `hidden` no mapa). O suporte está pronto, mas o Aeroporto não usa: lá, "tem mais
+  gente?" só vira anotação.
+- Com controle: direcional escolhe o cartão, ✕ pergunta, ○ encerra.
+
+Os diálogos são dados: as classes de NPC (garimpeiro, piloto, caseiro, caçador, pescador e segurança,
+que é calado e não tem diálogo; no Aeroporto, o Jô é o **caseiro**), com traço de personalidade, fala de entrada e de retomada, `mod` (0, ainda sem uso)
+e a árvore de perguntas, ficam em `src/app/game/npc-dialogue.ts` (o topo do arquivo explica como
+adicionar NPC, pergunta e pista). Para ligar uma classe a um suspeito, use `npc` no inimigo do mapa
+(`maps.ts`); `hidden: true` deixa um inimigo escondido e `reveals` diz quem o suspeito pode entregar.
+As regras (CDs, intimidação, raio da aura, custo), a memória por NPC e as pistas ficam em
+`src/app/game/interrogation.ts`; a papelada em `src/app/ui/interrogation/` e a câmera em
+`HexBoard.closeUp` (a mesma da inspeção, com `frame: 'pair'`).
 
 ### Missão principal: queimar o avião e os suprimentos
 
@@ -322,7 +385,8 @@ símbolo correspondente.
 | Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
 | ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
 | ○ | Cancela |
-| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, inspecionar ou abrir o menu da porta) |
+| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, inspecionar, conversar ou abrir o menu da porta) |
+| No modo diálogo | direcional escolhe a pergunta, ✕ pergunta, ○ encerra |
 | No menu da porta | ✕ arromba, □ pick lock, △ abre, ○ volta |
 | L3 | Encerrar a operação (depois de queimar o avião) |
 | △ | Passar a vez |

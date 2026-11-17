@@ -1,0 +1,83 @@
+@let iv = view();
+<div class="interro-kicker">
+  <b>Conversa · {{ iv.cls.name }}</b>
+  {{ iv.suspect }} · {{ iv.cls.trait }}
+</div>
+<section
+  class="interro"
+  [attr.aria-label]="'Conversa com ' + iv.suspect"
+  data-testid="interrogation"
+>
+  @if (iv.agentLine !== null) {
+    <div class="balloon agent" aria-hidden="true" data-testid="agent-balloon">
+      <span class="who">{{ agent() }}</span>{{ iv.agentLine }}
+    </div>
+  }
+  @if (iv.suspectLine; as sl) {
+    <div class="balloon suspect" aria-hidden="true" data-testid="suspect-balloon">
+      <span class="who">{{ iv.suspect }}</span>
+      @if (sl.posture) {
+        <span class="stagedir">({{ sl.posture }})</span>
+      }
+      <span [class.dots]="sl.thinking">{{ sl.text }}</span>
+      @if (sl.tell) {
+        <span class="tell" data-testid="tell">({{ sl.tell }})</span>
+      }
+    </div>
+  }
+  <p class="sr-only" aria-live="polite">{{ live() }}</p>
+  @if (cards().length) {
+    <ul class="question-cards" aria-label="Perguntas">
+      @for (c of cards(); track c.option.key; let i = $index) {
+        @let o = c.option;
+        <li>
+          <button
+            type="button"
+            class="question-card"
+            [class.rep]="o.depth === 1"
+            [class.tre]="o.depth === 2"
+            [class.done]="o.done"
+            [class.picked]="!o.done && c.openIndex === pick()"
+            [style.--i]="i"
+            [disabled]="iv.busy || o.done"
+            [attr.aria-label]="o.done ? 'Já perguntado: ' + o.node.ask : null"
+            [attr.data-testid]="'question-' + o.key"
+            (click)="ask.emit(o.key)"
+          >
+            @if (o.depth) {
+              <span class="lvl">{{ levelLabel[o.depth] }}</span>
+            }
+            <span class="ask">{{ o.node.ask }}</span>
+            @if (o.done) {
+              <span class="asked-stamp" aria-hidden="true">Perguntado</span>
+            }
+            @if (confirmGlyph() && !o.done && c.openIndex === pick()) {
+              <span class="pad-glyph" aria-hidden="true">{{ confirmGlyph() }}</span>
+            }
+          </button>
+        </li>
+      }
+    </ul>
+  }
+  <div class="interro-foot">
+    <span class="interro-hint">
+      @if (!openCount()) {
+        sem mais perguntas
+      } @else if (!iv.asked && moveCost()) {
+        a 1ª pergunta desta conversa gasta {{ moveCost() }} mov.
+      }
+    </span>
+    <button
+      type="button"
+      class="interro-end"
+      [disabled]="iv.busy"
+      data-testid="interrogation-end"
+      (click)="end.emit()"
+    >
+      Encerrar
+      @if (cancelGlyph()) {
+        <span class="pad-glyph" aria-hidden="true">{{ cancelGlyph() }}</span>
+      }
+    </button>
+  </div>
+</section>

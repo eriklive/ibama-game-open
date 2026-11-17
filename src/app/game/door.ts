@@ -263,7 +263,7 @@ export function resolveBreakIn(
 ): BreakInRoll[] {
   const out: BreakInRoll[] = [];
   for (const enemy of enemies) {
-    if (enemy.status === 'surrendered' || enemy.status === 'fled' || !room.has(hexKey(enemy.hex)))
+    if (enemy.status === 'surrendered' || enemy.status === 'fled' || enemy.status === 'hidden' || !room.has(hexKey(enemy.hex)))
       continue;
     const distance = Math.max(1, hexDistance(enemy.hex, door));
     const r = roll();

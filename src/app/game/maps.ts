@@ -204,7 +204,7 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  *
  * A leste da pista, numa clareira, fica a **casa** dos garimpeiros (colunas 29–41, fileiras
  * 26–32): dois cômodos de 5 × 5 separados por uma divisória com porta. Entra-se pela porta
- * do oeste, que dá para a pista. No cômodo 1 o Garimpeiro Jô come de costas para a entrada,
+ * do oeste, que dá para a pista. No cômodo 1 o caseiro Jô come de costas para a entrada,
  * na mesa (`m`); no cômodo 2, a prateleira (`P`) na parede do leste esconde uma arma.
  *
  * A missão principal é queimar o **avião** e a pilha de **suprimentos do garimpo** (`R`), no
@@ -278,12 +278,19 @@ export const MAPS: GameMap[] = [
       { col: 4, row: 9 }, { col: 5, row: 10 },
     ],
     enemies: [
-      { id: 'piloto', name: 'Piloto', model: MODELS.piloto, patrol: [{ col: 2, row: 2 }, { col: 9, row: 2 }] },
-      { id: 'garimpeiro', name: 'Garimpeiro', model: MODELS.garimpeiro, patrol: [{ col: 10, row: 4 }, { col: 10, row: 9 }] },
+      { id: 'piloto', name: 'Piloto', model: MODELS.piloto, npc: 'piloto', patrol: [{ col: 2, row: 2 }, { col: 9, row: 2 }] },
+      {
+        id: 'garimpeiro',
+        name: 'Garimpeiro',
+        model: MODELS.garimpeiro,
+        npc: 'garimpeiro',
+        patrol: [{ col: 10, row: 4 }, { col: 10, row: 9 }],
+      },
       {
         id: 'garimpeiro-pa',
         name: 'Garimpeiro da pá',
         model: MODELS.garimpeiroPa,
+        npc: 'garimpeiro',
         patrol: [{ col: 8, row: 10 }, { col: 2, row: 10 }, { col: 1, row: 8 }],
       },
     ],
@@ -327,7 +334,7 @@ export const MAPS: GameMap[] = [
     objectives: [
       { id: 'queimar-aviao', text: 'Queimar o avião', burn: 'aviao', primary: true, unlocksEnd: true },
       { id: 'queimar-suprimentos', text: 'Queimar os suprimentos do garimpo', burn: 'suprimentos', primary: true },
-      { id: 'render-jo', text: 'Render o Garimpeiro Jô', surrender: 'jo' },
+      { id: 'render-jo', text: 'Render o Caseiro Jô', surrender: 'jo' },
       // a casa vem primeiro; achar a arma na prateleira (percepção) abre o passo seguinte
       { id: 'investigar-casa', text: 'Investigar a casa', notice: 'arma' },
       { id: 'apreender-arma', text: 'Apreender a arma escondida', find: 'arma', after: 'investigar-casa' },
@@ -340,6 +347,7 @@ export const MAPS: GameMap[] = [
         id: 'garimpeiro',
         name: 'Garimpeiro',
         model: MODELS.garimpeiro,
+        npc: 'garimpeiro',
         patrol: [{ col: 27, row: 19 }],
         facing: { col: 27, row: 20 },
       },
@@ -348,6 +356,7 @@ export const MAPS: GameMap[] = [
         id: 'piloto',
         name: 'Piloto',
         model: MODELS.piloto,
+        npc: 'piloto',
         patrol: [{ col: 14, row: 6 }],
         wander: { cols: [12, 21], rows: [5, 17] },
       },
@@ -355,6 +364,7 @@ export const MAPS: GameMap[] = [
         id: 'garimpeiro-pa',
         name: 'Garimpeiro da pá',
         model: MODELS.garimpeiroPa,
+        npc: 'garimpeiro',
         patrol: [{ col: 28, row: 15 }],
         wander: { cols: [22, 31], rows: [5, 17] },
       },
@@ -363,13 +373,17 @@ export const MAPS: GameMap[] = [
         id: 'vigia-pista',
         name: 'Vigia da pista',
         model: MODELS.garimpeiro,
+        // segurança: rende-se, mas é calado (sem diálogo: ação bloqueada e aura apagada)
+        npc: 'seguranca',
         patrol: [{ col: 21, row: 20 }, { col: 21, row: 36 }],
       },
       // na casa: parado, comendo na mesa, de costas para a porta
       {
         id: 'jo',
-        name: 'Garimpeiro Jô',
+        name: 'Caseiro Jô',
         model: MODELS.garimpeiro,
+        // mora na casa e cuida dela
+        npc: 'caseiro',
         patrol: [{ col: 32, row: 29 }],
         facing: { col: 33, row: 29 },
       },
