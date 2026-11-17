@@ -38,7 +38,7 @@ import { BURN_RULES, Burnable, burnTarget, seeFire } from '../../game/burn';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
-import { APPROACH_FX, holdProgress, holdRing, waveArrival, waveDuration } from '../../game/approach-fx';
+import { APPROACH_FX, waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
@@ -54,6 +54,18 @@ const MISSION_DEADLINE = 5;
 type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'ending' | 'enemy' | 'over';
 
 /** Teste de d20 mostrado na ficha da lateral. */
+/** Inspeção em close-up: quem procura, onde, a face do d20 e o resultado (quando parar). */
+interface SearchView {
+  who: string;
+  furniture: string;
+  target: number;
+  face: number;
+  result: number | null;
+  pass: boolean | null;
+  /** Aviso quando acha ("Arma apreendida!"). */
+  seized: string;
+}
+
 interface CheckView {
   kind: 'notice' | 'find';
   who: string;
@@ -71,6 +83,9 @@ const namesOf = (es: readonly EnemyState[]): string => {
   const names = es.map((e) => e.name);
   return names.length > 1 ? `${names.slice(0, -1).join(', ')} e ${names.at(-1)}` : names[0];
 };
+
+/** A equipe inteira, junta (como a partida começa). */
+const wholeTeam = (): ReadonlySet<string> => new Set(CHARACTERS.map((c) => c.id));
 
 const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -189,6 +204,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     });
     // resultado na tela: o foco vai para "Confirmar" (Enter/Espaço fecham)
     effect(() => this.rollConfirmBtn()?.nativeElement.focus({ preventScroll: true }));
+    // resultado da inspeção: o foco vai para "Fechar"
+    effect(() => this.searchCloseBtn()?.nativeElement.focus({ preventScroll: true }));
     // troca de modo no menu: o tabuleiro remonta o mundo em segundo plano
     effect(() => {
       const mode = this.renderMode();
@@ -239,13 +256,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Pré-visualizando a abordagem (zonas pintadas, aguardando confirmação). */
   protected readonly approaching = signal(false);
   protected readonly approachRules = APPROACH_RULES;
-  /** Segurando o **Abordar**: progresso do anel em volta do botão (0 a 1). */
-  protected readonly holdProgress = signal(0);
-  /** Passou do toque rápido: o raio está crescendo no tabuleiro. */
-  protected readonly charging = signal(false);
-  private hold: { start: number; frame: number; ring: number; source: 'pointer' | 'key' | 'pad' } | null = null;
-  /** Quando o último gesto de segurar acabou (o clique que vem logo depois é ignorado). */
-  private holdEndedAt = -Infinity;
   /** Auto de abordagem na tela: quem se rendeu e quem vai tentar correr. */
   protected readonly report = signal<{ agent: string; surrender: EnemyState[]; flee: EnemyState[] } | null>(null);
   protected readonly reportTally = computed(() => {
@@ -271,6 +281,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private checkTimer?: ReturnType<typeof setTimeout>;
   private checkSpin?: ReturnType<typeof setInterval>;
   protected readonly searchRules = SEARCH_RULES;
+  /**
+   * Inspeção em close-up (toque na lupa): a câmera aproxima, o d20 rola no meio da cena e o
+   * resultado fica na tela até o jogador tocar em **Fechar**.
+   */
+  protected readonly search = signal<SearchView | null>(null);
+  private searchDone?: () => void;
+  private searchSpin?: ReturnType<typeof setInterval>;
+  private readonly searchCloseBtn = viewChild('searchClose', { read: ElementRef<HTMLButtonElement> });
   /** Esconderijos em que alguém reparou (o móvel ganha a lupa e pode ser inspecionado). */
   protected readonly noticed = signal<ReadonlySet<string>>(new Set());
   /** Esconderijos já achados (o que havia lá foi apreendido). */
@@ -347,8 +365,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   // ---------- grupo ----------
 
-  /** Agentes agrupados (andam juntos e ganham movimento extra); vazio = cada um por si. */
-  protected readonly group = signal<ReadonlySet<string>>(new Set());
+  /**
+   * Agentes agrupados (andam juntos e ganham movimento extra); vazio = cada um por si.
+   * A equipe chega junta: a partida começa com todos no grupo.
+   */
+  protected readonly group = signal<ReadonlySet<string>>(wholeTeam());
   protected readonly groupBonus = GROUP_RULES.moveBonus;
   protected readonly groupApproachBonus = GROUP_RULES.approachBonus;
   protected readonly signed = signed;
@@ -496,6 +517,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.focusCharacter(id),
+        onClueTap: () => this.tapClue(),
       },
       {
         profile: this.renderSettings.profile(),
@@ -521,8 +543,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.destroyed = true;
     this.stopPad?.();
-    this.stopHold();
     this.clearTimers();
+    clearInterval(this.searchSpin);
     clearTimeout(this.noticeTimer);
     clearTimeout(this.checkTimer);
     clearInterval(this.checkSpin);
@@ -773,10 +795,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private tapHex(hex: HexCoord | null): void {
     if (this.phase() !== 'moving-choice') return;
     if (hex && !this.approaching() && !this.burning()) this.cursor.set(hex);
-    if (this.approaching()) {
-      this.cancelApproach();
-      return;
-    }
+    // no modo de abordagem só os dois botões decidem: toque no tabuleiro não faz nada
+    if (this.approaching()) return;
     if (this.burning()) {
       this.cancelBurn();
       return;
@@ -924,7 +944,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const id = this.active().id;
     this.closeGrouping();
     if (!(await this.walkUnits(id, plan.paths))) return;
-    this.group.set(new Set(CHARACTERS.map((c) => c.id)));
+    this.group.set(wholeTeam());
     this.movesLeft.update((n) => Math.max(0, n - plan.cost));
     this.say(
       `Equipe agrupada! Juntos: +${GROUP_RULES.moveBonus} de movimento e +${GROUP_RULES.approachBonus} de alcance na abordagem`,
@@ -977,33 +997,102 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return true;
   }
 
-  /** Inspeciona o móvel percebido: gasta 1 de movimento e rola 1d20 (mais que 4 acha). */
+  /** Toque na lupa: inspeciona se dá; senão, diz o que falta. */
+  protected tapClue(): void {
+    if (this.phase() !== 'moving-choice' || this.approaching() || this.burning() || this.grouping()) return;
+    const item = this.inspectable();
+    if (item) {
+      if (this.movesLeft() < SEARCH_RULES.inspectCost) this.say(`Sem movimento para inspecionar a ${item.furniture} agora`, 'info');
+      else void this.inspect();
+      return;
+    }
+    const spot = (this.map?.hidden ?? []).find((h) => this.noticed().has(h.id) && !this.found().has(h.id));
+    if (spot) this.say(`Chegue colado na ${spot.furniture} para inspecionar`, 'info');
+  }
+
+  /**
+   * Inspeciona o móvel percebido (toque na lupa ou □): gasta 1 de movimento, a câmera
+   * aproxima no agente e no móvel e o d20 rola ali (mais que 4 acha). O resultado fica na
+   * tela até o jogador fechar; só então a câmera volta e a vez segue.
+   */
   protected async inspect(): Promise<void> {
     const item = this.inspectable();
-    if (!item || this.movesLeft() < SEARCH_RULES.inspectCost) return;
+    const from = this.positions().get(this.active().id);
+    if (!item || !from || this.movesLeft() < SEARCH_RULES.inspectCost) return;
+    const epoch = this.epoch;
     const id = this.active().id;
     this.selected.set(null);
     this.board?.setSelected(null);
     this.board?.setReachable([]);
+    this.board?.setInputEnabled(false);
     this.phase.set('checking');
     this.movesLeft.update((n) => n - SEARCH_RULES.inspectCost);
-    const pass = await this.rollCheck('find', id, SEARCH_RULES.find);
-    if (pass === null) return;
+    this.board?.closeUp([from, item.spot]);
+    const motion = !reducedMotion();
+    // primeiro a câmera chega; depois o dado rola
+    await this.wait(motion ? 550 : 0);
+    if (this.destroyed || this.epoch !== epoch) return;
+    const result = rollDie(SEARCH_RULES.die);
+    this.search.set({
+      who: this.nameOf(id),
+      furniture: item.furniture,
+      target: SEARCH_RULES.find,
+      face: rollDie(SEARCH_RULES.die),
+      result: null,
+      pass: null,
+      seized: item.seized,
+    });
+    if (motion) {
+      this.haptics.vibrate(ROLL_PATTERN);
+      this.searchSpin = setInterval(
+        () => this.search.update((v) => (v && v.result === null ? { ...v, face: rollDie(SEARCH_RULES.die) } : v)),
+        70,
+      );
+    }
+    await this.wait(900);
+    clearInterval(this.searchSpin);
+    if (this.destroyed || this.epoch !== epoch) return;
+    const pass = beats(result, SEARCH_RULES.find);
+    this.search.update((v) => v && { ...v, face: result, result, pass });
+    this.haptics.vibrate(SETTLE_PATTERN);
+    this.gamepad.rumble(pass ? 0.8 : 0.3, pass ? 0.5 : 0.2, pass ? 260 : 120);
+    // a mensagem fica até o jogador fechar
+    await new Promise<void>((done) => (this.searchDone = done));
+    if (this.destroyed || this.epoch !== epoch) return;
+    this.board?.endCloseUp();
+    this.board?.setInputEnabled(true);
     if (pass) {
       this.found.update((s) => new Set([...s, item.id]));
       this.board?.setClue(null);
-      this.gamepad.rumble(0.8, 0.5, 260);
       this.say(`${this.nameOf(id)} achou a ${item.name} na ${item.furniture}. ${item.seized}`, 'alert');
     } else {
       this.searchFails.update((m) => new Map(m).set(item.id, (m.get(item.id) ?? 0) + 1));
       this.say(
         this.movesLeft() >= SEARCH_RULES.inspectCost
-          ? `Nada na ${item.furniture}… Dá para rolar de novo (1 de movimento).`
+          ? `Nada na ${item.furniture}… Toque na lupa para tentar de novo (1 de movimento).`
           : `Nada na ${item.furniture}… Sem movimento para tentar de novo agora.`,
         'info',
       );
     }
     this.afterMove();
+  }
+
+  /** Fecha o resultado da inspeção (botão **Fechar**, ✕ ou ○). */
+  protected closeSearch(): void {
+    if (this.search()?.result == null) return;
+    this.search.set(null);
+    const done = this.searchDone;
+    this.searchDone = undefined;
+    done?.();
+  }
+
+  /** Recomeço ou saída no meio da inspeção: some com o close-up sem seguir a vez. */
+  private dropSearch(): void {
+    clearInterval(this.searchSpin);
+    this.search.set(null);
+    this.searchDone = undefined;
+    this.board?.endCloseUp();
+    this.board?.setInputEnabled(true);
   }
 
   /**
@@ -1043,30 +1132,45 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   // ---------- abordagem ----------
 
-  /** Primeiro passo: mostra o raio e quem se renderia ou correria. */
+  /**
+   * Primeiro passo (toque no **Abordar** ou □): entra no modo de abordagem. O tabuleiro fica
+   * em cinza, menos quem está na vez, os suspeitos no raio e o raio; nada acontece até o
+   * jogador confirmar (**Abordar!**, ✕) ou cancelar (botão vermelho, ○).
+   */
   protected startApproach(): void {
     if (this.phase() !== 'moving-choice' || !this.canApproach()) return;
     if (!this.map || !this.positions().get(this.active().id)) return;
     this.closeBurn();
     this.clearBoardForApproach();
     this.approaching.set(true);
-    this.paintApproachZones(this.activeApproach().radius);
+    const zones = this.paintApproachZones();
+    // só ficam em cor quem está na vez, os suspeitos no raio e o próprio raio
+    const { surrender, flee } = this.approachPlan();
+    const from = this.positions().get(this.active().id)!;
+    this.board?.frameHexes([from, ...surrender.map((e) => e.hex), ...flee.map((e) => e.hex)]);
+    this.board?.setSpotlight({
+      units: [this.active().id],
+      labels: [
+        ...surrender.map((e) => ({ id: e.id, text: `${e.name} · se rende`, tone: 'surrender' as const })),
+        ...flee.map((e) => ({ id: e.id, text: `${e.name} · vai correr`, tone: 'flee' as const })),
+      ],
+      hexes: zones ? [...zones.surrender, ...zones.flee] : [],
+    });
   }
 
-  /** Pinta as zonas da abordagem até o anel `upTo` (o raio cresce enquanto o botão é segurado). */
-  private paintApproachZones(upTo: number): void {
+  /** Pinta as zonas da abordagem (rendição e alerta) em volta de quem está na vez. */
+  private paintApproachZones(): { surrender: string[]; flee: string[] } | null {
     const from = this.positions().get(this.active().id);
-    if (!from) return;
+    if (!from) return null;
     const zone = (min: number, max: number) =>
-      hexesInRange(from, Math.min(max, upTo), this.area)
+      hexesInRange(from, max, this.area)
         .filter((h) => !this.solid.has(hexKey(h)))
         .filter((h) => hexDistance(from, h) > min)
         .map(hexKey);
     const rules = this.activeApproach();
-    this.board?.setApproachZones({
-      surrender: zone(0, rules.surrenderRange),
-      flee: zone(rules.surrenderRange, rules.radius),
-    });
+    const zones = { surrender: zone(0, rules.surrenderRange), flee: zone(rules.surrenderRange, rules.radius) };
+    this.board?.setApproachZones(zones);
+    return zones;
   }
 
   private clearBoardForApproach(): void {
@@ -1082,81 +1186,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.phase() === 'moving-choice') this.refreshBoard();
   }
 
-  // ---------- segurar para abordar ----------
-
-  /** Apertou o **Abordar** (toque, tecla ou □): toque rápido abre a prévia; segurando, aborda. */
-  protected approachPress(ev: Event | null, source: 'pointer' | 'key' | 'pad'): void {
-    if (this.hold || this.approaching() || this.phase() !== 'moving-choice' || !this.canApproach()) return;
-    ev?.preventDefault();
-    if (ev instanceof PointerEvent) (ev.currentTarget as Element | null)?.setPointerCapture?.(ev.pointerId);
-    this.hold = { start: performance.now(), frame: 0, ring: 0, source };
-    this.holdFrame();
-  }
-
-  /** Soltou: antes do toque rápido vira prévia; depois, antes do anel fechar, desiste. */
-  protected approachRelease(): void {
-    if (!this.hold) return;
-    const tap = !this.charging();
-    this.stopHold();
-    if (tap) {
-      this.startApproach();
-      return;
-    }
-    this.board?.setApproachZones(null);
-    if (this.phase() === 'moving-choice') this.refreshBoard();
-    this.say('Abordagem cancelada: segure até o anel fechar', 'info');
-  }
-
-  protected approachKey(ev: KeyboardEvent, down: boolean): void {
-    if (ev.key !== ' ' && ev.key !== 'Enter') return;
-    ev.preventDefault();
-    if (!down) this.approachRelease();
-    else if (!ev.repeat) this.approachPress(null, 'key');
-  }
-
-  /** Clique sem toque nem tecla (leitor de tela): abre a prévia de sempre. */
-  protected approachClick(): void {
-    if (this.hold || performance.now() - this.holdEndedAt < 600) return;
-    this.startApproach();
-  }
-
-  private holdFrame = (): void => {
-    const h = this.hold;
-    if (!h) return;
-    if (this.phase() !== 'moving-choice') {
-      this.stopHold();
-      return;
-    }
-    const p = holdProgress(performance.now() - h.start);
-    if (p > 0 && !this.charging()) {
-      this.clearBoardForApproach();
-      this.charging.set(true);
-    }
-    this.holdProgress.set(p);
-    const ring = holdRing(p, this.activeApproach().radius);
-    if (ring !== h.ring) {
-      h.ring = ring;
-      this.paintApproachZones(ring);
-      this.haptics.vibrate(12);
-      this.gamepad.rumble(0.15, 0.3, 40);
-    }
-    if (p >= 1) {
-      this.stopHold();
-      this.executeApproach();
-      return;
-    }
-    h.frame = requestAnimationFrame(this.holdFrame);
-  };
-
-  private stopHold(): void {
-    if (this.hold) cancelAnimationFrame(this.hold.frame);
-    this.hold = null;
-    this.holdEndedAt = performance.now();
-    this.charging.set(false);
-    this.holdProgress.set(0);
-  }
-
-  /** Confirma pela prévia (**Abordar!** ou ✕). */
+  /** Confirma o modo de abordagem (**Abordar!** ou ✕). */
   protected confirmApproach(): void {
     if (!this.approaching() || this.phase() !== 'moving-choice') return;
     this.executeApproach();
@@ -1172,7 +1202,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const { surrender, flee } = this.approachPlan();
     if (!from || surrender.length + flee.length === 0) return;
     this.approaching.set(false);
-    this.paintApproachZones(this.activeApproach().radius);
+    this.board?.setSpotlight(null);
+    this.paintApproachZones();
     this.phase.set('ending');
     const motion = !reducedMotion();
     for (const e of surrender) this.updateEnemy(e.id, { status: 'surrendered', facing: facingBetween(e.hex, from) });
@@ -1211,6 +1242,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.approaching()) return;
     this.approaching.set(false);
     this.board?.setApproachZones(null);
+    this.board?.setSpotlight(null);
   }
 
   // ---------- queimar ----------
@@ -1310,10 +1342,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected restart(): void {
     this.epoch++;
     this.clearTimers();
-    this.stopHold();
     this.report.set(null);
     this.positions.set(this.initialPositions());
-    this.group.set(new Set());
+    this.group.set(wholeTeam());
     this.closeGrouping();
     this.board?.placeUnits(this.positions());
     this.enemies.set(this.initialEnemies());
@@ -1324,6 +1355,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     clearTimeout(this.checkTimer);
     clearInterval(this.checkSpin);
     this.check.set(null);
+    this.dropSearch();
     this.board?.setClue(null);
     this.burned.set(new Set());
     this.closeBurn();
@@ -1367,7 +1399,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     switch (b) {
       case 'cross':
-        if (this.report()) this.closeReport();
+        if (this.search()) this.closeSearch();
+        else if (this.report()) this.closeReport();
         else if (this.phase() === 'rolling') this.confirmRoll();
         else if (this.approaching()) this.confirmApproach();
         else if (this.burning()) this.confirmBurn();
@@ -1377,7 +1410,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else this.focusUnitUnderCursor();
         break;
       case 'circle':
-        if (this.approaching()) this.cancelApproach();
+        if (this.search()) this.closeSearch();
+        else if (this.approaching()) this.cancelApproach();
         else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) this.cancelGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
@@ -1387,12 +1421,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         }
         break;
       case 'square':
-        // □ aborda (toque rápido abre a prévia; segurando, aborda direto);
+        // □ abre o modo de abordagem (de novo, cancela);
         // sem ninguém no raio, queima o alvo ou inspeciona o móvel percebido ao lado
         if (this.approaching()) this.cancelApproach();
         else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) break;
-        else if (this.canApproach()) this.approachPress(null, 'pad');
+        else if (this.canApproach()) this.startApproach();
         else if (this.burnable()) this.startBurn();
         else if (this.inspectable()) void this.inspect();
         break;
@@ -1451,7 +1485,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Analógico direito move a câmera; R2 aproxima e L2 afasta. */
   private padFrame(dt: number, state: PadState): void {
-    if (this.hold?.source === 'pad' && state.buttons.square < 0.5) this.approachRelease();
     if (!this.board) return;
     const r = deadzone(state.right);
     if (r.x || r.y) this.board.panBy(r.x * dt * 9, r.y * dt * 9);

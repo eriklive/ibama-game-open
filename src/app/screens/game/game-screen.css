@@ -355,12 +355,86 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .stamp.confirm.fire { background: #f2b26b; }
 .burn-slip { background: #f6cf9a; }
 /* segurar para abordar: o contorno do papel vira um anel que se fecha */
-.approach { touch-action: none; -webkit-user-select: none; user-select: none; -webkit-touch-callout: none; }
-.approach.holding { transform: rotate(-5deg) translateY(2px) scale(.97); box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.4); }
-.hold-ring { position: absolute; inset: -5px; width: calc(100% + 10px); height: calc(100% + 10px); pointer-events: none; overflow: visible; }
-.hold-ring rect { fill: none; stroke: var(--red); stroke-width: 4; stroke-dasharray: 100; stroke-linejoin: round; opacity: 0; }
-.approach.holding .hold-ring rect { opacity: 1; }
-.slip.hold-slip { bottom: 122px; right: 56px; }
+
+/* ---------- inspeção em close-up: só o agente, o móvel e o d20 ---------- */
+.focus-mode .top, .focus-mode .agents, .focus-mode .suspects, .focus-mode .actions,
+.focus-mode .telegram, .focus-mode .check, .focus-mode .end-op { visibility: hidden; }
+.focus-stage { position: absolute; inset: 0; pointer-events: none; z-index: 4; animation: fade-in .3s ease-out both; }
+.focus-stage::before {
+  content: ''; position: absolute; inset: 0;
+  background: radial-gradient(ellipse 40% 58% at 50% 58%, transparent 55%, rgba(8, 10, 8, .78) 100%);
+}
+.focus-stage::after {
+  content: ''; position: absolute; inset: 0;
+  border-block: calc(26px + var(--safe-top)) solid #0c0d0b;
+  border-bottom-width: calc(26px + var(--safe-bottom));
+}
+.focus-die {
+  position: absolute; left: 50%; top: calc(40px + var(--safe-top));
+  width: 92px; height: 92px; margin: 0; transform: translateX(-50%);
+  filter: drop-shadow(0 5px 6px rgba(0, 0, 0, .6));
+}
+.focus-die .d20-value { font-size: 28px; top: 9px; }
+.focus-die.pass .d20-body { fill: #dff3d9; }
+.focus-die.fail .d20-body { fill: #f6dcd6; }
+.focus-card {
+  position: absolute; left: 50%; bottom: calc(40px + var(--safe-bottom));
+  transform: translateX(-50%) rotate(-1deg);
+  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center;
+  max-width: calc(100% - 32px - var(--safe-left) - var(--safe-right));
+  padding: 10px 14px;
+  background: var(--paper-light);
+  box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.4);
+  font-size: 13px;
+  pointer-events: auto;
+  animation: slap .25s ease-out both;
+}
+.focus-result { font-family: var(--stencil); font-weight: 700; font-size: 17px; text-transform: uppercase; color: var(--red-text); }
+.focus-result.pass { color: var(--green-ok); }
+.focus-result.rolling { font-family: var(--typed); font-weight: 400; font-size: 13px; text-transform: none; color: var(--muted-paper); }
+.focus-close {
+  position: relative;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 8px 14px;
+  background: var(--ink-paper); color: var(--paper-light);
+  font-family: var(--stencil); font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: .5px;
+  box-shadow: 2px 3px 0 rgba(0, 0, 0, .35);
+  animation: slap .25s ease-out both;
+}
+.focus-close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 3.4; stroke-linecap: round; }
+.focus-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, .35); }
+/* inspecionar pelo teclado: o botão só aparece quando recebe o foco */
+.inspect.keyboard-only:not(:focus-visible) { opacity: 0; pointer-events: none; }
+
+/* ---------- modo de abordagem: o resto da HUD apaga e a decisão fica em dois botões ---------- */
+.top, .suspects, .end-op { transition: filter .25s ease; }
+.approach-mode .top, .approach-mode .end-op { filter: grayscale(1) brightness(.75); }
+/* retratos e suspeitos saem da frente: as etiquetas no tabuleiro já dizem quem reage */
+.approach-mode .agents, .approach-mode .suspects { visibility: hidden; }
+.slip.approach-slip { right: 128px; bottom: 4px; width: max-content; max-width: 290px; transform: rotate(-1.5deg); }
+.slip .approach-tally { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
+.approach-tally .surrender { color: var(--green-ok); }
+.approach-tally .flee { color: #b4520f; }
+.approach-confirm { width: 112px; height: 112px; border-radius: 56px; }
+.approach-confirm .stamp-ring { width: 96px; height: 96px; border-radius: 48px; }
+.approach-confirm .stamp-text { font-size: 19px; }
+.approach-cancel {
+  position: absolute;
+  left: calc(14px + var(--safe-left));
+  top: 50%;
+  width: 84px; height: 84px; border-radius: 42px;
+  border: 4px solid #fff;
+  background: #e3121b;
+  color: #fff;
+  box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.4), inset 0 -5px 0 rgba(0, 0, 0, 0.18);
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
+  font-family: var(--stencil); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
+  transform: translateY(-50%);
+  animation: slap .25s ease-out both;
+  z-index: 3;
+}
+.approach-cancel svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 3.4; stroke-linecap: round; }
+.approach-cancel:active { transform: translateY(calc(-50% + 3px)); box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.4); }
 
 /* bilhete da abordagem: quem se rende e quem corre */
 .slip {
@@ -585,12 +659,12 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .slip, .suspect, .check, .check-result, .d20.rolling svg, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
+  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .focus-card, .focus-close, .slip, .suspect, .check, .check-result, .d20.rolling svg, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
 @media (min-width: 700px) and (min-height: 600px) {
-  .top, .agents, .suspects, .actions, .telegram, .check, .report, .end-op { zoom: 1.25; }
+  .top, .agents, .suspects, .actions, .telegram, .check, .report, .end-op, .approach-cancel { zoom: 1.25; }
 }
 
 /* ---------- controle (DualShock 4) ---------- */
