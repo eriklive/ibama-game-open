@@ -26,7 +26,8 @@ export const ENEMY_RULES = {
 
 /**
  * Abordagem: o agente da vez anuncia a abordagem ("Ibama! Parados!") e os inimigos em volta
- * reagem conforme a distância (em linha reta: paredes não abafam o grito, por enquanto).
+ * reagem conforme a distância (em linha reta). Só conta quem o agente alcança **direto**:
+ * parede, porta fechada ou carga alta no meio do caminho tiram o inimigo da abordagem.
  * São três faixas, uma logo depois da outra:
  *
  * 1. **Raio de abordagem** (até `surrenderRange`): se rende.
@@ -356,18 +357,22 @@ export interface EscapeRoll extends EscapeCheck {
 
 /**
  * Quem se rende, quem rola o teste de fuga e quem corre sem rolar se o agente em `from`
- * iniciar uma abordagem. Rendidos e fugidos não contam; quem já está em alerta, sim.
+ * iniciar uma abordagem. Rendidos e fugidos não contam; quem já está em alerta, sim. Com
+ * `walls`, só entra quem está em linha de visão direta (sem parede, porta fechada ou carga
+ * alta no meio).
  */
 export function resolveApproach(
   from: HexCoord,
   enemies: readonly EnemyState[],
   zones: ApproachZones = BASE_APPROACH,
+  walls?: ReadonlySet<string>,
 ): { surrender: EnemyState[]; roll: EscapeCheck[]; flee: EnemyState[] } {
   const surrender: EnemyState[] = [];
   const roll: EscapeCheck[] = [];
   const flee: EnemyState[] = [];
   for (const e of enemies) {
     if (!canAct(e)) continue;
+    if (walls && !lineOfSight(from, e.hex, walls)) continue;
     const d = hexDistance(from, e.hex);
     if (d <= zones.surrenderRange) surrender.push(e);
     else if (d <= zones.rollRange) {

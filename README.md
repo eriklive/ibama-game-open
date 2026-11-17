@@ -88,7 +88,9 @@ enquadra todos eles. São três faixas, uma logo depois da outra:
 Sem bônus, as faixas são 1–2, 3–5 e 6. O painel mostra a conta (base · intimidação · grupo), as
 faixas e quantos se rendem, rolam e vão correr. Os números ficam em `APPROACH_RULES`
 (`src/app/game/enemies.ts`). O botão
-**Abordar** só aparece com algum suspeito dentro do raio de quem está na vez. A decisão fica em
+**Abordar** só aparece com algum suspeito dentro do raio de quem está na vez **e com acesso direto** a
+ele: parede, porta fechada ou carga alta no meio do caminho tiram o suspeito da abordagem (e das
+faixas pintadas). Um arrombamento recente soma **+1 de intimidação** (ver [Portas](#portas)). A decisão fica em
 dois botões separados: o carimbo **Abordar!** (embaixo, à direita; ✕ no controle) confirma e o
 botão **vermelho** de **Cancelar** (na esquerda; ○ no controle) desiste. Tocar no tabuleiro não
 faz nada nesse modo. O cinza é um passe de pós-processamento (`src/app/game/spotlight.ts`).
@@ -160,8 +162,9 @@ O terreno é desenhado em texto em `maps.ts` (`parseLayout`): `.` grama, `T` ár
 `_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio, `A` avião, a carga (ver abaixo), os suprimentos do garimpo (`R`) e os móveis da casa (`m`, `P`) — basta editar as linhas para mudar o mapa.
 O hangar (chapa ondulada, portão, teto em arco, postes e lâmpadas) e o avião são montados por código em
 `scenery.ts`. O **teto** (chapa, oitões e arcos) cobre o hangar visto de fora e some assim que um agente entra
-(o vão do portão já conta); a carga, o avião e as lâmpadas de dentro só são desenhados quando há um agente a até
-6 hexágonos do hangar (`structureView` em `maps.ts`). O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
+ou chega a até 2 hexágonos do portão ou de uma porta **aberta**: porta fechada mantém o teto e esconde o interior
+(ver [Portas](#portas)). A carga, o avião e as lâmpadas de dentro só são desenhados quando há um agente a até
+6 hexágonos do hangar e o teto está aberto (`structureView` em `maps.ts`). O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
@@ -173,7 +176,8 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
 
 - **Cômodo 1:** o **Garimpeiro Jô** come parado na mesa, **de costas para a entrada**. Ele não anda no
   turno inimigo, mas o cone de visão dele cobre a porta do cômodo 2: entre por trás e **aborde** (a até 2
-  hexágonos ele se rende). Quem passa pela porta do meio sem rendê-lo é avistado.
+  hexágonos ele se rende). A porta do meio está **trancada** (ver [Portas](#portas)); quem passa por ela
+  sem rendê-lo é avistado.
 - **Cômodo 2:** ao entrar (mesmo só de passagem), cada agente rola **percepção** uma vez — um **d20** que
   aparece numa ficha no canto esquerdo da tela. Tirando **mais que 6**, ele repara em algo na
   **prateleira** da parede do leste, que ganha uma lupa. O resultado fica na ficha até o jogador tocar
@@ -198,6 +202,52 @@ reparar num esconderijo. As regras dos testes ficam em `SEARCH_RULES` (`src/app/
 e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
 mesa (cobertura baixa) e `P` a prateleira (alta); os modelos são montados em `scenery.ts` (`buildHouse`).
 Um inimigo com rota de um ponto só fica parado; `facing` no mapa diz para onde ele olha.
+
+### Portas
+
+As portas comuns (um `D` sozinho no desenho do mapa) têm folha de verdade e quatro estados. Fechada,
+a porta bloqueia a passagem e a visão como uma parede. Fileiras de `D` (o portão do hangar) ficam
+sempre abertas.
+
+| Estado | Como passa |
+| --- | --- |
+| **Aberta** | Passa direto |
+| **Encostada** (fechada, sem tranca) | Abrir, pick lock (abre sozinha) ou arrombar tirando **3+** no d20 |
+| **Trancada** | Pick lock tirando a **fechadura** da porta (12 por padrão) ou arrombar tirando **12+** |
+| **Bloqueada** | Nunca abre (até ser desbloqueada): dá para tentar, mas nunca passa |
+
+- Colado numa porta fechada, ela ganha um **losango amarelo**. Tocar na porta (ou no papel **Porta**, ou
+  □ no controle) abre o **menu da porta**: a câmera gira 45° e aproxima até enquadrar a porta e o agente,
+  a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Pick lock** e **Abrir**.
+  A ficha que depende de rolagem traz o **d20** com o número a tirar; as outras, um círculo vazio.
+- **Arrombar** é um chute: o agente encosta, o d20 gira na ficha da esquerda e para quando o pé bate. Se
+  passar, a porta abre com força para dentro, bate na parede e fica **arrombada** (aberta para sempre); se
+  não, só treme. Arrombar uma porta que **não estava trancada** faz o inimigo mais perto (a até 4
+  hexágonos) olhar para o agente e soltar uma fala num balão ("Precisava disso não, senhor.", "Pô, a porta
+  tava aberta!").
+- **Arrombar com sucesso** (a porta cede) assusta quem está do outro lado:
+  - a **equipe toda** ganha **+1 de intimidação** (alcance da abordagem) por **5 turnos**, contando o
+    atual. A fita no topo mostra o bônus e quantos turnos faltam;
+  - quem está **no cômodo arrombado** a até **3 hexágonos** da porta se **rende na hora**, a não ser que
+    resista: rola um d20 e precisa tirar **19** (colado na porta), **18** (a 2) ou **17** (a 3). Quem
+    resiste entra em alerta e tenta correr;
+  - quem está **mais longe** no cômodo tenta correr, mas só se tiver **atitude**: d20 **mais que 12**.
+    Sem atitude, fica parado onde está;
+  - cada rolagem aparece na ficha do d20 (o verde é sempre o que é bom para a equipe). Chutar uma porta
+    que já estava aberta não assusta ninguém (só rende a fala do morador).
+- **Pick lock** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
+  dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0).
+- **Abrir** empurra a folha: só abre a encostada.
+- Porta **fechada** (encostada, trancada ou bloqueada) mantém o **telhado** no lugar e o interior escondido,
+  mesmo com o agente colado nela. O telhado só sai quando a porta abre (ou com alguém lá dentro).
+- Nas portas, passa quem tira **pelo menos** o número (12 = 12 ou mais).
+- No aeroporto: a entrada da casa está encostada; a divisória, trancada; nos fundos do hangar, a porta do
+  oeste está trancada (fechadura 10) e a do leste, bloqueada (`doorStates` no mapa; sem entrada, a porta
+  começa encostada).
+
+As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testadas), as folhas e o indicador em
+`door-view.ts`. A biblioteca de clipes não tem chute: a perna é dobrada à mão por cima do `idle`
+(`CharacterRig.pose`); o pick lock usa o `crouch`.
 
 ### Missão principal: queimar o avião e os suprimentos
 
@@ -272,7 +322,8 @@ símbolo correspondente.
 | Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
 | ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
 | ○ | Cancela |
-| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo ou inspecionar) |
+| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, inspecionar ou abrir o menu da porta) |
+| No menu da porta | ✕ arromba, □ pick lock, △ abre, ○ volta |
 | L3 | Encerrar a operação (depois de queimar o avião) |
 | △ | Passar a vez |
 | Share | Agrupar / desagrupar |

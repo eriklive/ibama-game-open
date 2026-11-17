@@ -243,4 +243,13 @@ describe('abordagem', () => {
     expect(r.flee).toEqual([]);
     expect(canAct(at('x', 1, 1, 'surrendered'))).toBe(false);
   });
+
+  it('abordagem: parede ou porta fechada no meio tira o inimigo (só acesso direto)', () => {
+    const from = { col: 5, row: 5 };
+    const rules = approachZones(2);
+    const near = spawnEnemy({ id: 'perto', name: 'perto', patrol: [{ col: 5, row: 7 }] });
+    const walls = new Set([hexKey({ col: 5, row: 6 })]);
+    expect(resolveApproach(from, [near], rules).surrender).toHaveLength(1);
+    expect(resolveApproach(from, [near], rules, walls).surrender).toHaveLength(0);
+  });
 });

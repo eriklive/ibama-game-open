@@ -114,8 +114,10 @@ export function approachRulesFor(
   loadout: Loadout,
   grouped: boolean,
   rules: Pick<typeof APPROACH_RULES, 'surrenderRange' | 'rollBand' | 'fleeBand'> = APPROACH_RULES,
+  /** Intimidação extra de fora da ficha (o arrombamento dá +1 à equipe por alguns turnos). */
+  extra = 0,
 ): ApproachZones {
-  const bonus = statBreakdown(loadout, 'intimidacao', grouped).total;
+  const bonus = statBreakdown(loadout, 'intimidacao', grouped).total + extra;
   return approachZones(rules.surrenderRange + bonus, rules);
 }
 

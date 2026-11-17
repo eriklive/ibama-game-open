@@ -26,6 +26,7 @@ import {
   canAct,
   facingBetween,
   isBorder,
+  lineOfSight,
   onBoard,
   planFlee,
   planPatrol,
@@ -37,13 +38,31 @@ import {
   visionHexes,
 } from '../../game/enemies';
 import { HiddenItem, SEARCH_RULES, beats, canReach, entersRoom } from '../../game/search';
+import {
+  BREAK_IN_RULES,
+  BreakInRoll,
+  DOOR_REACTIONS,
+  DOOR_RULES,
+  Door,
+  DoorAction,
+  applyDoor,
+  doorChance,
+  doorNeed,
+  isOpen,
+  nextToDoor,
+  resolveBreakIn,
+  resolveDoor,
+  roomBehind,
+  rollsDie,
+  spawnDoors,
+} from '../../game/door';
 import { BURN_RULES, Burnable, burnTarget, seeFire } from '../../game/burn';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
+import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../game/stats';
 
@@ -54,7 +73,7 @@ const MISSION_DEADLINE = 5;
  * `checking`: rolando um d20 (percepção, inspecionar) — nada mais anda até o dado parar.
  * `over`: a operação foi encerrada (fica o relatório na tela).
  */
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'ending' | 'enemy' | 'over';
+type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'ending' | 'enemy' | 'over';
 
 /** Inspeção em close-up: quem procura, onde e o resultado do d20 (quando parar). */
 interface SearchView {
@@ -73,16 +92,46 @@ interface SearchView {
 interface CheckView {
   /** Um por teste: um teste novo recria a ficha (e relança o dado). */
   id: number;
-  kind: 'notice' | 'find';
+  /** Título da ficha ("Percepção", "Arrombar"…). */
+  kicker: string;
   who: string;
-  /** Passa com mais que isto. */
-  target: number;
+  /** O que precisa tirar ("precisa de mais que 6", "precisa de 12 ou mais"). */
+  need: string;
+  /** Carimbo de quando passa e de quando não passa. */
+  passText: string;
+  failText: string;
+  /** Face já sorteada (portas): o dado cai nela, em `duration` ms (a hora do impacto do chute). */
+  value?: number;
+  duration?: number;
   /** Resultado final; `null` enquanto rola. */
   result: number | null;
   pass: boolean | null;
   /** O resultado já foi visto e o jogo espera o **Continuar**. */
   waiting?: boolean;
 }
+
+/** Uma linha do menu da porta (as fichas da direita). */
+interface DoorOption {
+  action: DoorAction;
+  name: string;
+  /** Valor no d20 (`Infinity` = rola e nunca passa); `0` sem rolagem; `null` não dá. */
+  need: number | null;
+  rolls: boolean;
+  /** Linha de baixo: o que precisa e o porquê. */
+  note: string;
+  tone: 'need' | 'free' | 'never';
+  /** Movimento gasto ("1 mov."). */
+  cost?: string;
+  disabled: boolean;
+  label: string;
+}
+
+const DOOR_STATE_LABEL: Record<Door['state'], string> = {
+  aberta: 'Aberta',
+  encostada: 'Encostada',
+  trancada: 'Trancada',
+  bloqueada: 'Bloqueada',
+};
 
 /** "Fulano", "Fulano e Beltrano", "Fulano, Beltrano e Sicrano". */
 const namesOf = (es: readonly EnemyState[]): string => {
@@ -121,11 +170,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly map: GameMap | undefined = findMap(inject(ActivatedRoute).snapshot.paramMap.get('mapId'));
   protected readonly characters = CHARACTERS;
   /** Paredes, árvores, avião e carga alta: bloqueiam passagem e visão. */
-  private readonly walls = this.map ? blockedHexes(this.map) : new Set<string>();
+  private readonly fixedWalls = this.map ? blockedHexes(this.map) : new Set<string>();
   /** Carga baixa: bloqueia passagem; esconde da visão só quem está colado nela. */
   private readonly lowCover = this.map ? lowCoverHexes(this.map) : new Set<string>();
-  /** Tudo o que ninguém atravessa (paredes e toda a carga). */
-  private readonly solid = new Set([...this.walls, ...this.lowCover]);
+  /** Portas comuns (ver `door.ts`): fechadas, bloqueiam passagem e visão como parede. */
+  protected readonly doors = signal<ReadonlyMap<string, Door>>(this.initialDoors());
+  private readonly closedDoors = computed(
+    () => new Set([...this.doors()].filter(([, d]) => !isOpen(d)).map(([k]) => k)),
+  );
+  /** O que bloqueia a visão: paredes e afins, mais as portas fechadas. */
+  private readonly walls = computed(() => new Set([...this.fixedWalls, ...this.closedDoors()]));
+  /** Tudo o que ninguém atravessa (paredes, toda a carga e as portas fechadas). */
+  private readonly solid = computed(() => new Set([...this.fixedWalls, ...this.lowCover, ...this.closedDoors()]));
   /** Onde se joga: o círculo da missão (ou o retângulo do mapa de teste). */
   private readonly area = this.map ? playArea(this.map) : rectArea(0, 0);
   protected readonly diceSides = MOVE_DICE.sides;
@@ -209,6 +265,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const hex = this.pad() ? this.cursor() : null;
       this.board?.setCursor(hex);
     });
+    // losango amarelo nas portas fechadas coladas no agente da vez (tocar nelas abre o menu)
+    effect(() => {
+      const free = !this.approaching() && !this.burning() && !this.grouping() && !this.selected();
+      const keys = free ? this.nearDoors().filter((d) => !isOpen(d)).map((d) => hexKey(d.hex)) : [];
+      this.board?.setDoorHints(keys);
+    });
   }
 
   /** Símbolo do botão do controle para uma ação (✕, ○, □, △ no DualShock 4). */
@@ -278,6 +340,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly check = signal<CheckView | null>(null);
   /** Quem espera o jogador fechar a ficha (**Continuar**, ✕). */
   private checkDone?: () => void;
+  /** Some com a ficha do d20 das portas (essas não esperam o Continuar: a cena da porta segue). */
+  private doorCheckTimer?: ReturnType<typeof setTimeout>;
   /** A ficha como lista (0 ou 1 item), para o `@for` recriar o d20 a cada teste novo. */
   protected readonly checks = computed(() => {
     const c = this.check();
@@ -321,6 +385,81 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const noticed = this.noticed();
     const found = this.found();
     return (this.map?.hidden ?? []).find((h) => noticed.has(h.id) && !found.has(h.id) && canReach(from, h.spot)) ?? null;
+  });
+
+  // ---------- portas ----------
+
+  /**
+   * Arrombamento recente: a equipe ganha intimidação até o começo deste turno (rodada).
+   * `0` = sem bônus. Ver `BREAK_IN_RULES`.
+   */
+  protected readonly breakInUntil = signal(0);
+  /** Intimidação extra da equipe agora (o arrombamento assusta por alguns turnos). */
+  protected readonly breakInBoost = computed(() =>
+    this.round() < this.breakInUntil() ? BREAK_IN_RULES.intimidation : 0,
+  );
+  /** Turnos que ainda restam do bônus do arrombamento (contando o atual). */
+  protected readonly breakInLeft = computed(() => Math.max(0, this.breakInUntil() - this.round()));
+
+  /** Porta com o menu aberto (câmera de cena, fichas na direita). */
+  protected readonly doorKey = signal<string | null>(null);
+  /** Animação de porta em andamento: as fichas ficam travadas. */
+  protected readonly doorBusy = signal(false);
+  protected readonly doorStateLabel = DOOR_STATE_LABEL;
+
+  /** Portas coladas no agente da vez (dá para interagir). */
+  protected readonly nearDoors = computed<Door[]>(() => {
+    if (this.phase() !== 'moving-choice' || this.viewingOther()) return [];
+    const from = this.positions().get(this.active().id);
+    if (!from) return [];
+    return [...this.doors().values()].filter((d) => nextToDoor(from, d.hex));
+  });
+  /** A porta que o botão "Porta" abre: a fechada primeiro. */
+  protected readonly nearDoor = computed<Door | null>(
+    () => this.nearDoors().find((d) => !isOpen(d)) ?? this.nearDoors()[0] ?? null,
+  );
+  protected readonly openDoor = computed<Door | null>(() => {
+    const k = this.doorKey();
+    return k ? (this.doors().get(k) ?? null) : null;
+  });
+  /** Fichas do menu da porta: arrombar, pick lock e abrir. */
+  protected readonly doorOptions = computed<DoorOption[]>(() => {
+    const door = this.openDoor();
+    if (!door) return [];
+    const busy = this.doorBusy();
+    const open = isOpen(door);
+    const st = door.state;
+    const option = (action: DoorAction, name: string, note: string, extra: Partial<DoorOption> = {}): DoorOption => {
+      const need = doorNeed(action, door);
+      const rolls = rollsDie(need);
+      const tone = need === null || need === Infinity ? 'never' : rolls ? 'need' : 'free';
+      const line = rolls && need !== Infinity ? `precisa de ${need}+ · ${note}` : note;
+      const chance = rolls && need !== Infinity ? ` (${Math.round(doorChance(need) * 100)}% de chance)` : '';
+      return {
+        action, name, need, rolls, tone, note: line, disabled: busy, ...extra,
+        label: `${name}: ${rolls ? (need === Infinity ? 'rola o d20, mas nunca passa' : `rola o d20, precisa de ${need} ou mais${chance}`) : 'sem rolagem'}, ${note}${extra.cost ? `, gasta ${extra.cost} de movimento` : ''}`,
+      };
+    };
+    const noMoves = this.movesLeft() < DOOR_RULES.pickCost;
+    return [
+      option(
+        'arrombar',
+        'Arrombar',
+        st === 'bloqueada' && !door.broken ? 'nunca passa' : open ? 'já está aberta' : st === 'encostada' ? 'sem tranca, chama atenção' : 'porta trancada',
+      ),
+      option(
+        'pick',
+        'Pick lock',
+        open ? 'já está aberta' : noMoves ? 'sem movimento' : st === 'bloqueada' ? 'nunca passa' : st === 'trancada' ? `fechadura ${door.lock}` : 'precisa de 0, abre sozinha',
+        { cost: `${DOOR_RULES.pickCost} mov.`, disabled: busy || open || noMoves },
+      ),
+      option(
+        'abrir',
+        'Abrir',
+        open ? 'já dá para passar' : st === 'encostada' ? 'só empurrar' : st === 'trancada' ? 'está trancada' : 'está bloqueada',
+        { disabled: busy || open },
+      ),
+    ];
   });
 
   /** O que já aconteceu e decide os objetivos (rendidos, achados, queimados). */
@@ -393,10 +532,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected fieldStats(c: Character): { vel: number; int: number; range: number } {
     const loadout = this.roster.loadout(c.id);
     const grouped = this.group().has(c.id);
+    const boost = this.breakInBoost();
     return {
       vel: statBreakdown(loadout, 'velocidade', grouped).total,
-      int: statBreakdown(loadout, 'intimidacao', grouped).total,
-      range: approachRulesFor(loadout, grouped).surrenderRange,
+      int: statBreakdown(loadout, 'intimidacao', grouped).total + boost,
+      range: approachRulesFor(loadout, grouped, APPROACH_RULES, boost).surrenderRange,
     };
   }
   /** Velocidade do agente da vez que entra na rolagem (sem o grupo, que aparece à parte). */
@@ -416,6 +556,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       base: APPROACH_RULES.surrenderRange,
       int: statBreakdown(loadout, 'intimidacao', false).total,
       group: grouped ? GROUP_RULES.approachBonus : 0,
+      door: this.breakInBoost(),
       total: this.activeApproach().surrenderRange,
       zones: this.activeApproach(),
     };
@@ -466,13 +607,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * (ver `approachRulesFor` em `stats.ts`).
    */
   protected readonly activeApproach = computed(() =>
-    approachRulesFor(this.roster.loadout(this.active().id), this.grouped()),
+    approachRulesFor(this.roster.loadout(this.active().id), this.grouped(), APPROACH_RULES, this.breakInBoost()),
   );
   /** Quem se renderia, quem rolaria o teste de fuga e quem correria se o agente da vez abordasse agora. */
   protected readonly approachPlan = computed(() => {
     const from = this.positions().get(this.active().id);
+    // só quem o agente alcança direto (sem parede nem porta fechada no meio)
     return from
-      ? resolveApproach(from, this.enemies(), this.activeApproach())
+      ? resolveApproach(from, this.enemies(), this.activeApproach(), this.walls())
       : { surrender: [], roll: [], flee: [] };
   });
   protected readonly canApproach = computed(() => this.approachCount() > 0);
@@ -513,7 +655,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ...[...this.positions()]
         .filter(([id]) => id !== leader && !(group.has(leader) && group.has(id)))
         .map(([, h]) => hexKey(h)),
-      ...this.solid,
+      ...this.solid(),
       ...this.onBoardEnemies().map((e) => hexKey(e.hex)),
     ]);
     return reachableHexes(from, this.movesLeft(), this.area, blocked);
@@ -561,6 +703,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       },
     );
     this.board.setBurnTargets(this.map.burnables ?? []);
+    this.board.setDoors(this.doors(), true);
     this.refreshVision();
     this.startTurn();
     this.stopPad = this.gamepad.listen({
@@ -576,6 +719,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.clearTimers();
     clearTimeout(this.noticeTimer);
     clearInterval(this.statsTicker);
+    removeEventListener('resize', this.onDoorResize);
+    clearTimeout(this.doorCheckTimer);
     this.board?.dispose();
   }
 
@@ -635,7 +780,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected endTurn(): void {
-    if (['walking', 'checking', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
+    if (['walking', 'checking', 'door', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
     this.clearTimers();
     this.phase.set('ending');
     this.closeApproach();
@@ -797,7 +942,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const map = this.map;
     const enemy = this.enemy(enemyId);
     if (!map || !enemy) return false;
-    const who = spotted(enemy, agents, this.area, this.walls, this.lowCover);
+    const who = spotted(enemy, agents, this.area, this.walls(), this.lowCover);
     if (!who) return false;
     const agent = agents.get(who)!;
     // vira para quem viu
@@ -828,6 +973,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     if (this.grouping()) {
       this.pickRally(hex, true);
+      return;
+    }
+    // porta fechada: colado nela, abre o menu; de longe, avisa
+    const door = hex && this.doors().get(hexKey(hex));
+    if (door && !isOpen(door)) {
+      if (this.viewingOther()) this.focusCharacter(this.active().id);
+      if (this.nearDoors().includes(door)) this.openDoorMenu(door);
+      else this.say('Chegue colado na porta para interagir com ela', 'info');
       return;
     }
     if (this.viewingOther()) this.focusCharacter(this.active().id);
@@ -1165,10 +1318,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * O resultado fica na tela até o jogador tocar em **Continuar** (ou ✕); só então o jogo
    * segue. Devolve se passou (mais que `target`), ou `null` se a partida foi recomeçada.
    */
-  private async rollCheck(kind: CheckView['kind'], who: string, target: number): Promise<boolean | null> {
+  private async rollCheck(kind: 'notice' | 'find', who: string, target: number): Promise<boolean | null> {
     const epoch = this.epoch;
     const rolled = new Promise<number>((done) => (this.checkRolled = done));
-    this.check.set({ id: ++this.checkSeq, kind, who: this.nameOf(who), target, result: null, pass: null });
+    this.check.set({
+      id: ++this.checkSeq,
+      kicker: kind === 'notice' ? 'Percepção' : 'Inspecionar',
+      who: this.nameOf(who),
+      need: `precisa de mais que ${target}`,
+      passText: kind === 'notice' ? 'Percebeu algo!' : 'Achou!',
+      failText: kind === 'notice' ? 'Não percebeu' : 'Nada ainda',
+      result: null,
+      pass: null,
+    });
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
     const result = await rolled;
     if (this.destroyed || this.epoch !== epoch) return null;
@@ -1184,6 +1346,243 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     await closed;
     if (this.destroyed || this.epoch !== epoch) return null;
     return pass;
+  }
+
+  // ---------- portas: menu e ações ----------
+
+  /** Largura das fichas da direita no menu da porta (igual ao CSS de `.door-sheet`). */
+  private doorPanelWidth(): number {
+    const w = this.canvasRef().nativeElement.clientWidth || innerWidth;
+    return (w <= 640 ? Math.min(205, w * 0.54) : Math.min(300, w * 0.4)) + 14;
+  }
+
+  private readonly onDoorResize = (): void => this.board?.setDoorFocusOffset(this.doorPanelWidth() / 2);
+
+  /** Abre o menu da porta: a câmera gira e aproxima, a HUD some e as fichas entram na direita. */
+  protected openDoorMenu(door: Door | null = this.nearDoor()): void {
+    if (!door || this.phase() !== 'moving-choice' || !this.board) return;
+    this.closeApproach();
+    this.closeGrouping();
+    this.closeBurn();
+    this.focusCharacter(this.active().id);
+    this.selected.set(null);
+    this.board.setSelected(null);
+    this.board.setReachable([]);
+    this.phase.set('door');
+    this.doorKey.set(hexKey(door.hex));
+    this.board.focusDoor(door.hex, this.active().id, this.doorPanelWidth() / 2);
+    addEventListener('resize', this.onDoorResize);
+  }
+
+  /** Fecha o menu da porta e volta ao movimento (ou passa a vez, sem movimento). */
+  protected closeDoorMenu(): void {
+    if (this.phase() !== 'door' || this.doorBusy()) return;
+    this.doorKey.set(null);
+    this.board?.releaseDoorFocus();
+    removeEventListener('resize', this.onDoorResize);
+    this.afterMove();
+  }
+
+  /**
+   * Faz a ação na porta com animação: **arrombar** é um chute (o d20 gira na ficha e para
+   * quando o pé bate); **pick lock** agacha, rola enquanto mexe na fechadura e levanta, dê
+   * certo ou não; **abrir** empurra a folha. Uma porta sem tranca arrombada faz o inimigo
+   * mais perto comentar.
+   */
+  protected async doorAction(action: DoorAction): Promise<void> {
+    const door = this.openDoor();
+    const board = this.board;
+    if (!door || !board || this.phase() !== 'door' || this.doorBusy()) return;
+    const need = doorNeed(action, door);
+    if (action === 'pick' && (need === null || this.movesLeft() < DOOR_RULES.pickCost)) return;
+    if (action === 'abrir' && isOpen(door)) return;
+    const epoch = this.epoch;
+    const stale = () => this.destroyed || this.epoch !== epoch;
+    const id = this.active().id;
+    const roll = rollDie(DOOR_RULES.die);
+    const out = resolveDoor(action, door, roll);
+    this.doorBusy.set(true);
+    this.movesLeft.update((n) => n - out.cost);
+    const settle = (mode: 'swing' | 'slam') => {
+      this.doors.update((m) => new Map(m).set(hexKey(door.hex), applyDoor(door, out)));
+      board.setDoors(this.doors());
+      board.pushDoor(door.hex, id, mode);
+      this.refreshVision();
+      // no arrombamento, quem está do lado de lá só reage depois do susto (ver `breakIn`)
+      if (mode !== 'slam') this.checkAllSpotted(this.positions());
+    };
+    try {
+      if (action === 'abrir') {
+        await board.stepToDoor(id, door.hex, 0.75);
+        if (stale()) return;
+        if (out.opened) {
+          settle('swing');
+          this.say('Porta aberta', 'info');
+        } else {
+          board.pushDoor(door.hex, id, 'rattle');
+          await this.wait(260);
+          board.pushDoor(door.hex, id, 'rattle');
+          this.say(door.state === 'trancada' ? 'Trancada. Tente pick lock ou arrombar' : 'Bloqueada: não abre', 'alert');
+        }
+        await this.wait(450);
+      } else if (action === 'pick') {
+        await board.stepToDoor(id, door.hex, 0.55);
+        if (stale()) return;
+        board.crouchAtDoor(id, true);
+        await this.wait(450);
+        if (out.rolled) {
+          const reveal = this.startDoorCheck('Pick lock', this.nameOf(id), this.needText(need!), 'Destrancou!', 'Não deu', roll, 1300);
+          await this.wait(1300); // mexendo na fechadura
+          if (stale()) return;
+          reveal(roll, out.pass);
+          if (out.opened) {
+            await this.wait(250);
+            settle('swing');
+          } else board.pushDoor(door.hex, id, 'rattle');
+        } else {
+          await this.wait(300);
+          settle('swing');
+          this.say('Sem tranca: abriu sozinha', 'info');
+        }
+        await this.wait(500);
+        // deu certo ou não, levanta
+        board.crouchAtDoor(id, false);
+        await this.wait(450);
+      } else {
+        await board.stepToDoor(id, door.hex, 1.05);
+        if (stale()) return;
+        const reveal = out.rolled
+          ? this.startDoorCheck('Arrombar', this.nameOf(id), this.needText(need!), 'Arrombou!', door.state === 'bloqueada' ? 'Não cedeu' : 'Aguentou', roll, 950)
+          : null;
+        if (reveal) await this.wait(500);
+        await board.kick(id, () => {
+          if (stale()) return;
+          reveal?.(roll, out.pass);
+          if (out.pass) settle('slam');
+          else board.pushDoor(door.hex, id, 'rattle');
+          this.gamepad.rumble(out.pass ? 1 : 0.6, 0.5, 220);
+          this.haptics.vibrate(SETTLE_PATTERN);
+        });
+        if (stale()) return;
+        if (out.reaction) this.reactToBreakIn(door.hex, id);
+        if (out.opened) {
+          await this.wait(400);
+          if (!(await this.breakIn(door.hex, id, stale))) return;
+        }
+        await this.wait(400);
+      }
+      if (stale()) return;
+      await board.stepBack(id);
+    } finally {
+      if (!stale()) this.doorBusy.set(false);
+    }
+  }
+
+  /**
+   * Põe a ficha do d20 da porta na tela: o dado 3D cai já em `value` (o resultado sorteado) e
+   * leva `duration` ms para parar, a mesma hora em que a ação resolve (no chute, o impacto).
+   * A função devolvida pinta o dado de verde ou vermelho e carimba.
+   */
+  private startDoorCheck(
+    kicker: string,
+    who: string,
+    need: string,
+    passText: string,
+    failText: string,
+    value: number,
+    duration: number,
+  ): (result: number, pass: boolean) => void {
+    clearTimeout(this.doorCheckTimer);
+    this.checkRolled = undefined;
+    this.check.set({ id: ++this.checkSeq, kicker, who, need, passText, failText, value, duration, result: null, pass: null });
+    if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
+    return (result, pass) => {
+      this.check.update((c) => c && { ...c, result, pass });
+      this.haptics.vibrate(SETTLE_PATTERN);
+      this.doorCheckTimer = setTimeout(() => this.check.update((c) => (c?.waiting ? c : null)), 3200);
+    };
+  }
+
+  private needText(need: number): string {
+    return need === Infinity ? 'nunca passa' : `precisa de ${need} ou mais`;
+  }
+
+  /**
+   * Depois de arrombar: a equipe ganha intimidação por alguns turnos, e cada inimigo do
+   * cômodo arrombado rola o seu d20 (ver `BREAK_IN_RULES`): perto da porta, só não se rende
+   * quem resiste; mais longe, só corre quem tem atitude. Na ficha, o verde é sempre o que é
+   * bom para a equipe (rendeu, ficou parado). Devolve `false` se a partida foi recomeçada.
+   */
+  private async breakIn(doorHex: HexCoord, agentId: string, stale: () => boolean): Promise<boolean> {
+    const map = this.map;
+    const board = this.board;
+    if (!map || !board) return true;
+    this.breakInUntil.set(this.round() + BREAK_IN_RULES.rounds);
+    const rect = map.structures?.find((st) => inStructure(doorHex, st.rect))?.rect;
+    const agent = this.positions().get(agentId);
+    const rolls: BreakInRoll[] =
+      rect && agent
+        ? resolveBreakIn(
+            doorHex,
+            roomBehind(doorHex, agent, rect, new Set([...map.walls.map(hexKey), ...this.closedDoors()])),
+            this.enemies(),
+            () => rollDie(DOOR_RULES.die),
+          )
+        : [];
+    for (const r of rolls) {
+      const e = r.enemy;
+      const resist = r.test === 'resist';
+      const reveal = this.startDoorCheck(
+        resist ? 'Resistir à rendição' : 'Atitude para correr',
+        e.name,
+        resist ? `resiste com ${r.need} ou mais` : `corre com mais que ${r.need}`,
+        resist ? 'Rendido!' : 'Ficou parado',
+        resist ? 'Resistiu: vai correr' : 'Vai correr',
+        r.roll,
+        1000,
+      );
+      board.focusHex(e.hex);
+      await this.wait(1000);
+      if (stale()) return false;
+      reveal(r.roll, r.outcome !== 'flee');
+      const facing = facingBetween(e.hex, doorHex);
+      board.setEnemyFacing(e.id, facing);
+      board.startleEnemy(e.id);
+      if (r.outcome === 'surrender') {
+        this.updateEnemy(e.id, { status: 'surrendered', facing });
+        board.setEnemySurrendered(e.id, true);
+      } else if (r.outcome === 'flee') {
+        this.updateEnemy(e.id, { status: 'alert', facing });
+        board.setEnemyAlert(e.id, true);
+      } else this.updateEnemy(e.id, { facing });
+      this.refreshVision();
+      await this.wait(1100);
+      if (stale()) return false;
+    }
+    this.checkAllSpotted(this.positions());
+    const said = (o: BreakInRoll['outcome']) => rolls.filter((r) => r.outcome === o).map((r) => r.enemy);
+    const parts = [
+      said('surrender').length && `${namesOf(said('surrender'))} se ${said('surrender').length === 1 ? 'rendeu' : 'renderam'}`,
+      said('flee').length && `${namesOf(said('flee'))} vai correr`,
+      said('stay').length && `${namesOf(said('stay'))} ficou parado`,
+    ].filter(Boolean);
+    this.say(
+      `Porta arrombada! Equipe +${BREAK_IN_RULES.intimidation} de intimidação por ${BREAK_IN_RULES.rounds} turnos.` +
+        (parts.length ? ` ${parts.join('; ')}.` : ''),
+      'alert',
+    );
+    return true;
+  }
+
+  /** Arrombou uma porta sem tranca: o inimigo mais perto (que esteja vendo) comenta. */
+  private reactToBreakIn(doorHex: HexCoord, agentId: string): void {
+    const witness = this.onBoardEnemies()
+      .filter((e) => hexDistance(e.hex, doorHex) <= DOOR_RULES.witnessRange)
+      .sort((a, b) => hexDistance(a.hex, doorHex) - hexDistance(b.hex, doorHex))
+      .find((e) => this.board?.enemyHeadOnScreen(e.id));
+    if (!witness) return;
+    this.board?.enemyLookAt(witness.id, agentId);
+    this.board?.speak(witness.id, DOOR_REACTIONS[Math.floor(Math.random() * DOOR_REACTIONS.length)]);
   }
 
   /** Fecha a ficha do d20 (**Continuar** ou ✕) e deixa o jogo seguir. */
@@ -1245,10 +1644,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private paintApproachZones(): { surrender: string[]; roll: string[]; flee: string[] } | null {
     const from = this.positions().get(this.active().id);
     if (!from) return null;
+    const walls = this.walls();
     const ring = (min: number, max: number) =>
       hexesInRange(from, max, this.area)
-        .filter((h) => !this.solid.has(hexKey(h)))
+        .filter((h) => !this.solid().has(hexKey(h)))
+        .filter((h) => lineOfSight(from, h, walls))
         .filter((h) => hexDistance(from, h) > min)
+        .filter((h) => lineOfSight(from, h, walls))
         .map(hexKey);
     const rules = this.activeApproach();
     const zones = {
@@ -1449,6 +1851,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.check.set(null);
     this.dropSearch();
     this.board?.setClue(null);
+    this.doorKey.set(null);
+    this.doorBusy.set(false);
+    this.breakInUntil.set(0);
+    clearTimeout(this.doorCheckTimer);
+    this.board?.releaseDoorFocus();
+    this.doors.set(this.initialDoors());
+    this.board?.setDoors(this.doors(), true);
     this.burned.set(new Set());
     this.closeBurn();
     this.debrief.set(null);
@@ -1489,6 +1898,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (b === 'options') this.padHelp.update((v) => !v);
       return;
     }
+    // menu da porta: ○ volta; ✕ arromba, □ pick lock, △ abre
+    if (this.phase() === 'door') {
+      const act: Partial<Record<PadButton, DoorAction>> = { cross: 'arrombar', square: 'pick', triangle: 'abrir' };
+      const option = this.doorOptions().find((o) => o.action === act[b]);
+      if (b === 'circle') this.closeDoorMenu();
+      else if (option && !option.disabled) void this.doorAction(option.action);
+      return;
+    }
     switch (b) {
       case 'cross':
         if (this.search()?.pass === false && this.movesLeft() >= SEARCH_RULES.inspectCost) this.retryInspect();
@@ -1527,6 +1944,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else if (this.canApproach()) this.startApproach();
         else if (this.burnable()) this.startBurn();
         else if (this.inspectable()) this.startInspect();
+        else if (this.nearDoor()) this.openDoorMenu();
         break;
       case 'l3':
         this.openDebrief();
@@ -1562,7 +1980,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Anda o cursor um hexágono; sobre um destino alcançável, já mostra o caminho (como o 1º toque). */
   private moveCursor(dir: Stick): void {
     const map = this.map;
-    if (!map || !this.board || this.phase() === 'enemy' || this.approaching() || this.burning() || this.aiming() || this.debrief()) return;
+    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'door' || this.approaching() || this.burning() || this.aiming() || this.debrief()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
     const next = neighborToward(from, dir);
@@ -1609,6 +2027,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(this.selected(), this.selectedPath());
   }
 
+  private initialDoors(): Map<string, Door> {
+    return spawnDoors(this.map?.doors ?? [], this.map?.doorStates);
+  }
+
   private initialEnemies(): EnemyState[] {
     return (this.map?.enemies ?? []).map(spawnEnemy);
   }
@@ -1643,13 +2065,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Paredes, carga e inimigos no tabuleiro: o que bloqueia os agentes (sem contar os outros agentes). */
   private enemyWalls(): Set<string> {
-    return new Set([...this.solid, ...this.onBoardEnemies().map((e) => hexKey(e.hex))]);
+    return new Set([...this.solid(), ...this.onBoardEnemies().map((e) => hexKey(e.hex))]);
   }
 
   /** Hexágonos que um inimigo não pode atravessar: paredes, agentes e os outros inimigos. */
   private blockedFor(enemyId: string): Set<string> {
     return new Set([
-      ...this.solid,
+      ...this.solid(),
       ...[...this.positions().values()].map(hexKey),
       ...this.onBoardEnemies().filter((e) => e.id !== enemyId).map((e) => hexKey(e.hex)),
     ]);
@@ -1662,7 +2084,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const keys = this.enemies()
       .filter((e) => e.status === 'patrol')
       .flatMap((e) =>
-        visionHexes(e, this.area, this.walls, ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, this.lowCover).map(hexKey),
+        visionHexes(e, this.area, this.walls(), ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, this.lowCover).map(hexKey),
       );
     this.board?.setVision(keys);
   }

@@ -1,4 +1,4 @@
-<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming()">
+<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming()" [class.door-focus]="phase() === 'door'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
 
   <!-- Topo: fita crepe com a linha do tempo -->
@@ -14,6 +14,11 @@
         </span>
         <span class="op">Op. {{ map?.name }}</span>
       </div>
+      @if (breakInBoost()) {
+        <span class="boost-tag" data-testid="break-in-boost">
+          Arrombamento: equipe +{{ breakInBoost() }} intimidação · {{ breakInLeft() }} {{ breakInLeft() === 1 ? 'turno' : 'turnos' }}
+        </span>
+      }
       <ol class="timeline" [attr.aria-label]="'Linha do tempo: turno ' + round() + ' de ' + deadline + '. No turno ' + deadline + ' o carro foge.'">
         @for (t of timeline; track t) {
           <li class="box" [class.final]="t === deadline" [class.done]="t <= round()" aria-hidden="true">
@@ -162,7 +167,7 @@
         </span>
         <span class="photo-name">{{ c.name }}</span>
         @let fs = fieldStats(c);
-        <span class="photo-stats" aria-hidden="true" [class.boosted]="inGroup(c)" data-testid="photo-stats">
+        <span class="photo-stats" aria-hidden="true" [class.boosted]="inGroup(c) || breakInBoost() > 0" data-testid="photo-stats">
           <span>vel {{ signed(fs.vel) }}</span>
           <span>int {{ signed(fs.int) }}</span>
           @if (onTurn(c)) { <span>alc. {{ fs.range }}</span> }
@@ -229,18 +234,66 @@
     </div>
   }
 
-  <!-- Teste de d20 (percepção): uma ficha na lateral; o jogo espera o Continuar -->
+  <!-- Menu da porta: a câmera gira e aproxima; as ações ficam em fichas na direita -->
+  @if (phase() === 'door' && openDoor(); as door) {
+    <button type="button" class="paper-btn door-back" [disabled]="doorBusy()" (click)="closeDoorMenu()" aria-label="Voltar ao tabuleiro" data-testid="door-back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+    </button>
+    <aside class="door-sheet" aria-label="Ações da porta" data-testid="door-sheet">
+      <div class="door-head">
+        <span class="door-kicker">Porta · {{ active().name }}</span>
+        <h2 class="door-name">Porta de madeira</h2>
+      </div>
+      <span class="door-state" [class]="'door-state st-' + (door.broken ? 'aberta' : door.state)" data-testid="door-state">
+        {{ door.broken ? 'Arrombada' : doorStateLabel[door.state] }}
+      </span>
+      <ul class="door-opts">
+        @for (o of doorOptions(); track o.action; let i = $index) {
+          <li>
+            <button type="button" class="door-opt" [style.--i]="i" [style.--tilt]="['-1deg', '.8deg', '-.6deg'][i]" [disabled]="o.disabled" [attr.aria-label]="o.label" [attr.data-testid]="'door-' + o.action" (click)="doorAction(o.action)">
+              <span class="door-slot" [class.none]="!o.rolls" aria-hidden="true">
+                @if (o.rolls) {
+                  <span class="d20" [class.never]="o.tone === 'never'">
+                    <svg viewBox="0 0 100 100">
+                      <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
+                      <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
+                    </svg>
+                    <span class="d20-value">{{ o.tone === 'never' ? '✕' : o.need }}</span>
+                  </span>
+                }
+                @if (o.cost) { <span class="door-cost">{{ o.cost }}</span> }
+              </span>
+              <span class="door-text">
+                <span class="door-opt-name">{{ o.name }}</span>
+                <span class="door-opt-need" [class]="'door-opt-need ' + o.tone">{{ o.note }}</span>
+              </span>
+              @if (pad()) {
+                <span class="pad-glyph" aria-hidden="true">{{ glyph(o.action === 'arrombar' ? 'confirm' : o.action === 'pick' ? 'approach' : 'endTurn') }}</span>
+              }
+            </button>
+          </li>
+        }
+      </ul>
+    </aside>
+  }
+
+  <!-- Teste de d20 (percepção, portas): uma ficha na lateral; a percepção espera o Continuar -->
   @for (ck of checks(); track ck.id) {
     <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
-      <span class="check-kicker">{{ ck.kind === 'notice' ? 'Percepção' : 'Inspecionar' }} · d20</span>
+      <span class="check-kicker">{{ ck.kicker }} · d20</span>
       <span class="check-who">{{ ck.who }}</span>
-      <app-d20 class="check-die" aria-hidden="true" [tone]="ck.pass === null ? 'gold' : ck.pass ? 'pass' : 'fail'" (rolled)="checkDieRolled($event)" />
+      <app-d20
+        class="check-die"
+        aria-hidden="true"
+        [value]="ck.value"
+        [duration]="ck.duration ?? 1200"
+        [tone]="ck.pass === null ? 'gold' : ck.pass ? 'pass' : 'fail'"
+        (rolled)="checkDieRolled($event)" />
       @if (ck.result !== null) { <span class="check-value" data-testid="check-value">{{ ck.result }}</span> }
-      <span class="check-need">precisa de mais que {{ ck.target }}</span>
+      <span class="check-need">{{ ck.need }}</span>
       @if (ck.pass !== null) {
-        <span class="check-result" data-testid="check-result">
-          @if (ck.kind === 'notice') { {{ ck.pass ? 'Percebeu algo!' : 'Não percebeu' }} } @else { {{ ck.pass ? 'Achou!' : 'Nada ainda' }} }
-        </span>
+        <span class="check-result" data-testid="check-result">{{ ck.pass ? ck.passText : ck.failText }}</span>
       } @else {
         <span class="sr-only">Rolando o d20…</span>
       }
@@ -264,7 +317,7 @@
         <strong>Abordagem de {{ active().name }}</strong>
         @let ap = approachParts();
         <span class="small approach-range" data-testid="approach-range">
-          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}@if (ap.door) { · arrombamento +{{ ap.door }}}
         </span>
         <span class="small approach-range" data-testid="approach-bands">
           Rolagem {{ ap.zones.surrenderRange + 1 }}–{{ ap.zones.rollRange }} (d20 ≥ {{ approachRules.escapeDC }} escapa) · fuga até {{ ap.zones.radius }}
@@ -414,6 +467,19 @@
           (click)="inspect()">
           <span class="stencil">Inspecionar</span>
           <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
+        </button>
+      }
+      <!-- Porta: colado numa porta, abre o menu (arrombar, pick lock, abrir) -->
+      @if (nearDoor(); as door) {
+        <button
+          type="button"
+          class="paper door-btn"
+          [attr.aria-label]="'Porta ' + doorStateLabel[door.broken ? 'aberta' : door.state].toLowerCase() + ': arrombar, pick lock ou abrir'"
+          data-testid="door"
+          (click)="openDoorMenu(door)">
+          <span class="stencil">Porta</span>
+          <span class="typed">{{ door.broken ? 'arrombada' : doorStateLabel[door.state].toLowerCase() }}</span>
+          @if (pad() && !canApproach() && !burnable() && !inspectable()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
       <!-- Queimar: colado no avião ou na pilha de suprimentos (encerra a vez) -->

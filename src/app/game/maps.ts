@@ -1,5 +1,6 @@
 import type { Burnable } from './burn';
 import { ModelDef, MODELS } from './character-model';
+import type { DoorSpec } from './door';
 import { EnemySpawn } from './enemies';
 import type { Objective } from './mission';
 import type { HiddenItem } from './search';
@@ -43,6 +44,11 @@ export interface GameMap {
   walls: { col: number; row: number }[];
   /** Hexágonos de porta (`D` no esboço): passagens nas paredes das estruturas. */
   doors?: HexCoord[];
+  /**
+   * Como começa cada porta comum (`D` sozinho; chave de `hexKey`). Sem entrada aqui, a porta
+   * começa encostada. Fileiras de `D` são portões e ficam sempre abertas (ver `door.ts`).
+   */
+  doorStates?: Readonly<Record<string, DoorSpec>>;
   /** Hexágonos com árvores: bloqueiam passagem e visão, como as paredes. */
   trees?: HexCoord[];
   /** Chão de cada hexágono (chave de `hexKey`); sem isso, o tabuleiro azul de teste. */
@@ -59,8 +65,8 @@ export interface GameMap {
   /**
    * Estruturas cobertas (hangar, casa…). Toda estrutura com telhado segue as mesmas regras
    * (ver `structureView`): o telhado some com um agente dentro ou perto de uma das portas
-   * (`D` dentro do retângulo dela), e o que se passa lá dentro fica escondido enquanto o
-   * telhado estiver no lugar.
+   * **abertas** (`D` dentro do retângulo dela; porta fechada não revela nada), e o que se passa
+   * lá dentro fica escondido enquanto o telhado estiver no lugar.
    */
   structures?: Structure[];
   /** Coisas escondidas: aparecem com um teste de percepção e se acham inspecionando o móvel. */
@@ -287,6 +293,14 @@ export const MAPS: GameMap[] = [
     name: 'Aeroporto',
     subtitle: 'Missão circular · pista de terra, hangar e mata',
     ...AEROPORTO,
+    // a casa: a entrada está só encostada; a divisória, trancada. No hangar, a porta dos
+    // fundos do oeste está trancada (fechadura mais fácil) e a do leste, bloqueada
+    doorStates: {
+      '29,29': { state: 'encostada' },
+      '35,29': { state: 'trancada', lock: 12 },
+      '14,4': { state: 'trancada', lock: 10 },
+      '29,4': { state: 'bloqueada' },
+    },
     structures: [
       { kind: 'hangar', rect: { cols: [11, 32], rows: [4, 18] } },
       { kind: 'house', rect: { cols: [29, 41], rows: [26, 32] } },

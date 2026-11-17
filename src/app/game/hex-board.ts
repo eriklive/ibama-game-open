@@ -9,6 +9,8 @@ import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
 import { StaticShadow, castsMovingShadow } from './static-shadow';
 import { HexTile, TileField } from './tile-field';
+import { Door, commonDoors, seeThroughDoors } from './door';
+import { DoorPush, DoorViews } from './door-view';
 import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
 
 const HEX_SIZE = 1;
@@ -241,6 +243,20 @@ export class HexBoard {
    * (carga, avião, lâmpadas, móveis) só aparece com um agente por perto.
    */
   private readonly structures: { rect: HexRect; doors: HexCoord[]; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
+  /** Folhas das portas comuns (ver `DoorViews`). */
+  private doorViews?: DoorViews;
+  /**
+   * Câmera de cena da porta: gira 45° e aproxima, enquadrando a porta e o agente, com a
+   * vista deslocada para a esquerda das fichas de ação. `cineBlend` vai de 0 (câmera de
+   * sempre) a 1 (cena) e volta.
+   */
+  private cine: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number } | null = null;
+  private cineLast: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number } | null = null;
+  private cineBlend = 0;
+  /** Estado das portas comuns: fechadas, mantêm o telhado e escondem o interior. */
+  private doorStates: ReadonlyMap<string, Door> = new Map();
+  /** Falas em balão sobre a cabeça dos inimigos (some sozinha em `until`, no relógio do tabuleiro). */
+  private readonly speeches = new Map<string, { sprite: THREE.Sprite; until: number }>();
   /** Pista de algo escondido: uma lupa flutuando sobre o móvel percebido. */
   private clue?: { sprite: THREE.Sprite; hex: HexCoord };
   /** Modelo do avião e da carga por hexágono: o que escurece quando pega fogo. */
@@ -793,6 +809,297 @@ export class HexBoard {
     if (u.rig) u.rig.play(this.restClip(u), 0.3);
   }
 
+  // ---------- portas ----------
+
+  /** Estado das portas (cadeado, tábuas, aberta ou fechada). `instant` pula a animação. */
+  setDoors(doors: ReadonlyMap<string, Door>, instant = false): void {
+    this.doorViews?.setStates(doors, instant);
+    this.doorStates = doors;
+    // abrir ou fechar uma porta muda o que se vê da estrutura: reavalia no próximo quadro
+    this.structureKey = '';
+  }
+
+  /** Portas com o indicador de interação (o losango amarelo). */
+  setDoorHints(keys: Iterable<string>): void {
+    this.doorViews?.setHints(keys);
+  }
+
+  /** Empurra a folha da porta a partir do agente (ela abre para o outro lado). */
+  pushDoor(door: HexCoord, unitId: string, mode: DoorPush): void {
+    const u = this.units.get(unitId);
+    if (u) this.doorViews?.push(hexKey(door), u.group.position, mode);
+  }
+
+  /**
+   * Cena da porta: a câmera gira 45° e aproxima até enquadrar a porta e o agente.
+   * `offsetPx` empurra a cena para a esquerda (metade da largura das fichas na direita).
+   */
+  focusDoor(door: HexCoord, unitId: string, offsetPx: number): void {
+    const u = this.units.get(unitId);
+    const center = this.doorViews?.centerOf(hexKey(door));
+    if (!u || !center) return;
+    const agent = u.group.position.clone().setY(0);
+    // em retrato sobra pouca largura à esquerda das fichas: o quadro puxa mais para o agente
+    const target = center.clone().lerp(agent, this.camera.aspect < 1 ? 0.6 : 0.35).setY(1.75);
+    // de que lado da porta o agente está; a câmera fica do lado dele, 45° para um lado
+    const n = agent.clone().sub(center).setY(0);
+    if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
+    n.normalize();
+    const turn = (v: THREE.Vector3, a: number) =>
+      new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), 0, -v.x * Math.sin(a) + v.z * Math.cos(a));
+    // gira 45° a partir da câmera de sempre (que olha de +Z), para o lado em que a porta aparece de frente
+    const home = new THREE.Vector3(0, 0, 1);
+    const options = [turn(home, Math.PI / 4), turn(home, -Math.PI / 4)].sort((a, b) => b.dot(n) - a.dot(n));
+    const dir = options[0].dot(n) > 0.1 ? options[0] : turn(n, Math.PI / 4);
+    this.cine = { target, dir, offsetPx };
+    this.cineLast = this.cine;
+    this.focusId = unitId;
+  }
+
+  /** Volta para a câmera de sempre. */
+  releaseDoorFocus(): void {
+    this.cine = null;
+  }
+
+  /** Atualiza o deslocamento da cena (a largura das fichas mudou, por exemplo, ao girar o celular). */
+  setDoorFocusOffset(offsetPx: number): void {
+    if (this.cine) this.cine.offsetPx = offsetPx;
+  }
+
+  /** O agente sai do centro do hexágono e para colado na porta, de frente para ela. */
+  async stepToDoor(unitId: string, door: HexCoord, dist: number): Promise<void> {
+    const u = this.units.get(unitId);
+    const spot = u && this.doorViews?.frontOf(hexKey(door), u.group.position, dist);
+    if (!u || !spot) return;
+    const center = this.doorViews!.centerOf(hexKey(door))!;
+    u.yaw = Math.atan2(center.x - u.group.position.x, center.z - u.group.position.z);
+    await this.slide(u, spot, 'walk', 1.7);
+  }
+
+  /** Volta ao centro do hexágono, de costas (sem tirar os olhos da porta). */
+  async stepBack(unitId: string): Promise<void> {
+    const u = this.units.get(unitId);
+    if (!u) return;
+    await this.slide(u, this.worldOf(u.hex), 'walk', 1.7, true);
+  }
+
+  /** Agacha (pick lock) ou levanta. */
+  crouchAtDoor(unitId: string, down: boolean): void {
+    const u = this.units.get(unitId);
+    u?.rig?.play(down ? 'crouch' : this.restClip(u), down ? 0.35 : 0.45);
+  }
+
+  /**
+   * Chute frontal: recolhe o joelho, estica a perna na porta (`onImpact` roda na hora em
+   * que o pé bate) e volta. A biblioteca de clipes não tem chute: a perna é dobrada à mão
+   * por cima do `idle` (ver `CharacterRig.pose`).
+   */
+  async kick(unitId: string, onImpact: () => void): Promise<void> {
+    const u = this.units.get(unitId);
+    if (!u) return onImpact();
+    const rig = u.rig;
+    const pose = rig?.pose ?? { thigh: 0, calf: 0, spine: 0 };
+    const pos = u.group.position;
+    const fwd = new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
+    const start = pos.clone();
+    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
+    // sem modelo, a peça dá um tranco para a frente no lugar do chute
+    await this.tween(260, (t) => {
+      const e = 1 - (1 - t) * (1 - t);
+      pose.thigh = lerp(0, -1.5, e);
+      pose.calf = lerp(0, 1.7, e);
+      pose.spine = lerp(0, -0.08, e);
+    });
+    await this.tween(90, () => undefined);
+    await this.tween(110, (t) => {
+      const e = t * t;
+      pose.thigh = lerp(-1.5, -1.42, e);
+      pose.calf = lerp(1.7, 0.05, e);
+      pose.spine = lerp(-0.08, -0.22, e);
+      pos.x = start.x + fwd.x * 0.14 * e;
+      pos.z = start.z + fwd.z * 0.14 * e;
+    });
+    onImpact();
+    await this.tween(160, () => undefined);
+    await this.tween(380, (t) => {
+      const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
+      pose.thigh = lerp(-1.42, 0, e);
+      pose.calf = lerp(0.05, 0, e);
+      pose.spine = lerp(-0.22, 0, e);
+      pos.x = start.x + fwd.x * 0.14 * (1 - e);
+      pos.z = start.z + fwd.z * 0.14 * (1 - e);
+    });
+    pose.thigh = pose.calf = pose.spine = 0;
+  }
+
+  /** Posição na tela (px, relativa ao canvas) de um ponto acima da cabeça do inimigo; `null` longe da tela. */
+  enemyHeadOnScreen(id: string): { x: number; y: number } | null {
+    const e = this.enemies.get(id);
+    if (!e || !e.group.visible) return null;
+    const p = e.group.position.clone();
+    p.y = e.signY + 0.15;
+    p.project(this.camera);
+    // um pouco fora do quadro (a cabeça acima da borda na cena da porta) ainda conta: o balão
+    // fica preso dentro da tela
+    if (p.z > 1 || Math.abs(p.x) > 1.4 || Math.abs(p.y) > 1.6) return null;
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const clamp = THREE.MathUtils.clamp;
+    return { x: clamp(((p.x + 1) / 2) * w, 90, w - 90), y: clamp(((1 - p.y) / 2) * h, 70, h - 10) };
+  }
+
+  /**
+   * Balão de fala sobre a cabeça do inimigo (bilhete de papel com letra de caneta, como a HUD),
+   * desenhado na cena: acompanha a cabeça e fica por cima de tudo. Some depois de `ms`.
+   */
+  speak(enemyId: string, text: string, ms = 3400): void {
+    const e = this.enemies.get(enemyId);
+    if (!e) return;
+    this.silence(enemyId);
+    const { texture, aspect } = this.speechTexture(text);
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true }));
+    const h = 0.8;
+    sprite.scale.set(h * aspect, h, 1);
+    sprite.center.set(0.5, 0);
+    // logo acima do chapéu (o "!" do alerta fica mais alto)
+    sprite.position.y = e.signY - 0.25;
+    sprite.renderOrder = 11;
+    e.group.add(sprite);
+    this.speeches.set(enemyId, { sprite, until: this.clock.elapsedTime + ms / 1000 });
+  }
+
+  /** Tira o balão de fala do inimigo. */
+  silence(enemyId: string): void {
+    const sp = this.speeches.get(enemyId);
+    if (!sp) return;
+    sp.sprite.removeFromParent();
+    sp.sprite.material.map?.dispose();
+    sp.sprite.material.dispose();
+    this.speeches.delete(enemyId);
+  }
+
+  /** Bilhete com rabinho e o texto em até duas linhas (Permanent Marker, a letra de caneta da HUD). */
+  private speechTexture(text: string): { texture: THREE.Texture; aspect: number } {
+    const font = '44px "Permanent Marker", "Comic Sans MS", cursive';
+    const c = document.createElement('canvas');
+    const g = c.getContext('2d');
+    const lines: string[] = [];
+    if (g) {
+      g.font = font;
+      // quebra em até duas linhas de no máximo ~420 px
+      let line = '';
+      for (const word of text.split(' ')) {
+        const next = line ? `${line} ${word}` : word;
+        if (line && g.measureText(next).width > 420) {
+          lines.push(line);
+          line = word;
+        } else line = next;
+      }
+      lines.push(line);
+    }
+    const textW = g ? Math.max(...lines.map((l) => g.measureText(l).width)) : 300;
+    const pad = 26;
+    const lineH = 54;
+    const tail = 26;
+    c.width = Math.ceil(textW + pad * 2);
+    c.height = Math.ceil(lines.length * lineH + pad * 1.4 + tail);
+    if (g) {
+      const w = c.width;
+      const boxH = c.height - tail;
+      g.fillStyle = 'rgba(0, 0, 0, 0.35)';
+      g.fillRect(6, 8, w - 6, boxH - 8);
+      g.fillStyle = '#f7f2e4';
+      g.fillRect(0, 0, w - 6, boxH - 8);
+      g.beginPath();
+      g.moveTo(w / 2 - 14, boxH - 9);
+      g.lineTo(w / 2 + 4, boxH - 9);
+      g.lineTo(w / 2 - 4, c.height - 2);
+      g.closePath();
+      g.fill();
+      g.fillStyle = '#23201a';
+      g.font = font;
+      g.textAlign = 'center';
+      g.textBaseline = 'top';
+      lines.forEach((l, i) => g.fillText(l, (w - 6) / 2, pad * 0.6 + i * lineH));
+    }
+    const texture = new THREE.CanvasTexture(c);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    return { texture, aspect: c.width / c.height };
+  }
+
+  /** Vira o inimigo para o agente (quem comenta o arrombamento olha para quem chutou). */
+  enemyLookAt(enemyId: string, unitId: string): void {
+    const e = this.enemies.get(enemyId);
+    const u = this.units.get(unitId);
+    if (!e || !u) return;
+    const d = u.group.position.clone().sub(e.group.position);
+    e.facingGoal = Math.atan2(d.z, d.x);
+  }
+
+  /** Anda em linha reta até `to` com um clipe; `backwards` mantém a direção e toca o clipe ao contrário. */
+  private async slide(u: UnitView, to: THREE.Vector3, clip: 'walk', speed: number, backwards = false): Promise<void> {
+    const from = u.group.position.clone();
+    const dist = Math.hypot(to.x - from.x, to.z - from.z);
+    if (dist < 0.02) return;
+    const rig = u.rig;
+    rig?.play(clip, 0.2);
+    rig?.setTimeScale(clip, backwards ? -1 : 1);
+    await this.tween((dist / speed) * 1000, (t) => {
+      u.group.position.x = from.x + (to.x - from.x) * t;
+      u.group.position.z = from.z + (to.z - from.z) * t;
+    });
+    rig?.setTimeScale(clip, 1);
+    rig?.play(this.restClip(u), 0.25);
+  }
+
+  /** Anima de 0 a 1 em `ms` (para na hora se o tabuleiro for desmontado). */
+  private tween(ms: number, fn: (t: number) => void): Promise<void> {
+    const start = performance.now();
+    return new Promise((resolve) => {
+      const step = (now: number) => {
+        const t = this.disposed || ms <= 0 ? 1 : Math.min(1, (now - start) / ms);
+        fn(t);
+        if (t < 1) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  /**
+   * Mistura a câmera com a da cena da porta (ver `focusDoor`), como a inspeção: ajusta a
+   * posição e `look`, desloca a vista para a esquerda das fichas e devolve a distância.
+   */
+  private blendCine(dt: number, look: THREE.Vector3, dist: number): number {
+    const goal = this.cine ? 1 : 0;
+    this.cineBlend += (goal - this.cineBlend) * (1 - Math.exp(-dt * 5));
+    if (Math.abs(goal - this.cineBlend) < 0.002) this.cineBlend = goal;
+    const c = this.cine ?? this.cineLast;
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    if (!c || this.cineBlend <= 0) {
+      if (this.camera.view?.enabled) this.camera.clearViewOffset();
+      return dist;
+    }
+    const e = this.cineBlend * this.cineBlend * (3 - 2 * this.cineBlend);
+    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
+    // perto o bastante para ver o chute, longe o bastante para caber quem está do outro lado
+    // da porta (e o balão de fala sobre a cabeça dele)
+    const near = 8.8 * Math.min(portrait, 2.1);
+    const pitch = THREE.MathUtils.degToRad(31);
+    const pos = c.target
+      .clone()
+      .addScaledVector(c.dir, Math.cos(pitch) * near)
+      .setY(c.target.y + Math.sin(pitch) * near);
+    this.camera.position.lerp(pos, e);
+    look.lerp(c.target, e);
+    const off = c.offsetPx * e;
+    if (off > 0.5) this.camera.setViewOffset(w, h, off, 0, w, h);
+    else if (this.camera.view?.enabled) this.camera.clearViewOffset();
+    return THREE.MathUtils.lerp(dist, near, e);
+  }
+
+
   dispose(): void {
     this.disposed = true;
     cancelAnimationFrame(this.frameId);
@@ -1004,6 +1311,11 @@ export class HexBoard {
       this.structures.push({ rect, doors: doorsOf(this.map, rect), roof, interior: lamps ? [lamps] : [] });
       this.addScenery(built);
     }
+    const common = commonDoors(this.map.doors ?? []);
+    if (common.length && this.structures.length) {
+      this.doorViews = new DoorViews(common, this.structures.map((st) => st.rect), HEX_SIZE);
+      this.scene.add(this.doorViews.group);
+    }
     const inHangar = (h: HexCoord): boolean => this.structures.some((st) => inStructure(h, st.rect));
     for (const h of walls) {
       const tile = this.tiles.get(hexKey(h));
@@ -1075,11 +1387,11 @@ export class HexBoard {
 
   /**
    * O hexágono fica debaixo de um telhado que está no lugar (nenhum agente dentro da
-   * estrutura nem perto de uma porta dela): o jogador não enxerga o que acontece ali.
+   * estrutura nem perto de uma porta aberta dela): o jogador não enxerga o que acontece ali.
    */
   isCovered(hex: HexCoord): boolean {
     const agents = [...this.units.values()].map((u) => u.hex);
-    return this.structures.some((st) => st.roof && inStructure(hex, st.rect) && structureView(st.rect, agents, st.doors).roof);
+    return this.structures.some((st) => st.roof && inStructure(hex, st.rect) && structureView(st.rect, agents, this.seeThrough(st.doors)).roof);
   }
 
   /** Põe o inimigo num hexágono na hora (sem animação), virado para onde ia. */
@@ -1105,10 +1417,16 @@ export class HexBoard {
     this.structureKey = key;
     const agents = [...this.units.values()].map((u) => u.hex);
     for (const st of this.structures) {
-      const view = structureView(st.rect, agents, st.doors);
+      const view = structureView(st.rect, agents, this.seeThrough(st.doors));
       if (st.roof) st.roof.visible = view.roof;
-      for (const o of st.interior) o.visible = view.interior;
+      // com o telhado no lugar, o interior nem é desenhado (nada vaza pelas frestas)
+      for (const o of st.interior) o.visible = view.interior && (!st.roof || !view.roof);
     }
+  }
+
+  /** Portas da estrutura que revelam o interior: só as abertas (e os portões). */
+  private seeThrough(doors: readonly HexCoord[]): HexCoord[] {
+    return seeThroughDoors(doors, this.doorStates);
   }
 
   /**
@@ -1783,6 +2101,7 @@ export class HexBoard {
     const look = new THREE.Vector3();
     let dist = this.updatePerspectiveCamera(dt, look);
     dist = this.blendInspect(dt, look, dist);
+    dist = this.blendCine(dt, look, dist);
     this.camera.lookAt(look);
 
     // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
@@ -1988,6 +2307,8 @@ export class HexBoard {
     }
 
     this.updateFires(t);
+    this.doorViews?.update(dt, t, this.camera);
+    for (const [id, sp] of this.speeches) if (t >= sp.until) this.silence(id);
 
     if (this.clue?.sprite.visible) {
       const tile = this.tiles.get(hexKey(this.clue.hex));
