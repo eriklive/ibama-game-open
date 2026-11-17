@@ -1873,6 +1873,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!(await this.typeOut(node.ask, 13, (t) => this.patchInterrogation({ agentLine: t }), alive))) return;
     const out = answer.outcome;
     if (!(await this.suspectSays(answer.line, { tell: out.tell, think: 600 }, epoch, iv.enemyId))) return;
+    // resistiu ao último nível: o agente fecha a insistência (sem cartão, sem resposta)
+    if (answer.closing) {
+      await this.wait(500);
+      if (!alive()) return;
+      this.patchInterrogation({ agentLine: '' });
+      if (!(await this.typeOut(answer.closing, 13, (t) => this.patchInterrogation({ agentLine: t }), alive))) return;
+    }
     this.fieldNotes.update((ns) => [
       ...ns,
       { id: ++this.noteSeq, suspect: iv.suspect, text: out.note, kind: noteKind(out), depth: answer.option.depth },

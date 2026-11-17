@@ -148,6 +148,11 @@ export interface RolledQuestion extends Visibility {
   fail: Outcome;
   /** Réplica (e, dentro dela, a tréplica): surge quando o NPC passa. */
   followUp?: FollowUpQuestion;
+  /**
+   * Fecho: fala conclusiva do agente, dita sozinha logo depois que o NPC resiste ao último nível
+   * da cadeia que rola. Não é cartão, não rola e o NPC não responde. Não aparece se ele cedeu.
+   */
+  closing?: string;
 }
 
 /** Pergunta da raiz da árvore (o que vai em `NpcClass.questions`). */
@@ -269,6 +274,8 @@ export interface Answer {
   passed: boolean | null;
   /** Réplica/tréplica liberada, se houver. */
   unlocked: QuestionOption | null;
+  /** Fecho da cadeia (`RolledQuestion.closing`): o NPC resistiu ao último nível. */
+  closing: string | null;
 }
 
 /** O nó da árvore na chave `key` ("2", "2.r", "2.r.r"); `null` se não existir. */
@@ -357,6 +364,7 @@ export function askQuestion(
         dc: null,
         passed: null,
         unlocked: null,
+        closing: null,
       },
     };
   }
@@ -371,6 +379,9 @@ export function askQuestion(
       ? { key: `${key}.r`, node: node.followUp, depth: option.depth + 1, done: false }
       : null;
   const drawn = drawLine(outcome.say, pools, rng);
+  // resistiu ao último nível que rola: o agente fecha a insistência
+  const last = !node.followUp || option.depth >= maxDepth || !isRolled(node.followUp);
+  const closing = pass && last && !unlocked ? (root.closing ?? null) : null;
   return {
     pools: drawn.usage,
     memory: { asked, unlocked: unlocked ? [...memory.unlocked, unlocked.key] : memory.unlocked },
@@ -382,6 +393,7 @@ export function askQuestion(
       dc,
       passed: pass,
       unlocked,
+      closing,
     },
   };
 }

@@ -29,9 +29,14 @@ import {
  * nível tem a **sua mentira** (`pass`), mas a **verdade é uma só**: o `fail` fica só na
  * pergunta da raiz e vale para a cadeia inteira. Cedendo em qualquer nível, o NPC dá essa
  * resposta e a cadeia acaba (réplica e tréplica nem aceitam `fail`). As falas da réplica e da
- * tréplica são o agente insistindo. Uma réplica/tréplica pode também ser **sem rolagem**
- * (`{ ask, answer }`): a fala do agente que fecha a insistência e a resposta fixa do NPC, sem
- * chance de ceder (ex.: a tréplica do caseiro em "De quem é essa arma?"). A intimidação do agente que conversa soma +1 à CD por ponto.
+ * tréplica são o agente insistindo.
+ *
+ * **Fecho (`closing`, na pergunta da raiz):** fala conclusiva do agente, dita sozinha logo depois
+ * que o NPC resiste ao último nível da cadeia que rola. Não é cartão, não rola, o NPC não
+ * responde e a cadeia termina; se ele cedeu, não aparece. Ex.: "De quem é essa arma?" do caseiro.
+ *
+ * Uma réplica/tréplica também pode ser **sem rolagem** (`{ ask, answer }`): pergunta e resposta
+ * fixa do NPC, sem chance de ceder (suporte pronto, sem uso por enquanto). A intimidação do agente que conversa soma +1 à CD por ponto.
  *
  * **Perguntas que surgem (ou somem) com o que a equipe descobre:**
  *
@@ -97,13 +102,15 @@ const GARIMPEIROS_ON_GUN: LinePool = {
 };
 
 /**
- * O caseiro: a arma é dele. Duas chances de ceder (pergunta e réplica), com duas evasivas e uma
- * verdade só: cedendo, confirma o dono e a pergunta some dos NPCs que ainda não a fizeram. A
- * tréplica é só a fala sarcástica do agente, sem rolagem; ele responde "…".
+ * O caseiro: a arma é dele. Três chances de ceder (pergunta, réplica e tréplica), com três
+ * evasivas e uma verdade só: cedendo, confirma o dono e a pergunta some dos NPCs que ainda não a
+ * fizeram. Resistindo à tréplica, o agente fecha com a fala sarcástica (`closing`).
  */
 const WHOSE_GUN_CASEIRO: RolledQuestion = {
   ...WHOSE_GUN,
   pass: { say: 'Sei não, senhor.', note: 'Diz não saber de quem é a arma.' },
+  // resistiu à tréplica: o agente fecha a insistência (sem cartão, sem rolagem, sem resposta)
+  closing: 'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
   fail: {
     say: '…É minha, doutor. É pra onça, juro.',
     note: 'A arma da prateleira é dele.',
@@ -116,10 +123,9 @@ const WHOSE_GUN_CASEIRO: RolledQuestion = {
       say: 'Pode ser de um dos meninos… eles vivem entrando aqui.',
       note: 'Diz que pode ser de um dos garimpeiros.',
     },
-    // a tréplica não rola: é o agente encerrando a insistência; ele só fica calado
     followUp: {
-      ask: 'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
-      answer: { say: '…', note: 'Mantém que a arma não é dele.' },
+      ask: 'Pensa bem antes de responder. Essa arma é de quem?',
+      pass: { say: 'Sei lá, doutor. Minha é que não é.', note: 'Mantém que a arma não é dele.' },
     },
   },
 };

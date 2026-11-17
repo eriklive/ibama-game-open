@@ -401,25 +401,39 @@ describe('perguntas que surgem (e somem) com pistas da missão', () => {
     expect(owns.outcome.clue).toBe(GUN_OWNER);
   });
 
-  it('caseiro: "De quem é essa arma?" com duas evasivas e uma verdade (pergunta ou réplica)', () => {
+  it('caseiro: "De quem é essa arma?" com três rolagens, três evasivas e uma verdade', () => {
     const asks3 = [
       WHOSE,
       'Não sabe de quem é a arma que tá dentro da sua casa?',
-      'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
+      'Pensa bem antes de responder. Essa arma é de quem?',
     ];
     let m = EMPTY_MEMORY;
-    const lines: string[] = [];
+    const res = [];
     for (const q of asks3) {
       const r = ask(caseiro, m, q, 20, { clues: ARMA });
-      lines.push(r.answer.line);
+      res.push(r.answer);
       m = r.memory;
     }
-    expect(lines).toEqual([
+    expect(res.map((a) => a.dc)).toEqual([8, 12, 14]);
+    expect(res.map((a) => a.line)).toEqual([
       'Sei não, senhor.',
       'Pode ser de um dos meninos… eles vivem entrando aqui.',
-      '…',
+      'Sei lá, doutor. Minha é que não é.',
     ]);
-    for (let level = 0; level < 2; level++) {
+    // o fecho só vem depois de resistir à última rolagem
+    expect(res.map((a) => a.closing)).toEqual([
+      null,
+      null,
+      'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
+    ]);
+    expect(res[2].unlocked).toBeNull();
+    expect(res[2].outcome.clue).toBeUndefined();
+    // nenhum cartão sobra na cadeia, e a pergunta segue aberta para os outros
+    expect(
+      dialogueOptions(caseiro, m, ARMA).filter((o) => o.key.startsWith('2') && !o.done),
+    ).toEqual([]);
+    expect(asks(piloto, EMPTY_MEMORY, ARMA)).toContain(WHOSE);
+    for (let level = 0; level < 3; level++) {
       let mem = EMPTY_MEMORY;
       let last;
       for (let i = 0; i <= level; i++) {
@@ -430,6 +444,8 @@ describe('perguntas que surgem (e somem) com pistas da missão', () => {
       expect(a.line, `nível ${level}`).toBe('…É minha, doutor. É pra onça, juro.');
       expect(a.outcome.clue).toBe(GUN_OWNER);
       expect(a.unlocked).toBeNull();
+      // cedeu: sem fecho
+      expect(a.closing, `nível ${level}`).toBeNull();
       // e fecha a pergunta para quem ainda não perguntou
       const after = new Set([...ARMA, GUN_OWNER]);
       expect(asks(piloto, EMPTY_MEMORY, after)).not.toContain(WHOSE);
@@ -437,28 +453,14 @@ describe('perguntas que surgem (e somem) com pistas da missão', () => {
     }
   });
 
-  it('caseiro: a tréplica da arma não rola, não confessa e não registra o dono', () => {
+  it('cadeias sem fecho não trazem fala conclusiva', () => {
     let m = EMPTY_MEMORY;
-    m = ask(caseiro, m, WHOSE, 20, { clues: ARMA }).memory;
-    m = ask(caseiro, m, 'Não sabe de quem é a arma que tá dentro da sua casa?', 20, {
-      clues: ARMA,
-    }).memory;
-    const tre = keyOf(
-      dialogueOptions(caseiro, m, ARMA),
-      'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
-    );
-    let rolled = false;
-    const r = askQuestion(caseiro, m, tre, { die: () => ((rolled = true), 1), clues: ARMA })!;
-    expect(rolled).toBe(false);
-    expect(r.answer.passed).toBeNull();
-    expect(r.answer.dc).toBeNull();
-    expect(r.answer.line).toBe('…');
-    expect(r.answer.outcome.note).toBe('Mantém que a arma não é dele.');
-    expect(r.answer.outcome.clue).toBeUndefined();
-    expect(r.answer.outcome.confess).toBeFalsy();
-    expect(r.answer.unlocked).toBeNull();
-    // a pergunta segue aberta para os outros
-    expect(asks(piloto, EMPTY_MEMORY, ARMA)).toContain(WHOSE);
+    let last;
+    for (const q of [CARGA, REPLICA, TREPLICA]) {
+      last = ask(piloto, m, q, 20);
+      m = last.memory;
+    }
+    expect(last!.answer.closing).toBeNull();
   });
 
   it('garimpeiros: falas de um pool compartilhado, sem repetição, e "Não sei." quando acaba', () => {
