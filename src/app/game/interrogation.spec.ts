@@ -35,6 +35,7 @@ import {
 import { MAPS } from './maps';
 import { objectiveState } from './mission';
 import { needsNoticeRoll } from './search';
+import { KEY_PANEL_ID, KEY_TAKEN, PLANE_LOCKED } from './plane';
 import { GUN_OWNER, MORE_PEOPLE, NPC_CLASSES, isMorePeople, npcClass } from './npc-dialogue';
 
 /** Dado viciado: devolve as faces na ordem (e repete a última). */
@@ -647,7 +648,8 @@ describe('dados de diálogo', () => {
 
   it('nos mapas, só o piloto (1) e o caseiro (2) têm cadeia de réplica', () => {
     const chains = (c: NpcClass) => c.questions.filter((q) => isRolled(q) && q.followUp).length;
-    expect([piloto, caseiro].map(chains)).toEqual([1, 2]);
+    // piloto: "o que carregava" e "onde está a chave"; caseiro: a arma e "tem arma na casa"
+    expect([piloto, caseiro].map(chains)).toEqual([2, 2]);
     expect(chains(garimpeiro)).toBe(0);
   });
 
@@ -675,5 +677,35 @@ describe('dados de diálogo', () => {
     expect([jo.name, jo.npc]).toEqual(['Caseiro Jô', 'caseiro']);
     expect(aeroporto.enemies.some((e) => e.hidden)).toBe(false);
     expect(spawnEnemy(jo).status).toBe('patrol');
+  });
+});
+
+describe('a chave do avião trancado', () => {
+  const asks = (cls: NpcClass, clues: string[]) =>
+    dialogueOptions(cls, EMPTY_MEMORY, new Set(clues)).map((o) => o.node.ask);
+  const piloto = NPC_CLASSES.piloto;
+  const garimpeiro = NPC_CLASSES.garimpeiro;
+
+  it('as perguntas só aparecem depois de achar o avião trancado e somem com a chave', () => {
+    for (const cls of [piloto, garimpeiro]) {
+      expect(asks(cls, [])).not.toContain('Onde está a chave?');
+      expect(asks(cls, [PLANE_LOCKED])).toContain('Onde está a chave?');
+      expect(asks(cls, [PLANE_LOCKED, KEY_TAKEN])).not.toContain('Onde está a chave?');
+    }
+  });
+
+  it('os ajudantes não sabem: resposta fixa "Não sei não."', () => {
+    const q = garimpeiro.questions.find((x) => x.ask === 'Onde está a chave?')!;
+    expect('answer' in q && q.answer.say).toBe('Não sei não.');
+  });
+
+  it('o piloto mente ("Não sei não.") e, cedendo, entrega o painel e o quadro de chaves', () => {
+    const q = piloto.questions.find((x) => x.ask === 'Onde está a chave?')!;
+    expect(isRolled(q)).toBe(true);
+    if (!isRolled(q) || !('fail' in q)) return;
+    expect(q.pass.say).toBe('Não sei não.');
+    expect(q.fail.say).toBe('No painel ali atrás.');
+    expect(q.fail.notices).toBe(KEY_PANEL_ID);
+    expect(q.followUp?.ask).toBe('O avião abre por digital? Cadê a chave?');
   });
 });

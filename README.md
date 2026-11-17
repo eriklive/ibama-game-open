@@ -348,6 +348,23 @@ As regras ficam em `BURN_RULES` (`src/app/game/burn.ts`) e os objetivos/resultad
 lista os alvos e a pilha é desenhada com `R` no texto (`buildCover` em `scenery.ts`). O fogo é montado em
 `hex-board.ts` (`ignite`, `clearFires`, `setBurnTargets`).
 
+### Avião trancado e quadro de chaves
+
+O avião do hangar está **trancado**; a chave fica no **quadro de chaves**, na parede do fundo do hangar
+(cobertura alta, `K` no esboço). Regras em `game/plane.ts`:
+
+- **Avião:** colado nele, aparece **Inspecionar** (no lugar de Queimar). O menu (como o das portas) tem
+  **Olhar dentro** e **Queimar**. Sem a chave, olhar dentro só dá um leve zoom out e o aviso "O avião está
+  trancado", e libera, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave).
+- **Diálogos:** os dois ajudantes do hangar (garimpeiros) respondem "Não sei não.". O piloto pode mentir
+  (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e, cedendo, diz
+  **"No painel ali atrás."**, o que faz a equipe reconhecer a chave no quadro.
+- **Quadro de chaves:** quem mexe nele rola **percepção** (d20, uma vez por agente): passando, vê a chave do avião
+  e escolhe **Pegar** ou **Deixar**; falhando, não vê nada. Não rola se alguém já tentou o avião, se o piloto contou
+  ou se alguém já viu a chave lá.
+- **Quem viu e deixou:** ao olhar dentro do avião trancado, esse agente comenta embaixo da tela, com o avatar
+  dele: "Eu vi uma chave no quadro dos fundos."
+
 ### Mundo semiaberto: área da missão
 
 No Aeroporto, a **missão é um círculo** de 26 hexágonos de raio em volta do meio do mapa, marcado

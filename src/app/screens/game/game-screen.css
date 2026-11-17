@@ -836,3 +836,32 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @media (prefers-reduced-motion: reduce) {
   .door-sheet, .door-opt, .door-state, .door-back, .door-btn { animation: none; }
 }
+
+/* ---------- avião trancado, quadro de chaves e fala embaixo da tela ---------- */
+.plane-btn { width: 94px; }
+.plane-btn .stencil { font-size: 13px; }
+.key-btn { width: 84px; }
+.key-slip { background: var(--postit); right: 108px; width: 150px; }
+.plane-note {
+  margin: 0; padding: 8px 10px;
+  background: var(--paper-light); box-shadow: var(--drop);
+  font-family: var(--marker); font-size: 14px; line-height: 1.25; color: var(--red-text);
+  transform: rotate(-1deg);
+  animation: slap .25s ease-out both;
+}
+.speech {
+  position: absolute; z-index: 5;
+  left: calc(14px + var(--safe-left)); bottom: calc(14px + var(--safe-bottom));
+  max-width: min(420px, calc(100% - 290px));
+  display: flex; align-items: flex-end; gap: 8px; padding: 6px 12px 6px 6px;
+  background: var(--paper-light); box-shadow: var(--drop);
+  font: inherit; text-align: left; cursor: pointer;
+  transform: rotate(-1deg);
+  animation: slap .25s ease-out both;
+}
+.speech-img { flex: none; width: 44px; height: 50px; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
+.speech-img svg { width: 40px; height: 46px; }
+.speech-text { font-family: var(--marker); font-size: 15px; line-height: 1.25; }
+.speech-text strong { display: block; font-family: var(--stencil); font-size: 12px; text-transform: uppercase; color: var(--red-text); font-weight: 700; }
+@media (max-width: 640px) { .speech { max-width: calc(100% - 28px); bottom: calc(168px + var(--safe-bottom)); } }
+@media (prefers-reduced-motion: reduce) { .plane-note, .speech { animation: none; } }

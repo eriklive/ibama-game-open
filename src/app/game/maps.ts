@@ -1,6 +1,7 @@
 import type { Burnable } from './burn';
 import { ModelDef, MODELS } from './character-model';
 import type { DoorSpec } from './door';
+import type { KeyPanel } from './plane';
 import { EnemySpawn } from './enemies';
 import type { Objective } from './mission';
 import type { HiddenItem } from './search';
@@ -71,6 +72,11 @@ export interface GameMap {
   structures?: Structure[];
   /** Coisas escondidas: aparecem com um teste de percepção e se acham inspecionando o móvel. */
   hidden?: HiddenItem[];
+  /**
+   * Quadro de chaves com a chave do avião (hexágono `K` do esboço, colado na parede). Mexer nele
+   * rola percepção para achar a chave; sem a chave o avião fica trancado (ver `plane.ts`).
+   */
+  keyPanel?: KeyPanel;
   /** O que a equipe pode queimar (o avião, os suprimentos do garimpo). */
   burnables?: Burnable[];
   /** Objetivos da missão (aparecem numa ficha na tela). */
@@ -119,6 +125,8 @@ export const CHARACTERS: Character[] = [
  * Móveis: `m` mesa (baixa, como os sacos) · `P` prateleira encostada na parede (alta)
  *
  * `R` suprimentos do garimpo (pilha alta de caixas, galões e mangueiras: dá para queimar)
+ *
+ * `K` quadro de chaves (alto, encostado na parede do fundo; ver `keyPanel`)
  */
 export function parseLayout(
   layout: readonly string[],
@@ -133,10 +141,10 @@ export function parseLayout(
   const ground = new Map<string, Ground>();
   const kinds: Record<string, Ground> = {
     '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron', '~': 'dirt',
-    B: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor', m: 'floor', P: 'floor', R: 'floor',
+    B: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor', m: 'floor', P: 'floor', R: 'floor', K: 'floor',
   };
   const coverKinds: Record<string, CoverKind> = {
-    B: 'crates', M: 'boxes', S: 'sacks', G: 'cages', m: 'table', P: 'shelf', R: 'supplies',
+    B: 'crates', M: 'boxes', S: 'sacks', G: 'cages', m: 'table', P: 'shelf', R: 'supplies', K: 'keys',
   };
   layout.forEach((line, row) => {
     if (line.length !== cols) throw new Error(`Linha ${row} do mapa tem ${line.length} colunas (esperado: ${cols})`);
@@ -169,6 +177,7 @@ export const COVER_HEIGHT: Record<CoverKind, 'high' | 'low'> = {
   table: 'low',
   shelf: 'high',
   supplies: 'high',
+  keys: 'high',
 };
 
 const coverOf = (map: GameMap, height: 'high' | 'low'): HexCoord[] =>
@@ -207,6 +216,8 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  * do oeste, que dá para a pista. No cômodo 1 o caseiro Jô come de costas para a entrada,
  * na mesa (`m`); no cômodo 2, a prateleira (`P`) na parede do leste esconde uma arma.
  *
+ * O avião fica **trancado**; a chave está no quadro de chaves (`K`), na parede do fundo.
+ *
  * A missão principal é queimar o **avião** e a pilha de **suprimentos do garimpo** (`R`), no
  * fundo do hangar, à direita de quem entra pelo portão.
  */
@@ -216,7 +227,7 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTT..........................TTTTTTTTT',
   'TTTTTTTTT.T......................T.TTTTTTTTT',
   'TTTTTTTTT..###D##############D###...TTTTTTTT',
-  'TTTTTTTTT..#____________________#..TTT.TTTTT',
+  'TTTTTTTTT..#________K___________#..TTT.TTTTT',
   'TTTTTT.....#____________________#.......TTTT',
   'TTTT....T..#_BMB_MB_____________#........TTT',
   'TTTTT...TT.#_S____S____RRR_____f#.TTT...TTTT',
@@ -312,6 +323,8 @@ export const MAPS: GameMap[] = [
       { kind: 'hangar', rect: { cols: [11, 32], rows: [4, 18] } },
       { kind: 'house', rect: { cols: [29, 41], rows: [26, 32] } },
     ],
+    // o quadro de chaves, no fundo do hangar (parede norte), com a chave do avião
+    keyPanel: { spot: { col: 20, row: 5 } },
     hidden: [
       {
         id: 'arma',
@@ -323,7 +336,8 @@ export const MAPS: GameMap[] = [
       },
     ],
     burnables: [
-      { id: 'aviao', name: 'o avião', short: 'avião', hexes: AEROPORTO.plane ?? [] },
+      // trancado: o menu de inspecionar (olhar dentro / queimar) em vez do botão de queimar
+      { id: 'aviao', name: 'o avião', short: 'avião', hexes: AEROPORTO.plane ?? [], inspect: true },
       {
         id: 'suprimentos',
         name: 'os suprimentos do garimpo',

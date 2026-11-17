@@ -178,3 +178,21 @@ describe('aeroporto: mundo semiaberto', () => {
     for (const key of Object.keys(map.doorStates ?? {})) expect(common.has(key), key).toBe(true);
   });
 });
+
+describe('aeroporto: avião trancado e quadro de chaves', () => {
+  const map = MAPS.find((m) => m.id === 'aeroporto')!;
+  const hangar = map.structures!.find((st) => st.kind === 'hangar')!.rect;
+
+  it('o quadro de chaves é carga alta colada na parede do fundo do hangar', () => {
+    const panel = map.keyPanel!;
+    expect(map.cover!.find((c) => c.col === panel.spot.col && c.row === panel.spot.row)?.kind).toBe('keys');
+    expect(panel.spot.row).toBe(hangar.rows[0] + 1);
+    expect(map.walls.some((w) => w.col === panel.spot.col && w.row === hangar.rows[0])).toBe(true);
+    expect(blockedHexes(map).has(hexKey(panel.spot))).toBe(true);
+  });
+
+  it('o avião não se queima direto: tem menu de inspecionar', () => {
+    expect(map.burnables!.find((b) => b.id === 'aviao')?.inspect).toBe(true);
+    expect(map.burnables!.find((b) => b.id === 'suprimentos')?.inspect).toBeUndefined();
+  });
+});

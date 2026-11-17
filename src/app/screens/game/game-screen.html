@@ -1,4 +1,4 @@
-<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door'">
+<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
 
   <!-- Topo: fita crepe com a linha do tempo -->
@@ -104,6 +104,16 @@
     <div class="telegram" [class.alert]="n.tone === 'alert'" role="status" aria-live="assertive" data-testid="notice">
       {{ n.text }}
     </div>
+  }
+
+  <!-- Fala de um agente embaixo da tela, com o avatar dele (toque para dispensar) -->
+  @if (speech(); as sp) {
+    <button type="button" class="speech" (click)="closeSpeech()" role="status" aria-live="polite" data-testid="speech">
+      <span class="speech-img" [style.background]="hexColor(sp.who)" aria-hidden="true">
+        <svg viewBox="0 0 24 24" [style.fill]="shade(sp.who)"><circle cx="12" cy="9" r="4.5" /><path d="M3 24c0-6 4-9.5 9-9.5s9 3.5 9 9.5z" /></svg>
+      </span>
+      <span class="speech-text"><strong>{{ sp.who.name }}</strong>“{{ sp.text }}”</span>
+    </button>
   }
 
   <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); espera o Fechar -->
@@ -281,6 +291,48 @@
     </aside>
   }
 
+  <!-- Menu do avião (inspecionar): a câmera aproxima; olhar dentro e queimar ficam em fichas na direita -->
+  @if (phase() === 'plane') {
+    <button type="button" class="paper-btn door-back" (click)="closePlaneMenu()" aria-label="Voltar ao tabuleiro" data-testid="plane-back">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+    </button>
+    <aside class="door-sheet" aria-label="Ações do avião" data-testid="plane-sheet">
+      <div class="door-head">
+        <span class="door-kicker">Inspecionar · {{ active().name }}</span>
+        <h2 class="door-name">Avião</h2>
+      </div>
+      <span class="door-state" [class]="'door-state st-' + (hasKey() ? 'aberta' : 'trancada')" data-testid="plane-state">
+        {{ hasKey() ? 'Chave na mão' : 'Trancado' }}
+      </span>
+      @if (planeNote(); as note) {
+        <p class="plane-note" role="status" aria-live="polite" data-testid="plane-note">{{ note }}</p>
+      }
+      <ul class="door-opts">
+        <li>
+          <button type="button" class="door-opt" style="--i: 0; --tilt: -1deg" data-testid="plane-look" aria-label="Olhar dentro do avião: sem rolagem" (click)="planeLook()">
+            <span class="door-slot none" aria-hidden="true"></span>
+            <span class="door-text">
+              <span class="door-opt-name">Olhar dentro</span>
+              <span class="door-opt-need free">{{ hasKey() ? 'tem a chave, abre' : 'sem a chave, está trancado' }}</span>
+            </span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+          </button>
+        </li>
+        <li>
+          <button type="button" class="door-opt" style="--i: 1; --tilt: .8deg" data-testid="plane-burn" aria-label="Queimar o avião: encerra a vez" (click)="planeBurnPick()">
+            <span class="door-slot none" aria-hidden="true"></span>
+            <span class="door-text">
+              <span class="door-opt-name">Queimar</span>
+              <span class="door-opt-need free">encerra a vez</span>
+            </span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('approach') }}</span> }
+          </button>
+        </li>
+      </ul>
+    </aside>
+  }
+
   <!-- Teste de d20 (percepção, portas): uma ficha na lateral; a percepção espera o Continuar -->
   @for (ck of checks(); track ck.id) {
     <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
@@ -372,6 +424,19 @@
       </button>
       <button type="button" class="paper side" (click)="cancelBurn()">
         <span class="stencil">Cancelar</span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+      </button>
+    } @else if (keyPrompt()) {
+      <div class="slip key-slip" role="status" aria-live="polite" data-testid="key-hint">
+        <strong>Uma chave com a etiqueta "AVIÃO"</strong>
+        <span class="small">Pegar a chave do avião?</span>
+      </div>
+      <button type="button" class="stamp confirm" (click)="takeKey()" data-testid="key-take">
+        <span class="stamp-ring"><span class="stamp-text">Pegar!</span></span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+      </button>
+      <button type="button" class="paper side" (click)="leaveKey()" data-testid="key-leave">
+        <span class="stencil">Deixar</span>
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
       </button>
     } @else if (grouping()) {
@@ -515,6 +580,31 @@
           <span class="stencil">Queimar</span>
           <span class="typed">{{ target.short }}</span>
           @if (pad() && !canApproach()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
+        </button>
+      }
+      <!-- Avião: colado nele, abre o menu de inspecionar (olhar dentro ou queimar) -->
+      @if (nearPlane(); as plane) {
+        <button
+          type="button"
+          class="paper burn plane-btn"
+          aria-label="Inspecionar o avião: olhar dentro ou queimar"
+          data-testid="plane"
+          (click)="openPlaneMenu()">
+          <span class="stencil">Inspecionar</span>
+          <span class="typed">{{ plane.short }}</span>
+          @if (pad() && !canApproach()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
+        </button>
+      }
+      <!-- Quadro de chaves: colado nele, procura a chave (percepção, se ninguém sabe qual é) -->
+      @if (nearPanel()) {
+        <button
+          type="button"
+          class="paper door-btn key-btn"
+          [attr.aria-label]="keySeen() ? 'Quadro de chaves: pegar a chave do avião' : 'Quadro de chaves: procurar a chave do avião (percepção, d20)'"
+          data-testid="key-panel"
+          (click)="touchKeyPanel()">
+          <span class="stencil">Chaves</span>
+          <span class="typed">{{ keySeen() ? 'pegar a do avião' : 'procurar · d20' }}</span>
         </button>
       }
       <!-- Abordar só aparece com suspeito no raio: o toque abre o modo de abordagem -->

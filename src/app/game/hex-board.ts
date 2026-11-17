@@ -289,9 +289,11 @@ export class HexBoard {
    * vista deslocada para a esquerda das fichas de ação. `cineBlend` vai de 0 (câmera de
    * sempre) a 1 (cena) e volta.
    */
-  private cine: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number } | null = null;
-  private cineLast: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number } | null = null;
+  private cine: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number; zoom: number } | null = null;
+  private cineLast: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number; zoom: number } | null = null;
   private cineBlend = 0;
+  /** Afastamento atual da cena (1 = padrão); acompanha `cine.zoom` devagar (ver `setCineZoom`). */
+  private cineZoom = 1;
   /** Estado das portas comuns: fechadas, mantêm o telhado e escondem o interior. */
   private doorStates: ReadonlyMap<string, Door> = new Map();
   /** Falas em balão sobre a cabeça dos inimigos (some sozinha em `until`, no relógio do tabuleiro). */
@@ -941,23 +943,42 @@ export class HexBoard {
    * `offsetPx` empurra a cena para a esquerda (metade da largura das fichas na direita).
    */
   focusDoor(door: HexCoord, unitId: string, offsetPx: number): void {
-    const u = this.units.get(unitId);
     const center = this.doorViews?.centerOf(hexKey(door));
-    if (!u || !center) return;
+    if (center) this.focusAt(center, unitId, offsetPx, 1);
+  }
+
+  /**
+   * Cena de um objeto grande (o avião): como `focusDoor`, enquadrando os hexágonos dele e o
+   * agente. `zoom` afasta a câmera (1 = padrão).
+   */
+  focusSpot(hexes: readonly HexCoord[], unitId: string, offsetPx: number, zoom = 1): void {
+    if (!hexes.length) return;
+    this.cineZoom = zoom;
+    this.focusAt(this.centerOf(hexes), unitId, offsetPx, zoom);
+  }
+
+  /** Afasta (ou aproxima) a câmera da cena aberta, devagar. */
+  setCineZoom(zoom: number): void {
+    if (this.cine) this.cine.zoom = zoom;
+  }
+
+  private focusAt(center: THREE.Vector3, unitId: string, offsetPx: number, zoom: number): void {
+    const u = this.units.get(unitId);
+    if (!u) return;
     const agent = u.group.position.clone().setY(0);
     // em retrato sobra pouca largura à esquerda das fichas: o quadro puxa mais para o agente
-    const target = center.clone().lerp(agent, this.camera.aspect < 1 ? 0.6 : 0.35).setY(1.75);
-    // de que lado da porta o agente está; a câmera fica do lado dele, 45° para um lado
+    const target = center.clone().setY(0).lerp(agent, this.camera.aspect < 1 ? 0.6 : 0.35).setY(1.75);
+    // de que lado do alvo o agente está; a câmera fica do lado dele, 45° para um lado
     const n = agent.clone().sub(center).setY(0);
     if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
     n.normalize();
     const turn = (v: THREE.Vector3, a: number) =>
       new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), 0, -v.x * Math.sin(a) + v.z * Math.cos(a));
-    // gira 45° a partir da câmera de sempre (que olha de +Z), para o lado em que a porta aparece de frente
+    // gira 45° a partir da câmera de sempre (que olha de +Z), para o lado em que o alvo aparece de frente
     const home = new THREE.Vector3(0, 0, 1);
     const options = [turn(home, Math.PI / 4), turn(home, -Math.PI / 4)].sort((a, b) => b.dot(n) - a.dot(n));
     const dir = options[0].dot(n) > 0.1 ? options[0] : turn(n, Math.PI / 4);
-    this.cine = { target, dir, offsetPx };
+    this.cine = { target, dir, offsetPx, zoom };
     this.cineLast = this.cine;
     this.focusId = unitId;
   }
@@ -1186,7 +1207,8 @@ export class HexBoard {
     const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
     // perto o bastante para ver o chute, longe o bastante para caber quem está do outro lado
     // da porta (e o balão de fala sobre a cabeça dele)
-    const near = 8.8 * Math.min(portrait, 2.1);
+    this.cineZoom += (c.zoom - this.cineZoom) * (1 - Math.exp(-dt * 2.5));
+    const near = 8.8 * Math.min(portrait, 2.1) * this.cineZoom;
     const pitch = THREE.MathUtils.degToRad(31);
     const pos = c.target
       .clone()

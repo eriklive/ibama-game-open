@@ -25,6 +25,11 @@ export interface Burnable {
   /** Rótulo curto para o botão: "avião", "suprimentos". */
   short: string;
   hexes: HexCoord[];
+  /**
+   * Não se queima direto: o botão é **Inspecionar** (o avião trancado), e o menu dele traz
+   * `olhar dentro` e `queimar` (ver `plane.ts`).
+   */
+  inspect?: boolean;
 }
 
 /** Distância do agente até o hexágono mais próximo do alvo. */

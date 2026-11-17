@@ -7,6 +7,7 @@ import {
   RolledQuestion,
   itemClue,
 } from './interrogation';
+import { KEY_PANEL_ID, KEY_TAKEN, PLANE_LOCKED } from './plane';
 
 /**
  * Diálogos dos suspeitos, por classe de NPC (ver `interrogation.ts` para as regras).
@@ -135,6 +136,41 @@ const WHOSE_GUN_CASEIRO: RolledQuestion = {
   },
 };
 
+/**
+ * "Onde está a chave?": só depois que alguém olhou dentro do avião e o achou trancado
+ * (`PLANE_LOCKED`), e some quando a equipe pega a chave (`KEY_TAKEN`). Ver `plane.ts`.
+ */
+const WHERE_KEY = { requires: PLANE_LOCKED, hiddenWhen: KEY_TAKEN } as const;
+
+/** Os ajudantes do hangar não sabem onde está a chave (resposta fixa). */
+const whereKeyUnknown: FixedQuestion = {
+  ...WHERE_KEY,
+  ask: 'Onde está a chave?',
+  answer: { say: 'Não sei não.', note: 'Diz não saber da chave do avião.' },
+};
+
+/**
+ * O piloto sabe, e pode mentir: pergunta, réplica e tréplica têm uma verdade só ("No painel ali
+ * atrás"). Cedendo, a equipe passa a reconhecer a chave no quadro dos fundos (`notices`).
+ */
+const WHERE_KEY_PILOTO: RolledQuestion = {
+  ...WHERE_KEY,
+  ask: 'Onde está a chave?',
+  pass: { say: 'Não sei não.', note: 'Diz não saber onde está a chave.' },
+  fail: {
+    say: 'No painel ali atrás.',
+    note: 'A chave do avião está no painel (quadro de chaves) dos fundos do hangar.',
+    confess: true,
+    // entrega o quadro: ninguém precisa rolar percepção para reconhecer a chave
+    notices: KEY_PANEL_ID,
+  },
+  followUp: {
+    ask: 'O avião abre por digital? Cadê a chave?',
+    pass: { say: '…', note: 'Não responde.' },
+    // TODO(roteiro): falta uma fala — a tréplica (ou o fecho do agente) desta cadeia.
+  },
+};
+
 export type NpcClassId = 'garimpeiro' | 'piloto' | 'caseiro' | 'cacador' | 'pescador' | 'seguranca';
 
 export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
@@ -175,6 +211,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
         },
       },
       whoseGunUnknown(GARIMPEIROS_ON_GUN),
+      whereKeyUnknown,
     ],
   },
 
@@ -238,9 +275,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
         },
       },
       whoseGunUnknown('Arma? Eu só piloto, doutor. Não sei de quem é.'),
-      // FUTURO (não implementado): inspecionar o avião vai achar uma chave no painel (pista, ex.:
-      // `item:chave-aviao`), que libera aqui uma pergunta sobre a chave do avião
-      // (`requires: itemClue('chave-aviao')`).
+      WHERE_KEY_PILOTO,
     ],
   },
 
