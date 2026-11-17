@@ -150,8 +150,9 @@ O terreno é desenhado em texto em `maps.ts` (`parseLayout`): `.` grama, `T` ár
 `_` piso, `D` porta, `~` terra batida, `=` asfalto, `:` pátio, `A` avião, a carga (ver abaixo), os suprimentos do garimpo (`R`) e os móveis da casa (`m`, `P`) — basta editar as linhas para mudar o mapa.
 O hangar (chapa ondulada, portão, teto em arco, postes e lâmpadas) e o avião são montados por código em
 `scenery.ts`. O **teto** (chapa, oitões e arcos) cobre o hangar visto de fora e some assim que um agente entra
-(o vão do portão já conta); a carga, o avião e as lâmpadas de dentro só são desenhados quando há um agente a até
-6 hexágonos do hangar (`structureView` em `maps.ts`). O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
+ou chega a até 2 hexágonos do portão ou de uma porta **aberta**: porta fechada mantém o teto e esconde o interior
+(ver [Portas](#portas)). A carga, o avião e as lâmpadas de dentro só são desenhados quando há um agente a até
+6 hexágonos do hangar e o teto está aberto (`structureView` em `maps.ts`). O avião é um modelo provisório, a ser trocado pelo Cessna 152 escolhido.
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
@@ -207,6 +208,8 @@ sempre abertas.
 - **Pick lock** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
   dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0).
 - **Abrir** empurra a folha: só abre a encostada.
+- Porta **fechada** (encostada, trancada ou bloqueada) mantém o **telhado** no lugar e o interior escondido,
+  mesmo com o agente colado nela. O telhado só sai quando a porta abre (ou com alguém lá dentro).
 - Nas portas, passa quem tira **pelo menos** o número (12 = 12 ou mais).
 - No aeroporto: a entrada da casa está encostada; a divisória, trancada; nos fundos do hangar, a porta do
   oeste está trancada (fechadura 10) e a do leste, bloqueada (`doorStates` no mapa; sem entrada, a porta

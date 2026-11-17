@@ -65,8 +65,8 @@ export interface GameMap {
   /**
    * Estruturas cobertas (hangar, casa…). Toda estrutura com telhado segue as mesmas regras
    * (ver `structureView`): o telhado some com um agente dentro ou perto de uma das portas
-   * (`D` dentro do retângulo dela), e o que se passa lá dentro fica escondido enquanto o
-   * telhado estiver no lugar.
+   * **abertas** (`D` dentro do retângulo dela; porta fechada não revela nada), e o que se passa
+   * lá dentro fica escondido enquanto o telhado estiver no lugar.
    */
   structures?: Structure[];
   /** Coisas escondidas: aparecem com um teste de percepção e se acham inspecionando o móvel. */

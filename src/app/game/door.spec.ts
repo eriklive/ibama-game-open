@@ -8,6 +8,7 @@ import {
   doorChance,
   doorNeed,
   resolveDoor,
+  seeThroughDoors,
   spawnDoors,
 } from './door';
 
@@ -108,6 +109,21 @@ describe('portas do mapa', () => {
     );
     expect(doors.get('1,1')?.state).toBe('encostada');
     expect(doors.get('9,9')).toMatchObject({ state: 'trancada', lock: 15 });
+  });
+
+  it('só porta aberta (ou portão) revela o interior', () => {
+    const doors = spawnDoors(
+      [
+        { col: 1, row: 1 },
+        { col: 9, row: 9 },
+      ],
+      { '9,9': { state: 'aberta' } },
+    );
+    const gate = { col: 20, row: 20 };
+    const all = [{ col: 1, row: 1 }, { col: 9, row: 9 }, gate];
+    expect(seeThroughDoors(all, doors)).toEqual([{ col: 9, row: 9 }, gate]);
+    doors.set('1,1', { ...doors.get('1,1')!, broken: true });
+    expect(seeThroughDoors(all, doors)).toHaveLength(3);
   });
 
   it('chance no d20', () => {

@@ -154,6 +154,19 @@ export function spawnDoors(
   );
 }
 
+/**
+ * Passagens de uma estrutura por onde dá para enxergar o interior: os portões e as portas
+ * abertas (ou arrombadas). Porta fechada mantém o telhado no lugar e o interior escondido.
+ */
+export const seeThroughDoors = (
+  doors: readonly HexCoord[],
+  state: ReadonlyMap<string, Door>,
+): HexCoord[] =>
+  doors.filter((d) => {
+    const door = state.get(hexKey(d));
+    return !door || isOpen(door);
+  });
+
 /** Colado na porta: dá para interagir. */
 export const nextToDoor = (agent: HexCoord, door: HexCoord): boolean =>
   hexDistance(agent, door) === 1;

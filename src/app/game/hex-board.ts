@@ -9,7 +9,7 @@ import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
 import { StaticShadow, castsMovingShadow } from './static-shadow';
 import { HexTile, TileField } from './tile-field';
-import { Door, commonDoors } from './door';
+import { Door, commonDoors, seeThroughDoors } from './door';
 import { DoorPush, DoorViews } from './door-view';
 
 const HEX_SIZE = 1;
@@ -224,6 +224,8 @@ export class HexBoard {
   private cine: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number } | null = null;
   private cineLast: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number } | null = null;
   private cineBlend = 0;
+  /** Estado das portas comuns: fechadas, mantêm o telhado e escondem o interior. */
+  private doorStates: ReadonlyMap<string, Door> = new Map();
   /** Falas em balão sobre a cabeça dos inimigos (some sozinha em `until`, no relógio do tabuleiro). */
   private readonly speeches = new Map<string, { sprite: THREE.Sprite; until: number }>();
   /** Pista de algo escondido: uma lupa flutuando sobre o móvel percebido. */
@@ -624,6 +626,9 @@ export class HexBoard {
   /** Estado das portas (cadeado, tábuas, aberta ou fechada). `instant` pula a animação. */
   setDoors(doors: ReadonlyMap<string, Door>, instant = false): void {
     this.doorViews?.setStates(doors, instant);
+    this.doorStates = doors;
+    // abrir ou fechar uma porta muda o que se vê da estrutura: reavalia no próximo quadro
+    this.structureKey = '';
   }
 
   /** Portas com o indicador de interação (o losango amarelo). */
@@ -1183,11 +1188,11 @@ export class HexBoard {
 
   /**
    * O hexágono fica debaixo de um telhado que está no lugar (nenhum agente dentro da
-   * estrutura nem perto de uma porta dela): o jogador não enxerga o que acontece ali.
+   * estrutura nem perto de uma porta aberta dela): o jogador não enxerga o que acontece ali.
    */
   isCovered(hex: HexCoord): boolean {
     const agents = [...this.units.values()].map((u) => u.hex);
-    return this.structures.some((st) => st.roof && inStructure(hex, st.rect) && structureView(st.rect, agents, st.doors).roof);
+    return this.structures.some((st) => st.roof && inStructure(hex, st.rect) && structureView(st.rect, agents, this.seeThrough(st.doors)).roof);
   }
 
   /** Põe o inimigo num hexágono na hora (sem animação), virado para onde ia. */
@@ -1213,10 +1218,16 @@ export class HexBoard {
     this.structureKey = key;
     const agents = [...this.units.values()].map((u) => u.hex);
     for (const st of this.structures) {
-      const view = structureView(st.rect, agents, st.doors);
+      const view = structureView(st.rect, agents, this.seeThrough(st.doors));
       if (st.roof) st.roof.visible = view.roof;
-      for (const o of st.interior) o.visible = view.interior;
+      // com o telhado no lugar, o interior nem é desenhado (nada vaza pelas frestas)
+      for (const o of st.interior) o.visible = view.interior && (!st.roof || !view.roof);
     }
+  }
+
+  /** Portas da estrutura que revelam o interior: só as abertas (e os portões). */
+  private seeThrough(doors: readonly HexCoord[]): HexCoord[] {
+    return seeThroughDoors(doors, this.doorStates);
   }
 
   /**
