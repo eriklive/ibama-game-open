@@ -13,6 +13,8 @@ import {
   resolveApproach,
   facingBetween,
   isBorder,
+  known,
+  onBoard,
   lineOfSight,
   planFlee,
   planPatrol,
@@ -251,5 +253,22 @@ describe('abordagem', () => {
     const walls = new Set([hexKey({ col: 5, row: 6 })]);
     expect(resolveApproach(from, [near], rules).surrender).toHaveLength(1);
     expect(resolveApproach(from, [near], rules, walls).surrender).toHaveLength(0);
+  });
+});
+
+describe('inimigo escondido', () => {
+  it('começa escondido: não age, não ocupa hexágono e a equipe não sabe dele', () => {
+    const e = spawnEnemy({ id: 'carregador', name: 'Carregador', hidden: true, patrol: [{ col: 2, row: 2 }] });
+    expect(e.status).toBe('hidden');
+    expect(canAct(e)).toBe(false);
+    expect(onBoard(e)).toBe(false);
+    expect(known(e)).toBe(false);
+    expect(known({ status: 'fled' })).toBe(true);
+    expect(onBoard({ status: 'surrendered' })).toBe(true);
+  });
+
+  it('guarda a classe de NPC e quem ele pode entregar', () => {
+    const e = spawnEnemy({ id: 'p', name: 'Piloto', npc: 'piloto', reveals: 'carregador', patrol: [{ col: 0, row: 0 }] });
+    expect([e.npc, e.reveals]).toEqual(['piloto', 'carregador']);
   });
 });
