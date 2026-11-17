@@ -5,10 +5,10 @@
 import { HexArea, HexCoord, hexKey, hexNeighbors, pathTo, reachableHexes, sameHex } from './hex';
 
 export const GROUP_RULES = {
-  /** Movimento extra de cada agente enquanto o grupo anda junto. */
-  moveBonus: 2,
-  /** Alcance extra da abordagem de cada agente enquanto o grupo anda junto (ver `stats.ts`). */
-  approachBonus: 2,
+  /** Movimento extra de cada agente enquanto o grupo anda junto (o Capitão soma mais 1). */
+  moveBonus: 1,
+  /** Intimidação extra (alcance da abordagem) enquanto o grupo anda junto (o Capitão soma mais 1; ver `stats.ts`). */
+  approachBonus: 1,
 };
 
 export interface RallyPlan {

@@ -22,7 +22,7 @@
           [class.on]="t.selected"
           [attr.aria-selected]="t.selected"
           aria-controls="ficha"
-          [attr.aria-label]="t.c.name + (t.done ? ', ponto distribuído' : ', ponto livre')"
+          [attr.aria-label]="t.c.name + (t.captain ? ', Capitão' : ', Agente') + (t.done ? ', ponto distribuído' : ', ponto livre')"
           [attr.data-testid]="'tab-' + t.c.id"
           (click)="go(t.i)"
         >
@@ -32,6 +32,9 @@
               <path d="M4 96c2-24 16-36 34-36s32 12 34 36z" />
             </svg>
             <span class="dot" [class.done]="t.done"></span>
+            @if (t.captain) {
+              <span class="cap-mark" aria-hidden="true">Cap.</span>
+            }
           </span>
           <span class="tab-label" aria-hidden="true">{{ t.c.name }}</span>
         </button>
@@ -143,6 +146,46 @@
       >
         <span class="tape" aria-hidden="true"></span>
 
+        <!-- Classe: Capitão (um na equipe) ou Agente -->
+        <div class="class-block" data-testid="class-block">
+          <h2 id="class-title">Classe</h2>
+          <div class="class-pick" role="radiogroup" aria-labelledby="class-title">
+            @for (k of classes(); track k.key) {
+              <button
+                type="button"
+                role="radio"
+                class="class-opt"
+                [class.on]="k.selected"
+                [attr.aria-checked]="k.selected"
+                [disabled]="k.disabled"
+                [attr.data-testid]="'class-' + k.key"
+                [attr.aria-label]="k.name + '. ' + k.blurb + (k.hint ? ' ' + k.hint + '.' : '')"
+                (click)="setClass(k.key)"
+              >
+                <span class="class-name">{{ k.name }}</span>
+                <span class="class-blurb">{{ k.hint || k.blurb }}</span>
+              </button>
+            }
+          </div>
+          <ul class="perks" aria-label="Habilidades e perícias da classe">
+            @for (p of perks(); track p.key) {
+              <li class="perk" [class]="'perk ' + p.kind">
+                <span class="perk-kind">{{ p.kind === 'hab' ? 'Habilidade' : 'Perícia' }}</span>
+                <b
+                  >{{ p.name }}
+                  @if (p.value) {
+                    <span class="perk-val">{{ p.value }}</span>
+                  }</b
+                >
+                <span class="perk-text">{{ p.text }}</span>
+              </li>
+            }
+          </ul>
+          @if (pad()) {
+            <span class="pad-hint-inline" aria-hidden="true">{{ glyph('endTurn') }}: tornar Capitão</span>
+          }
+        </div>
+
         <div class="sheet-head">
           <h2>Atributos</h2>
           <div
@@ -236,13 +279,14 @@
                   <th scope="row">{{ s.field }}</th>
                   <td>{{ signed(s.value) }}</td>
                   <td class="none" aria-label="nenhum">—</td>
-                  <td>{{ signed(s.group) }}</td>
+                  <td>{{ signed(s.group + s.leader) }}</td>
                 </tr>
               }
             </tbody>
           </table>
           <p class="note">
-            *Só enquanto estiver agrupado. Equipamentos terão modificadores próprios.
+            *Só enquanto estiver agrupado: +1 do grupo e +1 da Liderança do Capitão. Equipamentos terão
+            modificadores próprios.
           </p>
         </div>
       </section>

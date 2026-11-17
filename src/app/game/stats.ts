@@ -1,22 +1,24 @@
 /**
  * Camada "RPG": atributos de cada agente, escolhidos na ficha antes da missão.
  *
- * - **Velocidade:** cada ponto vale +1 de movimento no turno (somado aos 2d4).
+ * - **Vigor:** cada ponto vale +1 de movimento no turno (somado aos 2d4).
  * - **Intimidação:** cada ponto vale +1 no raio de abordagem; a zona de rolagem e a de fuga
- *   se afastam junto (ver `approachRulesFor`).
+ *   se afastam junto (ver `approachRulesFor`). No interrogatório, a da ficha sobe a CD.
  *
  * Cada atributo vai de −5 a +5 e todo agente começa com 0. O jogador tem `points` (1) para pôr
  * em um dos dois; o lado negativo fica para penalidades de outras fontes (peso, equipamento).
- * O valor em campo soma três fontes: o **atributo** (ficha), o **equipamento** (vazio por ora)
- * e o **grupo** (só enquanto os agentes estão agrupados; ver `GROUP_RULES`).
+ * O valor em campo soma quatro fontes: o **atributo** (ficha), o **equipamento** (vazio por ora),
+ * o **grupo** (só enquanto os agentes estão agrupados; ver `GROUP_RULES`) e a **Liderança** do
+ * Capitão (só com ele no grupo; ver `agent-class.ts`).
  *
  * Só funções puras (testadas em `stats.spec.ts`); as telas decidem quando usá-las.
  */
 import { APPROACH_RULES, ApproachZones, approachZones } from './enemies';
+import { leadershipBonus } from './agent-class';
 import { GROUP_RULES } from './group';
 
-export type StatKey = 'velocidade' | 'intimidacao';
-export const STAT_KEYS: readonly StatKey[] = ['velocidade', 'intimidacao'];
+export type StatKey = 'vigor' | 'intimidacao';
+export const STAT_KEYS: readonly StatKey[] = ['vigor', 'intimidacao'];
 
 /** Valor de cada atributo. */
 export type Stats = Readonly<Record<StatKey, number>>;
@@ -29,7 +31,7 @@ export const STAT_RULES = {
   points: 1,
 } as const;
 
-export const ZERO_STATS: Stats = { velocidade: 0, intimidacao: 0 };
+export const ZERO_STATS: Stats = { vigor: 0, intimidacao: 0 };
 
 const clampStat = (v: number): number => Math.min(STAT_RULES.max, Math.max(STAT_RULES.min, v));
 
@@ -68,7 +70,9 @@ export interface StatBreakdown {
   equipment: number;
   /** Bônus do grupo (só agrupado). */
   group: number;
-  /** Atributo + equipamento, presos à escala de −5 a +5, mais o grupo. */
+  /** Liderança do Capitão (só agrupado com ele). */
+  leader: number;
+  /** Atributo + equipamento, presos à escala de −5 a +5, mais o grupo e a Liderança. */
   total: number;
 }
 
@@ -79,36 +83,41 @@ export interface Loadout {
   equipment?: Stats;
 }
 
-/** Bônus do grupo em cada atributo (velocidade = movimento, intimidação = alcance). */
+/** Bônus do grupo em cada atributo (vigor = movimento, intimidação = alcance). */
 export const GROUP_STAT_BONUS: Stats = {
-  velocidade: GROUP_RULES.moveBonus,
+  vigor: GROUP_RULES.moveBonus,
   intimidacao: GROUP_RULES.approachBonus,
 };
 
-/** Um atributo em campo, separado por fonte. */
-export function statBreakdown(loadout: Loadout, key: StatKey, grouped: boolean): StatBreakdown {
+/**
+ * Um atributo em campo, separado por fonte. `led`: o grupo tem o Capitão (Liderança); só vale
+ * agrupado.
+ */
+export function statBreakdown(loadout: Loadout, key: StatKey, grouped: boolean, led = false): StatBreakdown {
   const attribute = loadout.attributes[key];
   const equipment = loadout.equipment?.[key] ?? 0;
   const group = grouped ? GROUP_STAT_BONUS[key] : 0;
-  return { attribute, equipment, group, total: clampStat(attribute + equipment) + group };
+  const leader = leadershipBonus(key, grouped && led);
+  return { attribute, equipment, group, leader, total: clampStat(attribute + equipment) + group + leader };
 }
 
 /** Atributos da ficha a partir da base do agente e dos pontos distribuídos. */
 export function sheetStats(spent: Stats, base: Stats = ZERO_STATS): Stats {
   return {
-    velocidade: clampStat(base.velocidade + spent.velocidade),
+    vigor: clampStat(base.vigor + spent.vigor),
     intimidacao: clampStat(base.intimidacao + spent.intimidacao),
   };
 }
 
-/** Movimento do turno: soma dos dados + velocidade (+ grupo). Nunca fica negativo. */
-export function turnMovement(diceTotal: number, loadout: Loadout, grouped: boolean): number {
-  return Math.max(0, diceTotal + statBreakdown(loadout, 'velocidade', grouped).total);
+/** Movimento do turno: soma dos dados + vigor (+ grupo, + Liderança). Nunca fica negativo. */
+export function turnMovement(diceTotal: number, loadout: Loadout, grouped: boolean, led = false): number {
+  return Math.max(0, diceTotal + statBreakdown(loadout, 'vigor', grouped, led).total);
 }
 
 /**
  * Faixas da abordagem de um agente: o raio de abordagem base cresce com a intimidação (e com
- * o grupo), nunca fica menor que 1, e a zona de rolagem e a de fuga vêm logo depois dele.
+ * o grupo e a Liderança), nunca fica menor que 1, e a zona de rolagem e a de fuga vêm logo
+ * depois dele.
  */
 export function approachRulesFor(
   loadout: Loadout,
@@ -116,8 +125,10 @@ export function approachRulesFor(
   rules: Pick<typeof APPROACH_RULES, 'surrenderRange' | 'rollBand' | 'fleeBand'> = APPROACH_RULES,
   /** Intimidação extra de fora da ficha (o arrombamento dá +1 à equipe por alguns turnos). */
   extra = 0,
+  /** O grupo tem o Capitão (Liderança). */
+  led = false,
 ): ApproachZones {
-  const bonus = statBreakdown(loadout, 'intimidacao', grouped).total + extra;
+  const bonus = statBreakdown(loadout, 'intimidacao', grouped, led).total + extra;
   return approachZones(rules.surrenderRange + bonus, rules);
 }
 

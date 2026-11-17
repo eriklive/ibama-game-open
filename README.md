@@ -7,11 +7,11 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 ## Como jogar o teste
 
 1. Na tela inicial, toque em **Campo de teste** (o único mapa disponível) e em **Iniciar**.
-2. Antes da partida vem a **ficha do agente** (escalação): distribua o ponto de cada agente e
-   toque em **Confirmar escalação** (ver [Ficha do agente](#ficha-do-agente-atributos)).
+2. Antes da partida vem a **ficha do agente** (escalação): escolha o **Capitão**, distribua o ponto de
+   cada agente e toque em **Confirmar escalação** (ver [Ficha do agente](#ficha-do-agente-atributos)).
 3. Há **3 personagens** (Ana, Bruno e Clara), cada um com o seu turno, em rodadas sem fim.
-4. No início de cada turno são rolados **2d4**: a soma **mais a velocidade** do agente (e +2 se
-   estiver agrupado) é o movimento daquele turno.
+4. No início de cada turno são rolados **2d4**: a soma **mais o vigor** do agente (e +1 se
+   estiver agrupado, +1 a mais com o Capitão no grupo) é o movimento daquele turno.
 5. Os hexágonos claros mostram até onde dá para ir (contornando os outros personagens).
    Toque num hexágono para destacá-lo (fica amarelo): o caminho até ele brilha e flutua,
    mostrando por onde o personagem vai passar. **Toque de novo** no destino para
@@ -20,7 +20,7 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 6. Quando o movimento acaba, a vez passa sozinha; **Passar a vez** encerra antes.
 7. Toque numa peça no tabuleiro ou num retrato no topo para ver aquele personagem. Quem
    está na vez ganha um anel amarelo e o retrato fica destacado como **Na vez**. Cada retrato
-   mostra a velocidade e a intimidação do agente em campo (em verde quando o grupo soma o bônus);
+   mostra o vigor e a intimidação do agente em campo (em verde quando o grupo soma o bônus);
    o de quem está na vez mostra também o alcance da abordagem.
 8. Ana, Bruno e Clara são personagens 3D animados (ficam parados respirando e correm pelo
    caminho), de pé sobre um disco com a cor de cada um.
@@ -32,7 +32,13 @@ agente: abas com a foto 3x4 (ponto **amarelo** = ponto livre, **verde** = distri
 **modelo 3D** real do personagem (arraste ou use o botão para girar) com seis espaços de
 equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a ficha em papel.
 
-- **Velocidade:** cada ponto vale **+1 de movimento** no turno (somado aos 2d4).
+- **Classe:** cada agente é **Capitão** ou **Agente**. A equipe tem **um Capitão só** (de início,
+  a Ana): marcar outro como Capitão devolve o anterior para Agente. A ficha lista o que a classe dá:
+  - **Capitão** — habilidades **Comando** (o Agrupar dele não gasta movimento, uma vez por turno) e
+    **Liderança** (com ele no grupo, todos ganham **+1 de movimento** e **+1 de intimidação**).
+  - **Agente** — perícia **Gazua +6** no **Destrancar** (qualquer um pode tentar; o Agente tem
+    vantagem).
+- **Vigor:** cada ponto vale **+1 de movimento** no turno (somado aos 2d4).
 - **Intimidação:** cada ponto vale **+1 no raio de abordagem** (a zona de rendição). A zona de
   rolagem e a de fuga se afastam junto.
 - Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
@@ -42,16 +48,18 @@ equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a 
   você colocou: pelo jogador, o mínimo é 0. O lado negativo fica para penalidades (peso,
   equipamento).
 - **Total em campo:** atributo + equipamento (por enquanto, nenhum) + **grupo**. Enquanto os
-  agentes estão **agrupados**, cada um ganha **+2 de velocidade** (movimento) e **+2 de alcance**
-  na abordagem; separou, perdeu.
+  agentes estão **agrupados**, cada um ganha **+1 de vigor** (movimento) e **+1 de intimidação**
+  (alcance da abordagem), e mais **+1** em cada com o Capitão no grupo; separou, perdeu.
 - **Anterior / Próximo agente** passam pelas fichas; no último, **Confirmar escalação** começa a
   partida com esses atributos (a escolha fica guardada na sessão do navegador e vale também para
   "Recomeçar"). Com controle: L1/R1 trocam de agente, cima/baixo escolhem o atributo,
-  esquerda/direita tiram/põem o ponto, ✕ avança e ○ volta ao início.
+  esquerda/direita tiram/põem o ponto, △ torna o agente Capitão, ✕ avança e ○ volta ao início.
 - Larga (≥ 900 px), a tela usa o layout "web" (abas na lateral); estreita, o de celular.
 
 As regras ficam em `src/app/game/stats.ts` (`STAT_RULES`, `APPROACH_SCALING`, funções puras
-testadas); o bônus do grupo, em `GROUP_RULES` (`group.ts`). Para a intimidação também aumentar a
+testadas); o bônus do grupo, em `GROUP_RULES` (`group.ts`); as classes (perícias, habilidades e
+`CLASS_RULES`), em `src/app/game/agent-class.ts` — o desenho completo está em
+`docs/sistema-de-classes.md`. Para a intimidação também aumentar a
 zona de rendição, troque `APPROACH_SCALING.surrender` para `true`. A tela fica em
 `src/app/screens/roster/` e o visualizador 3D em `src/app/game/agent-viewer.ts`.
 
@@ -77,15 +85,15 @@ só ficam em cor quem está na vez, os suspeitos no raio (cada um com uma etique
 *X% de escapar* ou *vai correr*; o alvo da missão ganha um *alvo!*) e o próprio raio. A câmera
 enquadra todos eles. São três faixas, uma logo depois da outra:
 
-- **Verde, raio de abordagem:** **2 + intimidação** do agente, **+2** enquanto ele estiver
-  agrupado, nunca menor que 1. Quem está nele se rende.
+- **Verde, raio de abordagem:** **3 + intimidação** do agente, **+1** enquanto ele estiver
+  agrupado e **+1** com o Capitão no grupo, nunca menor que 1. Quem está nele se rende.
 - **Amarelo, zona de rolagem (3 hexágonos):** cada suspeito rola **d20 + modificador** e passa
   no teste com **8 ou mais**. O modificador é **−1** no hexágono mais perto da abordagem, **0** no
   meio e **+1** no mais perto da fuga (60%, 65% e 70% de escapar). Passou: não se rende, fica em
   alerta e corre no turno inimigo. Falhou: se rende.
 - **Laranja, zona de fuga (1 hexágono):** fica em alerta e corre, sem rolar.
 
-Sem bônus, as faixas são 1–2, 3–5 e 6. O painel mostra a conta (base · intimidação · grupo), as
+Sem bônus, as faixas são 1–3, 4–6 e 7. O painel mostra a conta (base · intimidação · grupo · Capitão), as
 faixas e quantos se rendem, rolam e vão correr. Os números ficam em `APPROACH_RULES`
 (`src/app/game/enemies.ts`). O botão
 **Abordar** só aparece com algum suspeito dentro do raio de quem está na vez **e com acesso direto** a
@@ -119,13 +127,16 @@ rotas de patrulha ficam no mapa (`maps.ts`).
 Na vez de um agente, o botão **Agrupar** reúne a equipe: os hexágonos claros são os **pontos de
 encontro** possíveis — lugares que todos alcançam com o movimento que resta a quem está na vez.
 Toque num ponto para ver o caminho e toque de novo (ou em **Agrupar!**) para confirmar: quem está
-na vez vai até o ponto e os outros param em volta dele. Gasta-se o caminho mais longo entre todos.
+na vez vai até o ponto e os outros param em volta dele. Gasta-se o caminho mais longo entre todos —
+a não ser que quem chama seja o **Capitão**: com o **Comando**, o primeiro Agrupar do turno dele não
+gasta movimento (o ponto ainda precisa estar ao alcance).
 
 - A partida **começa com a equipe agrupada** (os três saem juntos do ponto de partida).
 - Agrupados, os agentes **andam juntos**: quando um deles anda, os outros seguem o rastro logo
   atrás. Quem não consegue acompanhar (caminho bloqueado) sai do grupo.
-- Juntos, cada agente ganha **+2 de movimento** na rolagem do seu turno e **+2 de alcance** na
-  abordagem. Desagrupou, perdeu os dois.
+- Juntos, cada agente ganha **+1 de movimento** na rolagem do seu turno e **+1 de intimidação**
+  (alcance da abordagem); com o Capitão no grupo, **+1 a mais** em cada (Liderança). Desagrupou,
+  perdeu tudo.
 - **Desagrupar** desfaz o grupo e cada um volta a andar por conta própria.
 
 Os bônus ficam em `GROUP_RULES` (`moveBonus` e `approachBonus`, em `src/app/game/group.ts`).
@@ -212,13 +223,13 @@ sempre abertas.
 | Estado | Como passa |
 | --- | --- |
 | **Aberta** | Passa direto |
-| **Encostada** (fechada, sem tranca) | Abrir, pick lock (abre sozinha) ou arrombar tirando **3+** no d20 |
-| **Trancada** | Pick lock tirando a **fechadura** da porta (12 por padrão) ou arrombar tirando **12+** |
+| **Encostada** (fechada, sem tranca) | Abrir, destrancar (abre sozinha) ou arrombar tirando **3+** no d20 |
+| **Trancada** | Destrancar tirando a **fechadura** da porta (12 por padrão; **6** para o Agente, com a Gazua +6) ou arrombar tirando **12+** |
 | **Bloqueada** | Nunca abre (até ser desbloqueada): dá para tentar, mas nunca passa |
 
 - Colado numa porta fechada, ela ganha um **losango amarelo**. Tocar na porta (ou no papel **Porta**, ou
   □ no controle) abre o **menu da porta**: a câmera gira 45° e aproxima até enquadrar a porta e o agente,
-  a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Pick lock** e **Abrir**.
+  a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Destrancar** e **Abrir**.
   A ficha que depende de rolagem traz o **d20** com o número a tirar; as outras, um círculo vazio.
 - **Arrombar** é um chute: o agente encosta, o d20 gira na ficha da esquerda e para quando o pé bate. Se
   passar, a porta abre com força para dentro, bate na parede e fica **arrombada** (aberta para sempre); se
@@ -235,8 +246,9 @@ sempre abertas.
     Sem atitude, fica parado onde está;
   - cada rolagem aparece na ficha do d20 (o verde é sempre o que é bom para a equipe). Chutar uma porta
     que já estava aberta não assusta ninguém (só rende a fala do morador).
-- **Pick lock** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
-  dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0).
+- **Destrancar** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
+  dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0). Qualquer um pode
+  tentar; o **Agente** soma a perícia **Gazua +6** (o número a tirar já aparece descontado, nunca abaixo de 1).
 - **Abrir** empurra a folha: só abre a encostada.
 - Porta **fechada** (encostada, trancada ou bloqueada) mantém o **telhado** no lugar e o interior escondido,
   mesmo com o agente colado nela. O telhado só sai quando a porta abre (ou com alguém lá dentro).
@@ -247,7 +259,7 @@ sempre abertas.
 
 As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testadas), as folhas e o indicador em
 `door-view.ts`. A biblioteca de clipes não tem chute: a perna é dobrada à mão por cima do `idle`
-(`CharacterRig.pose`); o pick lock usa o `crouch`.
+(`CharacterRig.pose`); o destrancar usa o `crouch`.
 
 ### Modo diálogo (interrogatório)
 
@@ -387,7 +399,7 @@ símbolo correspondente.
 | ○ | Cancela |
 | □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, inspecionar, conversar ou abrir o menu da porta) |
 | No modo diálogo | direcional escolhe a pergunta, ✕ pergunta, ○ encerra |
-| No menu da porta | ✕ arromba, □ pick lock, △ abre, ○ volta |
+| No menu da porta | ✕ arromba, □ destranca, △ abre, ○ volta |
 | L3 | Encerrar a operação (depois de queimar o avião) |
 | △ | Passar a vez |
 | Share | Agrupar / desagrupar |

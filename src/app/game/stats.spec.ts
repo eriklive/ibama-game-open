@@ -19,60 +19,62 @@ import {
 
 describe('distribuição de pontos', () => {
   it('todo agente começa com 0 e 1 ponto livre', () => {
-    expect(ZERO_STATS).toEqual({ velocidade: 0, intimidacao: 0 });
+    expect(ZERO_STATS).toEqual({ vigor: 0, intimidacao: 0 });
     expect(STAT_RULES.points).toBe(1);
     expect(freePoints(ZERO_STATS)).toBe(1);
   });
 
   it('o ponto vai para um atributo só', () => {
-    const v = addPoint(ZERO_STATS, 'velocidade');
-    expect(v).toEqual({ velocidade: 1, intimidacao: 0 });
+    const v = addPoint(ZERO_STATS, 'vigor');
+    expect(v).toEqual({ vigor: 1, intimidacao: 0 });
     expect(freePoints(v)).toBe(0);
     expect(canAddPoint(v, 'intimidacao')).toBe(false);
     expect(addPoint(v, 'intimidacao')).toBe(v);
-    expect(addPoint(v, 'velocidade')).toBe(v);
+    expect(addPoint(v, 'vigor')).toBe(v);
   });
 
   it('só tira o ponto que o jogador colocou (o mínimo pelo jogador é 0)', () => {
-    expect(canRemovePoint(ZERO_STATS, 'velocidade')).toBe(false);
-    expect(removePoint(ZERO_STATS, 'velocidade')).toBe(ZERO_STATS);
+    expect(canRemovePoint(ZERO_STATS, 'vigor')).toBe(false);
+    expect(removePoint(ZERO_STATS, 'vigor')).toBe(ZERO_STATS);
     const i = addPoint(ZERO_STATS, 'intimidacao');
     expect(canRemovePoint(i, 'intimidacao')).toBe(true);
-    expect(canRemovePoint(i, 'velocidade')).toBe(false);
+    expect(canRemovePoint(i, 'vigor')).toBe(false);
     expect(removePoint(i, 'intimidacao')).toEqual(ZERO_STATS);
   });
 
   it('não passa de +5 mesmo com ponto livre', () => {
-    const base = { velocidade: 5, intimidacao: 0 };
-    expect(canAddPoint(ZERO_STATS, 'velocidade', base)).toBe(false);
+    const base = { vigor: 5, intimidacao: 0 };
+    expect(canAddPoint(ZERO_STATS, 'vigor', base)).toBe(false);
     expect(canAddPoint(ZERO_STATS, 'intimidacao', base)).toBe(true);
   });
 
   it('a ficha fica na escala de −5 a +5', () => {
     expect(
-      sheetStats({ velocidade: 1, intimidacao: 0 }, { velocidade: 5, intimidacao: -9 }),
+      sheetStats({ vigor: 1, intimidacao: 0 }, { vigor: 5, intimidacao: -9 }),
     ).toEqual({
-      velocidade: 5,
+      vigor: 5,
       intimidacao: -5,
     });
   });
 });
 
 describe('valores em campo', () => {
-  const fast = { attributes: { velocidade: 1, intimidacao: 0 } };
-  const scary = { attributes: { velocidade: 0, intimidacao: 1 } };
+  const fast = { attributes: { vigor: 1, intimidacao: 0 } };
+  const scary = { attributes: { vigor: 0, intimidacao: 1 } };
 
   it('separa atributo, equipamento e grupo', () => {
-    expect(statBreakdown(fast, 'velocidade', false)).toEqual({
+    expect(statBreakdown(fast, 'vigor', false)).toEqual({
       attribute: 1,
       equipment: 0,
       group: 0,
+      leader: 0,
       total: 1,
     });
-    expect(statBreakdown(fast, 'velocidade', true)).toEqual({
+    expect(statBreakdown(fast, 'vigor', true)).toEqual({
       attribute: 1,
       equipment: 0,
       group: GROUP_RULES.moveBonus,
+      leader: 0,
       total: 1 + GROUP_RULES.moveBonus,
     });
     expect(statBreakdown(scary, 'intimidacao', true).group).toBe(GROUP_RULES.approachBonus);
@@ -80,38 +82,58 @@ describe('valores em campo', () => {
 
   it('atributo + equipamento ficam presos a −5..+5; o grupo soma por cima', () => {
     const heavy = {
-      attributes: { velocidade: -4, intimidacao: 5 },
-      equipment: { velocidade: -3, intimidacao: 2 },
+      attributes: { vigor: -4, intimidacao: 5 },
+      equipment: { vigor: -3, intimidacao: 2 },
     };
-    expect(statBreakdown(heavy, 'velocidade', false).total).toBe(-5);
+    expect(statBreakdown(heavy, 'vigor', false).total).toBe(-5);
     expect(statBreakdown(heavy, 'intimidacao', false).total).toBe(5);
     expect(statBreakdown(heavy, 'intimidacao', true).total).toBe(5 + GROUP_RULES.approachBonus);
   });
 
-  it('movimento = 2d4 + velocidade (+2 agrupado)', () => {
+  it('grupo dá +1 e a Liderança do Capitão mais +1 (só agrupado)', () => {
+    expect(GROUP_RULES).toMatchObject({ moveBonus: 1, approachBonus: 1 });
+    expect(statBreakdown(fast, 'vigor', true, true)).toEqual({
+      attribute: 1,
+      equipment: 0,
+      group: 1,
+      leader: 1,
+      total: 3,
+    });
+    expect(statBreakdown(scary, 'intimidacao', true, true).total).toBe(3);
+    // Capitão sem grupo não dá nada
+    expect(statBreakdown(fast, 'vigor', false, true).leader).toBe(0);
+  });
+
+  it('movimento = 2d4 + vigor (+1 agrupado, +1 com o Capitão)', () => {
     expect(turnMovement(5, { attributes: ZERO_STATS }, false)).toBe(5);
     expect(turnMovement(5, fast, false)).toBe(6);
-    expect(turnMovement(5, fast, true)).toBe(8);
-    expect(turnMovement(5, scary, true)).toBe(7);
+    expect(turnMovement(5, fast, true)).toBe(7);
+    expect(turnMovement(5, fast, true, true)).toBe(8);
+    expect(turnMovement(5, scary, true)).toBe(6);
+    expect(turnMovement(5, scary, true, true)).toBe(7);
   });
 
   it('movimento nunca fica negativo', () => {
-    expect(turnMovement(2, { attributes: { velocidade: -5, intimidacao: 0 } }, false)).toBe(0);
+    expect(turnMovement(2, { attributes: { vigor: -5, intimidacao: 0 } }, false)).toBe(0);
   });
 
-  it('raio de abordagem = base + intimidação (+2 agrupado); rolagem e fuga se afastam junto', () => {
+  it('raio de abordagem = 3 + intimidação (+1 agrupado, +1 com o Capitão); rolagem e fuga se afastam junto', () => {
     const base = APPROACH_RULES.surrenderRange;
+    expect(base).toBe(3);
     expect(approachRulesFor({ attributes: ZERO_STATS }, false)).toEqual(BASE_APPROACH);
     expect(approachRulesFor(scary, false)).toEqual(approachZones(base + 1));
-    expect(approachRulesFor(scary, false)).toEqual({ surrenderRange: 3, rollRange: 6, radius: 7 });
+    expect(approachRulesFor(scary, false)).toEqual({ surrenderRange: 4, rollRange: 7, radius: 8 });
+    expect(approachRulesFor({ attributes: ZERO_STATS }, true).surrenderRange).toBe(4);
+    expect(approachRulesFor({ attributes: ZERO_STATS }, true, APPROACH_RULES, 0, true).surrenderRange).toBe(5);
+    expect(approachRulesFor(scary, true, APPROACH_RULES, 0, true).surrenderRange).toBe(6);
     expect(approachRulesFor(scary, true)).toEqual(approachZones(base + 1 + GROUP_RULES.approachBonus));
     expect(approachRulesFor(fast, true).surrenderRange).toBe(base + GROUP_RULES.approachBonus);
   });
 
   it('com intimidação negativa o raio de abordagem encolhe, mas fica ≥ 1', () => {
-    const timid = { attributes: { velocidade: 0, intimidacao: -3 } };
+    const timid = { attributes: { vigor: 0, intimidacao: -4 } };
     expect(approachRulesFor(timid, false)).toEqual({ surrenderRange: 1, rollRange: 4, radius: 5 });
-    const mute = { attributes: { velocidade: 0, intimidacao: -5 } };
+    const mute = { attributes: { vigor: 0, intimidacao: -5 } };
     expect(approachRulesFor(mute, false).surrenderRange).toBe(1);
   });
 });

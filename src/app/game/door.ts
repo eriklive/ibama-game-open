@@ -72,8 +72,12 @@ export interface Door {
 export const isOpen = (d: Pick<Door, 'state' | 'broken'>): boolean =>
   d.broken || d.state === 'aberta';
 
-/** Rolagem que a ação pede: o valor a tirar no d20, `0` (sem rolagem), `Infinity` (rola e nunca passa) ou `null` (não dá). */
-export function doorNeed(action: DoorAction, door: Door): number | null {
+/**
+ * Rolagem que a ação pede: o valor a tirar no d20, `0` (sem rolagem), `Infinity` (rola e nunca
+ * passa) ou `null` (não dá). `pickBonus` é a perícia de quem destranca (Gazua do Agente; ver
+ * `agent-class.ts`): baixa o valor da fechadura, mas nunca abaixo de 1.
+ */
+export function doorNeed(action: DoorAction, door: Door, pickBonus = 0): number | null {
   const open = isOpen(door);
   switch (action) {
     case 'arrombar':
@@ -83,7 +87,7 @@ export function doorNeed(action: DoorAction, door: Door): number | null {
     case 'pick':
       if (open) return null;
       if (door.state === 'bloqueada') return Infinity;
-      return door.state === 'trancada' ? door.lock : 0;
+      return door.state === 'trancada' ? Math.max(1, door.lock - pickBonus) : 0;
     case 'abrir':
       if (open || door.state === 'encostada') return 0;
       return null;
@@ -119,8 +123,8 @@ export interface DoorOutcome {
   cost: number;
 }
 
-export function resolveDoor(action: DoorAction, door: Door, roll: number): DoorOutcome {
-  const need = doorNeed(action, door);
+export function resolveDoor(action: DoorAction, door: Door, roll: number, pickBonus = 0): DoorOutcome {
+  const need = doorNeed(action, door, pickBonus);
   const rolled = rollsDie(need);
   const pass = need !== null && (need === 0 || (need !== Infinity && meets(roll, need)));
   const cost = action === 'pick' && need !== null ? DOOR_RULES.pickCost : 0;
