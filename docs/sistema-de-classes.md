@@ -14,13 +14,14 @@ ficha (`stats.ts`) e o d20 das portas e da abordagem.
 | | Hoje | Proposta |
 |---|---|---|
 | Bônus de movimento do grupo (`GROUP_RULES.moveBonus`) | +2 | **+1** |
-| Grupo com um Capitão | — | **+2** (+1 do grupo, +1 do Capitão) |
+| Movimento: grupo com o Capitão | — | **+2** (+1 do grupo, +1 do Capitão) |
 | Raio de abordagem base (`APPROACH_RULES.surrenderRange`) | 2 | **3** |
 | Bônus de intimidação do grupo (`GROUP_RULES.approachBonus`) | +2 | **+1** |
+| Intimidação: grupo com o Capitão | — | **+2** (+1 do grupo, +1 do Capitão) |
 
 Ou seja: agrupar continua valendo a pena, mas o grupo "cheio" (+2, como hoje) passa a depender
-de ter um Capitão nele. O alcance da abordagem segue a mesma lógica e passa a ser individual
-(ver 3.6).
+de ter um Capitão nele, tanto no movimento quanto na intimidação. O alcance da abordagem segue a mesma lógica e passa a ser individual
+(ver 3.5).
 
 ---
 
@@ -36,11 +37,12 @@ a formação é sempre **1 Capitão + 2 Agentes** (Agentes não têm limite, se 
 | Habilidade | Efeito |
 |---|---|
 | **Comando** | Quando o Capitão é quem chama o "Agrupar", o encontro **não gasta movimento** de ninguém. Os pontos de encontro possíveis continuam limitados pelo movimento que ele ainda tem (o grupo precisa conseguir chegar lá); só o custo (`plan.cost`) vira 0. |
-| **Liderança** | Enquanto o Capitão está no grupo, **todo o grupo** ganha +1 de movimento, além do +1 normal do grupo. |
+| **Liderança** | Enquanto o Capitão está no grupo, **todo o grupo** ganha +1 de movimento e +1 de intimidação, além do +1 normal do grupo em cada um. |
 
 Regras de borda propostas:
 
-- O +1 do Capitão **só vale agrupado** (Capitão sozinho não ganha nada de movimento).
+- O +1 do Capitão **só vale agrupado** (Capitão sozinho não ganha nada de movimento nem de
+  intimidação).
 - **Um Capitão na equipe**: quem garante é o menu (marcar outro como Capitão tira a classe do
   anterior, que volta a ser Agente). Assim o jogo nunca precisa lidar com dois Capitães em campo
   e o grupo único que existe hoje no código continua bastando.
@@ -94,8 +96,8 @@ passa se total ≥ dificuldade
 |---|---|---|---|
 | Arrombar | **Força** | — | 3 (encostada) / 12 (trancada) |
 | Destrancar | **Destreza** | Gazua +6 (Agente) | fechadura da porta (padrão 12) |
-| Interrogar / conversar | **Intimidação** (do agente, vira penalidade do NPC) | — | a definir |
-| Abordar | **Intimidação** (vira alcance, não rolagem do agente) | — | raio = 3 + intimidação (ver 3.6) |
+| Interrogar / conversar | **Intimidação** só da ficha (soma à CD do NPC) | — | 8 / 12 / 14 (branch do interrogatório) |
+| Abordar | **Intimidação** (vira alcance, não rolagem do agente) | — | raio = 3 + intimidação (ver 3.5) |
 | Mover | **Vigor** (hoje "Velocidade") | — (ver bônus de movimentação, 3.4) | — |
 
 Em código seria só uma tabela, algo como:
@@ -104,24 +106,25 @@ Em código seria só uma tabela, algo como:
 const ACTION_CHECKS: Record<ActionKey, { stat?: StatKey; skill?: SkillKey }> = {
   arrombar:   { stat: 'forca' },
   destrancar: { stat: 'destreza', skill: 'gazua' },
-  interrogar: { stat: 'intimidacao' },
+  abordar:    { stat: 'intimidacao' },
 };
 ```
 
 e `doorNeed` / `resolveDoor` passariam a receber o modificador (hoje é d20 puro ≥ `need`).
 
-### 3.2 Interrogar: a intimidação vira penalidade do NPC
+### 3.2 Interrogar: já resolvido na branch `claude/interrogatorio-v1`
 
-Quem rola é o **NPC** (resistir ao interrogatório); a intimidação do agente entra **subtraindo**:
+O interrogatório tem regras próprias (`INTERROGATION_RULES` em `interrogation.ts`) e não entra
+neste sistema por enquanto. Resumo do que ele faz, para não conflitar:
 
-```
-NPC resiste se d20 − intimidação do agente ≥ dificuldade
-```
+- O NPC rola 1d20 escondido (+ `mod` da classe de NPC) e resiste se tirar **mais que** a CD.
+  CDs: pergunta 8, réplica 12, tréplica 14.
+- Cada ponto de intimidação do agente que conversa **soma 1 à CD**.
+- Usa só a intimidação **da ficha** do agente: o bônus do grupo e o do arrombamento ficam de
+  fora, de propósito.
 
-É o mesmo formato do teste de fuga da abordagem (`passesEscape`: dado + modificador ≥ CD), então
-reaproveita a UI de rolagem. Exemplo: CD 10, agente com intimidação +2 → o NPC precisa de 12+
-(45%) em vez de 10+ (55%). Se o grupo der intimidação (hoje dá +2 no alcance), vale decidir se
-também entra aqui.
+Como o Capitão não dá bônus pessoal (só bônus de grupo), as classes **não mudam o
+interrogatório**. Ver o impacto completo na seção 5.
 
 ### 3.3 O problema da Destreza (e da Força)
 
@@ -176,7 +179,7 @@ família de ação (mover, arrombar, destrancar, abordar/interrogar).
 
 ---
 
-## 3.6 Abordagem: alcance individual pela intimidação
+### 3.5 Abordagem: alcance individual pela intimidação
 
 O alcance da abordagem deixa de ter um bônus fixo grande do grupo e passa a vir da intimidação de
 cada agente, do mesmo jeito que o movimento vem do Vigor:
@@ -186,7 +189,8 @@ raio de abordagem = 3 + intimidação do agente + bônus de intimidação   (nun
 ```
 
 - **Intimidação do agente**: o atributo da ficha (−5 … +5).
-- **Bônus de intimidação** (soma por fora, como o bônus de movimentação): grupo (+1), arrombamento
+- **Bônus de intimidação** (soma por fora, como o bônus de movimentação): grupo (+1), Capitão no
+  grupo (+1), arrombamento
   (+1 para a equipe por alguns turnos, já existe em `BREAK_IN_RULES`), equipamento no futuro.
 - As outras faixas continuam presas ao raio: rolagem até raio + 3, fuga até raio + 4.
 
@@ -194,13 +198,14 @@ raio de abordagem = 3 + intimidação do agente + bônus de intimidação   (nun
 |---|---|---|---|---|---|
 | Padrão | 0 | não | 3 | 6 | 7 |
 | Padrão | 0 | sim | 4 | 7 | 8 |
-| Com ponto em intimidação | +1 | sim | 5 | 8 | 9 |
+| Padrão | 0 | sim, com o Capitão | 5 | 8 | 9 |
+| Com ponto em intimidação | +1 | sim, com o Capitão | 6 | 9 | 10 |
 | Hoje (para comparar) | 0 | sim | 4 | 7 | 8 |
 
 Um agente que não investe em intimidação fica no mesmo alcance de hoje quando agrupado, e um que
 investe passa a se destacar. Cada agente pode ter um alcance diferente conforme a sua função.
 
-## 3.5 Organização: tabela de perícias + tabela de habilidades
+### 3.6 Organização: tabela de perícias + tabela de habilidades
 
 - **Perícia** é um número somado numa rolagem de uma ação (Gazua +6 no Destrancar).
 - **Habilidade** é uma regra que muda como uma ação funciona, sem número de rolagem (Comando,
@@ -217,7 +222,7 @@ investe passa a se destacar. Cada agente pode ter um alcance diferente conforme 
 | Habilidade | Classe | Tipo | Quando vale | Efeito | Acumula? |
 |---|---|---|---|---|---|
 | Comando | Capitão | ativa | Capitão chama o Agrupar na vez dele | Encontro custa 0 de movimento | — |
-| Liderança | Capitão | passiva | Capitão está no grupo | +1 no bônus de movimentação do grupo | Não se aplica: 1 Capitão na equipe |
+| Liderança | Capitão | passiva | Capitão está no grupo | +1 de movimento e +1 de intimidação para o grupo | Não se aplica: 1 Capitão na equipe |
 
 A tabela de ações (3.1) vira o índice que liga as duas: cada ação diz qual atributo e qual
 perícia somam e quais habilidades mexem nela, sem guardar números de classe.
@@ -226,16 +231,45 @@ perícia somam e quais habilidades mexem nela, sem guardar números de classe.
 
 ## 4. Perguntas em aberto
 
-1. O Capitão dá +1 de **intimidação** ao grupo, como dá de movimento? (Hoje: não; só movimento.)
-2. "Comando" deveria valer também para **desagrupar/reagrupar** no mesmo turno, ou só uma vez por
+1. "Comando" deveria valer também para **desagrupar/reagrupar** no mesmo turno, ou só uma vez por
    turno?
-3. Interrogar: qual a **dificuldade base** e o que o NPC entrega quando falha (pista, localização
-   de item, rendição)?
-4. Vigor faz mais alguma coisa além do movimento já nesta versão (ex.: custo de carregar
+2. Vigor faz mais alguma coisa além do movimento já nesta versão (ex.: custo de carregar
    equipamento pesado), ou começa só como o novo nome da Velocidade?
 
 ### Decidido
 
 - Bônus de grupo: +1 de movimento e +1 de intimidação. Raio de abordagem base 3.
+- Liderança do Capitão: +1 de movimento e +1 de intimidação para o grupo.
+- Interrogatório fica com as regras da branch `claude/interrogatorio-v1`.
 - Qualquer agente pode destrancar; o Agente tem Gazua +6.
 - A classe é trocada no menu. Um Capitão por equipe (o menu só permite um); hoje: 1 Capitão + 2 Agentes.
+
+---
+
+## 5. Impacto da branch `claude/interrogatorio-v1`
+
+Revisado na versão de 17/11/2026 (commit `db035a6`, já com a `main` atual).
+
+**Regras: sem conflito.** O interrogatório lê só a intimidação da ficha
+(`statBreakdown(..., 'intimidacao', false)`), então nem o novo bônus do grupo nem a Liderança
+mudam a CD. Se um dia quisermos que o Capitão ajude a interrogar, é uma habilidade nova (ex.:
+"Pressão: +1 na CD quando o Capitão está a até 1 hexágono"), não uma mudança na Liderança.
+
+**Nome: conflito de vocabulário.** A branch já usa **classe** para os NPCs (`NpcClass`,
+`npcClass()`, campo `EnemySpawn.npc`, variável `cls`). No código, as nossas devem ter outro nome
+para não confundir: `AgentClass` / `agent-class.ts` (e `role` como campo do personagem). Na tela
+pode continuar "Classe", porque a classe de NPC não aparece para o jogador.
+
+**Código: conflitos de merge esperados.** A branch mexe bastante em `game-screen.ts` (+383
+linhas), justamente onde as classes vão entrar:
+
+- `fieldStats` e o detalhamento do raio de abordagem (base, intimidação, grupo) ganharam campos
+  novos (`groupApproachBonus`). A Liderança precisa entrar nesse detalhamento como uma linha
+  "Capitão +1".
+- Textos que repetem os números de hoje e vão ficar errados quando os valores mudarem: o comentário
+  "+2 enquanto estiver agrupado" e a mensagem "Equipe agrupada! Juntos: +… de movimento e +… de
+  alcance" (esta usa as constantes, mas precisa citar o Capitão).
+- `door.ts` e `enemies.ts` só ganharam o estado `hidden`; não tocam no que vamos mudar.
+
+**Ordem recomendada:** esperar a branch do interrogatório entrar na `main` e só então implementar
+as classes em cima dela.
