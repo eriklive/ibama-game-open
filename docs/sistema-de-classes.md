@@ -15,16 +15,19 @@ ficha (`stats.ts`) e o d20 das portas e da abordagem.
 |---|---|---|
 | Bônus de movimento do grupo (`GROUP_RULES.moveBonus`) | +2 | **+1** |
 | Grupo com um Capitão | — | **+2** (+1 do grupo, +1 do Capitão) |
-| Bônus de alcance da abordagem (`GROUP_RULES.approachBonus`) | +2 | +2 (sem mudança — ver perguntas) |
+| Raio de abordagem base (`APPROACH_RULES.surrenderRange`) | 2 | **3** |
+| Bônus de intimidação do grupo (`GROUP_RULES.approachBonus`) | +2 | **+1** |
 
 Ou seja: agrupar continua valendo a pena, mas o grupo "cheio" (+2, como hoje) passa a depender
-de ter um Capitão nele.
+de ter um Capitão nele. O alcance da abordagem segue a mesma lógica e passa a ser individual
+(ver 3.6).
 
 ---
 
 ## 2. Classes
 
-Cada agente tem **uma** classe, escolhida na ficha (ao lado dos atributos). A classe dá
+Cada agente tem **uma** classe, que pode ser trocada no menu (ficha) antes da missão.
+**Não há limite de Agentes** na equipe nem no grupo; o limite é **um Capitão por grupo**. A classe dá
 **habilidades** (regras que mudam uma ação) e/ou **perícias** (bônus fixo numa rolagem).
 
 ### 2.1 Capitão
@@ -37,7 +40,8 @@ Cada agente tem **uma** classe, escolhida na ficha (ao lado dos atributos). A cl
 Regras de borda propostas:
 
 - O +1 do Capitão **só vale agrupado** (Capitão sozinho não ganha nada de movimento).
-- **Não acumula**: dois Capitães no mesmo grupo ainda dão +1 (o bônus é "o grupo tem um líder").
+- **Um Capitão por grupo**: o Agrupar nunca junta dois Capitães. Proposta: quando outro Capitão
+  está em campo, ele aparece no Agrupar como "não pode entrar" e fica de fora.
 - "Comando" só vale quando o Capitão **lidera** o Agrupar (é a vez dele). Se outro agente chama
   o Agrupar e o Capitão só vem junto, o custo é o normal.
 
@@ -47,7 +51,8 @@ Regras de borda propostas:
 |---|---|
 | **Gazua** (pick lock) | +6 na rolagem de destrancar uma porta. |
 
-Com a fechadura padrão (`DOOR_RULES.lock = 12`), isso muda bastante a chance:
+**Qualquer agente pode tentar destrancar.** A perícia dá vantagem, não exclusividade. Com a
+fechadura padrão (`DOOR_RULES.lock = 12`), isso muda bastante a chance:
 
 | Quem tenta | Precisa no d20 | Chance |
 |---|---|---|
@@ -88,6 +93,7 @@ passa se total ≥ dificuldade
 | Arrombar | **Força** | — | 3 (encostada) / 12 (trancada) |
 | Destrancar | **Destreza** | Gazua +6 (Agente) | fechadura da porta (padrão 12) |
 | Interrogar / conversar | **Intimidação** (do agente, vira penalidade do NPC) | — | a definir |
+| Abordar | **Intimidação** (vira alcance, não rolagem do agente) | — | raio = 3 + intimidação (ver 3.6) |
 | Mover | **Vigor** (hoje "Velocidade") | — (ver bônus de movimentação, 3.4) | — |
 
 Em código seria só uma tabela, algo como:
@@ -168,6 +174,30 @@ família de ação (mover, arrombar, destrancar, abordar/interrogar).
 
 ---
 
+## 3.6 Abordagem: alcance individual pela intimidação
+
+O alcance da abordagem deixa de ter um bônus fixo grande do grupo e passa a vir da intimidação de
+cada agente, do mesmo jeito que o movimento vem do Vigor:
+
+```
+raio de abordagem = 3 + intimidação do agente + bônus de intimidação   (nunca abaixo de 1)
+```
+
+- **Intimidação do agente**: o atributo da ficha (−5 … +5).
+- **Bônus de intimidação** (soma por fora, como o bônus de movimentação): grupo (+1), arrombamento
+  (+1 para a equipe por alguns turnos, já existe em `BREAK_IN_RULES`), equipamento no futuro.
+- As outras faixas continuam presas ao raio: rolagem até raio + 3, fuga até raio + 4.
+
+| Agente | Intimidação | Agrupado? | Raio | Rolagem até | Fuga até |
+|---|---|---|---|---|---|
+| Padrão | 0 | não | 3 | 6 | 7 |
+| Padrão | 0 | sim | 4 | 7 | 8 |
+| Com ponto em intimidação | +1 | sim | 5 | 8 | 9 |
+| Hoje (para comparar) | 0 | sim | 4 | 7 | 8 |
+
+Um agente que não investe em intimidação fica no mesmo alcance de hoje quando agrupado, e um que
+investe passa a se destacar. Cada agente pode ter um alcance diferente conforme a sua função.
+
 ## 3.5 Organização: tabela de perícias + tabela de habilidades
 
 - **Perícia** é um número somado numa rolagem de uma ação (Gazua +6 no Destrancar).
@@ -185,7 +215,7 @@ família de ação (mover, arrombar, destrancar, abordar/interrogar).
 | Habilidade | Classe | Tipo | Quando vale | Efeito | Acumula? |
 |---|---|---|---|---|---|
 | Comando | Capitão | ativa | Capitão chama o Agrupar na vez dele | Encontro custa 0 de movimento | — |
-| Liderança | Capitão | passiva | Capitão está no grupo | +1 no bônus de movimentação do grupo | Não |
+| Liderança | Capitão | passiva | Capitão está no grupo | +1 no bônus de movimentação do grupo | Máx. 1 Capitão por grupo |
 
 A tabela de ações (3.1) vira o índice que liga as duas: cada ação diz qual atributo e qual
 perícia somam e quais habilidades mexem nela, sem guardar números de classe.
@@ -194,16 +224,18 @@ perícia somam e quais habilidades mexem nela, sem guardar números de classe.
 
 ## 4. Perguntas em aberto
 
-1. O bônus de **alcance da abordagem** do grupo (+2) também cai para +1? E o Capitão dá +1 de
-   alcance, como dá de movimento?
-2. Uma equipe pode ter **mais de um Capitão**? (Proposta: pode, mas o bônus não acumula.)
+1. O Capitão dá +1 de **intimidação** ao grupo, como dá de movimento? (Hoje: não; só movimento.)
+2. Hoje o código tem **um grupo só**. Com o limite de um Capitão por grupo, uma equipe com dois
+   Capitães precisa poder ter **dois grupos**, ou o segundo Capitão só fica de fora?
 3. "Comando" deveria valer também para **desagrupar/reagrupar** no mesmo turno, ou só uma vez por
    turno?
-4. Quem não é Agente **pode** tentar destrancar (com 45%), ou a ação fica só para o Agente?
-   (Proposta: pode — a classe dá vantagem, não exclusividade.)
-5. Interrogar: qual a **dificuldade base** e o que o NPC entrega quando falha (pista, localização
+4. Interrogar: qual a **dificuldade base** e o que o NPC entrega quando falha (pista, localização
    de item, rendição)?
-6. Vigor faz mais alguma coisa além do movimento já nesta versão (ex.: custo de carregar
+5. Vigor faz mais alguma coisa além do movimento já nesta versão (ex.: custo de carregar
    equipamento pesado), ou começa só como o novo nome da Velocidade?
-7. A classe é **fixa por personagem** (Ana é sempre Capitã) ou escolhida na ficha antes de cada
-   missão?
+
+### Decidido
+
+- Bônus de grupo: +1 de movimento e +1 de intimidação. Raio de abordagem base 3.
+- Qualquer agente pode destrancar; o Agente tem Gazua +6.
+- A classe é trocada no menu. Sem limite de Agentes; um Capitão por grupo.
