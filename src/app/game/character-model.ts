@@ -95,6 +95,13 @@ export class CharacterRig {
   private readonly mixer: THREE.AnimationMixer;
   private readonly actions = new Map<ClipName, THREE.AnimationAction>();
   private current: THREE.AnimationAction | null = null;
+  /**
+   * Camada procedural por cima do clipe (em radianos, somada depois do mixer): a biblioteca
+   * de clipes não tem chute, então o arrombamento dobra a perna direita e a coluna à mão.
+   * `thigh` < 0 levanta a coxa para a frente; `calf` > 0 dobra o joelho; `spine` < 0 inclina para trás.
+   */
+  readonly pose = { thigh: 0, calf: 0, spine: 0 };
+  private readonly bones: Partial<Record<'thigh_r' | 'calf_r' | 'spine_01', THREE.Object3D>> = {};
 
   private constructor(
     /** Raiz do modelo já na escala do tabuleiro, com os pés em y = 0 e de frente para +Z. */
@@ -107,6 +114,10 @@ export class CharacterRig {
   ) {
     this.mixer = new THREE.AnimationMixer(object);
     for (const clip of clips) this.actions.set(clip.name as ClipName, this.mixer.clipAction(clip));
+    for (const name of ['thigh_r', 'calf_r', 'spine_01'] as const) {
+      const bone = object.getObjectByName(name);
+      if (bone) this.bones[name] = bone;
+    }
   }
 
   static async load(def: ModelDef): Promise<CharacterRig> {
@@ -158,6 +169,12 @@ export class CharacterRig {
     this.current = next;
   }
 
+  /** Velocidade de um clipe (negativa toca ao contrário: andar de costas). */
+  setTimeScale(name: ClipName, scale: number): void {
+    const action = this.actions.get(name);
+    if (action) action.timeScale = scale;
+  }
+
   /** Ajusta a velocidade do clipe de locomoção à velocidade da peça (unidades do mundo/s). */
   matchSpeed(name: ClipName, worldSpeed: number): void {
     const action = this.actions.get(name);
@@ -167,6 +184,10 @@ export class CharacterRig {
 
   update(dt: number): void {
     this.mixer.update(dt);
+    const { thigh, calf, spine } = this.pose;
+    if (thigh && this.bones.thigh_r) this.bones.thigh_r.rotation.x += thigh;
+    if (calf && this.bones.calf_r) this.bones.calf_r.rotation.x += calf;
+    if (spine && this.bones.spine_01) this.bones.spine_01.rotation.x += spine;
   }
 
   dispose(): void {

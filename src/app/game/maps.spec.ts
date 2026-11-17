@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { commonDoors } from './door';
 import { HexCoord, hexKey, reachableHexes } from './hex';
 import {
   COVER_HEIGHT, DOOR_REVEAL, HexRect, MAPS, STRUCTURE_SIGHT, doorsOf, structureRect, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
@@ -168,5 +169,12 @@ describe('aeroporto: mundo semiaberto', () => {
     // porta da casa, a oeste
     expect(structureView(house, [{ col: 27, row: 29 }], houseDoors).roof).toBe(false);
     expect(structureView(house, [{ col: 26, row: 29 }], houseDoors).roof).toBe(true);
+  });
+
+  it('aeroporto: os estados de porta do mapa são de portas comuns (o portão do hangar fica de fora)', () => {
+    const map = MAPS.find((m) => m.id === 'aeroporto')!;
+    const common = new Set(commonDoors(map.doors ?? []).map(hexKey));
+    expect([...common].sort()).toEqual(['14,4', '29,29', '29,4', '35,29']);
+    for (const key of Object.keys(map.doorStates ?? {})) expect(common.has(key), key).toBe(true);
   });
 });

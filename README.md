@@ -163,7 +163,8 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
 
 - **Cômodo 1:** o **Garimpeiro Jô** come parado na mesa, **de costas para a entrada**. Ele não anda no
   turno inimigo, mas o cone de visão dele cobre a porta do cômodo 2: entre por trás e **aborde** (a até 2
-  hexágonos ele se rende). Quem passa pela porta do meio sem rendê-lo é avistado.
+  hexágonos ele se rende). A porta do meio está **trancada** (ver [Portas](#portas)); quem passa por ela
+  sem rendê-lo é avistado.
 - **Cômodo 2:** ao entrar (mesmo só de passagem), cada agente rola **percepção** uma vez — um **d20** que
   aparece numa ficha no canto esquerdo da tela. Tirando **mais que 6**, ele repara em algo na
   **prateleira** da parede do leste, que ganha uma lupa.
@@ -180,6 +181,40 @@ reparar num esconderijo. As regras dos testes ficam em `SEARCH_RULES` (`src/app/
 e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
 mesa (cobertura baixa) e `P` a prateleira (alta); os modelos são montados em `scenery.ts` (`buildHouse`).
 Um inimigo com rota de um ponto só fica parado; `facing` no mapa diz para onde ele olha.
+
+### Portas
+
+As portas comuns (um `D` sozinho no desenho do mapa) têm folha de verdade e quatro estados. Fechada,
+a porta bloqueia a passagem e a visão como uma parede. Fileiras de `D` (o portão do hangar) ficam
+sempre abertas.
+
+| Estado | Como passa |
+| --- | --- |
+| **Aberta** | Passa direto |
+| **Encostada** (fechada, sem tranca) | Abrir, pick lock (abre sozinha) ou arrombar tirando **3+** no d20 |
+| **Trancada** | Pick lock tirando a **fechadura** da porta (12 por padrão) ou arrombar tirando **12+** |
+| **Bloqueada** | Nunca abre (até ser desbloqueada): dá para tentar, mas nunca passa |
+
+- Colado numa porta fechada, ela ganha um **losango amarelo**. Tocar na porta (ou no papel **Porta**, ou
+  □ no controle) abre o **menu da porta**: a câmera gira 45° e aproxima até enquadrar a porta e o agente,
+  a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Pick lock** e **Abrir**.
+  A ficha que depende de rolagem traz o **d20** com o número a tirar; as outras, um círculo vazio.
+- **Arrombar** é um chute: o agente encosta, o d20 gira na ficha da esquerda e para quando o pé bate. Se
+  passar, a porta abre com força para dentro, bate na parede e fica **arrombada** (aberta para sempre); se
+  não, só treme. Arrombar uma porta que **não estava trancada** faz o inimigo mais perto (a até 4
+  hexágonos) olhar para o agente e soltar uma fala num balão ("Precisava disso não, senhor.", "Pô, a porta
+  tava aberta!").
+- **Pick lock** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
+  dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0).
+- **Abrir** empurra a folha: só abre a encostada.
+- Nas portas, passa quem tira **pelo menos** o número (12 = 12 ou mais).
+- No aeroporto: a entrada da casa está encostada; a divisória, trancada; nos fundos do hangar, a porta do
+  oeste está trancada (fechadura 10) e a do leste, bloqueada (`doorStates` no mapa; sem entrada, a porta
+  começa encostada).
+
+As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testadas), as folhas e o indicador em
+`door-view.ts`. A biblioteca de clipes não tem chute: a perna é dobrada à mão por cima do `idle`
+(`CharacterRig.pose`); o pick lock usa o `crouch`.
 
 ### Missão principal: queimar o avião e os suprimentos
 
@@ -254,7 +289,8 @@ símbolo correspondente.
 | Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
 | ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
 | ○ | Cancela |
-| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo ou inspecionar) |
+| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, inspecionar ou abrir o menu da porta) |
+| No menu da porta | ✕ arromba, □ pick lock, △ abre, ○ volta |
 | L3 | Encerrar a operação (depois de queimar o avião) |
 | △ | Passar a vez |
 | Share | Agrupar / desagrupar |

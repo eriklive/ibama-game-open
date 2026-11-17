@@ -673,3 +673,113 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   font-size: 14px; text-transform: uppercase;
 }
 .menu-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35); }
+
+/* ---------- portas ---------- */
+/* botão "Porta": post-it colado no canto das ações, quando o agente está colado numa porta */
+.door-btn { right: 176px; bottom: 112px; width: 74px; height: 44px; transform: rotate(-3deg); background: var(--postit); animation: slap .25s ease-out both; }
+.door-btn .stencil { font-size: 13px; }
+.door-btn .typed { font-size: 9px; }
+
+/* menu da porta: a papelada da HUD sai de cena; as ações entram como fichas na direita */
+.game .top, .game .agents, .game .suspects, .game .actions, .game .end-op { transition: opacity .3s, translate .3s; }
+.game.door-focus .top { opacity: 0; translate: 0 -14px; pointer-events: none; }
+.game.door-focus .agents { opacity: 0; translate: -14px 0; pointer-events: none; }
+.game.door-focus .suspects, .game.door-focus .actions { opacity: 0; translate: 14px 0; pointer-events: none; }
+.game.door-focus .end-op { opacity: 0; pointer-events: none; }
+.game.door-focus .telegram { left: calc((100% - var(--door-w)) / 2); }
+
+.game { --door-w: calc(min(300px, 40vw) + 14px); }
+.door-back {
+  position: absolute; z-index: 4;
+  left: calc(14px + var(--safe-left)); top: calc(12px + var(--safe-top));
+  animation: slap .25s ease-out both;
+}
+.door-back:disabled { opacity: .5; }
+.door-sheet {
+  position: absolute; z-index: 4;
+  top: 0; bottom: 0; right: calc(14px + var(--safe-right));
+  width: min(300px, 40vw);
+  padding: calc(14px + var(--safe-top)) 0 calc(14px + var(--safe-bottom));
+  display: flex; flex-direction: column; justify-content: center; gap: 12px;
+  overflow-y: auto;
+  animation: sheet-in .45s cubic-bezier(.2, .8, .2, 1) both;
+}
+.door-sheet > :first-child { margin-top: auto; }
+.door-sheet > :last-child { margin-bottom: auto; }
+@keyframes sheet-in { from { translate: calc(100% + 30px) 0; } to { translate: 0 0; } }
+.door-head {
+  align-self: flex-end; max-width: 100%;
+  padding: 8px 16px 14px;
+  background: var(--tape);
+  clip-path: polygon(0 8%, 3% 0, 50% 3%, 97% 0, 100% 10%, 99% 50%, 100% 92%, 96% 100%, 50% 97%, 4% 100%, 0 90%, 1% 50%);
+  transform: rotate(-1deg);
+}
+.door-kicker { display: block; font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted-paper); }
+.door-name { margin: 1px 0 0; font-family: var(--marker); font-weight: 400; font-size: 20px; line-height: 1.1; }
+.door-state {
+  align-self: flex-end; margin: -18px 10px 0 0; position: relative; z-index: 1;
+  padding: 0 6px; border: 3px solid currentColor; background: rgba(247, 242, 228, .9);
+  font-family: var(--stencil); font-weight: 700; font-size: 13px; text-transform: uppercase; white-space: nowrap;
+  transform: rotate(-8deg);
+  animation: slap .25s ease-out both;
+}
+.door-state.st-aberta { color: var(--green-ok); }
+.door-state.st-encostada { color: var(--ink-paper); }
+.door-state.st-trancada, .door-state.st-bloqueada { color: var(--red-text); }
+.door-state.st-bloqueada { border-style: double; border-width: 4px; }
+.door-opts { list-style: none; margin: 4px 0 0; padding: 0; display: flex; flex-direction: column; gap: 12px; }
+.door-opt {
+  position: relative; width: 100%;
+  display: grid; grid-template-columns: 56px minmax(0, 1fr); align-items: center; gap: 10px;
+  padding: 9px 12px 9px 8px;
+  text-align: left;
+  background: var(--paper);
+  box-shadow: 2px 4px 0 rgba(0, 0, 0, .4);
+  transform: rotate(var(--tilt, -1deg));
+  animation: slap .25s calc(var(--i, 0) * .06s) ease-out both;
+  transition: transform .12s;
+}
+.door-opts li:nth-child(2) .door-opt { --tilt: .8deg; }
+.door-opts li:nth-child(3) .door-opt { --tilt: -.6deg; }
+.door-opt:hover:not(:disabled) { transform: rotate(0deg) translateX(-4px); }
+.door-opt:active:not(:disabled) { transform: rotate(0deg) translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, .4); }
+.door-opt:disabled { opacity: .5; }
+.door-text { min-width: 0; }
+.door-opt-name { display: block; font-family: var(--stencil); font-weight: 700; font-size: 26px; line-height: 1; text-transform: uppercase; overflow-wrap: anywhere; }
+.door-opt-need { display: block; margin-top: 3px; font-size: 12px; line-height: 1.2; }
+.door-opt-need.never { color: var(--red-text); }
+.door-opt-need.free { color: var(--green-ok); }
+.door-slot { position: relative; width: 56px; height: 56px; display: grid; place-items: center; }
+.door-slot.none::before { content: ''; width: 34px; height: 34px; border: 2px dashed rgba(35, 32, 26, .28); border-radius: 50%; }
+.door-slot .d20 { width: 56px; height: 56px; margin: 0; }
+.door-slot .d20-value { top: 5px; font-size: 16px; }
+.door-slot .d20.never .d20-body { fill: #f6dcd6; }
+.door-slot .d20.never .d20-value { color: var(--red-text); }
+.door-cost {
+  position: absolute; right: -8px; top: -10px;
+  padding: 0 4px; background: var(--postit);
+  font-size: 9px; line-height: 14px; text-transform: uppercase; white-space: nowrap;
+  box-shadow: 1px 1px 0 rgba(0, 0, 0, .3);
+  transform: rotate(6deg);
+}
+
+@media (max-width: 640px) {
+  .game { --door-w: calc(min(205px, 54vw) + 14px); }
+  .door-sheet { width: min(205px, 54vw); gap: 10px; }
+  .door-opt { grid-template-columns: 42px minmax(0, 1fr); gap: 8px; padding: 8px 10px 8px 6px; }
+  .door-slot, .door-slot .d20 { width: 42px; height: 42px; }
+  .door-slot.none::before { width: 28px; height: 28px; }
+  .door-slot .d20-value { font-size: 13px; top: 4px; }
+  .door-opt-name { font-size: 21px; }
+  .door-opt-need { font-size: 11px; }
+  .door-name { font-size: 17px; }
+}
+@media (max-height: 520px) {
+  .door-opts { gap: 8px; }
+  .door-opt { padding-block: 5px; }
+  .door-slot, .door-slot .d20 { width: 40px; height: 40px; }
+  .door-opt-name { font-size: 20px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .door-sheet, .door-opt, .door-state, .door-back, .door-btn { animation: none; }
+}
