@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { spawnEnemy, stationary, visionHexes } from './enemies';
 import { hexKey, reachableHexes } from './hex';
-import { MAPS, blockedHexes, lowCoverHexes, playArea } from './maps';
+import { MAPS, blockedHexes, lowCoverHexes, playArea, structureRect } from './maps';
 import { SEARCH_RULES, beats, canReach, chance, entersRoom } from './search';
 
 describe('testes de d20', () => {
@@ -33,7 +33,7 @@ describe('aeroporto: casa do Garimpeiro Jô', () => {
   const map = MAPS.find((m) => m.id === 'aeroporto')!;
   const area = playArea(map);
   const solid = new Set([...blockedHexes(map), ...lowCoverHexes(map)]);
-  const house = map.house!;
+  const house = structureRect(map, 'house')!;
   const item = map.hidden!.find((h) => h.id === 'arma')!;
   const jo = map.enemies.find((e) => e.id === 'jo')!;
 

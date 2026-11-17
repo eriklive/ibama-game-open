@@ -7,7 +7,11 @@ import { HexCoord, hexKey, hexToWorld } from './hex';
  * bloqueia passagem e visão são os hexágonos marcados no mapa.
  */
 
-const WALL_HEIGHT = 1.5;
+/**
+ * Altura das paredes do hangar. O telhado em arco nasce no topo delas: o agente mais alto
+ * (≈ 2,73 unidades) tem que caber debaixo dele já na primeira coluna de dentro.
+ */
+const WALL_HEIGHT = 2.6;
 const WALL_THICKNESS = 0.18;
 
 /** Nome do grupo do telhado (chapa, oitões e arcos) dentro do hangar. */
@@ -272,7 +276,8 @@ export function buildHangar(
 
 /** Nome do grupo do telhado da casa (some quando um agente entra). */
 export const HOUSE_ROOF = 'house-roof';
-const HOUSE_WALL_HEIGHT = 1.3;
+/** Altura das paredes da casa: o telhado de duas águas passa por cima da cabeça já rente à parede. */
+const HOUSE_WALL_HEIGHT = 2.4;
 
 /** Textura de tábuas corridas na horizontal, com frestas escuras e veios. */
 function plankTexture(): THREE.Texture {

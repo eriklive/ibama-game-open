@@ -16,6 +16,19 @@ export interface HexRect {
   rows: [number, number];
 }
 
+/** Aparência de uma estrutura: as regras (telhado, portas, interior) são as mesmas para todas. */
+export type StructureKind = 'hangar' | 'house';
+
+/**
+ * Estrutura coberta sobre um retângulo de hexágonos (colunas e fileiras, inclusive).
+ * `hangar`: paredes de chapa reta e telhado em arco. `house`: paredes de tábua e telhado de
+ * duas águas; paredes de dentro (divisórias) são colunas inteiras de `#` dentro do retângulo.
+ */
+export interface Structure {
+  kind: StructureKind;
+  rect: HexRect;
+}
+
 export interface GameMap {
   id: string;
   name: string;
@@ -28,6 +41,8 @@ export interface GameMap {
   starts: { col: number; row: number }[];
   /** Hexágonos com parede: bloqueiam passagem e visão. */
   walls: { col: number; row: number }[];
+  /** Hexágonos de porta (`D` no esboço): passagens nas paredes das estruturas. */
+  doors?: HexCoord[];
   /** Hexágonos com árvores: bloqueiam passagem e visão, como as paredes. */
   trees?: HexCoord[];
   /** Chão de cada hexágono (chave de `hexKey`); sem isso, o tabuleiro azul de teste. */
@@ -41,13 +56,13 @@ export interface GameMap {
   props?: HexCoord[];
   /** Hexágonos ocupados pelo avião estacionado: bloqueiam passagem e visão. */
   plane?: HexCoord[];
-  /** Hangar: retângulo (colunas e fileiras, inclusive) cujas paredes viram chapa reta, com telhado em arco. */
-  hangar?: HexRect;
   /**
-   * Casa: retângulo cujas paredes viram tábuas, com telhado de duas águas que some quando um
-   * agente entra. Paredes de dentro (divisórias) são colunas inteiras de `#` dentro do retângulo.
+   * Estruturas cobertas (hangar, casa…). Toda estrutura com telhado segue as mesmas regras
+   * (ver `structureView`): o telhado some com um agente dentro ou perto de uma das portas
+   * (`D` dentro do retângulo dela), e o que se passa lá dentro fica escondido enquanto o
+   * telhado estiver no lugar.
    */
-  house?: HexRect;
+  structures?: Structure[];
   /** Coisas escondidas: aparecem com um teste de percepção e se acham inspecionando o móvel. */
   hidden?: HiddenItem[];
   /** O que a equipe pode queimar (o avião, os suprimentos do garimpo). */
@@ -101,9 +116,10 @@ export const CHARACTERS: Character[] = [
  */
 export function parseLayout(
   layout: readonly string[],
-): Pick<GameMap, 'cols' | 'rows' | 'walls' | 'trees' | 'ground' | 'plane' | 'cover' | 'props'> {
+): Pick<GameMap, 'cols' | 'rows' | 'walls' | 'doors' | 'trees' | 'ground' | 'plane' | 'cover' | 'props'> {
   const cols = layout[0].length;
   const walls: HexCoord[] = [];
+  const doors: HexCoord[] = [];
   const trees: HexCoord[] = [];
   const plane: HexCoord[] = [];
   const cover: (HexCoord & { kind: CoverKind })[] = [];
@@ -124,13 +140,14 @@ export function parseLayout(
       const h = { col, row };
       ground.set(hexKey(h), kind);
       if (ch === '#') walls.push(h);
+      if (ch === 'D') doors.push(h);
       if (ch === 'T') trees.push(h);
       if (ch === 'A') plane.push(h);
       if (ch === 'f') props.push(h);
       if (coverKinds[ch]) cover.push({ ...h, kind: coverKinds[ch] });
     });
   });
-  return { cols, rows: layout.length, walls, trees, ground, plane, cover, props };
+  return { cols, rows: layout.length, walls, doors, trees, ground, plane, cover, props };
 }
 
 /**
@@ -270,8 +287,10 @@ export const MAPS: GameMap[] = [
     name: 'Aeroporto',
     subtitle: 'Missão circular · pista de terra, hangar e mata',
     ...AEROPORTO,
-    hangar: { cols: [11, 32], rows: [4, 18] },
-    house: { cols: [29, 41], rows: [26, 32] },
+    structures: [
+      { kind: 'hangar', rect: { cols: [11, 32], rows: [4, 18] } },
+      { kind: 'house', rect: { cols: [29, 41], rows: [26, 32] } },
+    ],
     hidden: [
       {
         id: 'arma',
@@ -378,24 +397,37 @@ export function stepsToStructure(h: HexCoord, rect: HexRect): number {
   return best;
 }
 
+/** Distância (em hexágonos) de uma porta a partir da qual o teto some para mostrar o interior. */
+export const DOOR_REVEAL = 2;
+
 /**
  * O que se desenha de uma estrutura, dadas as posições dos agentes: o teto some quando
- * algum agente entra (de fora ele fica) e o que há dentro só aparece com um agente a
- * até `sight` hexágonos dela.
+ * algum agente entra ou está a até `DOOR_REVEAL` hexágonos de uma das portas (`doors`) —
+ * ao se afastar da porta, ele volta. O que há dentro só aparece com um agente a até
+ * `sight` hexágonos dela.
  */
 export function structureView(
   rect: HexRect,
   agents: Iterable<HexCoord>,
+  doors: readonly HexCoord[] = [],
   sight = STRUCTURE_SIGHT,
 ): { roof: boolean; interior: boolean } {
   let roof = true;
   let interior = false;
   for (const a of agents) {
-    if (inStructure(a, rect)) roof = false;
+    if (inStructure(a, rect) || doors.some((d) => hexDistance(a, d) <= DOOR_REVEAL)) roof = false;
     if (stepsToStructure(a, rect) <= sight) interior = true;
   }
   return { roof, interior };
 }
+
+/** Retângulo da primeira estrutura de um tipo no mapa. */
+export const structureRect = (map: GameMap, kind: StructureKind): HexRect | undefined =>
+  map.structures?.find((s) => s.kind === kind)?.rect;
+
+/** Portas do mapa que ficam na planta da estrutura. */
+export const doorsOf = (map: GameMap, rect: HexRect): HexCoord[] =>
+  (map.doors ?? []).filter((d) => inStructure(d, rect));
 
 export const findMap = (id: string | null | undefined): GameMap | undefined =>
   MAPS.find((m) => m.id === id && m.available);

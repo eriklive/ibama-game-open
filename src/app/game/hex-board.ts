@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, HexRect, inStructure, playArea, structureView } from './maps';
+import { COVER_HEIGHT, GameMap, Ground, HexRect, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, METER, ModelDef } from './character-model';
@@ -9,6 +9,7 @@ import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
 import { StaticShadow, castsMovingShadow } from './static-shadow';
 import { HexTile, TileField } from './tile-field';
+import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -167,6 +168,8 @@ export interface HexBoardCallbacks {
   onHexTap(hex: HexCoord | null): void;
   /** Toque numa peça de personagem (ou no hexágono em que ela está). */
   onUnitTap(id: string): void;
+  /** Toque na lupa (ou no móvel debaixo dela). */
+  onClueTap?(): void;
 }
 
 /**
@@ -212,7 +215,7 @@ export class HexBoard {
    * Estruturas (hangar, casa): o telhado some quando um agente entra e o que fica dentro
    * (carga, avião, lâmpadas, móveis) só aparece com um agente por perto.
    */
-  private readonly structures: { rect: HexRect; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
+  private readonly structures: { rect: HexRect; doors: HexCoord[]; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
   /** Pista de algo escondido: uma lupa flutuando sobre o móvel percebido. */
   private clue?: { sprite: THREE.Sprite; hex: HexCoord };
   /** Modelo do avião e da carga por hexágono: o que escurece quando pega fogo. */
@@ -238,6 +241,12 @@ export class HexBoard {
   private vision = new Set<string>();
   /** Pré-visualização da abordagem: zona de rendição, zona de rolagem e zona de fuga. */
   private approach: { surrender: Set<string>; roll: Set<string>; flee: Set<string> } | null = null;
+  /** Escala de cinza do modo de abordagem (ver `setSpotlight`). */
+  private spotlight!: Spotlight;
+  private spot: { lit: THREE.Object3D[]; zone: THREE.InstancedMesh | null; tiles: HexTile[] } | null = null;
+  /** Etiquetas sobre os suspeitos (desenhadas por cima, depois do cinza). */
+  private readonly labelScene = new THREE.Scene();
+  private readonly labels = new Map<string, THREE.Sprite>();
   /** Onda de voz da abordagem: sai do agente e acende os hexágonos do raio. */
   private wave: { from: HexCoord; start: number; end: number } | null = null;
   private waveRing?: THREE.Mesh;
@@ -254,6 +263,8 @@ export class HexBoard {
   private readonly camTarget = new THREE.Vector3();
   private readonly camGoal = new THREE.Vector3();
   private zoom = 1;
+  /** Câmera de antes do close-up da inspeção (para voltar depois). */
+  private beforeCloseUp: { zoom: number; goal: THREE.Vector3 } | null = null;
   private readonly bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
   /** Mundo semiaberto: a câmera passeia num círculo (centro e raio no plano do mundo). */
   private worldBounds: { x: number; z: number; r: number } | null = null;
@@ -277,6 +288,7 @@ export class HexBoard {
     // contagem por quadro (a sombra móvel faz um `render` dentro do outro)
     this.renderer.info.autoReset = false;
     this.staticShadow = new StaticShadow(this.renderer, this.scene, this.sun);
+    this.spotlight = new Spotlight(this.renderer, this.scene, this.camera);
     this.area = playArea(map);
 
     this.scene.background = new THREE.Color(COLORS.background);
@@ -382,6 +394,70 @@ export class HexBoard {
   }
 
   /**
+   * Modo de abordagem: o tabuleiro fica em cinza, menos os personagens de `units` (o da vez),
+   * os inimigos de `labels` (cada um com uma etiqueta: se rende, rola ou corre) e os hexágonos de
+   * `hexes` (o raio). `null` devolve a cor.
+   */
+  setSpotlight(
+    spot: {
+      units: readonly string[];
+      labels: readonly { id: string; text: string; tone: 'surrender' | 'roll' | 'flee' }[];
+      hexes: Iterable<string>;
+    } | null,
+  ): void {
+    // desfaz o destaque anterior
+    if (this.spot) {
+      for (const o of this.spot.lit) o.layers.disable(SPOTLIGHT_LAYER);
+      if (this.spot.zone) {
+        this.scene.remove(this.spot.zone);
+        this.spot.zone.geometry.dispose();
+        (this.spot.zone.material as THREE.Material).dispose();
+      }
+      this.spot = null;
+    }
+    for (const sprite of this.labels.values()) {
+      this.labelScene.remove(sprite);
+      sprite.material.map?.dispose();
+      sprite.material.dispose();
+    }
+    this.labels.clear();
+    this.spotlight.set(!!spot);
+    if (!spot) return;
+
+    const lit: THREE.Object3D[] = [];
+    const light = (root: THREE.Object3D) =>
+      root.traverse((o) => {
+        if (!(o as THREE.Mesh).isMesh) return;
+        o.layers.enable(SPOTLIGHT_LAYER);
+        lit.push(o);
+      });
+    for (const id of spot.units) {
+      const u = this.units.get(id);
+      if (u) light(u.group);
+    }
+    if (spot.units.includes(this.activeId ?? '')) light(this.activeMarker);
+    for (const l of spot.labels) {
+      const e = this.enemies.get(l.id);
+      if (!e) continue;
+      light(e.group);
+      const sprite = this.labelSprite(l.text, l.tone);
+      this.labels.set(l.id, sprite);
+      this.labelScene.add(sprite);
+    }
+    // o raio: prismas só na camada do destaque, por cima dos hexágonos do chão
+    const tiles = [...spot.hexes].map((k) => this.tiles.get(k)).filter((t): t is HexTile => !!t);
+    let zone: THREE.InstancedMesh | null = null;
+    if (tiles.length) {
+      zone = new THREE.InstancedMesh(this.field.prism.clone(), new THREE.MeshBasicMaterial(), tiles.length);
+      zone.layers.set(SPOTLIGHT_LAYER);
+      zone.frustumCulled = false;
+      this.scene.add(zone);
+    }
+    this.spot = { lit, zone, tiles };
+    this.updateSpotlight();
+  }
+
+  /**
    * Onda de voz da abordagem: um anel sai de `from` e cada hexágono das zonas da abordagem
    * pula e brilha quando ela chega (as zonas precisam estar mostradas). `radius` é o alcance
    * da abordagem de quem gritou (cresce com a intimidação e com o grupo).
@@ -419,6 +495,46 @@ export class HexBoard {
   /** Mostra (ou esconde, com `null`) o cursor do controle. */
   setCursor(hex: HexCoord | null): void {
     this.cursor = hex && this.tiles.has(hexKey(hex)) ? hex : null;
+  }
+
+  /**
+   * Close-up (inspeção): a câmera aproxima até enquadrar `hexes` (o agente e o móvel).
+   * `endCloseUp` volta para onde a câmera estava.
+   */
+  closeUp(hexes: readonly HexCoord[]): void {
+    if (!hexes.length) return;
+    this.beforeCloseUp ??= { zoom: this.zoom, goal: this.camGoal.clone() };
+    const pts = hexes.map((h) => this.worldOf(h));
+    const mid = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / pts.length);
+    this.setZoom(0.6);
+    this.camGoal.copy(mid);
+    // o d20 aparece em cima: o enquadramento desce para os dois ficarem no meio de baixo
+    this.camGoal.z -= 1.1;
+  }
+
+  endCloseUp(): void {
+    const prev = this.beforeCloseUp;
+    if (!prev) return;
+    this.beforeCloseUp = null;
+    this.setZoom(prev.zoom);
+    this.camGoal.copy(prev.goal);
+    this.clampGoal();
+  }
+
+  /**
+   * Enquadra um grupo de hexágonos (quem aborda e os suspeitos): a câmera vai para o meio
+   * deles e afasta o que for preciso para todos caberem na tela (nunca aproxima).
+   */
+  frameHexes(hexes: readonly HexCoord[]): void {
+    if (!hexes.length) return;
+    const pts = hexes.map((h) => this.worldOf(h));
+    const mid = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / pts.length);
+    const spread = Math.max(...pts.map((p) => Math.max(Math.abs(p.x - mid.x) / 1.9, Math.abs(p.z - mid.z))));
+    this.setZoom(Math.max(this.zoom, (spread + 2) / 3));
+    this.camGoal.copy(mid);
+    // a fita do topo cobre mais que o painel de baixo: o enquadramento desce um pouco
+    this.camGoal.z -= 0.9;
+    this.clampGoal();
   }
 
   /** Desloca a câmera só o necessário para o hexágono ficar longe das bordas da tela. */
@@ -621,6 +737,8 @@ export class HexBoard {
       else mat?.dispose();
     });
     this.staticShadow.dispose();
+    this.setSpotlight(null);
+    this.spotlight.dispose();
     this.renderer.dispose();
   }
 
@@ -804,17 +922,11 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
     const wallKeys = new Set(walls.map(hexKey));
-    const hangar = this.map.hangar;
-    if (hangar) {
-      const built = buildHangar(hangar, wallKeys, HEX_SIZE);
+    for (const { kind, rect } of this.map.structures ?? []) {
+      const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE);
+      const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
-      this.structures.push({ rect: hangar, roof: built.getObjectByName(HANGAR_ROOF), interior: lamps ? [lamps] : [] });
-      this.addScenery(built);
-    }
-    const house = this.map.house;
-    if (house) {
-      const built = buildHouse(house, wallKeys, HEX_SIZE);
-      this.structures.push({ rect: house, roof: built.getObjectByName(HOUSE_ROOF), interior: [] });
+      this.structures.push({ rect, doors: doorsOf(this.map, rect), roof, interior: lamps ? [lamps] : [] });
       this.addScenery(built);
     }
     const inHangar = (h: HexCoord): boolean => this.structures.some((st) => inStructure(h, st.rect));
@@ -886,6 +998,29 @@ export class HexBoard {
     return new THREE.Group().add(object);
   }
 
+  /**
+   * O hexágono fica debaixo de um telhado que está no lugar (nenhum agente dentro da
+   * estrutura nem perto de uma porta dela): o jogador não enxerga o que acontece ali.
+   */
+  isCovered(hex: HexCoord): boolean {
+    const agents = [...this.units.values()].map((u) => u.hex);
+    return this.structures.some((st) => st.roof && inStructure(hex, st.rect) && structureView(st.rect, agents, st.doors).roof);
+  }
+
+  /** Põe o inimigo num hexágono na hora (sem animação), virado para onde ia. */
+  jumpEnemy(id: string, hex: HexCoord): void {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    const from = this.worldOf(e.hex);
+    const to = this.worldOf(hex);
+    e.epoch++;
+    e.hop = 0;
+    e.hex = { ...hex };
+    e.group.position.x = to.x;
+    e.group.position.z = to.z;
+    if (from.distanceToSquared(to) > 0) e.facing = e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
+  }
+
   /** Teto e interior das estruturas conforme a posição dos agentes (ver `structureView`). */
   private updateStructure(): void {
     if (!this.structures.length) return;
@@ -895,7 +1030,7 @@ export class HexBoard {
     this.structureKey = key;
     const agents = [...this.units.values()].map((u) => u.hex);
     for (const st of this.structures) {
-      const view = structureView(st.rect, agents);
+      const view = structureView(st.rect, agents, st.doors);
       if (st.roof) st.roof.visible = view.roof;
       for (const o of st.interior) o.visible = view.interior;
     }
@@ -1743,6 +1878,8 @@ export class HexBoard {
       const tile = this.tiles.get(hexKey(this.clue.hex));
       const p = tile ?? this.worldOf(this.clue.hex);
       this.clue.sprite.position.set(p.x, (tile?.y ?? 0) + 1.9 + Math.sin(t * 3) * 0.08, p.z);
+      // pulsa para mostrar que dá para tocar
+      this.clue.sprite.scale.setScalar(0.8 + Math.max(0, Math.sin(t * 4)) * 0.12);
     }
 
     this.updateCamera(dt);
@@ -1750,8 +1887,71 @@ export class HexBoard {
     // a mata que só faz sombra (fora da tela) entra apenas no quadro que redesenha a sombra
     this.stream.cull(this.camera, shadow ? this.sun : undefined);
     this.renderer.info.reset();
-    this.renderer.render(this.scene, this.camera);
+    this.updateSpotlight();
+    this.spotlight.render(dt);
+    if (this.labels.size) {
+      this.renderer.autoClear = false;
+      this.renderer.render(this.labelScene, this.camera);
+      this.renderer.autoClear = true;
+    }
   };
+
+  /** Acompanha o destaque: o raio sobe e desce com os hexágonos e as etiquetas seguem os suspeitos. */
+  private updateSpotlight(): void {
+    const zone = this.spot?.zone;
+    if (zone && this.spot) {
+      const m = new THREE.Matrix4();
+      this.spot.tiles.forEach((t, i) => zone.setMatrixAt(i, m.makeTranslation(t.x, t.y + 0.002, t.z)));
+      zone.instanceMatrix.needsUpdate = true;
+    }
+    for (const [id, sprite] of this.labels) {
+      const e = this.enemies.get(id);
+      if (!e) continue;
+      sprite.visible = e.group.visible;
+      sprite.position.set(e.group.position.x, e.group.position.y + e.signY - 0.2, e.group.position.z);
+    }
+  }
+
+  /** Etiqueta de um suspeito no modo de abordagem ("se rende" em verde, "rola" em amarelo, "corre" em laranja). */
+  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee'): THREE.Sprite {
+    const font = 'bold 40px "Special Elite", "Courier New", monospace';
+    const c = document.createElement('canvas');
+    const g = c.getContext('2d');
+    const pad = 22;
+    const tip = 14;
+    let width = 240;
+    if (g) {
+      g.font = font;
+      width = Math.ceil(g.measureText(text).width) + pad * 2;
+    }
+    c.width = width;
+    c.height = 64 + tip;
+    if (g) {
+      g.fillStyle = tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : '#c4621a';
+      g.beginPath();
+      g.roundRect(0, 0, width, 64, 12);
+      g.moveTo(width / 2 - tip, 64);
+      g.lineTo(width / 2, 64 + tip);
+      g.lineTo(width / 2 + tip, 64);
+      g.fill();
+      g.font = font;
+      g.fillStyle = '#ffffff';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.fillText(text, width / 2, 34);
+    }
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(
+      new THREE.SpriteMaterial({ map: tex, depthTest: false, depthWrite: false, sizeAttenuation: false }),
+    );
+    // tamanho fixo na tela (cerca de 6% da altura), qualquer que seja o zoom
+    const h = 0.045;
+    sprite.scale.set((h * c.width) / c.height, h, 1);
+    // a ponta do balão fica em cima da cabeça
+    sprite.center.set(0.5, 0);
+    return sprite;
+  }
 
   /** Anel da onda de voz; devolve a onda em andamento (ou `null` quando acabou). */
   private updateWave(t: number): { from: HexCoord; start: number } | null {
@@ -1896,6 +2096,16 @@ export class HexBoard {
     );
     this.raycaster.setFromCamera(ndc, this.camera);
 
+    // a lupa (ou o móvel debaixo dela) vem antes de tudo
+    if (this.clue?.sprite.visible && this.callbacks.onClueTap) {
+      const onSprite = this.raycaster.intersectObject(this.clue.sprite, false).length > 0;
+      const ground = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+      const onFurniture = !!ground && sameHex(worldToHex(ground.x, ground.z, HEX_SIZE), this.clue.hex);
+      if (onSprite || onFurniture) {
+        this.callbacks.onClueTap();
+        return;
+      }
+    }
     // peças primeiro: tocar perto da peça (ou no hexágono dela) seleciona o personagem
     const hitboxes = [...this.units.values()].map((u) => u.hitbox);
     const unitHit = this.raycaster.intersectObjects(hitboxes, false)[0];
