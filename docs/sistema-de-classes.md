@@ -36,7 +36,7 @@ a formação é sempre **1 Capitão + 2 Agentes** (Agentes não têm limite, se 
 
 | Habilidade | Efeito |
 |---|---|
-| **Comando** | Quando o Capitão é quem chama o "Agrupar", o encontro **não gasta movimento** de ninguém. Os pontos de encontro possíveis continuam limitados pelo movimento que ele ainda tem (o grupo precisa conseguir chegar lá); só o custo (`plan.cost`) vira 0. |
+| **Comando** | Quando o Capitão é quem chama o "Agrupar", o encontro **não gasta movimento** de ninguém. Os pontos de encontro possíveis continuam limitados pelo movimento que ele ainda tem (o grupo precisa conseguir chegar lá); só o custo (`plan.cost`) vira 0. **Uma vez por turno**: um segundo Agrupar no mesmo turno custa o normal. |
 | **Liderança** | Enquanto o Capitão está no grupo, **todo o grupo** ganha +1 de movimento e +1 de intimidação, além do +1 normal do grupo em cada um. |
 
 Regras de borda propostas:
@@ -147,8 +147,8 @@ Agente já carrega a diferença que importa; a Destreza seria o "tempero" (como 
 Proposta: renomear **Velocidade → Vigor** e separar duas coisas que hoje andam juntas:
 
 - **Vigor** é o atributo da ficha (−5 … +5). É o "modificador" do movimento, do mesmo jeito que
-  Força é o de arrombar. Mais tarde pode pesar em outras coisas físicas (aguentar carga,
-  perseguir, resistir a cansaço) — "Velocidade" só serviria para andar.
+  Força é o de arrombar. **Por ora, só afeta o movimento.** O nome deixa espaço para, no
+  futuro, pesar em outras coisas físicas (aguentar carga, perseguir, resistir a cansaço).
 - **Bônus de movimentação** é tudo o que vem de fora do personagem e soma por cima: grupo (+1),
   Liderança do Capitão (+1), equipamento (botas, peso negativo), efeitos temporários.
 
@@ -231,15 +231,14 @@ perícia somam e quais habilidades mexem nela, sem guardar números de classe.
 
 ## 4. Perguntas em aberto
 
-1. "Comando" deveria valer também para **desagrupar/reagrupar** no mesmo turno, ou só uma vez por
-   turno?
-2. Vigor faz mais alguma coisa além do movimento já nesta versão (ex.: custo de carregar
-   equipamento pesado), ou começa só como o novo nome da Velocidade?
+Nenhuma no momento.
 
 ### Decidido
 
 - Bônus de grupo: +1 de movimento e +1 de intimidação. Raio de abordagem base 3.
 - Liderança do Capitão: +1 de movimento e +1 de intimidação para o grupo.
+- Comando vale uma vez por turno.
+- Vigor, por ora, só afeta o movimento (é o novo nome da Velocidade).
 - Interrogatório fica com as regras da branch `claude/interrogatorio-v1`.
 - Qualquer agente pode destrancar; o Agente tem Gazua +6.
 - A classe é trocada no menu. Um Capitão por equipe (o menu só permite um); hoje: 1 Capitão + 2 Agentes.
