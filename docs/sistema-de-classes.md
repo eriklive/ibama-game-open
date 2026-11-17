@@ -168,6 +168,30 @@ família de ação (mover, arrombar, destrancar, abordar/interrogar).
 
 ---
 
+## 3.5 Organização: tabela de perícias + tabela de habilidades
+
+- **Perícia** é um número somado numa rolagem de uma ação (Gazua +6 no Destrancar).
+- **Habilidade** é uma regra que muda como uma ação funciona, sem número de rolagem (Comando,
+  Liderança).
+
+**Tabela de perícias** (matriz perícia × classe; classe nova = coluna nova):
+
+| Perícia | Ação | Atributo da ação | Capitão | Agente |
+|---|---|---|---|---|
+| Gazua | Destrancar | Destreza | — | +6 |
+
+**Tabela de habilidades** (lista; uma linha por habilidade):
+
+| Habilidade | Classe | Tipo | Quando vale | Efeito | Acumula? |
+|---|---|---|---|---|---|
+| Comando | Capitão | ativa | Capitão chama o Agrupar na vez dele | Encontro custa 0 de movimento | — |
+| Liderança | Capitão | passiva | Capitão está no grupo | +1 no bônus de movimentação do grupo | Não |
+
+A tabela de ações (3.1) vira o índice que liga as duas: cada ação diz qual atributo e qual
+perícia somam e quais habilidades mexem nela, sem guardar números de classe.
+
+---
+
 ## 4. Perguntas em aberto
 
 1. O bônus de **alcance da abordagem** do grupo (+2) também cai para +1? E o Capitão dá +1 de
