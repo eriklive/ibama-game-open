@@ -1,0 +1,148 @@
+# Sistema de classes (e modificadores por ação)
+
+> Proposta de design · status: **rascunho para discussão** · nada aqui está implementado em `src/` ainda.
+
+Primeira versão, propositalmente pequena: **duas classes** (Capitão e Agente) e uma regra geral
+para dizer **qual atributo e qual perícia pesam em cada ação**. A ideia é que tudo continue
+cabendo no que já existe: `GROUP_RULES` (`group.ts`), `DOOR_RULES` (`door.ts`), os atributos da
+ficha (`stats.ts`) e o d20 das portas e da abordagem.
+
+---
+
+## 1. Mudança no grupo (vale para todos)
+
+| | Hoje | Proposta |
+|---|---|---|
+| Bônus de movimento do grupo (`GROUP_RULES.moveBonus`) | +2 | **+1** |
+| Grupo com um Capitão | — | **+2** (+1 do grupo, +1 do Capitão) |
+| Bônus de alcance da abordagem (`GROUP_RULES.approachBonus`) | +2 | +2 (sem mudança — ver perguntas) |
+
+Ou seja: agrupar continua valendo a pena, mas o grupo "cheio" (+2, como hoje) passa a depender
+de ter um Capitão nele.
+
+---
+
+## 2. Classes
+
+Cada agente tem **uma** classe, escolhida na ficha (ao lado dos atributos). A classe dá
+**habilidades** (regras que mudam uma ação) e/ou **perícias** (bônus fixo numa rolagem).
+
+### 2.1 Capitão
+
+| Habilidade | Efeito |
+|---|---|
+| **Comando** | Quando o Capitão é quem chama o "Agrupar", o encontro **não gasta movimento** de ninguém. Os pontos de encontro possíveis continuam limitados pelo movimento que ele ainda tem (o grupo precisa conseguir chegar lá); só o custo (`plan.cost`) vira 0. |
+| **Liderança** | Enquanto o Capitão está no grupo, **todo o grupo** ganha +1 de movimento, além do +1 normal do grupo. |
+
+Regras de borda propostas:
+
+- O +1 do Capitão **só vale agrupado** (Capitão sozinho não ganha nada de movimento).
+- **Não acumula**: dois Capitães no mesmo grupo ainda dão +1 (o bônus é "o grupo tem um líder").
+- "Comando" só vale quando o Capitão **lidera** o Agrupar (é a vez dele). Se outro agente chama
+  o Agrupar e o Capitão só vem junto, o custo é o normal.
+
+### 2.2 Agente
+
+| Perícia | Efeito |
+|---|---|
+| **Gazua** (pick lock) | +6 na rolagem de destrancar uma porta. |
+
+Com a fechadura padrão (`DOOR_RULES.lock = 12`), isso muda bastante a chance:
+
+| Quem tenta | Precisa no d20 | Chance |
+|---|---|---|
+| Sem perícia | 12+ | 45% |
+| Agente (+6) | 6+ | 75% |
+| Agente, fechadura fácil (10) | 4+ | 85% |
+
+> **Tradução de "picklocking":** sugestão **"Destrancar"** como nome da ação no menu da porta e
+> **"Gazua"** como nome da perícia ("Gazua +6"). Alternativas: "Abrir fechadura", "Forçar
+> fechadura" (mas "forçar" confunde com arrombar). O BG3 em português usa "Ferramentas de ladrão"
+> para a proficiência e "Prestidigitação" para a perícia — longo demais para o nosso menu.
+
+---
+
+## 3. Modificadores por ação: como o Baldur's Gate faz
+
+- **BG1/BG2 (AD&D 2ª ed.)**: "Abrir fechaduras" é uma **perícia de ladrão em %**. O jogador
+  distribui pontos nela a cada nível, e a **Destreza** dá um ajuste pequeno por cima (Des 16:
+  +5%, Des 9: −10%, etc.). Ou seja: a perícia é o principal; o atributo é tempero.
+- **BG3 (D&D 5ª ed.)**: toda checagem é **d20 + modificador do atributo + proficiência** (se a
+  classe/antecedente é proficiente) contra uma dificuldade (CD). Destrancar = Destreza
+  (Prestidigitação) + proficiência em ferramentas de ladrão; o Ladino tem *Especialização* e soma
+  a proficiência **em dobro**. Arrombar/forçar = Força (Atletismo). Intimidar = Carisma
+  (Intimidação).
+
+O modelo do BG3 é exatamente o que você descreveu e encaixa no nosso d20: **cada ação declara,
+opcionalmente, um atributo e uma perícia**, e a rolagem soma o que existir.
+
+### 3.1 Regra geral proposta
+
+```
+total = d20 + atributo da ação (se houver) + perícia da classe (se houver) + equipamento
+passa se total ≥ dificuldade
+```
+
+| Ação | Atributo | Perícia (classe) | Dificuldade |
+|---|---|---|---|
+| Arrombar | **Força** | — | 3 (encostada) / 12 (trancada) |
+| Destrancar | **Destreza** | Gazua +6 (Agente) | fechadura da porta (padrão 12) |
+| Interrogar / conversar | **Intimidação** (do agente, vira penalidade do NPC) | — | a definir |
+| Mover | Velocidade | Liderança +1 (Capitão, agrupado) | — |
+
+Em código seria só uma tabela, algo como:
+
+```ts
+const ACTION_CHECKS: Record<ActionKey, { stat?: StatKey; skill?: SkillKey }> = {
+  arrombar:   { stat: 'forca' },
+  destrancar: { stat: 'destreza', skill: 'gazua' },
+  interrogar: { stat: 'intimidacao' },
+};
+```
+
+e `doorNeed` / `resolveDoor` passariam a receber o modificador (hoje é d20 puro ≥ `need`).
+
+### 3.2 Interrogar: a intimidação vira penalidade do NPC
+
+Quem rola é o **NPC** (resistir ao interrogatório); a intimidação do agente entra **subtraindo**:
+
+```
+NPC resiste se d20 − intimidação do agente ≥ dificuldade
+```
+
+É o mesmo formato do teste de fuga da abordagem (`passesEscape`: dado + modificador ≥ CD), então
+reaproveita a UI de rolagem. Exemplo: CD 10, agente com intimidação +2 → o NPC precisa de 12+
+(45%) em vez de 10+ (55%). Se o grupo der intimidação (hoje dá +2 no alcance), vale decidir se
+também entra aqui.
+
+### 3.3 O problema da Destreza (e da Força)
+
+Hoje a ficha só tem **Velocidade** e **Intimidação**, com 1 ponto para distribuir. Opções:
+
+1. **Adicionar Força e Destreza à ficha** (recomendado a médio prazo). Fica igual ao BG3 e cada
+   ação de porta ganha um atributo natural. Custo: com só 1 ponto, quatro atributos diluem a
+   escolha — provavelmente o número de pontos (`STAT_RULES.points`) precisa subir para 2–3.
+2. **Por enquanto, não ligar a atributo nenhum** (recomendado agora). Destrancar usa só a
+   perícia (Agente +6) e arrombar fica no d20 puro. A tabela `ACTION_CHECKS` já nasce com o campo
+   `stat` opcional, e quando Força/Destreza existirem é só preencher.
+3. **Reaproveitar Velocidade como "Agilidade"** e ligar o destrancar nela. Barato, mas mistura
+   correr com mão leve, e força o jogador a escolher entre os dois sem querer.
+
+Recomendação: **opção 2 agora, opção 1 quando as classes estiverem testadas.** A perícia +6 do
+Agente já carrega a diferença que importa; a Destreza seria o "tempero" (como no BG1/BG2).
+
+---
+
+## 4. Perguntas em aberto
+
+1. O bônus de **alcance da abordagem** do grupo (+2) também cai para +1? E o Capitão dá +1 de
+   alcance, como dá de movimento?
+2. Uma equipe pode ter **mais de um Capitão**? (Proposta: pode, mas o bônus não acumula.)
+3. "Comando" deveria valer também para **desagrupar/reagrupar** no mesmo turno, ou só uma vez por
+   turno?
+4. Quem não é Agente **pode** tentar destrancar (com 45%), ou a ação fica só para o Agente?
+   (Proposta: pode — a classe dá vantagem, não exclusividade.)
+5. Interrogar: qual a **dificuldade base** e o que o NPC entrega quando falha (pista, localização
+   de item, rendição)?
+6. A classe é **fixa por personagem** (Ana é sempre Capitã) ou escolhida na ficha antes de cada
+   missão?
