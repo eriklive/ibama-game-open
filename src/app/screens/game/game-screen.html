@@ -101,7 +101,7 @@
     </div>
   }
 
-  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr; some sozinho -->
+  <!-- Auto de abordagem: fotos de quem se rendeu e de quem vai correr (com o d20 de quem rolou); some sozinho -->
   @if (report(); as r) {
     <div class="report" role="status" aria-live="polite" data-testid="approach-report" (click)="closeReport()">
       <div class="report-head">
@@ -115,6 +115,7 @@
               <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" /><circle cx="20" cy="12" r="5.5" /><path class="pole" d="M27 24 L33 6" /><rect class="flag" x="31" y="5" width="7" height="5" /></svg>
             </span>
             <span class="pola-name">{{ e.name }}</span>
+            @if (r.rolls.get(e.id); as t) { <span class="pola-roll">d20 {{ t.roll }}{{ modTerm(t.modifier) }} = {{ t.total }}</span> }
             <span class="pola-stamp">Rendido</span>
           </li>
         }
@@ -124,6 +125,7 @@
               <svg viewBox="0 0 40 40"><ellipse cx="20" cy="34" rx="12" ry="4.5" /><rect x="14" y="17" width="12" height="15" rx="5" transform="rotate(12 20 25)" /><circle cx="22" cy="12" r="5.5" /></svg>
             </span>
             <span class="pola-name">{{ e.name }}</span>
+            @if (r.rolls.get(e.id); as t) { <span class="pola-roll">d20 {{ t.roll }}{{ modTerm(t.modifier) }} = {{ t.total }}</span> }
             <span class="pola-stamp">Vai correr</span>
             <svg class="pola-circle" viewBox="0 0 100 130" preserveAspectRatio="none" aria-hidden="true">
               <path pathLength="100" d="M50 4 C 88 2, 98 40, 96 70 C 94 108, 70 126, 44 124 C 14 122, 2 96, 4 62 C 6 28, 22 6, 58 8" />
@@ -228,17 +230,12 @@
   }
 
   <!-- Teste de d20 (percepção, inspecionar): uma ficha na lateral -->
-  @if (check(); as ck) {
+  @for (ck of checks(); track ck.id) {
     <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
       <span class="check-kicker">{{ ck.kind === 'notice' ? 'Percepção' : 'Inspecionar' }} · d20</span>
       <span class="check-who">{{ ck.who }}</span>
-      <span class="d20" [class.rolling]="ck.result === null" aria-hidden="true">
-        <svg viewBox="0 0 100 100">
-          <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
-          <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
-        </svg>
-        <span class="d20-value">{{ ck.face }}</span>
-      </span>
+      <app-d20 class="check-die" aria-hidden="true" [tone]="ck.pass === null ? 'gold' : ck.pass ? 'pass' : 'fail'" (rolled)="checkDieRolled($event)" />
+      @if (ck.result !== null) { <span class="check-value" data-testid="check-value">{{ ck.result }}</span> }
       <span class="check-need">precisa de mais que {{ ck.target }}</span>
       @if (ck.pass !== null) {
         <span class="check-result" data-testid="check-result">
@@ -261,11 +258,15 @@
         <strong>Abordagem de {{ active().name }}</strong>
         @let ap = approachParts();
         <span class="small approach-range" data-testid="approach-range">
-          Alcance {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}
+        </span>
+        <span class="small approach-range" data-testid="approach-bands">
+          Rolagem {{ ap.zones.surrenderRange + 1 }}–{{ ap.zones.rollRange }} (d20 ≥ {{ approachRules.escapeDC }} escapa) · fuga até {{ ap.zones.radius }}
         </span>
         @let plan = approachPlan();
         <span class="approach-tally" aria-hidden="true">
           @if (plan.surrender.length) { <span class="surrender">{{ plan.surrender.length }} se {{ plan.surrender.length === 1 ? 'rende' : 'rendem' }}</span> }
+          @if (plan.roll.length) { <span class="roll">{{ plan.roll.length }} {{ plan.roll.length === 1 ? 'rola' : 'rolam' }} d20</span> }
           @if (plan.flee.length) { <span class="flee">{{ plan.flee.length }} {{ plan.flee.length === 1 ? 'vai' : 'vão' }} correr</span> }
           <span class="small">· encerra a vez</span>
         </span>
@@ -274,8 +275,11 @@
           @for (e of plan.surrender; track e.id) {
             <li>{{ e.name }} se rende</li>
           }
+          @for (c of plan.roll; track c.enemy.id) {
+            <li>{{ c.enemy.name }} rola d20{{ modTerm(c.modifier) }}: {{ percent(c.chance) }} de escapar@if (missionTargets().has(c.enemy.id)) { · alvo da missão}</li>
+          }
           @for (e of plan.flee; track e.id) {
-            <li>{{ e.name }} vai correr</li>
+            <li>{{ e.name }} vai correr@if (missionTargets().has(e.id)) { · alvo da missão}</li>
           }
         </ul>
       </div>
@@ -442,13 +446,10 @@
   @if (aiming(); as item) {
     <div class="focus-stage" data-testid="inspect-focus">
       @if (search(); as sv) {
-        <span class="d20 focus-die" [class.rolling]="sv.result === null" [class.pass]="sv.pass === true" [class.fail]="sv.pass === false" aria-hidden="true">
-          <svg viewBox="0 0 100 100">
-            <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
-            <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
-          </svg>
-          <span class="d20-value">{{ sv.face }}</span>
-        </span>
+        <!-- uma rolagem por lance: "De novo!" recria o dado, que rola outra vez -->
+        @for (n of [sv.throw]; track n) {
+          <app-d20 class="focus-die" aria-hidden="true" [tone]="sv.pass === null ? 'gold' : sv.pass ? 'pass' : 'fail'" (rolled)="searchDieRolled($event)" />
+        }
       }
     </div>
     <div class="aim-actions">
@@ -546,20 +547,13 @@
 
   @if (phase() === 'rolling') {
     <div class="roll-stage" [class.settled]="rolled() > 0" role="dialog" aria-modal="true" aria-labelledby="roll-who" data-testid="roll">
-      <div class="roll-tray" #diceHost aria-hidden="true">
-        @if (flatDice()) {
-          <div class="dice big" [class.rolling]="rolled() === 0">
-            @for (v of dice(); track $index) {
-              <span class="d4" [style.animation-delay.ms]="$index * 90">
-                <svg viewBox="0 0 100 92"><polygon points="50,4 96,88 4,88" /><path d="M50 4V62L4 88M50 62L96 88" /></svg>
-                <span class="d4-value">{{ rolled() > 0 ? v : '?' }}</span>
-              </span>
-            }
-          </div>
+      <div class="roll-tray" aria-hidden="true">
+        @for (k of rollKeys(); track k) {
+          <app-d4 class="roll-die" [delay]="$index * 80" (rolled)="dieRolled(k, $index, $event)" />
         }
       </div>
       <header class="roll-head">
-        <span class="roll-kicker">Rolagem de movimento · {{ dice().length }}d{{ diceSides }}</span>
+        <span class="roll-kicker">Rolagem de movimento · {{ rollKeys().length }}d{{ diceSides }}</span>
         <span class="roll-who" id="roll-who">Vez de {{ active().name }}</span>
       </header>
       <div class="roll-result" aria-live="polite">

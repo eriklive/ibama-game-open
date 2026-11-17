@@ -246,17 +246,11 @@ button:disabled { cursor: not-allowed; }
 }
 .check-kicker { font-size: 10px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted-paper); }
 .check-who { font-family: var(--marker); font-size: 15px; line-height: 1.1; }
-.d20 { position: relative; display: grid; place-items: center; width: 74px; height: 74px; margin: 2px 0; }
-.d20 svg { position: absolute; inset: 0; width: 100%; height: 100%; }
-.d20-body { fill: #fff; stroke: var(--ink-paper); stroke-width: 5; stroke-linejoin: round; }
-.d20 path { fill: none; stroke: rgba(35, 32, 26, .35); stroke-width: 2.5; stroke-linejoin: round; }
-.d20-value {
-  position: relative; top: 7px;
-  font-family: var(--stencil); font-weight: 700; font-size: 22px; line-height: 1;
+.check-die { width: 96px; height: 96px; margin: -6px 0 -10px; }
+.check-value {
+  font-family: var(--stencil); font-weight: 700; font-size: 20px; line-height: 1;
+  animation: slap .2s ease-out both;
 }
-.d20.rolling svg { animation: d20-spin .45s linear infinite; }
-.d20.rolling .d20-value { opacity: .55; }
-@keyframes d20-spin { to { transform: rotate(360deg); } }
 .check-need { font-size: 11px; line-height: 1.2; }
 .check-result {
   margin-top: 4px; padding: 1px 6px;
@@ -266,9 +260,7 @@ button:disabled { cursor: not-allowed; }
   animation: slap .2s ease-out both;
 }
 .check.pass .check-result { color: var(--green-ok); }
-.check.pass .d20-body { fill: #dff3d9; }
 .check.fail .check-result { color: var(--red-text); }
-.check.fail .d20-body { fill: #f6dcd6; }
 
 /* ---------- ações: um carimbo contextual + aba ---------- */
 .actions {
@@ -370,13 +362,9 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   border-bottom-width: calc(26px + var(--safe-bottom));
 }
 .focus-die {
-  position: absolute; left: 50%; top: calc(40px + var(--safe-top));
-  width: 92px; height: 92px; margin: 0; transform: translateX(-50%);
-  filter: drop-shadow(0 5px 6px rgba(0, 0, 0, .6));
+  position: absolute; left: 50%; top: calc(26px + var(--safe-top));
+  width: 200px; height: 200px; transform: translateX(-50%);
 }
-.focus-die .d20-value { font-size: 28px; top: 9px; }
-.focus-die.pass .d20-body { fill: #dff3d9; }
-.focus-die.fail .d20-body { fill: #f6dcd6; }
 /* inspeção: os botões ficam onde ficam nos outros modos (bilhete, carimbo e Cancelar) */
 .aim-actions {
   position: absolute; z-index: 5;
@@ -403,6 +391,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .slip.approach-slip { right: 128px; bottom: 4px; width: max-content; max-width: 290px; transform: rotate(-1.5deg); }
 .slip .approach-tally { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
 .approach-tally .surrender { color: var(--green-ok); }
+.approach-tally .roll { color: #8a6d0f; }
 .approach-tally .flee { color: #b4520f; }
 .approach-confirm { width: 112px; height: 112px; border-radius: 56px; }
 .approach-confirm .stamp-ring { width: 96px; height: 96px; border-radius: 48px; }
@@ -444,6 +433,9 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .approach-list li.surrender { color: var(--green-ok); }
 .approach-list li.flee { color: var(--red-text); }
 .approach-list li.flee::before { content: '→ '; }
+.approach-list li.roll { color: var(--muted-paper); }
+.approach-list li.roll::before { content: '⬡ '; }
+.approach-list li.target { font-weight: 800; text-decoration: underline; text-decoration-thickness: 2px; }
 
 /* ---------- encerrar a operação: etiqueta vermelha no canto de baixo ---------- */
 .end-op {
@@ -540,6 +532,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .pola-img svg .pole { stroke: #5a3d1e; stroke-width: 2; fill: none; }
 .pola-img svg .flag { fill: #fff; }
 .pola-name { font-size: 10px; line-height: 1.15; min-height: 2.3em; display: grid; place-items: center; }
+.pola-roll { font-size: 9px; line-height: 1.1; text-align: center; color: var(--muted-paper); font-variant-numeric: tabular-nums; }
 .pola-stamp {
   position: absolute; left: 50%; top: 36px;
   padding: 0 4px; border: 2.5px solid currentColor; background: rgba(247, 242, 228, .7);
@@ -589,7 +582,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   z-index: 6;
   color: var(--paper-light);
 }
-.roll-tray { position: absolute; inset: 0; display: grid; place-items: center; }
+.roll-tray { position: absolute; inset: 0; display: flex; justify-content: center; align-items: center; }
 .roll-head, .roll-result { position: relative; display: flex; flex-direction: column; align-items: center; text-align: center; }
 .roll-head { animation: drop-in .4s ease-out both; }
 .roll-kicker {
@@ -609,11 +602,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .roll-total.rolling { animation: pulse 1s ease-in-out infinite; }
 .roll-confirm { margin-top: 18px; animation: rise .35s .25s ease-out both; }
 .roll-confirm .pad-glyph { top: -14px; right: -14px; }
-.dice.big { gap: 18px; }
-.dice.big .d4 { width: 92px; height: 84px; filter: drop-shadow(2px 4px 0 rgba(0, 0, 0, .35)); }
-.dice.big .d4-value { font-size: 36px; top: 38%; }
-.dice.big:not(.rolling) .d4 { animation: land .45s cubic-bezier(.3, 1.6, .5, 1) both; }
-.dice.big.rolling .d4 { animation: tumble .42s linear infinite; }
+.roll-die { width: min(44vw, 280px); height: min(56vh, 360px); }
 
 @keyframes reveal {
   0%   { opacity: 0; transform: scale(1.8); filter: blur(4px); }
@@ -629,17 +618,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   to   { opacity: 1; translate: 0 0; }
 }
 @keyframes pulse { 50% { opacity: .45; } }
-@keyframes tumble {
-  0%   { transform: translateY(0) rotate(0deg) scale(1); }
-  25%  { transform: translateY(-22px) rotate(100deg) scale(1.08); }
-  50%  { transform: translateY(0) rotate(200deg) scale(.94); }
-  75%  { transform: translateY(-12px) rotate(290deg) scale(1.04); }
-  100% { transform: translateY(0) rotate(360deg) scale(1); }
-}
-@keyframes land {
-  0%   { transform: translateY(-14px) scale(1.25); }
-  100% { transform: translateY(0) scale(1); }
-}
 /* carimbo batendo no papel */
 @keyframes slap {
   0%   { opacity: 0; scale: 1.5; }
@@ -648,7 +626,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .dice.big.rolling .d4, .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .slip, .suspect, .check, .check-result, .d20.rolling svg, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
+  .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .slip, .suspect, .check, .check-result, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */

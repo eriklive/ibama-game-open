@@ -1,0 +1,36 @@
+/* O canvas 3D ocupa o elemento inteiro; quem usa define largura e altura. */
+:host { position: relative; display: block; width: 120px; height: 140px; container-type: size; }
+
+/* ---------- desenho 2D (sem WebGL) ---------- */
+:host(.die-flat) { display: grid; place-items: center; }
+svg { display: block; width: 62%; height: auto; filter: drop-shadow(2px 4px 0 rgba(0, 0, 0, .35)); }
+polygon { stroke: #23201a; stroke-width: 6; stroke-linejoin: round; }
+path { fill: none; stroke-width: 3; stroke-linejoin: round; }
+.value {
+  position: absolute; left: 0; right: 0; top: 50%;
+  text-align: center; font-family: var(--stencil, sans-serif); font-weight: 700;
+  font-size: 24cqmin; line-height: 1; transform: translateY(-30%);
+}
+:host(.die-d4) polygon { fill: #f4ecd6; }
+:host(.die-d4) path { stroke: rgba(35, 32, 26, .3); }
+:host(.die-d4) .value { color: #23201a; transform: translateY(-15%); }
+:host(.die-d20) polygon { fill: #2f5a3b; }
+:host(.die-d20) path { stroke: rgba(244, 236, 214, .35); }
+:host(.die-d20) .value { color: #f4ecd6; }
+:host(.die-rolling.die-flat) svg { animation: die-tumble .42s linear infinite; }
+:host(.die-rolling.die-flat) .value { opacity: .6; }
+:host(.die-flat:not(.die-rolling)) svg { animation: die-land .45s cubic-bezier(.3, 1.6, .5, 1) both; }
+@keyframes die-tumble {
+  0%   { transform: translateY(0) rotate(0deg) scale(1); }
+  25%  { transform: translateY(-14%) rotate(100deg) scale(1.08); }
+  50%  { transform: translateY(0) rotate(200deg) scale(.94); }
+  75%  { transform: translateY(-8%) rotate(290deg) scale(1.04); }
+  100% { transform: translateY(0) rotate(360deg) scale(1); }
+}
+@keyframes die-land {
+  0%   { transform: translateY(-12%) scale(1.25); }
+  100% { transform: translateY(0) scale(1); }
+}
+@media (prefers-reduced-motion: reduce) {
+  :host(.die-flat) svg { animation: none !important; }
+}
