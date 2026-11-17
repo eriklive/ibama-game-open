@@ -146,6 +146,35 @@
   opacity: 0.65;
   cursor: wait;
 }
+.question-card.done,
+.question-card.done:disabled {
+  padding-right: 100px;
+  opacity: 1;
+  cursor: default;
+  color: var(--muted-paper);
+  background: #e6dcc4;
+  box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.3);
+}
+.question-card.done .ask {
+  text-decoration: line-through;
+  text-decoration-color: rgba(35, 32, 26, 0.45);
+}
+.asked-stamp {
+  position: absolute;
+  right: 10px;
+  top: 50%;
+  translate: 0 -50%;
+  padding: 0 5px;
+  border: 2px solid var(--red);
+  color: var(--red-text);
+  font-family: var(--stencil);
+  font-weight: 700;
+  font-size: 10px;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  rotate: -6deg;
+  opacity: 0.85;
+}
 .question-card.picked {
   outline: 3px solid var(--postit);
   outline-offset: 2px;

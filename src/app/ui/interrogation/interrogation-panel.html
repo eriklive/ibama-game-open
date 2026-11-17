@@ -1,11 +1,11 @@
 @let iv = view();
 <div class="interro-kicker">
-  <b>Interrogatório · {{ iv.cls.name }}</b>
+  <b>Conversa · {{ iv.cls.name }}</b>
   {{ iv.suspect }} · {{ iv.cls.trait }}
 </div>
 <section
   class="interro"
-  [attr.aria-label]="'Interrogatório de ' + iv.suspect"
+  [attr.aria-label]="'Conversa com ' + iv.suspect"
   data-testid="interrogation"
 >
   @if (iv.agentLine !== null) {
@@ -26,26 +26,32 @@
     </div>
   }
   <p class="sr-only" aria-live="polite">{{ live() }}</p>
-  @if (open().length) {
+  @if (cards().length) {
     <ul class="question-cards" aria-label="Perguntas">
-      @for (o of open(); track o.key; let i = $index) {
+      @for (c of cards(); track c.option.key; let i = $index) {
+        @let o = c.option;
         <li>
           <button
             type="button"
             class="question-card"
             [class.rep]="o.depth === 1"
             [class.tre]="o.depth === 2"
-            [class.picked]="i === pick()"
+            [class.done]="o.done"
+            [class.picked]="!o.done && c.openIndex === pick()"
             [style.--i]="i"
-            [disabled]="iv.busy"
+            [disabled]="iv.busy || o.done"
+            [attr.aria-label]="o.done ? 'Já perguntado: ' + o.node.ask : null"
             [attr.data-testid]="'question-' + o.key"
             (click)="ask.emit(o.key)"
           >
             @if (o.depth) {
               <span class="lvl">{{ levelLabel[o.depth] }}</span>
             }
-            {{ o.node.ask }}
-            @if (confirmGlyph() && i === pick()) {
+            <span class="ask">{{ o.node.ask }}</span>
+            @if (o.done) {
+              <span class="asked-stamp" aria-hidden="true">Perguntado</span>
+            }
+            @if (confirmGlyph() && !o.done && c.openIndex === pick()) {
               <span class="pad-glyph" aria-hidden="true">{{ confirmGlyph() }}</span>
             }
           </button>
@@ -55,10 +61,10 @@
   }
   <div class="interro-foot">
     <span class="interro-hint">
-      @if (!open().length) {
+      @if (!openCount()) {
         sem mais perguntas
       } @else if (!iv.asked && moveCost()) {
-        a 1ª pergunta gasta {{ moveCost() }} mov.
+        a 1ª pergunta desta conversa gasta {{ moveCost() }} mov.
       }
     </span>
     <button

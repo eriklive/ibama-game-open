@@ -1,7 +1,7 @@
 import { Component, computed, input, output } from '@angular/core';
 import { LEVEL_LABEL, NpcClass, QuestionOption } from '../../game/interrogation';
 
-/** Interrogatório em close-up: quem é interrogado, as perguntas (cartões) e os balões. */
+/** Conversa em close-up (modo diálogo): com quem, as perguntas (cartões) e os balões. */
 export interface InterrogationView {
   enemyId: string;
   /** Nome do suspeito no balão ("Piloto", "Garimpeiro Jô"). */
@@ -20,16 +20,17 @@ export interface InterrogationView {
   } | null;
   /** Falando: os cartões ficam travados. */
   busy: boolean;
-  /** Perguntas já feitas (a primeira gasta o movimento). */
+  /** Perguntas feitas nesta entrada (a primeira gasta o movimento). */
   asked: number;
   /** Alguém escondido foi entregue: aparece no mapa ao encerrar. */
   reveal: string | null;
 }
 
 /**
- * Papelada do interrogatório, por cima do close-up do tabuleiro: a rubrica (classe e traço) no
+ * Papelada do modo diálogo (tom de interrogatório), por cima do close-up do tabuleiro: a rubrica (classe e traço) no
  * canto, o balão do agente, o balão do suspeito (no canto de baixo), os cartões de pergunta
- * (réplica e tréplica recuadas, com o carimbo) e **Encerrar**. Só mostra texto: a rolagem do
+ * (réplica e tréplica recuadas, com o carimbo; as já feitas riscadas, com "Perguntado") e
+ * **Encerrar**. Só mostra texto: a rolagem do
  * suspeito é escondida (nada de dado, número ou CD).
  */
 @Component({
@@ -53,7 +54,15 @@ export class InterrogationPanel {
   readonly end = output<void>();
 
   protected readonly levelLabel = LEVEL_LABEL;
-  protected readonly open = computed(() => this.view().options.filter((o) => !o.done));
+  /**
+   * Todos os cartões, na ordem: as perguntas já feitas continuam (marcadas, bloqueadas) para o
+   * jogador ver o histórico; `openIndex` é a posição entre as ainda abertas (a do controle).
+   */
+  protected readonly cards = computed(() => {
+    let n = 0;
+    return this.view().options.map((option) => ({ option, openIndex: option.done ? -1 : n++ }));
+  });
+  protected readonly openCount = computed(() => this.view().options.filter((o) => !o.done).length);
   /** A última fala completa, para o leitor de tela (o balão vai aparecendo letra a letra). */
   protected readonly live = computed(() => {
     const v = this.view();

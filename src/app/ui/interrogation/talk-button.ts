@@ -1,15 +1,17 @@
 import { Component, input } from '@angular/core';
 
 /**
- * Botão **Interrogar** das ações (dentro da aura de um suspeito rendido): o papel da HUD com
- * um carimbo de borda dupla, como o "Abordar". O conteúdo é o nome do suspeito.
+ * Botão **Conversar** das ações (dentro da aura de um suspeito rendido): o papel da HUD com um
+ * carimbo de borda dupla, como o "Abordar". O conteúdo é o nome do suspeito. Com `silent` (NPC
+ * sem diálogo), o carimbo fica apagado e o botão vem desabilitado ("sem diálogo").
  *
- * Uso: `<button type="button" class="paper" appInterrogateButton [glyph]="…">Piloto</button>`.
+ * Uso: `<button type="button" class="paper" appTalkButton [silent]="…" [glyph]="…">Piloto</button>`.
  */
 @Component({
-  selector: 'button[appInterrogateButton]',
+  selector: 'button[appTalkButton]',
+  host: { '[class.silent]': 'silent()' },
   template: `
-    <span class="stamp">Interrogar</span>
+    <span class="stamp">Conversar</span>
     <span class="name"><ng-content /></span>
     @if (glyph()) {
       <span class="pad-glyph" aria-hidden="true">{{ glyph() }}</span>
@@ -42,6 +44,15 @@ import { Component, input } from '@angular/core';
       white-space: nowrap;
       font-size: 10px;
       line-height: 1.1;
+    }
+    /* sem diálogo: visível, mas apagado e sem toque */
+    :host(.silent) .stamp {
+      border-color: var(--muted-paper);
+      color: var(--muted-paper);
+      text-decoration: line-through;
+    }
+    :host(.silent) .name {
+      font-style: italic;
     }
     .pad-glyph {
       position: absolute;
@@ -78,7 +89,9 @@ import { Component, input } from '@angular/core';
     }
   `,
 })
-export class InterrogateButton {
+export class TalkButton {
+  /** NPC sem diálogo: o papel aparece, mas bloqueado. */
+  readonly silent = input(false);
   /** Símbolo do botão do controle (□), vazio sem controle ou quando outra ação usa o □. */
   readonly glyph = input('');
 }

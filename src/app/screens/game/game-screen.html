@@ -212,7 +212,7 @@
           @for (e of knownEnemies(); track e.id; let i = $index) {
             <li [class]="'suspect ' + e.status" [style.--tilt]="-tilts[i % tilts.length] + 'deg'">
               <span class="suspect-name">{{ e.name }}</span>
-              <span class="suspect-status">{{ statusLabel[e.status] }}@if (interrogated().has(e.id)) { · interrogado}</span>
+              <span class="suspect-status">{{ statusLabel[e.status] }}@if (talked(e.id)) { · conversou}</span>
             </li>
           }
         </ul>
@@ -469,17 +469,19 @@
           <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
         </button>
       }
-      <!-- Interrogar: dentro da aura de um suspeito rendido com diálogo -->
-      @if (interrogable(); as e) {
+      <!-- Conversar: colado em qualquer rendido; sem diálogo, o papel aparece bloqueado -->
+      @if (talkTarget(); as t) {
         <button
           type="button"
           class="paper"
-          appInterrogateButton
-          [glyph]="pad() && !canApproach() && !burnable() && !inspectable() ? glyph('approach') : ''"
-          [attr.aria-label]="'Interrogar ' + e.name + ' (rendido). A primeira pergunta gasta ' + interrogationRules.moveCost + ' de movimento'"
-          data-testid="interrogate"
+          appTalkButton
+          [silent]="t.silent"
+          [disabled]="t.silent"
+          [glyph]="!t.silent && pad() && !canApproach() && !burnable() && !inspectable() ? glyph('approach') : ''"
+          [attr.aria-label]="t.silent ? t.enemy.name + ' (rendido) não tem nada a dizer: sem diálogo' : 'Conversar com ' + t.enemy.name + ' (rendido). A primeira pergunta de cada conversa gasta ' + interrogationRules.moveCost + ' de movimento'"
+          data-testid="talk"
           (click)="startInterrogation()">
-          {{ e.name }}
+          {{ t.silent ? 'sem diálogo' : t.enemy.name }}
         </button>
       }
       <!-- Porta: colado numa porta, abre o menu (arrombar, pick lock, abrir) -->
@@ -492,7 +494,7 @@
           (click)="openDoorMenu(door)">
           <span class="stencil">Porta</span>
           <span class="typed">{{ door.broken ? 'arrombada' : doorStateLabel[door.state].toLowerCase() }}</span>
-          @if (pad() && !canApproach() && !burnable() && !inspectable() && !interrogable()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
+          @if (pad() && !canApproach() && !burnable() && !inspectable() && !canTalk()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
       <!-- Queimar: colado no avião ou na pilha de suprimentos (encerra a vez) -->
@@ -631,7 +633,7 @@
           <dt>Direcional / analógico esq.</dt><dd>mover o cursor</dd>
           <dt>{{ glyph('confirm') }}</dt><dd>confirmar</dd>
           <dt>{{ glyph('cancel') }}</dt><dd>cancelar</dd>
-          <dt>{{ glyph('approach') }}</dt><dd>abordar / queimar / inspecionar / interrogar</dd>
+          <dt>{{ glyph('approach') }}</dt><dd>abordar / queimar / inspecionar / conversar</dd>
           <dt>{{ glyph('endTurn') }}</dt><dd>passar a vez</dd>
           <dt>{{ glyph('group') }}</dt><dd>agrupar / desagrupar</dd>
           <dt>{{ glyph('endMission') }}</dt><dd>encerrar a operação (avião queimado)</dd>

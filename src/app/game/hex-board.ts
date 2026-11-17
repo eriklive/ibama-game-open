@@ -50,6 +50,8 @@ const COLORS = {
   interrogate: 0xe08a1e,
   interrogateHot: 0xffb347,
   interrogateReach: 0xe7b569,
+  /** Aura de rendido sem diálogo: âmbar apagado. */
+  interrogateMuted: 0xa79a80,
   /** Chão "low poly" além do raio carregado: só uma cor de mata fechada sob a névoa. */
   farGround: 0x1f3a1c,
 };
@@ -320,6 +322,7 @@ export class HexBoard {
   /** Aura de interrogatório (ver `setInterrogationAura`). */
   private interrogationAura = new Set<string>();
   private interrogationHot = new Set<string>();
+  private interrogationMuted = new Set<string>();
   /** Pré-visualização da abordagem: zona de rendição, zona de rolagem e zona de fuga. */
   private approach: { surrender: Set<string>; roll: Set<string>; flee: Set<string> } | null = null;
   /** Escala de cinza do modo de abordagem (ver `setSpotlight`). */
@@ -488,16 +491,19 @@ export class HexBoard {
   }
 
   /**
-   * Aura de interrogatório: hexágonos em volta dos suspeitos rendidos com diálogo (âmbar,
-   * pulsando). `hot` são os da aura em que o agente da vez está (mais claros).
+   * Aura de diálogo: hexágonos em volta dos suspeitos rendidos com diálogo (âmbar, pulsando).
+   * `hot` são os da aura em que o agente da vez está (mais claros); `muted`, a aura apagada (sem
+   * pulso) dos rendidos sem diálogo.
    */
-  setInterrogationAura(keys: Iterable<string>, hot: Iterable<string> = []): void {
+  setInterrogationAura(keys: Iterable<string>, hot: Iterable<string> = [], muted: Iterable<string> = []): void {
     const aura = new Set(keys);
     const warm = new Set(hot);
+    const dim = new Set([...muted].filter((k) => !aura.has(k)));
     const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((k) => b.has(k));
-    if (same(aura, this.interrogationAura) && same(warm, this.interrogationHot)) return;
+    if (same(aura, this.interrogationAura) && same(warm, this.interrogationHot) && same(dim, this.interrogationMuted)) return;
     this.interrogationAura = aura;
     this.interrogationHot = warm;
+    this.interrogationMuted = dim;
     this.paintTiles();
   }
 
@@ -2108,7 +2114,9 @@ export class HexBoard {
           : isReach
             ? COLORS.interrogateReach
             : COLORS.interrogate
-        : null;
+        : this.interrogationMuted.has(key)
+          ? COLORS.interrogateMuted
+          : null;
       tile.color.set(
         zone ??
           (isSel ? COLORS.selected : onPath ? COLORS.path : (aura ?? (isReach ? reachColor : seen ? COLORS.vision : tile.baseColor))),
