@@ -10,12 +10,13 @@ import {
   viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { rollDice, rollDie, sum } from '../../game/dice';
-import { DiceTray } from '../../game/dice-3d';
+import { sum } from '../../game/dice';
 import { HexBoard } from '../../game/hex-board';
 import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
 import { MainButton } from '../../ui/main-button';
+import { D4 } from '../../ui/dice/d4';
+import { D20 } from '../../ui/dice/d20';
 import { RENDER_PROFILES, RenderMode, RenderSettings } from '../../game/render-settings';
 import {
   APPROACH_RULES,
@@ -53,26 +54,25 @@ const MISSION_DEADLINE = 5;
  */
 type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'ending' | 'enemy' | 'over';
 
-/** Teste de d20 mostrado na ficha da lateral. */
-/** Inspeção em close-up: quem procura, onde, a face do d20 e o resultado (quando parar). */
+/** Inspeção em close-up: quem procura, onde e o resultado do d20 (quando parar). */
 interface SearchView {
   who: string;
   furniture: string;
   target: number;
-  face: number;
   result: number | null;
   pass: boolean | null;
   /** Aviso quando acha ("Arma apreendida!"). */
   seized: string;
 }
 
+/** Teste de d20 mostrado na ficha da lateral. */
 interface CheckView {
+  /** Um por teste: um teste novo recria a ficha (e relança o dado). */
+  id: number;
   kind: 'notice' | 'find';
   who: string;
   /** Passa com mais que isto. */
   target: number;
-  /** Face à mostra (gira enquanto rola). */
-  face: number;
   /** Resultado final; `null` enquanto rola. */
   result: number | null;
   pass: boolean | null;
@@ -92,7 +92,7 @@ const reducedMotion = (): boolean =>
 
 @Component({
   selector: 'app-game-screen',
-  imports: [MainButton],
+  imports: [MainButton, D4, D20],
   templateUrl: './game-screen.html',
   styleUrl: './game-screen.css',
 })
@@ -107,12 +107,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private board?: HexBoard;
   private timers: ReturnType<typeof setTimeout>[] = [];
-  /** Palco dos dados 3D (só existe enquanto a rolagem está na tela). */
-  private readonly diceHost = viewChild<ElementRef<HTMLDivElement>>('diceHost');
   private readonly rollConfirmBtn = viewChild('rollConfirm', { read: ElementRef<HTMLButtonElement> });
-  private diceTray?: DiceTray;
-  /** Resultado sorteado esperando o palco aparecer para ser jogado. */
-  private pendingRoll: number[] | null = null;
   private destroyed = false;
   /** Muda a cada "Recomeçar": animações antigas param de mexer no estado. */
   private epoch = 0;
@@ -137,8 +132,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Valores sorteados nesta rolagem. */
   protected readonly dice = signal<number[]>(Array(MOVE_DICE.count).fill(1));
   protected readonly rolled = signal(0);
-  /** Sem WebGL: a rolagem cai nos d4 desenhados em 2D. */
-  protected readonly flatDice = signal(false);
+  /**
+   * Um `app-d4` por chave: cada rolagem ganha chaves novas, então os dados são recriados e
+   * lançados de novo. Cada um sorteia o seu valor e avisa quando para (`dieRolled`).
+   */
+  protected readonly rollKeys = signal<readonly string[]>([]);
+  private rollSeq = 0;
+  private dieResults: number[] = [];
   protected readonly movesLeft = signal(0);
   protected readonly selected = signal<HexCoord | null>(null);
   /** Personagem em foco na interface (tocado no tabuleiro ou no retrato). */
@@ -185,23 +185,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   constructor() {
-    // o palco da rolagem entra e sai com a fase: monta/desmonta a bandeja 3D junto
-    effect(() => {
-      const host = this.diceHost()?.nativeElement;
-      if (!host) {
-        this.diceTray?.dispose();
-        this.diceTray = undefined;
-        return;
-      }
-      if (!this.diceTray && !this.flatDice()) {
-        try {
-          this.diceTray = new DiceTray(host);
-        } catch {
-          this.flatDice.set(true);
-        }
-      }
-      if (this.pendingRoll) this.throwDice(this.pendingRoll);
-    });
     // resultado na tela: o foco vai para "Confirmar" (Enter/Espaço fecham)
     effect(() => this.rollConfirmBtn()?.nativeElement.focus({ preventScroll: true }));
     // resultado da inspeção: o foco vai para "Fechar"
@@ -279,7 +262,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Teste de d20 na ficha da lateral (percepção ao entrar no cômodo, inspecionar o móvel). */
   protected readonly check = signal<CheckView | null>(null);
   private checkTimer?: ReturnType<typeof setTimeout>;
-  private checkSpin?: ReturnType<typeof setInterval>;
+  /** A ficha como lista (0 ou 1 item), para o `@for` recriar o d20 a cada teste novo. */
+  protected readonly checks = computed(() => {
+    const c = this.check();
+    return c ? [c] : [];
+  });
+  private checkSeq = 0;
+  /** Quem espera o d20 da ficha parar. */
+  private checkRolled?: (value: number) => void;
   protected readonly searchRules = SEARCH_RULES;
   /**
    * Inspeção em close-up (toque na lupa): a câmera aproxima, o d20 rola no meio da cena e o
@@ -287,7 +277,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    */
   protected readonly search = signal<SearchView | null>(null);
   private searchDone?: () => void;
-  private searchSpin?: ReturnType<typeof setInterval>;
+  /** Quem espera o d20 da inspeção parar. */
+  private searchRolled?: (value: number) => void;
   private readonly searchCloseBtn = viewChild('searchClose', { read: ElementRef<HTMLButtonElement> });
   /** Esconderijos em que alguém reparou (o móvel ganha a lupa e pode ser inspecionado). */
   protected readonly noticed = signal<ReadonlySet<string>>(new Set());
@@ -544,13 +535,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.destroyed = true;
     this.stopPad?.();
     this.clearTimers();
-    clearInterval(this.searchSpin);
     clearTimeout(this.noticeTimer);
     clearTimeout(this.checkTimer);
-    clearInterval(this.checkSpin);
     clearInterval(this.statsTicker);
-    this.diceTray?.dispose();
-    this.diceTray = undefined;
     this.board?.dispose();
   }
 
@@ -571,31 +558,31 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.roll();
   }
 
-  /** Rola 2d4 com dados 3D; o resultado fica na tela até o jogador confirmar. */
+  /**
+   * Rola 2d4: põe dois `app-d4` novos na tela, que caem e param sozinhos. O resultado fica
+   * na tela até o jogador confirmar.
+   */
   private roll(): void {
     this.phase.set('rolling');
     this.rolled.set(0);
-    const final = rollDice(MOVE_DICE.count, MOVE_DICE.sides);
-    this.dice.set(final);
-    this.pendingRoll = final;
-    // palco já montado (ex.: recomeçar durante a rolagem): joga direto
-    if (this.diceTray || this.flatDice()) this.throwDice(final);
-  }
-
-  private throwDice(final: number[]): void {
-    this.pendingRoll = null;
-    const epoch = this.epoch;
-    const show = () => {
-      if (this.destroyed || this.epoch !== epoch || this.dice() !== final) return;
-      this.rolled.set(sum(final));
-      this.movesLeft.set(turnMovement(sum(final), this.roster.loadout(this.active().id), this.grouped()));
-      this.gamepad.rumble(0.3, 0.2, 120);
-      this.haptics.vibrate(SETTLE_PATTERN);
-    };
+    const seq = ++this.rollSeq;
+    this.dieResults = [];
+    this.rollKeys.set(Array.from({ length: MOVE_DICE.count }, (_, i) => `${seq}-${i}`));
     // no celular, os dados "quicam" na mão (a não ser que a animação esteja reduzida)
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
-    if (this.diceTray) void this.diceTray.roll(final, { instant: reducedMotion() }).then(show);
-    else this.later(reducedMotion() ? 150 : 700, show);
+  }
+
+  /** Um dos d4 parou; quando todos pararem, mostra o total. */
+  protected dieRolled(key: string, index: number, value: number): void {
+    if (this.destroyed || this.phase() !== 'rolling' || !this.rollKeys().includes(key)) return;
+    this.dieResults[index] = value;
+    if (this.dieResults.filter(Number.isFinite).length < MOVE_DICE.count) return;
+    const final = [...this.dieResults];
+    this.dice.set(final);
+    this.rolled.set(sum(final));
+    this.movesLeft.set(turnMovement(sum(final), this.roster.loadout(this.active().id), this.grouped()));
+    this.gamepad.rumble(0.3, 0.2, 120);
+    this.haptics.vibrate(SETTLE_PATTERN);
   }
 
   /** Fecha o resultado da rolagem e libera o movimento. */
@@ -1032,28 +1019,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // primeiro a câmera chega; depois o dado rola
     await this.wait(motion ? 550 : 0);
     if (this.destroyed || this.epoch !== epoch) return;
-    const result = rollDie(SEARCH_RULES.die);
+    // o `app-d20` do close-up rola sozinho e avisa o resultado quando para
+    const rolled = new Promise<number>((done) => (this.searchRolled = done));
     this.search.set({
       who: this.nameOf(id),
       furniture: item.furniture,
       target: SEARCH_RULES.find,
-      face: rollDie(SEARCH_RULES.die),
       result: null,
       pass: null,
       seized: item.seized,
     });
-    if (motion) {
-      this.haptics.vibrate(ROLL_PATTERN);
-      this.searchSpin = setInterval(
-        () => this.search.update((v) => (v && v.result === null ? { ...v, face: rollDie(SEARCH_RULES.die) } : v)),
-        70,
-      );
-    }
-    await this.wait(900);
-    clearInterval(this.searchSpin);
+    if (motion) this.haptics.vibrate(ROLL_PATTERN);
+    const result = await rolled;
     if (this.destroyed || this.epoch !== epoch) return;
     const pass = beats(result, SEARCH_RULES.find);
-    this.search.update((v) => v && { ...v, face: result, result, pass });
+    this.search.update((v) => v && { ...v, result, pass });
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(pass ? 0.8 : 0.3, pass ? 0.5 : 0.2, pass ? 260 : 120);
     // a mensagem fica até o jogador fechar
@@ -1077,6 +1057,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.afterMove();
   }
 
+  /** O d20 do close-up parou. */
+  protected searchDieRolled(value: number): void {
+    const done = this.searchRolled;
+    this.searchRolled = undefined;
+    done?.(value);
+  }
+
   /** Fecha o resultado da inspeção (botão **Fechar**, ✕ ou ○). */
   protected closeSearch(): void {
     if (this.search()?.result == null) return;
@@ -1088,7 +1075,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Recomeço ou saída no meio da inspeção: some com o close-up sem seguir a vez. */
   private dropSearch(): void {
-    clearInterval(this.searchSpin);
+    this.searchRolled = undefined;
     this.search.set(null);
     this.searchDone = undefined;
     this.board?.endCloseUp();
@@ -1096,27 +1083,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Rola 1d20 na ficha da lateral: a face gira, para no resultado e mostra se passou.
+   * Rola 1d20 na ficha da lateral (um `app-d20` que cai, para e brilha verde ou vermelho).
    * Devolve se passou (mais que `target`), ou `null` se a partida foi recomeçada.
    */
   private async rollCheck(kind: CheckView['kind'], who: string, target: number): Promise<boolean | null> {
     const epoch = this.epoch;
-    const result = rollDie(SEARCH_RULES.die);
     clearTimeout(this.checkTimer);
-    clearInterval(this.checkSpin);
-    this.check.set({ kind, who: this.nameOf(who), target, face: rollDie(SEARCH_RULES.die), result: null, pass: null });
-    if (!reducedMotion()) {
-      this.haptics.vibrate(ROLL_PATTERN);
-      this.checkSpin = setInterval(
-        () => this.check.update((c) => (c && c.result === null ? { ...c, face: rollDie(SEARCH_RULES.die) } : c)),
-        70,
-      );
-    }
-    await this.wait(900);
-    clearInterval(this.checkSpin);
+    const rolled = new Promise<number>((done) => (this.checkRolled = done));
+    this.check.set({ id: ++this.checkSeq, kind, who: this.nameOf(who), target, result: null, pass: null });
+    if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
+    const result = await rolled;
     if (this.destroyed || this.epoch !== epoch) return null;
     const pass = beats(result, target);
-    this.check.update((c) => c && { ...c, face: result, result, pass });
+    this.check.update((c) => c && { ...c, result, pass });
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.3, 0.2, 120);
     await this.wait(1100);
@@ -1124,6 +1103,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // a ficha fica mais um pouco na tela, sem segurar o jogo
     this.checkTimer = setTimeout(() => this.check.set(null), 2400);
     return pass;
+  }
+
+  /** O d20 da ficha parou. */
+  protected checkDieRolled(value: number): void {
+    const done = this.checkRolled;
+    this.checkRolled = undefined;
+    done?.(value);
   }
 
   private nameOf(id: string): string {
@@ -1353,7 +1339,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.searchFails.set(new Map());
     this.noticeRolled.clear();
     clearTimeout(this.checkTimer);
-    clearInterval(this.checkSpin);
+    this.checkRolled = undefined;
     this.check.set(null);
     this.dropSearch();
     this.board?.setClue(null);

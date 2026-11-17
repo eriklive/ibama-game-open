@@ -228,17 +228,12 @@
   }
 
   <!-- Teste de d20 (percepção, inspecionar): uma ficha na lateral -->
-  @if (check(); as ck) {
+  @for (ck of checks(); track ck.id) {
     <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
       <span class="check-kicker">{{ ck.kind === 'notice' ? 'Percepção' : 'Inspecionar' }} · d20</span>
       <span class="check-who">{{ ck.who }}</span>
-      <span class="d20" [class.rolling]="ck.result === null" aria-hidden="true">
-        <svg viewBox="0 0 100 100">
-          <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
-          <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
-        </svg>
-        <span class="d20-value">{{ ck.face }}</span>
-      </span>
+      <app-d20 class="check-die" aria-hidden="true" [tone]="ck.pass === null ? 'gold' : ck.pass ? 'pass' : 'fail'" (rolled)="checkDieRolled($event)" />
+      @if (ck.result !== null) { <span class="check-value" data-testid="check-value">{{ ck.result }}</span> }
       <span class="check-need">precisa de mais que {{ ck.target }}</span>
       @if (ck.pass !== null) {
         <span class="check-result" data-testid="check-result">
@@ -438,18 +433,12 @@
   <!-- Inspeção em close-up: o d20 rola no meio da cena e o resultado espera o Fechar -->
   @if (search(); as sv) {
     <div class="focus-stage" data-testid="search-focus">
-      <span class="d20 focus-die" [class.rolling]="sv.result === null" [class.pass]="sv.pass === true" [class.fail]="sv.pass === false" aria-hidden="true">
-        <svg viewBox="0 0 100 100">
-          <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
-          <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
-        </svg>
-        <span class="d20-value">{{ sv.face }}</span>
-      </span>
+      <app-d20 class="focus-die" aria-hidden="true" [tone]="sv.pass === null ? 'gold' : sv.pass ? 'pass' : 'fail'" (rolled)="searchDieRolled($event)" />
       <div class="focus-card" role="status" aria-live="polite">
         <span class="focus-what">{{ sv.who }} · {{ sv.furniture }} · d20 · mais que {{ sv.target }}</span>
         @if (sv.pass !== null) {
           <span class="focus-result" [class.pass]="sv.pass" data-testid="search-result">
-            {{ sv.pass ? 'Achou! ' + sv.seized : 'Nada ainda' }}
+            {{ sv.result }} · {{ sv.pass ? 'Achou! ' + sv.seized : 'Nada ainda' }}
           </span>
           <button type="button" class="focus-close" #searchClose (click)="closeSearch()" data-testid="search-close">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
@@ -498,20 +487,13 @@
 
   @if (phase() === 'rolling') {
     <div class="roll-stage" [class.settled]="rolled() > 0" role="dialog" aria-modal="true" aria-labelledby="roll-who" data-testid="roll">
-      <div class="roll-tray" #diceHost aria-hidden="true">
-        @if (flatDice()) {
-          <div class="dice big" [class.rolling]="rolled() === 0">
-            @for (v of dice(); track $index) {
-              <span class="d4" [style.animation-delay.ms]="$index * 90">
-                <svg viewBox="0 0 100 92"><polygon points="50,4 96,88 4,88" /><path d="M50 4V62L4 88M50 62L96 88" /></svg>
-                <span class="d4-value">{{ rolled() > 0 ? v : '?' }}</span>
-              </span>
-            }
-          </div>
+      <div class="roll-tray" aria-hidden="true">
+        @for (k of rollKeys(); track k) {
+          <app-d4 class="roll-die" [delay]="$index * 80" (rolled)="dieRolled(k, $index, $event)" />
         }
       </div>
       <header class="roll-head">
-        <span class="roll-kicker">Rolagem de movimento · {{ dice().length }}d{{ diceSides }}</span>
+        <span class="roll-kicker">Rolagem de movimento · {{ rollKeys().length }}d{{ diceSides }}</span>
         <span class="roll-who" id="roll-who">Vez de {{ active().name }}</span>
       </header>
       <div class="roll-result" aria-live="polite">
