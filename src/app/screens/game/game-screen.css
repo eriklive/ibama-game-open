@@ -366,7 +366,8 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .focus-stage { position: absolute; inset: 0; pointer-events: none; z-index: 4; animation: fade-in .3s ease-out both; }
 .focus-stage::before {
   content: ''; position: absolute; inset: 0;
-  background: radial-gradient(ellipse 40% 58% at 50% 58%, transparent 55%, rgba(8, 10, 8, .78) 100%);
+  /* --vig: onde fica a parte clara (o interrogatório põe a dupla mais para cima) */
+  background: radial-gradient(ellipse var(--vig, 40% 58% at 50% 58%), transparent 55%, rgba(8, 10, 8, .78) 100%);
 }
 .focus-stage::after {
   content: ''; position: absolute; inset: 0;

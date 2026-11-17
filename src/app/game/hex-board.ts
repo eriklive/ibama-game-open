@@ -46,6 +46,10 @@ const COLORS = {
   approachRoll: 0xf5e663,
   approachFlee: 0xffb067,
   aura: 0x9dff8f,
+  /** Aura de interrogatório em volta do suspeito rendido (âmbar; mais clara com o agente dentro). */
+  interrogate: 0xe08a1e,
+  interrogateHot: 0xffb347,
+  interrogateReach: 0xe7b569,
   /** Chão "low poly" além do raio carregado: só uma cor de mata fechada sob a névoa. */
   farGround: 0x1f3a1c,
 };
@@ -88,6 +92,8 @@ export interface BoardEnemy {
   facing: number;
   /** Modelo 3D; enquanto carrega (ou se falhar) a peça simples continua no lugar. */
   model?: ModelDef;
+  /** Começa fora do tabuleiro (escondido): aparece com `revealEnemy`. */
+  hidden?: boolean;
 }
 
 /** Peça que anda pelo tabuleiro (agente ou inimigo). */
@@ -184,7 +190,38 @@ const INSPECT_CAM = {
   aimHeight: 1.15,
   /** Rapidez da ida e da volta (taxa exponencial por segundo). */
   blendRate: 5,
+  /**
+   * Enquadramento de duas pessoas em pé (interrogatório): a câmera fica de lado para a dupla
+   * (`side` = quanto puxa para a câmera de sempre) e afasta até caber `width` × `height`
+   * (unidades do mundo) na faixa de cima da tela, acima da papelada.
+   */
+  pair: { width: 4.4, height: 3.3, aimHeight: 1.25, side: 0.45, top: 0.09, minDist: 6 },
 } as const;
+
+/**
+ * Close-up no próprio tabuleiro (ver `HexBoard.closeUp`): `object` mira entre um objeto e o
+ * agente (inspeção do móvel); `pair` enquadra o agente e outra pessoa em pé, de lado
+ * (interrogatório). `insets` diz quanto da tela a papelada cobre (frações da altura, embaixo,
+ * e da largura, à direita): a dupla fica no meio do que sobra. `faceEnemy` vira esse inimigo
+ * para o agente.
+ */
+export interface CloseUpOptions {
+  frame?: 'object' | 'pair';
+  insets?: CloseUpInsets;
+  faceEnemy?: string;
+}
+
+export interface CloseUpInsets {
+  bottom: number;
+  right: number;
+}
+
+interface CloseUpView {
+  target: THREE.Vector3;
+  dir: THREE.Vector3;
+  frame: 'object' | 'pair';
+  insets: CloseUpInsets;
+}
 
 function reducedMotionQuery(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -280,6 +317,9 @@ export class HexBoard {
 
   private reachable = new Set<string>();
   private vision = new Set<string>();
+  /** Aura de interrogatório (ver `setInterrogationAura`). */
+  private interrogationAura = new Set<string>();
+  private interrogationHot = new Set<string>();
   /** Pré-visualização da abordagem: zona de rendição, zona de rolagem e zona de fuga. */
   private approach: { surrender: Set<string>; roll: Set<string>; flee: Set<string> } | null = null;
   /** Escala de cinza do modo de abordagem (ver `setSpotlight`). */
@@ -309,12 +349,14 @@ export class HexBoard {
   private readonly camGoal = new THREE.Vector3();
   private zoom = 1;
   /**
-   * Vista de inspeção (ver `inspectView`): ponto mirado e direção (do ponto até a câmera, no
-   * chão). `inspectBlend` vai de 0 (câmera de sempre) a 1 (inspeção) e volta.
+   * Close-up (ver `closeUp`): ponto mirado e direção (do ponto até a câmera, no chão).
+   * `inspectBlend` vai de 0 (câmera de sempre) a 1 (close-up) e volta.
    */
-  private inspect: { target: THREE.Vector3; dir: THREE.Vector3 } | null = null;
-  private inspectLast: { target: THREE.Vector3; dir: THREE.Vector3 } | null = null;
+  private inspect: CloseUpView | null = null;
+  private inspectLast: CloseUpView | null = null;
   private inspectBlend = 0;
+  /** Deslocamento da vista neste quadro (px): a cena da porta empurra para o lado, o close-up para cima. */
+  private readonly viewShift = { x: 0, y: 0 };
   private readonly bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
   /** Mundo semiaberto: a câmera passeia num círculo (centro e raio no plano do mundo). */
   private worldBounds: { x: number; z: number; r: number } | null = null;
@@ -445,6 +487,20 @@ export class HexBoard {
     this.paintTiles();
   }
 
+  /**
+   * Aura de interrogatório: hexágonos em volta dos suspeitos rendidos com diálogo (âmbar,
+   * pulsando). `hot` são os da aura em que o agente da vez está (mais claros).
+   */
+  setInterrogationAura(keys: Iterable<string>, hot: Iterable<string> = []): void {
+    const aura = new Set(keys);
+    const warm = new Set(hot);
+    const same = (a: Set<string>, b: Set<string>) => a.size === b.size && [...a].every((k) => b.has(k));
+    if (same(aura, this.interrogationAura) && same(warm, this.interrogationHot)) return;
+    this.interrogationAura = aura;
+    this.interrogationHot = warm;
+    this.paintTiles();
+  }
+
   /** Mostra (ou esconde, com `null`) as zonas da abordagem. */
   setApproachZones(zones: { surrender: Iterable<string>; roll: Iterable<string>; flee: Iterable<string> } | null): void {
     this.approach = zones && { surrender: new Set(zones.surrender), roll: new Set(zones.roll), flee: new Set(zones.flee) };
@@ -556,50 +612,76 @@ export class HexBoard {
   }
 
   /**
-   * Vista de inspeção, no mesmo enquadramento da cena da porta (arrombar / abrir fechadura):
-   * a câmera gira 45° a partir da de sempre, para o lado em que o agente está, desce para 30°
-   * e chega perto, mirando entre o `target` (o móvel — um hexágono ou o próprio objeto 3D) e
-   * o agente `agentId`, que vira para o objeto. Enquanto durar, o jogador não mexe na câmera
-   * (arrastar, pinça, roda e controle são ignorados) e o tabuleiro só aceita toque na lupa.
-   * `endInspectView` volta, suave, para a câmera de sempre.
+   * Close-up no próprio tabuleiro, no mesmo enquadramento da cena da porta (arrombar / abrir
+   * fechadura): a câmera desce para 30° e chega perto. Serve para a inspeção e o interrogatório.
+   *
+   * - `frame: 'object'` (inspeção): gira 45° a partir da câmera de sempre, para o lado em que o
+   *   agente está, mirando entre o `target` (o móvel — um hexágono ou o próprio objeto 3D) e o
+   *   agente.
+   * - `frame: 'pair'` (interrogatório): fica de lado para o agente e a pessoa em `target`,
+   *   mirando entre os dois, e afasta até os dois caberem em pé na faixa de cima da tela.
+   *
+   * O agente `agentId` vira para o `target` (e `faceEnemy`, para o agente). Enquanto durar, o
+   * jogador não mexe na câmera (arrastar, pinça, roda e controle são ignorados) e o tabuleiro
+   * só aceita toque na lupa. `endCloseUp` volta, suave, para a câmera de sempre.
    */
-  inspectView(agentId: string, target: HexCoord | THREE.Object3D): void {
+  closeUp(agentId: string, target: HexCoord | THREE.Object3D, opts: CloseUpOptions = {}): void {
     const u = this.units.get(agentId);
     if (!u) return;
+    const frame = opts.frame ?? 'object';
     const agent = this.worldOf(u.hex);
     const center = target instanceof THREE.Object3D
       ? target.getWorldPosition(new THREE.Vector3()).setY(0)
       : this.worldOf(target);
     const c = INSPECT_CAM;
-    const aim = center.clone().lerp(agent, c.towardAgent).setY(this.groundAt(agent.x, agent.z) + c.aimHeight);
-    // de que lado do objeto o agente está; a câmera fica do lado dele, 45° para um lado
+    // de que lado do objeto o agente está
     const n = agent.clone().sub(center).setY(0);
     if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
     n.normalize();
     const turn = (v: THREE.Vector3, a: number) =>
       new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), 0, -v.x * Math.sin(a) + v.z * Math.cos(a));
-    // gira a partir da câmera de sempre (que olha de +Z), para o lado em que o agente aparece
+    // a câmera de sempre olha de +Z
     const home = new THREE.Vector3(0, 0, 1);
-    const options = [turn(home, c.turn), turn(home, -c.turn)].sort((a, b) => b.dot(n) - a.dot(n));
-    const dir = options[0].dot(n) > 0.1 ? options[0] : turn(n, c.turn);
-    this.inspect = { target: aim, dir };
+    let aim: THREE.Vector3;
+    let dir: THREE.Vector3;
+    if (frame === 'pair') {
+      // de lado para a dupla (perpendicular à linha entre os dois), puxando para a câmera de sempre
+      aim = center.clone().lerp(agent, 0.5).setY(this.groundAt(agent.x, agent.z) + c.pair.aimHeight);
+      const side = [turn(n, Math.PI / 2), turn(n, -Math.PI / 2)].sort((a, b) => b.dot(home) - a.dot(home))[0];
+      dir = side.addScaledVector(home, c.pair.side).normalize();
+    } else {
+      aim = center.clone().lerp(agent, c.towardAgent).setY(this.groundAt(agent.x, agent.z) + c.aimHeight);
+      // 45° para um lado, o do agente
+      const options = [turn(home, c.turn), turn(home, -c.turn)].sort((a, b) => b.dot(n) - a.dot(n));
+      dir = options[0].dot(n) > 0.1 ? options[0] : turn(n, c.turn);
+    }
+    this.inspect = { target: aim, dir, frame, insets: opts.insets ?? { bottom: 0, right: 0 } };
     this.inspectLast = this.inspect;
     if (reducedMotionQuery()) this.inspectBlend = 1;
-    // o agente vira para o objeto
+    // o agente vira para o objeto (ou para a pessoa); a pessoa, para o agente
     u.yaw = Math.atan2(center.x - agent.x, center.z - agent.z);
+    if (opts.faceEnemy) {
+      const e = this.enemies.get(opts.faceEnemy);
+      if (e) e.facingGoal = Math.atan2(agent.z - center.z, agent.x - center.x);
+    }
     this.pointers.clear();
     this.tapStart = null;
     this.pinchDist = 0;
   }
 
-  /** Sai da vista de inspeção: a câmera volta, suave, para a de sempre. */
-  endInspectView(): void {
+  /** Sai do close-up: a câmera volta, suave, para a de sempre. */
+  endCloseUp(): void {
     if (!this.inspect) return;
     this.inspect = null;
     if (reducedMotionQuery()) this.inspectBlend = 0;
   }
 
-  /** Se a câmera está travada na vista de inspeção. */
+  /** Muda o que a papelada cobre durante o close-up (ao girar o celular, por exemplo). */
+  setCloseUpInsets(insets: CloseUpInsets): void {
+    if (this.inspect) this.inspect.insets = insets;
+  }
+
+  /** Se a câmera está travada no close-up. */
   get inspecting(): boolean {
     return !!this.inspect;
   }
@@ -726,6 +808,24 @@ export class HexBoard {
     e.running = false;
     e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
     this.moving = false;
+  }
+
+  /**
+   * Inimigo escondido aparece no tabuleiro (entregue no interrogatório): surge em `hex`, olhando
+   * para `facing`, com um susto e o "!" de alerta.
+   */
+  revealEnemy(id: string, hex: HexCoord, facing: number): void {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    e.epoch++;
+    e.hex = { ...hex };
+    const p = this.worldOf(hex);
+    e.group.position.x = p.x;
+    e.group.position.z = p.z;
+    e.facing = e.facingGoal = facing;
+    e.gone = false;
+    if (reducedMotionQuery()) e.presence = 1;
+    else e.startleAt = this.clock.elapsedTime;
   }
 
   /** O inimigo sai do tabuleiro (fugiu). */
@@ -1075,12 +1175,7 @@ export class HexBoard {
     this.cineBlend += (goal - this.cineBlend) * (1 - Math.exp(-dt * 5));
     if (Math.abs(goal - this.cineBlend) < 0.002) this.cineBlend = goal;
     const c = this.cine ?? this.cineLast;
-    const w = this.canvas.clientWidth;
-    const h = this.canvas.clientHeight;
-    if (!c || this.cineBlend <= 0) {
-      if (this.camera.view?.enabled) this.camera.clearViewOffset();
-      return dist;
-    }
+    if (!c || this.cineBlend <= 0) return dist;
     const e = this.cineBlend * this.cineBlend * (3 - 2 * this.cineBlend);
     const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
     // perto o bastante para ver o chute, longe o bastante para caber quem está do outro lado
@@ -1093,9 +1188,7 @@ export class HexBoard {
       .setY(c.target.y + Math.sin(pitch) * near);
     this.camera.position.lerp(pos, e);
     look.lerp(c.target, e);
-    const off = c.offsetPx * e;
-    if (off > 0.5) this.camera.setViewOffset(w, h, off, 0, w, h);
-    else if (this.camera.view?.enabled) this.camera.clearViewOffset();
+    this.viewShift.x += c.offsetPx * e;
     return THREE.MathUtils.lerp(dist, near, e);
   }
 
@@ -1800,6 +1893,11 @@ export class HexBoard {
       baseY: 0.15,
       signY: 1.05,
     });
+    if (enemy.hidden) {
+      const view = this.enemies.get(enemy.id)!;
+      view.gone = true;
+      view.presence = 0;
+    }
     if (enemy.model) this.attachEnemyModel(this.enemies.get(enemy.id)!, enemy.model, [body, head, nose, eyes], disc);
   }
 
@@ -2004,8 +2102,16 @@ export class HexBoard {
           : this.approach?.flee.has(key)
             ? COLORS.approachFlee
             : null;
+      const aura = this.interrogationAura.has(key)
+        ? this.interrogationHot.has(key)
+          ? COLORS.interrogateHot
+          : isReach
+            ? COLORS.interrogateReach
+            : COLORS.interrogate
+        : null;
       tile.color.set(
-        zone ?? (isSel ? COLORS.selected : onPath ? COLORS.path : isReach ? reachColor : seen ? COLORS.vision : tile.baseColor),
+        zone ??
+          (isSel ? COLORS.selected : onPath ? COLORS.path : (aura ?? (isReach ? reachColor : seen ? COLORS.vision : tile.baseColor))),
       );
       tile.emissive.set(isSel ? 0x6b5200 : onPath ? 0x5a4a14 : 0x000000);
       tile.lift = isSel ? 0.2 : onPath ? 0.1 : 0;
@@ -2100,9 +2206,15 @@ export class HexBoard {
   private updateCamera(dt: number): void {
     const look = new THREE.Vector3();
     let dist = this.updatePerspectiveCamera(dt, look);
+    this.viewShift.x = this.viewShift.y = 0;
     dist = this.blendInspect(dt, look, dist);
     dist = this.blendCine(dt, look, dist);
     this.camera.lookAt(look);
+    // a cena da porta empurra a vista para a esquerda das fichas; o close-up, para cima da papelada
+    const { x: vx, y: vy } = this.viewShift;
+    if (Math.abs(vx) > 0.5 || Math.abs(vy) > 0.5) {
+      this.camera.setViewOffset(this.canvas.clientWidth, this.canvas.clientHeight, vx, vy, this.canvas.clientWidth, this.canvas.clientHeight);
+    } else if (this.camera.view?.enabled) this.camera.clearViewOffset();
 
     // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
     // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
@@ -2125,7 +2237,7 @@ export class HexBoard {
   }
 
   /**
-   * Mistura a câmera de sempre com a da inspeção (ver `inspectView`), como a cena da porta.
+   * Mistura a câmera de sempre com a do close-up (ver `closeUp`), como a cena da porta.
    * Ajusta a posição da câmera e `look`; devolve a distância até o ponto mirado.
    */
   private blendInspect(dt: number, look: THREE.Vector3, dist: number): number {
@@ -2137,8 +2249,23 @@ export class HexBoard {
     const b = this.inspectBlend;
     const e = b * b * (3 - 2 * b);
     const c = INSPECT_CAM;
-    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
-    const near = c.dist * Math.min(portrait, c.portraitMax);
+    let near: number;
+    if (v.frame === 'pair') {
+      // afasta até a dupla caber em pé (altura) e lado a lado (largura) no que a papelada não cobre
+      const band = Math.max(0.3, 1 - v.insets.bottom - c.pair.top);
+      const wide = Math.max(0.35, 1 - v.insets.right);
+      const tanH = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+      const byHeight = c.pair.height / band / (2 * tanH);
+      const byWidth = c.pair.width / (0.92 * wide) / (Math.max(this.camera.aspect, 0.3) * 2 * tanH);
+      near = Math.max(c.pair.minDist, byHeight, byWidth);
+      // o meio da área livre fica no meio da tela: a vista sobe (e vai para a esquerda)
+      const mid = c.pair.top + band / 2;
+      this.viewShift.y += (0.5 - mid) * this.canvas.clientHeight * e;
+      this.viewShift.x += (v.insets.right / 2) * this.canvas.clientWidth * e;
+    } else {
+      const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
+      near = c.dist * Math.min(portrait, c.portraitMax);
+    }
     const pos = v.target
       .clone()
       .addScaledVector(v.dir, Math.cos(c.pitch) * near)
@@ -2284,6 +2411,12 @@ export class HexBoard {
         tile.emissive.setRGB(g, g * 0.85, g * 0.45);
         goal = tile.lift + hit * 0.3;
         if (hit) tile.y = goal;
+        changed = true;
+      } else if (this.interrogationAura.has(key)) {
+        // aura de interrogatório: brilho âmbar que respira (mais forte com o agente dentro)
+        const hot = this.interrogationHot.has(key);
+        const g = (hot ? 0.2 : 0.1) + Math.sin(t * 3.9) * (hot ? 0.1 : 0.07);
+        tile.emissive.setRGB(g, g * 0.55, g * 0.1);
         changed = true;
       } else if (this.reachable.has(key)) {
         if (this.vision.has(key)) tile.emissive.setRGB(pulse, pulse * 0.4, pulse * 0.3);

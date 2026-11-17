@@ -1,4 +1,4 @@
-<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming()" [class.door-focus]="phase() === 'door'">
+<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
 
   <!-- Topo: fita crepe com a linha do tempo -->
@@ -184,10 +184,10 @@
   </nav>
 
   <!-- Suspeitos: uma pilha de fichas que abre em lista -->
-  @if (enemies().length) {
+  @if (knownEnemies().length) {
     <div class="suspects" data-testid="foes">
       <div class="pile-wrap">
-        @if (!suspectsOpen() && enemies().length > 1) {
+        @if (!suspectsOpen() && knownEnemies().length > 1) {
           <span class="sheet back" aria-hidden="true"></span>
           <span class="sheet mid" aria-hidden="true"></span>
         }
@@ -202,17 +202,17 @@
           <span class="pin" aria-hidden="true"></span>
           <span class="pile-head">
             <span>Suspeitos</span>
-            <span class="pile-mark" [class.close]="suspectsOpen()">{{ suspectsOpen() ? 'fechar' : '×' + enemies().length }}</span>
+            <span class="pile-mark" [class.close]="suspectsOpen()">{{ suspectsOpen() ? 'fechar' : '×' + knownEnemies().length }}</span>
           </span>
           <span class="pile-summary">{{ enemySummary() }}</span>
         </button>
       </div>
       @if (suspectsOpen()) {
         <ul class="suspect-list" aria-label="Lista de suspeitos">
-          @for (e of enemies(); track e.id; let i = $index) {
+          @for (e of knownEnemies(); track e.id; let i = $index) {
             <li [class]="'suspect ' + e.status" [style.--tilt]="-tilts[i % tilts.length] + 'deg'">
               <span class="suspect-name">{{ e.name }}</span>
-              <span class="suspect-status">{{ statusLabel[e.status] }}</span>
+              <span class="suspect-status">{{ statusLabel[e.status] }}@if (interrogated().has(e.id)) { · interrogado}</span>
             </li>
           }
         </ul>
@@ -469,6 +469,19 @@
           <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
         </button>
       }
+      <!-- Interrogar: dentro da aura de um suspeito rendido com diálogo -->
+      @if (interrogable(); as e) {
+        <button
+          type="button"
+          class="paper"
+          appInterrogateButton
+          [glyph]="pad() && !canApproach() && !burnable() && !inspectable() ? glyph('approach') : ''"
+          [attr.aria-label]="'Interrogar ' + e.name + ' (rendido). A primeira pergunta gasta ' + interrogationRules.moveCost + ' de movimento'"
+          data-testid="interrogate"
+          (click)="startInterrogation()">
+          {{ e.name }}
+        </button>
+      }
       <!-- Porta: colado numa porta, abre o menu (arrombar, pick lock, abrir) -->
       @if (nearDoor(); as door) {
         <button
@@ -479,7 +492,7 @@
           (click)="openDoorMenu(door)">
           <span class="stencil">Porta</span>
           <span class="typed">{{ door.broken ? 'arrombada' : doorStateLabel[door.state].toLowerCase() }}</span>
-          @if (pad() && !canApproach() && !burnable() && !inspectable()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
+          @if (pad() && !canApproach() && !burnable() && !inspectable() && !interrogable()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
       <!-- Queimar: colado no avião ou na pilha de suprimentos (encerra a vez) -->
@@ -584,6 +597,23 @@
     </div>
   }
 
+  <!--
+    Interrogatório: close-up no próprio tabuleiro (faixas pretas e vinheta, como a inspeção).
+    A rolagem do suspeito é escondida: na tela só aparecem as falas, nunca o dado ou a CD.
+  -->
+  @if (interrogation(); as iv) {
+    <div class="focus-stage" [style.--vig]="interrogationVignette()" data-testid="interrogation-focus"></div>
+    <app-interrogation-panel
+      [view]="iv"
+      [agent]="active().name"
+      [pick]="pad() ? questionPick() : -1"
+      [confirmGlyph]="glyph('confirm')"
+      [cancelGlyph]="glyph('cancel')"
+      [moveCost]="interrogationRules.moveCost"
+      (ask)="ask($event)"
+      (end)="endInterrogation()" />
+  }
+
   <!-- Modo de abordagem: cancelar fica sozinho na esquerda, longe do confirmar -->
   @if (approaching()) {
     <button type="button" class="approach-cancel" data-testid="approach-cancel" (click)="cancelApproach()" aria-label="Cancelar a abordagem">
@@ -601,7 +631,7 @@
           <dt>Direcional / analógico esq.</dt><dd>mover o cursor</dd>
           <dt>{{ glyph('confirm') }}</dt><dd>confirmar</dd>
           <dt>{{ glyph('cancel') }}</dt><dd>cancelar</dd>
-          <dt>{{ glyph('approach') }}</dt><dd>abordar / queimar / inspecionar</dd>
+          <dt>{{ glyph('approach') }}</dt><dd>abordar / queimar / inspecionar / interrogar</dd>
           <dt>{{ glyph('endTurn') }}</dt><dd>passar a vez</dd>
           <dt>{{ glyph('group') }}</dt><dd>agrupar / desagrupar</dd>
           <dt>{{ glyph('endMission') }}</dt><dd>encerrar a operação (avião queimado)</dd>
@@ -669,6 +699,18 @@
         <p class="debrief-line" [class.late]="late()">
           Turno {{ round() }} de {{ deadline }}@if (late()) { · atrasado}
         </p>
+        @if (fieldNotes().length) {
+          <!-- caderneta de campo: o que cada suspeito disse no interrogatório -->
+          <p class="debrief-line"><strong>Caderneta de campo</strong></p>
+          <ul class="debrief-objectives" data-testid="field-notes">
+            @for (n of fieldNotes(); track n.id) {
+              <li class="objective">
+                <span class="tick" aria-hidden="true">{{ n.depth ? '↳' : '·' }}</span>
+                <span><b>{{ n.suspect }}:</b> {{ n.text }}<span class="primary-tag">{{ noteLabel[n.kind] }}</span></span>
+              </li>
+            }
+          </ul>
+        }
         @if (stage === 'confirm') {
           @if (verdict() !== 'success') {
             <p class="debrief-warn">Ainda falta objetivo principal: encerrar agora deixa a missão incompleta.</p>

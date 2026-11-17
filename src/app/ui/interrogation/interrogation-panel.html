@@ -1,0 +1,77 @@
+@let iv = view();
+<div class="interro-kicker">
+  <b>Interrogatório · {{ iv.cls.name }}</b>
+  {{ iv.suspect }} · {{ iv.cls.trait }}
+</div>
+<section
+  class="interro"
+  [attr.aria-label]="'Interrogatório de ' + iv.suspect"
+  data-testid="interrogation"
+>
+  @if (iv.agentLine !== null) {
+    <div class="balloon agent" aria-hidden="true" data-testid="agent-balloon">
+      <span class="who">{{ agent() }}</span>{{ iv.agentLine }}
+    </div>
+  }
+  @if (iv.suspectLine; as sl) {
+    <div class="balloon suspect" aria-hidden="true" data-testid="suspect-balloon">
+      <span class="who">{{ iv.suspect }}</span>
+      @if (sl.posture) {
+        <span class="stagedir">({{ sl.posture }})</span>
+      }
+      <span [class.dots]="sl.thinking">{{ sl.text }}</span>
+      @if (sl.tell) {
+        <span class="tell" data-testid="tell">({{ sl.tell }})</span>
+      }
+    </div>
+  }
+  <p class="sr-only" aria-live="polite">{{ live() }}</p>
+  @if (open().length) {
+    <ul class="question-cards" aria-label="Perguntas">
+      @for (o of open(); track o.key; let i = $index) {
+        <li>
+          <button
+            type="button"
+            class="question-card"
+            [class.rep]="o.depth === 1"
+            [class.tre]="o.depth === 2"
+            [class.picked]="i === pick()"
+            [style.--i]="i"
+            [disabled]="iv.busy"
+            [attr.data-testid]="'question-' + o.key"
+            (click)="ask.emit(o.key)"
+          >
+            @if (o.depth) {
+              <span class="lvl">{{ levelLabel[o.depth] }}</span>
+            }
+            {{ o.node.ask }}
+            @if (confirmGlyph() && i === pick()) {
+              <span class="pad-glyph" aria-hidden="true">{{ confirmGlyph() }}</span>
+            }
+          </button>
+        </li>
+      }
+    </ul>
+  }
+  <div class="interro-foot">
+    <span class="interro-hint">
+      @if (!open().length) {
+        sem mais perguntas
+      } @else if (!iv.asked && moveCost()) {
+        a 1ª pergunta gasta {{ moveCost() }} mov.
+      }
+    </span>
+    <button
+      type="button"
+      class="interro-end"
+      [disabled]="iv.busy"
+      data-testid="interrogation-end"
+      (click)="end.emit()"
+    >
+      Encerrar
+      @if (cancelGlyph()) {
+        <span class="pad-glyph" aria-hidden="true">{{ cancelGlyph() }}</span>
+      }
+    </button>
+  </div>
+</section>
