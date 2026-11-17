@@ -377,32 +377,21 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   position: absolute; left: 50%; top: calc(26px + var(--safe-top));
   width: 200px; height: 200px; transform: translateX(-50%);
 }
-.focus-card {
-  position: absolute; left: 50%; bottom: calc(40px + var(--safe-bottom));
-  transform: translateX(-50%) rotate(-1deg);
-  display: flex; align-items: center; gap: 14px; flex-wrap: wrap; justify-content: center;
-  max-width: calc(100% - 32px - var(--safe-left) - var(--safe-right));
-  padding: 10px 14px;
-  background: var(--paper-light);
-  box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.4);
-  font-size: 13px;
-  pointer-events: auto;
-  animation: slap .25s ease-out both;
+/* inspeção: os botões ficam onde ficam nos outros modos (bilhete, carimbo e Cancelar) */
+.aim-actions {
+  position: absolute; z-index: 5;
+  right: calc(14px + var(--safe-right));
+  bottom: calc(12px + var(--safe-bottom));
+  width: 250px; height: 150px;
+  pointer-events: none;
 }
-.focus-result { font-family: var(--stencil); font-weight: 700; font-size: 17px; text-transform: uppercase; color: var(--red-text); }
-.focus-result.pass { color: var(--green-ok); }
-.focus-result.rolling { font-family: var(--typed); font-weight: 400; font-size: 13px; text-transform: none; color: var(--muted-paper); }
-.focus-close {
-  position: relative;
-  display: inline-flex; align-items: center; gap: 6px;
-  padding: 8px 14px;
-  background: var(--ink-paper); color: var(--paper-light);
-  font-family: var(--stencil); font-weight: 700; font-size: 14px; text-transform: uppercase; letter-spacing: .5px;
-  box-shadow: 2px 3px 0 rgba(0, 0, 0, .35);
-  animation: slap .25s ease-out both;
-}
-.focus-close svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 3.4; stroke-linecap: round; }
-.focus-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, .35); }
+.aim-actions > * { pointer-events: auto; }
+.inspect-slip { width: 150px; }
+.aim-actions .side { width: 84px; right: 100px; }
+.aim-actions .side .stencil { font-size: 13px; }
+.stamp.inspect-stamp .stamp-text { font-size: 12px; }
+.inspect-slip.pass strong { color: var(--green-ok); }
+
 /* inspecionar pelo teclado: o botão só aparece quando recebe o foco */
 .inspect.keyboard-only:not(:focus-visible) { opacity: 0; pointer-events: none; }
 
@@ -649,12 +638,12 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .focus-card, .focus-close, .check-close, .slip, .suspect, .check, .check-result, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
+  .roll-number, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .check-close, .slip, .suspect, .check, .check-result, .inspect, .report, .pola, .pola-stamp, .pola-circle path, .report-foot, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
 @media (min-width: 700px) and (min-height: 600px) {
-  .top, .agents, .suspects, .actions, .telegram, .check, .report, .end-op, .approach-cancel { zoom: 1.25; }
+  .top, .agents, .suspects, .actions, .telegram, .check, .report, .end-op, .approach-cancel, .aim-actions { zoom: 1.25; }
 }
 
 /* ---------- controle (DualShock 4) ---------- */
