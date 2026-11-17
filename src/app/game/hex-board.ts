@@ -162,6 +162,27 @@ interface Fire {
   born: number;
 }
 
+/** Enquadramento da vista de inspeção. */
+interface InspectViewState {
+  /** Giro em torno de Y (0 = câmera em +Z olhando para -Z, como a câmera normal). */
+  yaw: number;
+  /** Inclinação (rad acima do horizonte). */
+  pitch: number;
+  /** Ponto mirado, no meio da tela. */
+  center: THREE.Vector3;
+  /** Meia altura enxergada (unidades do mundo). */
+  half: number;
+}
+
+/** Distância da câmera ortográfica até o ponto mirado (não muda o tamanho na tela). */
+const INSPECT_DIST = 24;
+/** Quanto a vista de inspeção sai de trás do agente para o lado (rad). */
+const INSPECT_SHOULDER = THREE.MathUtils.degToRad(25);
+
+function reducedMotionQuery(): boolean {
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+}
+
 export interface HexBoardCallbacks {
   /** Toque num hexágono vazio (ou fora do tabuleiro, com `null`). */
   onHexTap(hex: HexCoord | null): void;
@@ -262,8 +283,20 @@ export class HexBoard {
   private readonly camTarget = new THREE.Vector3();
   private readonly camGoal = new THREE.Vector3();
   private zoom = 1;
-  /** Câmera de antes do close-up da inspeção (para voltar depois). */
-  private beforeCloseUp: { zoom: number; goal: THREE.Vector3 } | null = null;
+  /** Câmera da vista de inspeção (ortográfica, 45°): ver `inspectView`. */
+  private readonly ortho = new THREE.OrthographicCamera(-1, 1, 1, -1, 0.1, 200);
+  private inspect: {
+    /** Câmera normal de antes (para voltar depois). */
+    prev: { zoom: number; goal: THREE.Vector3 };
+    from: InspectViewState;
+    to: InspectViewState;
+    /** Enquadramento deste quadro (da transição entre `from` e `to`). */
+    view: InspectViewState;
+    start: number;
+    duration: number;
+  } | null = null;
+  /** Corte da vista de inspeção: some com o que tapa o agente. */
+  private readonly inspectClip = new THREE.Plane();
   private readonly bounds = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
   /** Mundo semiaberto: a câmera passeia num círculo (centro e raio no plano do mundo). */
   private worldBounds: { x: number; z: number; r: number } | null = null;
@@ -497,27 +530,87 @@ export class HexBoard {
   }
 
   /**
-   * Close-up (inspeção): a câmera aproxima até enquadrar `hexes` (o agente e o móvel).
-   * `endCloseUp` volta para onde a câmera estava.
+   * Vista de inspeção: a câmera troca para uma projeção ortográfica a 45°, atrás do agente
+   * `agentId` e olhando para o `target` (o móvel — um hexágono ou o próprio objeto 3D),
+   * que fica em foco no meio da tela. Enquanto durar, o jogador não mexe na câmera
+   * (arrastar, pinça, roda e controle são ignorados) e o tabuleiro só aceita toque na lupa.
+   * O que fica entre a câmera e o agente (paredes, prateleiras) é cortado por um plano
+   * inclinado, para nada tapar a cena. `endInspectView` volta para a câmera de antes.
    */
-  closeUp(hexes: readonly HexCoord[]): void {
-    if (!hexes.length) return;
-    this.beforeCloseUp ??= { zoom: this.zoom, goal: this.camGoal.clone() };
-    const pts = hexes.map((h) => this.worldOf(h));
-    const mid = pts.reduce((a, p) => a.add(p), new THREE.Vector3()).multiplyScalar(1 / pts.length);
-    this.setZoom(0.6);
-    this.camGoal.copy(mid);
-    // o d20 aparece em cima: o enquadramento desce para os dois ficarem no meio de baixo
-    this.camGoal.z -= 1.1;
+  inspectView(agentId: string, target: HexCoord | THREE.Object3D): void {
+    const u = this.units.get(agentId);
+    if (!u) return;
+    const agent = this.worldOf(u.hex);
+    const goal = target instanceof THREE.Object3D
+      ? target.getWorldPosition(new THREE.Vector3()).setY(0)
+      : this.worldOf(target);
+    const dir = goal.clone().sub(agent).setY(0);
+    // agente e alvo no mesmo lugar: olha para "frente" (como a câmera normal)
+    if (dir.lengthSq() < 1e-6) dir.set(0, 0, -1);
+    const reach = dir.length();
+    dir.normalize();
+
+    // a câmera normal olha para -Z; a vista começa dali e gira até ficar atrás do agente
+    const fromView = this.inspect?.view ?? this.currentViewState();
+    this.inspect = {
+      prev: this.inspect?.prev ?? { zoom: this.zoom, goal: this.camGoal.clone() },
+      from: fromView,
+      to: {
+        // por cima do ombro: um pouco de lado, para o agente não tapar o móvel
+        yaw: Math.atan2(dir.x, -dir.z) + INSPECT_SHOULDER,
+        pitch: THREE.MathUtils.degToRad(45),
+        // o foco fica entre o agente e o móvel, puxado para o móvel
+        center: agent.clone().addScaledVector(dir, reach * 0.6).setY(0.8),
+        half: Math.max(3, reach * 0.5 + 2.3),
+      },
+      view: { ...fromView, center: fromView.center.clone() },
+      start: this.clock.elapsedTime,
+      duration: reducedMotionQuery() ? 0 : 0.6,
+    };
+    // corte: some o que estiver atrás do agente (do lado da câmera) e acima de uma rampa
+    // que desce para longe dele — o chão fica, a parede atrás do agente vira um toco
+    const slope = 0.9;
+    const top = 2.3;
+    const yaw = this.inspect.to.yaw;
+    const fwd = new THREE.Vector3(Math.sin(yaw), 0, -Math.cos(yaw));
+    const normal = new THREE.Vector3(slope * fwd.x, -1, slope * fwd.z).normalize();
+    this.inspectClip.setFromNormalAndCoplanarPoint(normal, agent.clone().setY(top));
+    this.renderer.clippingPlanes = [this.inspectClip];
+    this.spotlight.camera = this.ortho;
+    this.pointers.clear();
+    this.tapStart = null;
+    this.pinchDist = 0;
   }
 
-  endCloseUp(): void {
-    const prev = this.beforeCloseUp;
-    if (!prev) return;
-    this.beforeCloseUp = null;
-    this.setZoom(prev.zoom);
-    this.camGoal.copy(prev.goal);
+  /** Sai da vista de inspeção: volta à câmera em perspectiva, no zoom e lugar de antes. */
+  endInspectView(): void {
+    const ins = this.inspect;
+    if (!ins) return;
+    this.inspect = null;
+    this.renderer.clippingPlanes = [];
+    this.spotlight.camera = this.camera;
+    this.setZoom(ins.prev.zoom);
+    this.camGoal.copy(ins.prev.goal);
     this.clampGoal();
+  }
+
+  /** Se a câmera está travada na vista de inspeção. */
+  get inspecting(): boolean {
+    return !!this.inspect;
+  }
+
+  /** Enquadramento atual da câmera normal, nos termos da vista de inspeção. */
+  private currentViewState(): InspectViewState {
+    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
+    const dist = 11.5 * this.zoom * Math.min(portrait, 2.3);
+    const lead = this.camera.aspect < 1 ? 1.4 : 0.3;
+    return {
+      yaw: 0,
+      pitch: THREE.MathUtils.degToRad(55),
+      center: this.camTarget.clone().setZ(this.camTarget.z + lead),
+      // meia altura que a perspectiva enxerga no ponto mirado: a troca não dá salto
+      half: dist * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)),
+    };
   }
 
   /**
@@ -549,6 +642,7 @@ export class HexBoard {
 
   /** Arrasta a câmera (em unidades de tela: x direita, y baixo), proporcional ao zoom. */
   panBy(dx: number, dy: number): void {
+    if (this.inspect) return;
     this.camGoal.x += dx * this.zoom;
     this.camGoal.z += dy * this.zoom * 1.3;
     this.clampGoal();
@@ -556,6 +650,7 @@ export class HexBoard {
 
   /** Aproxima (< 1) ou afasta (> 1) a câmera. */
   zoomBy(factor: number): void {
+    if (this.inspect) return;
     this.setZoom(this.zoom * factor);
   }
 
@@ -1697,7 +1792,76 @@ export class HexBoard {
     this.camera.updateProjectionMatrix();
   }
 
+  /** Câmera que desenha o quadro: a ortográfica na vista de inspeção, senão a normal. */
+  private get view(): THREE.Camera {
+    return this.inspect ? this.ortho : this.camera;
+  }
+
+  /** Vista de inspeção: gira e aproxima até ficar atrás do agente, a 45°. */
+  private updateInspectCamera(): number {
+    const ins = this.inspect!;
+    const raw = ins.duration > 0 ? (this.clock.elapsedTime - ins.start) / ins.duration : 1;
+    const k = THREE.MathUtils.smootherstep(Math.min(1, raw), 0, 1);
+    const v = ins.view;
+    // giro pelo caminho mais curto
+    let dy = ins.to.yaw - ins.from.yaw;
+    dy = Math.atan2(Math.sin(dy), Math.cos(dy));
+    v.yaw = ins.from.yaw + dy * k;
+    v.pitch = THREE.MathUtils.lerp(ins.from.pitch, ins.to.pitch, k);
+    v.center.lerpVectors(ins.from.center, ins.to.center, k);
+    v.half = THREE.MathUtils.lerp(ins.from.half, ins.to.half, k);
+
+    const aspect = this.camera.aspect;
+    // em retrato, garante largura para o agente e o móvel caberem de lado
+    const half = Math.max(v.half, aspect < 1 ? 1.5 / aspect : 0);
+    const cam = this.ortho;
+    cam.left = -half * aspect;
+    cam.right = half * aspect;
+    cam.top = half;
+    cam.bottom = -half;
+    const back = Math.cos(v.pitch) * INSPECT_DIST;
+    cam.position.set(
+      v.center.x - Math.sin(v.yaw) * back,
+      v.center.y + Math.sin(v.pitch) * INSPECT_DIST,
+      v.center.z + Math.cos(v.yaw) * back,
+    );
+    cam.up.set(0, 1, 0);
+    cam.lookAt(v.center);
+    this.camTarget.set(v.center.x, 0, v.center.z);
+    return INSPECT_DIST;
+  }
+
   private updateCamera(dt: number): void {
+    let dist: number;
+    if (this.inspect) {
+      dist = this.updateInspectCamera();
+    } else {
+      dist = this.updatePerspectiveCamera(dt);
+    }
+
+    // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
+    // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
+    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE;
+    const fog = this.scene.fog as THREE.Fog;
+    fog.far = dist + view;
+    fog.near = dist + view * 0.45;
+    const far = fog.far + 4;
+    const cam = this.inspect ? this.ortho : this.camera;
+    if (Math.abs(cam.far - far) > 0.5 || this.inspect) {
+      cam.far = far;
+      cam.updateProjectionMatrix();
+    }
+
+    // o sol (e o quadro da sombra) acompanha o centro da tela em saltos de SHADOW_STEP:
+    // entre um salto e outro a sombra não é redesenhada (ver `shadowDue`)
+    const sx = Math.round(this.camTarget.x / SHADOW_STEP) * SHADOW_STEP;
+    const sz = Math.round(this.camTarget.z / SHADOW_STEP) * SHADOW_STEP;
+    this.sun.position.set(sx - 8, 16, sz + 6);
+    this.sun.target.position.set(sx, 0, sz);
+  }
+
+  /** Câmera normal: perspectiva inclinada que segue `camGoal`. Devolve a distância até o alvo. */
+  private updatePerspectiveCamera(dt: number): number {
     const k = 1 - Math.exp(-dt * 6);
     this.camTarget.lerp(this.camGoal, k);
     // Em retrato a câmera recua para enxergar o mesmo número de colunas.
@@ -1714,24 +1878,7 @@ export class HexBoard {
     this.camera.position.z += lead;
     this.camera.lookAt(this.camTarget.x, this.camTarget.y, this.camTarget.z + lead);
 
-    // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
-    // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
-    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE;
-    const fog = this.scene.fog as THREE.Fog;
-    fog.far = dist + view;
-    fog.near = dist + view * 0.45;
-    const far = fog.far + 4;
-    if (Math.abs(this.camera.far - far) > 0.5) {
-      this.camera.far = far;
-      this.camera.updateProjectionMatrix();
-    }
-
-    // o sol (e o quadro da sombra) acompanha o centro da tela em saltos de SHADOW_STEP:
-    // entre um salto e outro a sombra não é redesenhada (ver `shadowDue`)
-    const sx = Math.round(this.camTarget.x / SHADOW_STEP) * SHADOW_STEP;
-    const sz = Math.round(this.camTarget.z / SHADOW_STEP) * SHADOW_STEP;
-    this.sun.position.set(sx - 8, 16, sz + 6);
-    this.sun.target.position.set(sx, 0, sz);
+    return dist;
   }
 
   /**
@@ -1882,13 +2029,13 @@ export class HexBoard {
     this.updateCamera(dt);
     const shadow = this.shadowDue();
     // a mata que só faz sombra (fora da tela) entra apenas no quadro que redesenha a sombra
-    this.stream.cull(this.camera, shadow ? this.sun : undefined);
+    this.stream.cull(this.view, shadow ? this.sun : undefined);
     this.renderer.info.reset();
     this.updateSpotlight();
     this.spotlight.render(dt);
     if (this.labels.size) {
       this.renderer.autoClear = false;
-      this.renderer.render(this.labelScene, this.camera);
+      this.renderer.render(this.labelScene, this.view);
       this.renderer.autoClear = true;
     }
   };
@@ -2012,6 +2159,11 @@ export class HexBoard {
     if (!prev) return;
     const cur = { x: e.clientX, y: e.clientY };
     this.pointers.set(e.pointerId, cur);
+    // vista de inspeção: a câmera fica travada
+    if (this.inspect) {
+      if (this.tapStart && Math.hypot(cur.x - this.tapStart.x, cur.y - this.tapStart.y) > 10) this.dragged = true;
+      return;
+    }
 
     if (this.pointers.size >= 2) {
       const d = this.currentPinchDistance();
@@ -2049,6 +2201,7 @@ export class HexBoard {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    if (this.inspect) return;
     this.setZoom(this.zoom * (e.deltaY > 0 ? 1.1 : 0.9));
   };
 
@@ -2085,13 +2238,14 @@ export class HexBoard {
   }
 
   private handleTap(clientX: number, clientY: number): void {
-    if (!this.inputEnabled || this.moving) return;
+    // na vista de inspeção só a lupa (ou o móvel) responde, mesmo com o resto travado
+    if (this.moving || (!this.inputEnabled && !this.inspect)) return;
     const rect = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
-    this.raycaster.setFromCamera(ndc, this.camera);
+    this.raycaster.setFromCamera(ndc, this.view);
 
     // a lupa (ou o móvel debaixo dela) vem antes de tudo
     if (this.clue?.sprite.visible && this.callbacks.onClueTap) {
@@ -2103,6 +2257,7 @@ export class HexBoard {
         return;
       }
     }
+    if (this.inspect) return;
     // peças primeiro: tocar perto da peça (ou no hexágono dela) seleciona o personagem
     const hitboxes = [...this.units.values()].map((u) => u.hitbox);
     const unitHit = this.raycaster.intersectObjects(hitboxes, false)[0];

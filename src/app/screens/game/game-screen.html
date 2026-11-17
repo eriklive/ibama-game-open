@@ -1,4 +1,4 @@
-<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search()">
+<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming()">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
 
   <!-- Topo: fita crepe com a linha do tempo -->
@@ -434,6 +434,27 @@
       }
     }
   </div>
+
+  <!-- Mira da inspeção: câmera travada atrás do agente; só sobra o que dá para tocar -->
+  @if (aiming(); as item) {
+    <div class="focus-stage aim-stage" data-testid="inspect-aim"></div>
+    <div class="aim-bar">
+      <button type="button" class="aim-cancel" data-testid="inspect-cancel" (click)="cancelInspect()" aria-label="Cancelar e voltar ao normal">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
+        <span>Cancelar</span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+      </button>
+      <button type="button" class="aim-inspect" data-testid="inspect-go" (click)="inspect()"
+        [attr.aria-label]="'Inspecionar a ' + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10" cy="10" r="6" /><path d="M14.5 14.5L20 20" /></svg>
+        <span class="aim-inspect-text">
+          <span class="stencil">Inspecionar</span>
+          <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
+        </span>
+        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+      </button>
+    </div>
+  }
 
   <!-- Inspeção em close-up: o d20 rola no meio da cena e o resultado espera o Fechar -->
   @if (search(); as sv) {

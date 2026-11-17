@@ -39,7 +39,8 @@ export class Spotlight {
   constructor(
     private readonly renderer: THREE.WebGLRenderer,
     private readonly scene: THREE.Scene,
-    private readonly camera: THREE.Camera,
+    /** Câmera que desenha a cena (troca na vista de inspeção). */
+    public camera: THREE.Camera,
   ) {
     this.quad = new THREE.Mesh(
       new THREE.PlaneGeometry(2, 2),
