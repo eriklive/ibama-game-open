@@ -12,6 +12,7 @@ import { HexTile, TileField } from './tile-field';
 import { Door, commonDoors, seeThroughDoors } from './door';
 import { DoorPush, DoorViews } from './door-view';
 import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
+import { AuraLayer, AuraStyle, AuraTextures, createAuraTextures, splitHot } from './aura-layer';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -29,7 +30,6 @@ const COLORS = {
   hexA: 0x3b5530,
   hexB: 0x425d35,
   hexC: 0x4a663b,
-  reachable: 0x93b066,
   selected: 0xffd43b,
   path: 0xfff4c2,
   activeRing: 0xffd23f,
@@ -37,8 +37,6 @@ const COLORS = {
   cursor: 0xa9e4ff,
   wall: 0x56626a,
   wallTop: 0x7d8a90,
-  vision: 0xc4513f,
-  visionReach: 0xe39a7c,
   enemy: 0xc8323c,
   enemyAlert: 0xff8a1f,
   enemySurrendered: 0xe9eef0,
@@ -46,18 +44,28 @@ const COLORS = {
   approachRoll: 0xf5e663,
   approachFlee: 0xffb067,
   aura: 0x9dff8f,
-  /** Aura de interrogatório em volta do suspeito rendido (âmbar; mais clara com o agente dentro). */
-  interrogate: 0xe08a1e,
-  interrogateHot: 0xffb347,
-  /** Aura do que se pode queimar (o avião, os suprimentos): vermelho de brasa. */
-  actionAura: 0xd9532b,
-  actionHot: 0xff7a45,
-  interrogateReach: 0xe7b569,
-  /** Aura de rendido sem diálogo: âmbar apagado. */
-  interrogateMuted: 0xa79a80,
   /** Chão "low poly" além do raio carregado: só uma cor de mata fechada sob a névoa. */
   farGround: 0x1f3a1c,
 };
+
+/**
+ * Auras do tabuleiro (ver `aura-layer.ts`): luz pousada sobre o chão, que mantém a sua cor.
+ * Só o que é interativo (queimar, interrogar) ganha cortina; com o agente dentro, ela cresce.
+ */
+const AURAS = {
+  /** Até onde o agente da vez anda: azul-céu (o mesmo do cursor) com contorno claro. */
+  reach: { color: 0xa9e4ff, edge: 0xe6f8ff, fill: 0.3, rim: 1, wall: 0.3, wallOpacity: 0.4, breathe: { speed: 3, amount: 0.12 } },
+  /** Hexágonos vistos pelos inimigos: véu vermelho, sem cortina e sem respirar (é aviso, não convite). */
+  vision: { color: 0xe0503c, edge: 0xff8a70, fill: 0.5, rim: 0.9 },
+  /** Em volta do que se pode queimar (o avião, os suprimentos): brasa. */
+  burn: { color: 0xff5a26, edge: 0xffc08a, fill: 0.8, rim: 1, wall: 1, wallOpacity: 0.8, breathe: { speed: 3.2, amount: 0.15 } },
+  burnHot: { color: 0xff6a33, edge: 0xffd2a8, fill: 1, rim: 1, wall: 1.3, wallOpacity: 0.95, breathe: { speed: 4.5, amount: 0.12 } },
+  /** Em volta do suspeito rendido com diálogo: âmbar. */
+  talk: { color: 0xffa83a, edge: 0xffe8b8, fill: 0.8, rim: 1, wall: 1, wallOpacity: 0.8, breathe: { speed: 3.9, amount: 0.15 } },
+  talkHot: { color: 0xffb347, edge: 0xfff0d0, fill: 1, rim: 1, wall: 1.3, wallOpacity: 0.95, breathe: { speed: 4.5, amount: 0.12 } },
+  /** Rendido sem diálogo: âmbar apagado, parado. */
+  talkMuted: { color: 0xa79a80, edge: 0xc9bea6, fill: 0.35, rim: 0.5 },
+} satisfies Record<string, AuraStyle>;
 
 /** Milissegundos por quadro que a montagem de blocos em segundo plano pode gastar. */
 const STREAM_BUDGET_MS = 4;
@@ -319,6 +327,9 @@ export class HexBoard {
   private shadowKey = '';
   private readonly staticShadow: StaticShadow;
   private aura?: { wall: THREE.Mesh; ring: THREE.Mesh };
+  /** Camadas de luz das auras, de baixo para cima (ver `refreshAuras`). */
+  private readonly auraTextures: AuraTextures = createAuraTextures();
+  private readonly auras: Record<keyof typeof AURAS, AuraLayer>;
   /** Posições x dos sulcos da pista de terra (a continuação no mundo usa as mesmas). */
   private ruts: number[] = [];
 
@@ -410,6 +421,7 @@ export class HexBoard {
     this.buildPlane(map.plane ?? []);
     this.buildCargo();
     this.buildAura();
+    this.auras = this.buildAuraLayers();
     this.stream = this.buildStream();
     for (const u of units) this.buildUnit(u);
     for (const e of extras.enemies ?? []) this.buildEnemy(e);
@@ -482,7 +494,7 @@ export class HexBoard {
   /** Hexágonos destacados como destino possível. */
   setReachable(keys: Iterable<string>): void {
     this.reachable = new Set(keys);
-    this.paintTiles();
+    this.refreshAuras();
   }
 
   /** Destino escolhido e o caminho até ele (sem a origem), que brilha e flutua. */
@@ -492,16 +504,16 @@ export class HexBoard {
     this.paintTiles();
   }
 
-  /** Hexágonos vistos pelos inimigos (pintados de vermelho). */
+  /** Hexágonos vistos pelos inimigos (véu vermelho). */
   setVision(keys: Iterable<string>): void {
     this.vision = new Set(keys);
-    this.paintTiles();
+    this.refreshAuras();
   }
 
   /**
-   * Aura de diálogo: hexágonos em volta dos suspeitos rendidos com diálogo (âmbar, pulsando).
-   * `hot` são os da aura em que o agente da vez está (mais claros); `muted`, a aura apagada (sem
-   * pulso) dos rendidos sem diálogo.
+   * Aura de diálogo: hexágonos em volta dos suspeitos rendidos com diálogo (luz âmbar com cortina).
+   * `hot` são os da aura em que o agente da vez está (aquela aura inteira acende); `muted`, a aura
+   * apagada (sem cortina nem pulso) dos rendidos sem diálogo.
    */
   setInterrogationAura(keys: Iterable<string>, hot: Iterable<string> = [], muted: Iterable<string> = []): void {
     const aura = new Set(keys);
@@ -512,12 +524,12 @@ export class HexBoard {
     this.interrogationAura = aura;
     this.interrogationHot = warm;
     this.interrogationMuted = dim;
-    this.paintTiles();
+    this.refreshAuras();
   }
 
   /**
-   * Aura em volta de um objeto com ação (o avião, os suprimentos): hexágonos de brasa que respiram. `hot` são
-   * os em que o agente da vez está — ali o botão de ação aparece.
+   * Aura em volta de um objeto com ação (o avião, os suprimentos): luz de brasa com cortina. `hot` são
+   * os em que o agente da vez está — ali o botão de ação aparece e aquela aura inteira acende.
    */
   setActionAura(keys: Iterable<string>, hot: Iterable<string> = []): void {
     const aura = new Set(keys);
@@ -526,7 +538,7 @@ export class HexBoard {
     if (same(aura, this.actionAura) && same(warm, this.actionHot)) return;
     this.actionAura = aura;
     this.actionHot = warm;
-    this.paintTiles();
+    this.refreshAuras();
   }
 
   /** Mostra (ou esconde, com `null`) as zonas da abordagem. */
@@ -905,6 +917,7 @@ export class HexBoard {
     this.selected = lead.at(-1) ?? null;
     this.path = lead.map(hexKey);
     this.reachable.clear();
+    this.refreshAuras();
     this.paintTiles();
     await Promise.all(
       walks.map(([id, path]) => this.walk(this.units.get(id)!, path, id === leaderId, (hex) => onStep?.(id, hex))),
@@ -1256,6 +1269,8 @@ export class HexBoard {
       else mat?.dispose();
     });
     this.staticShadow.dispose();
+    this.auraTextures.fill.dispose();
+    this.auraTextures.fade.dispose();
     this.setSpotlight(null);
     this.spotlight.dispose();
     this.warmLabel.material.map?.dispose();
@@ -1382,6 +1397,42 @@ export class HexBoard {
     this.resize();
     // tamanho da tela e sombras mudaram: o destaque aquece de novo
     this.spotWarmDue = true;
+  }
+
+  /** Camadas de luz das auras, na ordem em que se empilham (a de baixo primeiro). */
+  private buildAuraLayers(): Record<keyof typeof AURAS, AuraLayer> {
+    const order: (keyof typeof AURAS)[] = ['reach', 'vision', 'talkMuted', 'burn', 'talk', 'burnHot', 'talkHot'];
+    const layers = {} as Record<keyof typeof AURAS, AuraLayer>;
+    order.forEach((name, i) => {
+      const layer = new AuraLayer(AURAS[name], this.auraTextures, 6 + i * 3);
+      this.scene.add(layer.root);
+      layers[name] = layer;
+    });
+    return layers;
+  }
+
+  /**
+   * Redistribui os hexágonos entre as camadas de luz. As camadas somam: um hexágono do alcance
+   * que também está numa aura interativa fica só com o véu dela, mas o contorno azul continua
+   * passando por fora de tudo (e por fora dos aliados, em vez de abrir um buraco em volta deles).
+   */
+  private refreshAuras(): void {
+    const known = (keys: Iterable<string>) => [...keys].filter((k) => this.tiles.has(k));
+    const burn = splitHot(known(this.actionAura), this.actionHot);
+    const talk = splitHot(known(this.interrogationAura), this.interrogationHot);
+    const covered = new Set([...this.actionAura, ...this.interrogationAura]);
+    const reach = known(this.reachable);
+    const occupied = [...this.units.values()].map((u) => hexKey(u.hex));
+    this.auras.reach.set(
+      reach.filter((k) => !covered.has(k)),
+      reach.length ? [...occupied, ...reach.filter((k) => covered.has(k))] : [],
+    );
+    this.auras.vision.set(known(this.vision));
+    this.auras.talkMuted.set(known(this.interrogationMuted));
+    this.auras.burn.set(burn.cold);
+    this.auras.burnHot.set(burn.hot);
+    this.auras.talk.set(talk.cold);
+    this.auras.talkHot.set(talk.hot);
   }
 
   /**
@@ -2141,9 +2192,6 @@ export class HexBoard {
     for (const [key, tile] of this.tiles) {
       const isSel = sameHex(tile.coord, this.selected);
       const onPath = !isSel && this.path.includes(key);
-      const isReach = this.reachable.has(key);
-      const seen = this.vision.has(key);
-      const reachColor = seen ? COLORS.visionReach : COLORS.reachable;
       const zone = this.approach?.surrender.has(key)
         ? COLORS.approachSurrender
         : this.approach?.roll.has(key)
@@ -2151,23 +2199,8 @@ export class HexBoard {
           : this.approach?.flee.has(key)
             ? COLORS.approachFlee
             : null;
-      const aura = this.interrogationAura.has(key)
-        ? this.interrogationHot.has(key)
-          ? COLORS.interrogateHot
-          : isReach
-            ? COLORS.interrogateReach
-            : COLORS.interrogate
-        : this.interrogationMuted.has(key)
-          ? COLORS.interrogateMuted
-          : this.actionAura.has(key)
-            ? this.actionHot.has(key)
-              ? COLORS.actionHot
-              : COLORS.actionAura
-            : null;
-      tile.color.set(
-        zone ??
-          (isSel ? COLORS.selected : onPath ? COLORS.path : (aura ?? (isReach ? reachColor : seen ? COLORS.vision : tile.baseColor))),
-      );
+      // alcance, visão e auras não pintam: são luz por cima (ver `refreshAuras`)
+      tile.color.set(zone ?? (isSel ? COLORS.selected : onPath ? COLORS.path : tile.baseColor));
       tile.emissive.set(isSel ? 0x6b5200 : onPath ? 0x5a4a14 : 0x000000);
       tile.lift = isSel ? 0.2 : onPath ? 0.1 : 0;
     }
@@ -2440,8 +2473,7 @@ export class HexBoard {
       this.cursorMarker.scale.setScalar(1 + Math.sin(t * 6) * 0.03);
     }
 
-    // pulso suave nos hexágonos alcançáveis
-    const pulse = 0.12 + Math.sin(t * 3) * 0.08;
+    for (const layer of Object.values(this.auras)) layer.update(t);
     const tk = 1 - Math.exp(-dt * 12);
     const field = this.field;
     const wave = this.updateWave(t);
@@ -2466,22 +2498,6 @@ export class HexBoard {
         tile.emissive.setRGB(g, g * 0.85, g * 0.45);
         goal = tile.lift + hit * 0.3;
         if (hit) tile.y = goal;
-        changed = true;
-      } else if (this.interrogationAura.has(key)) {
-        // aura de interrogatório: brilho âmbar que respira (mais forte com o agente dentro)
-        const hot = this.interrogationHot.has(key);
-        const g = (hot ? 0.2 : 0.1) + Math.sin(t * 3.9) * (hot ? 0.1 : 0.07);
-        tile.emissive.setRGB(g, g * 0.55, g * 0.1);
-        changed = true;
-      } else if (this.actionAura.has(key)) {
-        // aura de ação: brasa que respira (mais forte com o agente dentro)
-        const hot = this.actionHot.has(key);
-        const g = (hot ? 0.22 : 0.1) + Math.sin(t * 3.2) * (hot ? 0.1 : 0.06);
-        tile.emissive.setRGB(g, g * 0.3, g * 0.08);
-        changed = true;
-      } else if (this.reachable.has(key)) {
-        if (this.vision.has(key)) tile.emissive.setRGB(pulse, pulse * 0.4, pulse * 0.3);
-        else tile.emissive.setRGB(pulse * 0.3, pulse * 0.6, pulse);
         changed = true;
       }
       const diff = goal - tile.y;

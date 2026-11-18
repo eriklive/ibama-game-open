@@ -12,7 +12,8 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 3. Há **3 personagens** (Ana, Bruno e Clara), cada um com o seu turno, em rodadas sem fim.
 4. No início de cada turno são rolados **2d4**: a soma **mais o vigor** do agente (e +1 se
    estiver agrupado, +1 a mais com o Capitão no grupo) é o movimento daquele turno.
-5. Os hexágonos claros mostram até onde dá para ir (contornando os outros personagens).
+5. Um brilho azul-claro com contorno branco mostra até onde dá para ir (contornando os outros
+   personagens). As auras não pintam o chão: são luz por cima dele (ver [Auras](#auras)).
    Toque num hexágono para destacá-lo (fica amarelo): o caminho até ele brilha e flutua,
    mostrando por onde o personagem vai passar. **Toque de novo** no destino para
    confirmar — ou use o botão **Confirmar**. Dá para andar várias vezes no mesmo turno
@@ -70,7 +71,7 @@ delas) e **três inimigos** (dois garimpeiros e o piloto do avião do garimpo, c
 uma base vermelha; o corpo mostra para onde olham).
 
 - Depois da Clara vem o **turno inimigo**: quem está em patrulha anda 2 passos pela rota.
-- Os hexágonos **avermelhados** são o cone de visão dos inimigos em patrulha (3
+- Os hexágonos sob um **véu vermelho** são o cone de visão dos inimigos em patrulha (3
   hexágonos, 120° à frente). Entrar nele — mesmo só de passagem — ou ser alcançado por
   ele faz o inimigo **avistar** o agente: a base fica laranja, aparece um **!** e ele para.
 - Em alerta, no turno inimigo ele **corre** 4 passos rumo à borda mais próxima. Se
@@ -266,7 +267,7 @@ As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testada
 Todo suspeito **rendido** ganha uma **aura** de 1 hexágono. Com o agente da vez nela, aparece o papel
 **Conversar** (□ no controle, quando não há ninguém para abordar, nada para queimar nem para
 inspecionar), **a qualquer momento e quantas vezes quiser**. Se a classe do suspeito não tem diálogo
-(o segurança), o papel aparece **bloqueado** ("sem diálogo") e a aura fica apagada, sem pulsar.
+(o segurança), o papel aparece **bloqueado** ("sem diálogo") e a aura fica apagada, sem cortina nem pulso.
 Quem não se rendeu não conversa.
 
 - **Close-up:** a câmera faz o mesmo enquadramento da inspeção e das portas (desce para 30° e chega
@@ -431,6 +432,27 @@ um agente e na abordagem (Chrome/Edge). No Chrome/Edge o DualShock 4 chega com o
 "standard"; no Firefox/Linux, sem ele, o jogo usa o mapeamento do driver. Outros controles (Xbox,
 genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em
 `src/app/game/gamepad.ts` (funções puras testadas) e `gamepad.service.ts`.
+
+## Auras
+
+As auras do tabuleiro são **luz por cima do chão**, não tinta: o hexágono mantém a cor do terreno
+(mata, terra, piso do hangar) e a aura é uma camada semitransparente pousada sobre ele, em até três
+partes: um **véu** (mais forte na borda que no centro), um **contorno** contínuo só na fronteira da
+região e, no que é interativo, uma **cortina** de luz baixa que some para cima.
+
+| Aura | Cor | Cortina | Com o agente dentro |
+|---|---|---|---|
+| Alcance de movimento | azul-claro (o do cursor), contorno branco | baixa | — |
+| Visão dos inimigos | véu vermelho | não | — |
+| Queimar (avião, suprimentos) | brasa | sim | aquela aura inteira acende e a cortina cresce |
+| Conversar (rendido com diálogo) | âmbar | sim | idem |
+| Rendido sem diálogo | âmbar apagado | não | — |
+
+As camadas se somam: um hexágono do alcance dentro de uma aura de queimar fica com o véu da brasa, e o
+contorno azul continua passando por fora de tudo. Os hexágonos dos aliados contam como dentro do
+alcance, então o contorno não abre buracos em volta deles. Destino, caminho e as zonas da abordagem
+continuam pintando o hexágono (são escolha do jogador, não aura). Código em
+`src/app/game/aura-layer.ts`; estilos em `AURAS`, no `hex-board.ts`.
 
 ## Modelos dos personagens
 
