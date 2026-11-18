@@ -214,6 +214,8 @@ export interface CloseUpOptions {
   frame?: 'object' | 'pair';
   insets?: CloseUpInsets;
   faceEnemy?: string;
+  /** Oculta o que ficar entre a câmera e quem está em close-up (o avião, por exemplo). Padrão: sim. */
+  hideOccluders?: boolean;
 }
 
 export interface CloseUpInsets {
@@ -226,6 +228,18 @@ interface CloseUpView {
   dir: THREE.Vector3;
   frame: 'object' | 'pair';
   insets: CloseUpInsets;
+  /** Pontos (mundo) que a câmera precisa enxergar: o agente e o objeto / a pessoa. */
+  subjects: THREE.Vector3[];
+  /** Estruturas em que a dupla está (o telhado já some; as paredes não esmaecem). */
+  rooms: Set<THREE.Object3D>;
+  hideOccluders: boolean;
+}
+
+/** Cenário esmaecendo no close-up: materiais originais e as cópias translúcidas. */
+interface OccluderFade {
+  alpha: number;
+  hide: boolean;
+  meshes: { mesh: THREE.Mesh; original: THREE.Material | THREE.Material[]; clones: THREE.Material[]; base: Map<THREE.Material, number> }[];
 }
 
 function reducedMotionQuery(): boolean {
@@ -278,13 +292,16 @@ export class HexBoard {
   private readonly sun = new THREE.DirectionalLight(0xffffff, 2.2);
   /** Chão "low poly" que acompanha o centro de carregamento (o que fica além do raio). */
   private farGround?: THREE.Mesh;
+  /** Cenário esmaecido por estar entre a câmera e o close-up (ver `hideOccluders`). */
+  private readonly occluders = new Map<THREE.Object3D, OccluderFade>();
+  private occlusionClock = 0;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
   private readonly scenery: { object: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
   /**
    * Estruturas (hangar, casa): o telhado some quando um agente entra e o que fica dentro
    * (carga, avião, lâmpadas, móveis) só aparece com um agente por perto.
    */
-  private readonly structures: { rect: HexRect; doors: HexCoord[]; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
+  private readonly structures: { rect: HexRect; doors: HexCoord[]; object: THREE.Object3D; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
   /** Folhas das portas comuns (ver `DoorViews`). */
   private doorViews?: DoorViews;
   /**
@@ -683,7 +700,21 @@ export class HexBoard {
       const options = [turn(home, c.turn), turn(home, -c.turn)].sort((a, b) => b.dot(n) - a.dot(n));
       dir = options[0].dot(n) > 0.1 ? options[0] : turn(n, c.turn);
     }
-    this.inspect = { target: aim, dir, frame, insets: opts.insets ?? { bottom: 0, right: 0 } };
+    const chest = (p: THREE.Vector3) => p.clone().setY(this.groundAt(p.x, p.z) + 1);
+    this.inspect = {
+      target: aim,
+      dir,
+      frame,
+      insets: opts.insets ?? { bottom: 0, right: 0 },
+      subjects: [chest(agent), chest(center)],
+      rooms: new Set(
+        this.structures
+          .filter((st) => inStructure(u.hex, st.rect) || inStructure(worldToHex(center.x, center.z, HEX_SIZE), st.rect))
+          .map((st) => st.object),
+      ),
+      hideOccluders: opts.hideOccluders ?? true,
+    };
+    this.occlusionClock = 0;
     this.inspectLast = this.inspect;
     if (reducedMotionQuery()) this.inspectBlend = 1;
     // o agente vira para o objeto (ou para a pessoa); a pessoa, para o agente
@@ -1449,7 +1480,7 @@ export class HexBoard {
       const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE);
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
-      this.structures.push({ rect, doors: doorsOf(this.map, rect), roof, interior: lamps ? [lamps] : [] });
+      this.structures.push({ rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
       this.addScenery(built);
     }
     const common = commonDoors(this.map.doors ?? []);
@@ -1627,6 +1658,14 @@ export class HexBoard {
       if (planeKeys.has(key) && this.planeModel) models.add(this.planeModel);
       const cargo = this.cargoModels.get(key);
       if (cargo) models.add(cargo);
+    }
+    // o fade do close-up troca os materiais: volta aos originais antes de queimar
+    for (const o of [...this.occluders.keys()]) {
+      for (const model of models) {
+        let inside = false;
+        model.traverseAncestors((a) => (inside ||= a === o));
+        if (inside || model === o) this.releaseFade(o);
+      }
     }
     const charred: Fire['charred'] = [];
     const soot = new THREE.Color(0x1b1714);
@@ -2265,6 +2304,7 @@ export class HexBoard {
     dist = this.blendInspect(dt, look, dist);
     dist = this.blendCine(dt, look, dist);
     this.camera.lookAt(look);
+    this.updateOccluders(dt);
     // a cena da porta empurra a vista para a esquerda das fichas; o close-up, para cima da papelada
     const { x: vx, y: vy } = this.viewShift;
     if (Math.abs(vx) > 0.5 || Math.abs(vy) > 0.5) {
@@ -2289,6 +2329,106 @@ export class HexBoard {
     const sz = Math.round(this.camTarget.z / SHADOW_STEP) * SHADOW_STEP;
     this.sun.position.set(sx - 8, 16, sz + 6);
     this.sun.target.position.set(sx, 0, sz);
+  }
+
+  /**
+   * No close-up, esmaece o cenário (o avião, por exemplo) que cruza a linha entre a câmera e
+   * o agente / o objeto / a pessoa, e o traz de volta quando sai do caminho. A detecção
+   * confere uns poucos raios, umas dez vezes por segundo; o fade roda a cada quadro.
+   */
+  private updateOccluders(dt: number): void {
+    const v = this.inspect;
+    if (v?.hideOccluders && this.inspectBlend >= 0.3) {
+      this.occlusionClock -= dt;
+      if (this.occlusionClock <= 0) {
+        this.occlusionClock = 0.1;
+        const origin = this.camera.position;
+        const blockers = new Set<THREE.Object3D>();
+        for (const sc of this.scenery) {
+          if (v.rooms.has(sc.object)) continue;
+          if (!sc.object.visible && !this.occluders.has(sc.object)) continue;
+          for (const p of v.subjects) {
+            const dir = p.clone().sub(origin);
+            const len = dir.length();
+            // o que está colado em quem está em foco (o móvel inspecionado) não conta
+            if (len < 1) continue;
+            this.raycaster.set(origin, dir.divideScalar(len));
+            this.raycaster.near = 0;
+            this.raycaster.far = len - 0.8;
+            const hits = this.raycaster.intersectObject(sc.object, true);
+            if (hits.some((h) => this.shownUnder(h.object, sc.object))) {
+              blockers.add(sc.object);
+              break;
+            }
+          }
+        }
+        this.raycaster.far = Infinity;
+        for (const o of blockers) {
+          if (!this.occluders.has(o)) this.occluders.set(o, this.fadeEntry(o));
+        }
+        for (const [o, e] of this.occluders) e.hide = blockers.has(o);
+      }
+    } else {
+      for (const e of this.occluders.values()) e.hide = false;
+    }
+    if (!this.occluders.size) return;
+
+    const k = 1 - Math.exp(-dt * 9);
+    for (const [o, e] of this.occluders) {
+      e.alpha += ((e.hide ? 0 : 1) - e.alpha) * k;
+      if (e.hide && e.alpha < 0.03) e.alpha = 0;
+      if (!e.hide && e.alpha > 0.97) e.alpha = 1;
+      if (e.alpha === 1) {
+        this.releaseFade(o);
+        continue;
+      }
+      o.visible = e.alpha > 0;
+      for (const m of e.meshes) for (const c of m.clones) c.opacity = (m.base.get(c) ?? 1) * e.alpha;
+    }
+  }
+
+  /**
+   * Se a peça é desenhada (ela e os pais até `root`; o próprio `root` pode estar escondido
+   * pelo fade). O raio acerta também o que está invisível, como o telhado recolhido.
+   */
+  private shownUnder(object: THREE.Object3D, root: THREE.Object3D): boolean {
+    for (let o: THREE.Object3D | null = object; o && o !== root; o = o.parent) if (!o.visible) return false;
+    return true;
+  }
+
+  /** Fim do fade: materiais originais de volta, cópias descartadas, visível conforme o raio carregado. */
+  private releaseFade(object: THREE.Object3D): void {
+    const e = this.occluders.get(object);
+    if (!e) return;
+    this.occluders.delete(object);
+    for (const m of e.meshes) {
+      m.mesh.material = m.original;
+      for (const c of m.clones) c.dispose();
+    }
+    const sc = this.scenery.find((s) => s.object === object);
+    object.visible = !sc || this.stream.inLoadRadius(sc.center.x, sc.center.z, sc.radius / (HEX_STEP * HEX_SIZE));
+  }
+
+  /** Troca os materiais do objeto por cópias translúcidas (os originais ficam guardados). */
+  private fadeEntry(object: THREE.Object3D): OccluderFade {
+    const meshes: OccluderFade['meshes'] = [];
+    object.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const original = mesh.material;
+      const base = new Map<THREE.Material, number>();
+      const clone = (m: THREE.Material): THREE.Material => {
+        const c = m.clone();
+        base.set(c, m.opacity);
+        c.transparent = true;
+        c.depthWrite = false;
+        return c;
+      };
+      const clones = Array.isArray(original) ? original.map(clone) : [clone(original)];
+      mesh.material = Array.isArray(original) ? clones : clones[0];
+      meshes.push({ mesh, original, clones, base });
+    });
+    return { alpha: 1, hide: true, meshes };
   }
 
   /**
