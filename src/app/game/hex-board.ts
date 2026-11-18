@@ -233,6 +233,13 @@ interface CloseUpView {
   hideOccluders: boolean;
 }
 
+/** Cenário esmaecendo no close-up: materiais originais e as cópias translúcidas. */
+interface OccluderFade {
+  alpha: number;
+  hide: boolean;
+  meshes: { mesh: THREE.Mesh; original: THREE.Material | THREE.Material[]; clones: THREE.Material[]; base: Map<THREE.Material, number> }[];
+}
+
 function reducedMotionQuery(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
@@ -284,8 +291,8 @@ export class HexBoard {
   /** Chão "low poly" que acompanha o centro de carregamento (o que fica além do raio). */
   private farGround?: THREE.Mesh;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
-  /** Cenário escondido por estar entre a câmera e o close-up (ver `hideOccluders`). */
-  private readonly occluders = new Set<THREE.Object3D>();
+  /** Cenário esmaecido por estar entre a câmera e o close-up (ver `hideOccluders`). */
+  private readonly occluders = new Map<THREE.Object3D, OccluderFade>();
   private occlusionClock = 0;
   private readonly scenery: { object: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
   /**
@@ -718,7 +725,6 @@ export class HexBoard {
   endCloseUp(): void {
     if (!this.inspect) return;
     this.inspect = null;
-    this.restoreOccluders();
     if (reducedMotionQuery()) this.inspectBlend = 0;
   }
 
@@ -2311,49 +2317,79 @@ export class HexBoard {
   }
 
   /**
-   * No close-up, esconde o cenário (o avião, por exemplo) que cruza a linha entre a câmera e
-   * o agente / o objeto / a pessoa, e volta a mostrá-lo quando sai do caminho. Confere uns
-   * poucos raios, umas dez vezes por segundo.
+   * No close-up, esmaece o cenário (o avião, por exemplo) que cruza a linha entre a câmera e
+   * o agente / o objeto / a pessoa, e o traz de volta quando sai do caminho. A detecção
+   * confere uns poucos raios, umas dez vezes por segundo; o fade roda a cada quadro.
    */
   private updateOccluders(dt: number): void {
     const v = this.inspect;
-    if (!v?.hideOccluders || this.inspectBlend < 0.3) return;
-    this.occlusionClock -= dt;
-    if (this.occlusionClock > 0) return;
-    this.occlusionClock = 0.1;
-    const origin = this.camera.position;
-    const blockers = new Set<THREE.Object3D>();
-    for (const sc of this.scenery) {
-      if (!sc.object.visible && !this.occluders.has(sc.object)) continue;
-      for (const p of v.subjects) {
-        const dir = p.clone().sub(origin);
-        const len = dir.length();
-        this.raycaster.set(origin, dir.divideScalar(len));
-        this.raycaster.near = 0;
-        this.raycaster.far = Math.max(0, len - 0.3);
-        if (this.raycaster.intersectObject(sc.object, true).length) {
-          blockers.add(sc.object);
-          break;
+    if (v?.hideOccluders && this.inspectBlend >= 0.3) {
+      this.occlusionClock -= dt;
+      if (this.occlusionClock <= 0) {
+        this.occlusionClock = 0.1;
+        const origin = this.camera.position;
+        const blockers = new Set<THREE.Object3D>();
+        for (const sc of this.scenery) {
+          if (!sc.object.visible && !this.occluders.has(sc.object)) continue;
+          for (const p of v.subjects) {
+            const dir = p.clone().sub(origin);
+            const len = dir.length();
+            this.raycaster.set(origin, dir.divideScalar(len));
+            this.raycaster.near = 0;
+            this.raycaster.far = Math.max(0, len - 0.3);
+            if (this.raycaster.intersectObject(sc.object, true).length) {
+              blockers.add(sc.object);
+              break;
+            }
+          }
         }
+        this.raycaster.far = Infinity;
+        for (const o of blockers) {
+          if (!this.occluders.has(o)) this.occluders.set(o, this.fadeEntry(o));
+        }
+        for (const [o, e] of this.occluders) e.hide = blockers.has(o);
       }
+    } else {
+      for (const e of this.occluders.values()) e.hide = false;
     }
-    this.raycaster.far = Infinity;
-    for (const o of blockers) {
-      o.visible = false;
-      this.occluders.add(o);
-    }
-    for (const o of this.occluders) {
-      if (blockers.has(o)) continue;
-      this.occluders.delete(o);
-      o.visible = true;
+    if (!this.occluders.size) return;
+
+    const k = 1 - Math.exp(-dt * 9);
+    for (const [o, e] of this.occluders) {
+      e.alpha += ((e.hide ? 0 : 1) - e.alpha) * k;
+      if (e.hide && e.alpha < 0.03) e.alpha = 0;
+      if (!e.hide && e.alpha > 0.97) e.alpha = 1;
+      if (e.alpha === 1) {
+        // de volta ao normal: materiais originais e visibilidade do raio carregado
+        for (const m of e.meshes) m.mesh.material = m.original;
+        this.occluders.delete(o);
+        continue;
+      }
+      o.visible = e.alpha > 0;
+      for (const m of e.meshes) for (const c of m.clones) c.opacity = (m.base.get(c) ?? 1) * e.alpha;
     }
   }
 
-  /** Mostra de volta o cenário escondido pelo close-up (respeitando o raio carregado). */
-  private restoreOccluders(): void {
-    if (!this.occluders.size) return;
-    this.occluders.clear();
-    this.applyStreamVisibility();
+  /** Troca os materiais do objeto por cópias translúcidas (os originais ficam guardados). */
+  private fadeEntry(object: THREE.Object3D): OccluderFade {
+    const meshes: OccluderFade['meshes'] = [];
+    object.traverse((o) => {
+      const mesh = o as THREE.Mesh;
+      if (!mesh.isMesh) return;
+      const original = mesh.material;
+      const base = new Map<THREE.Material, number>();
+      const clone = (m: THREE.Material): THREE.Material => {
+        const c = m.clone();
+        base.set(c, m.opacity);
+        c.transparent = true;
+        c.depthWrite = false;
+        return c;
+      };
+      const clones = Array.isArray(original) ? original.map(clone) : [clone(original)];
+      mesh.material = Array.isArray(original) ? clones : clones[0];
+      meshes.push({ mesh, original, clones, base });
+    });
+    return { alpha: 1, hide: true, meshes };
   }
 
   /**
