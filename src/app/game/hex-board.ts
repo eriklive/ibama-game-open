@@ -214,6 +214,8 @@ export interface CloseUpOptions {
   frame?: 'object' | 'pair';
   insets?: CloseUpInsets;
   faceEnemy?: string;
+  /** Oculta o que ficar entre a câmera e quem está em close-up (o avião, por exemplo). Padrão: sim. */
+  hideOccluders?: boolean;
 }
 
 export interface CloseUpInsets {
@@ -226,6 +228,9 @@ interface CloseUpView {
   dir: THREE.Vector3;
   frame: 'object' | 'pair';
   insets: CloseUpInsets;
+  /** Pontos (mundo) que a câmera precisa enxergar: o agente e o objeto / a pessoa. */
+  subjects: THREE.Vector3[];
+  hideOccluders: boolean;
 }
 
 function reducedMotionQuery(): boolean {
@@ -279,6 +284,9 @@ export class HexBoard {
   /** Chão "low poly" que acompanha o centro de carregamento (o que fica além do raio). */
   private farGround?: THREE.Mesh;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
+  /** Cenário escondido por estar entre a câmera e o close-up (ver `hideOccluders`). */
+  private readonly occluders = new Set<THREE.Object3D>();
+  private occlusionClock = 0;
   private readonly scenery: { object: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
   /**
    * Estruturas (hangar, casa): o telhado some quando um agente entra e o que fica dentro
@@ -683,7 +691,16 @@ export class HexBoard {
       const options = [turn(home, c.turn), turn(home, -c.turn)].sort((a, b) => b.dot(n) - a.dot(n));
       dir = options[0].dot(n) > 0.1 ? options[0] : turn(n, c.turn);
     }
-    this.inspect = { target: aim, dir, frame, insets: opts.insets ?? { bottom: 0, right: 0 } };
+    const chest = (p: THREE.Vector3) => p.clone().setY(this.groundAt(p.x, p.z) + 1);
+    this.inspect = {
+      target: aim,
+      dir,
+      frame,
+      insets: opts.insets ?? { bottom: 0, right: 0 },
+      subjects: [chest(agent), chest(center)],
+      hideOccluders: opts.hideOccluders ?? true,
+    };
+    this.occlusionClock = 0;
     this.inspectLast = this.inspect;
     if (reducedMotionQuery()) this.inspectBlend = 1;
     // o agente vira para o objeto (ou para a pessoa); a pessoa, para o agente
@@ -701,6 +718,7 @@ export class HexBoard {
   endCloseUp(): void {
     if (!this.inspect) return;
     this.inspect = null;
+    this.restoreOccluders();
     if (reducedMotionQuery()) this.inspectBlend = 0;
   }
 
@@ -2265,6 +2283,7 @@ export class HexBoard {
     dist = this.blendInspect(dt, look, dist);
     dist = this.blendCine(dt, look, dist);
     this.camera.lookAt(look);
+    this.updateOccluders(dt);
     // a cena da porta empurra a vista para a esquerda das fichas; o close-up, para cima da papelada
     const { x: vx, y: vy } = this.viewShift;
     if (Math.abs(vx) > 0.5 || Math.abs(vy) > 0.5) {
@@ -2289,6 +2308,52 @@ export class HexBoard {
     const sz = Math.round(this.camTarget.z / SHADOW_STEP) * SHADOW_STEP;
     this.sun.position.set(sx - 8, 16, sz + 6);
     this.sun.target.position.set(sx, 0, sz);
+  }
+
+  /**
+   * No close-up, esconde o cenário (o avião, por exemplo) que cruza a linha entre a câmera e
+   * o agente / o objeto / a pessoa, e volta a mostrá-lo quando sai do caminho. Confere uns
+   * poucos raios, umas dez vezes por segundo.
+   */
+  private updateOccluders(dt: number): void {
+    const v = this.inspect;
+    if (!v?.hideOccluders || this.inspectBlend < 0.3) return;
+    this.occlusionClock -= dt;
+    if (this.occlusionClock > 0) return;
+    this.occlusionClock = 0.1;
+    const origin = this.camera.position;
+    const blockers = new Set<THREE.Object3D>();
+    for (const sc of this.scenery) {
+      if (!sc.object.visible && !this.occluders.has(sc.object)) continue;
+      for (const p of v.subjects) {
+        const dir = p.clone().sub(origin);
+        const len = dir.length();
+        this.raycaster.set(origin, dir.divideScalar(len));
+        this.raycaster.near = 0;
+        this.raycaster.far = Math.max(0, len - 0.3);
+        if (this.raycaster.intersectObject(sc.object, true).length) {
+          blockers.add(sc.object);
+          break;
+        }
+      }
+    }
+    this.raycaster.far = Infinity;
+    for (const o of blockers) {
+      o.visible = false;
+      this.occluders.add(o);
+    }
+    for (const o of this.occluders) {
+      if (blockers.has(o)) continue;
+      this.occluders.delete(o);
+      o.visible = true;
+    }
+  }
+
+  /** Mostra de volta o cenário escondido pelo close-up (respeitando o raio carregado). */
+  private restoreOccluders(): void {
+    if (!this.occluders.size) return;
+    this.occluders.clear();
+    this.applyStreamVisibility();
   }
 
   /**
