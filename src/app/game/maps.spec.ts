@@ -121,16 +121,20 @@ describe('aeroporto: mundo semiaberto', () => {
     expect(trees).toBeLessThan(400);
   });
 
-  it('aeroporto: a carga e os móveis ficam por dentro das paredes do hangar e da casa', () => {
+  it('aeroporto: a carga e os móveis ficam dentro das estruturas ou ao ar livre, nunca nas paredes', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
     const cover = map.cover ?? [];
     expect(cover.some((c) => COVER_HEIGHT[c.kind] === 'high')).toBe(true);
     expect(cover.some((c) => COVER_HEIGHT[c.kind] === 'low')).toBe(true);
     const inside = (h: HexCoord, { cols: [c0, c1], rows: [r0, r1] }: HexRect) => h.col > c0 && h.col < c1 && h.row > r0 && h.row < r1;
+    const onRect = (h: HexCoord, { cols: [c0, c1], rows: [r0, r1] }: HexRect) => h.col >= c0 && h.col <= c1 && h.row >= r0 && h.row <= r1;
+    const rects = (map.structures ?? []).map((s) => s.rect);
     for (const c of [...cover, ...(map.props ?? [])]) {
-      const where = c.col <= structureRect(map, 'hangar')!.cols[1] ? structureRect(map, 'hangar')! : structureRect(map, 'house')!;
-      expect(inside(c, where), hexKey(c)).toBe(true);
+      const ok = rects.some((r) => inside(c, r)) || rects.every((r) => !onRect(c, r));
+      expect(ok, hexKey(c)).toBe(true);
     }
+    // caixotes soltos do lado de fora servem de cobertura na fuga
+    expect(cover.some((c) => rects.every((r) => !onRect(c, r)))).toBe(true);
     // na casa só há móveis: a mesa do Jô e a prateleira
     expect(cover.filter((c) => inside(c, structureRect(map, 'house')!)).map((c) => c.kind).sort()).toEqual(['shelf', 'table']);
   });
