@@ -3,6 +3,7 @@ import { DOOR_RULES, Door, DoorState } from './door';
 import { HexCoord, hexKey, rectArea } from './hex';
 import { blockedHexes, findMap, playArea } from './maps';
 import { spawnDoors } from './door';
+import { spawnEnemy } from './enemies';
 import {
   CHASE_RULES,
   chaseCandidates,
@@ -280,5 +281,14 @@ describe('rotas no Aeroporto', () => {
   it('casa: sai pela porta encostada, que é a primeira parada', () => {
     const r = route(h(33, 28), h(31, 28));
     expect(r.stops[0]).toMatchObject({ kind: 'porta', door: { state: 'encostada' } });
+  });
+});
+
+describe('agilidade dos suspeitos do Aeroporto', () => {
+  it('vigia e piloto +2, garimpeiro 0, da pá −1, Jô −2', () => {
+    const ag = Object.fromEntries(
+      findMap('aeroporto')!.enemies.map((e) => [e.id, spawnEnemy(e).agilidade ?? 0]),
+    );
+    expect(ag).toEqual({ garimpeiro: 0, piloto: 2, 'garimpeiro-pa': -1, 'vigia-pista': 2, jo: -2 });
   });
 });

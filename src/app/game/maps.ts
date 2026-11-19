@@ -373,6 +373,8 @@ export const MAPS: GameMap[] = [
         npc: 'piloto',
         patrol: [{ col: 14, row: 6 }],
         wander: { cols: [12, 21], rows: [5, 17] },
+        // acostumado a sair correndo pela pista
+        agilidade: 2,
       },
       {
         id: 'garimpeiro-pa',
@@ -381,6 +383,8 @@ export const MAPS: GameMap[] = [
         npc: 'garimpeiro',
         patrol: [{ col: 28, row: 15 }],
         wander: { cols: [22, 31], rows: [5, 17] },
+        // corre carregando a pá
+        agilidade: -1,
       },
       // na pista de terra, indo de uma ponta à outra
       {
@@ -390,6 +394,8 @@ export const MAPS: GameMap[] = [
         // segurança: rende-se, mas é calado (sem diálogo: ação bloqueada e aura apagada)
         npc: 'seguranca',
         patrol: [{ col: 21, row: 20 }, { col: 21, row: 36 }],
+        // jovem, de olho na pista, pronto para correr
+        agilidade: 2,
       },
       // na casa: parado, comendo na mesa, de costas para a porta
       {
@@ -400,6 +406,8 @@ export const MAPS: GameMap[] = [
         npc: 'caseiro',
         patrol: [{ col: 32, row: 29 }],
         facing: { col: 33, row: 29 },
+        // mais velho, pego no meio da refeição
+        agilidade: -2,
       },
     ],
   },
