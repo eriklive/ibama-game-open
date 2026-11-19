@@ -19,8 +19,8 @@
  *    por dentro das construções ou pela mata a atravessar a pista à vista. Passa só por portas
  *    que consegue usar (abertas, encostadas, trancadas e portões; bloqueada é parede). A rota
  *    vira a "pista" e não muda mais. Nela ficam as **paradas**:
- *    - **curva** (mudança de direção, ver `routeStops`): uma `decisao:perseguicao`. O agente
- *      precisa deslizar para o lado da curva e rolar d20 + agilidade; o garimpeiro também rola
+ *    - **curva** (mudança de direção na pista do agente, ver `agentCurves`): uma
+ *      `decisao:perseguicao`, pedida quando o **agente** chega nela. O agente precisa deslizar para o lado da curva e rolar d20 + agilidade; o garimpeiro também rola
  *      a dele (`resolveCurve`);
  *    - **porta** fechada no caminho: o garimpeiro rola d4 para escolher abrir ou arrombar e d20
  *      para conseguir (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta
@@ -393,6 +393,24 @@ export function routeStops(
     if (!nearDoor(index)) stops.push({ kind: 'curva', index, hex: points[index], side });
   }
   return stops.sort((a, b) => a.index - b.index);
+}
+
+/**
+ * Curvas do **agente**: onde a pista dele (`track`: a origem dele, o caminho até o garimpeiro e,
+ * a partir do índice `fleeStart`, a rota de fuga) dobra. A curva é dele, não do garimpeiro: o
+ * lado só é pedido quando o agente chega nela. Curvas coladas numa porta fechada da rota de fuga
+ * (`doorStops`, índices de `[origem do garimpeiro, ...fuga]`) não contam, como em `routeStops`.
+ * Os índices devolvidos são de `track`.
+ */
+export function agentCurves(
+  track: readonly HexCoord[],
+  fleeStart: number,
+  doorStops: readonly ChaseStop[] = [],
+): { index: number; side: Side }[] {
+  return routeCurves(track).filter(
+    ({ index }) =>
+      !doorStops.some((d) => d.kind === 'porta' && Math.abs(fleeStart + d.index - index) < CHASE_RULES.curveSpacing),
+  );
 }
 
 // ---------- paradas ----------

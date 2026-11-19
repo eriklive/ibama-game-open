@@ -20,6 +20,7 @@ import {
   resolveFleeDoor,
   resolveShout,
   shoutResistNeed,
+  agentCurves,
   routeCurves,
   routeStops,
   targetChoices,
@@ -186,6 +187,27 @@ describe('routeStops', () => {
     const pts = line(h(5, 1), 6, 0, 1);
     const d = door(pts[3], 'aberta');
     expect(routeStops(pts, new Map([[hexKey(d.hex), d]]))).toEqual([]);
+  });
+});
+
+describe('agentCurves', () => {
+  it('a curva é do agente: índice na pista dele, inclusive no trecho até o garimpeiro', () => {
+    // o agente desce até o garimpeiro e a fuga segue reto; quem dobra é o agente
+    const track = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
+    const curves = agentCurves(track, 8);
+    expect(curves.map((c) => c.side)).toEqual(['esquerda']);
+    expect(curves[0].index).toBe(routeCurves(track)[0].index);
+  });
+  it('pista toda reta: nada de esquerda ou direita', () => {
+    expect(agentCurves(line(h(5, 1), 12, 0, 1), 4)).toEqual([]);
+  });
+  it('curva colada numa porta fechada da fuga não conta', () => {
+    const track = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
+    const corner = routeCurves(track)[0].index;
+    const fleeStart = 2;
+    const d = door(track[corner], 'encostada');
+    const stops = routeStops(track.slice(fleeStart), new Map([[hexKey(d.hex), d]]));
+    expect(agentCurves(track, fleeStart, stops)).toEqual([]);
   });
 });
 
