@@ -6,13 +6,19 @@
  * 1. **Gatilho.** No turno inimigo, antes de um suspeito em alerta correr, os agentes no
  *    **raio de perseguição** dele (`chaseRadius`: base + vigor + iniciativa, com caminho livre)
  *    podem ir atrás (`chaseCandidates`). Quem já correu nesta rodada inimiga não vai de novo.
+ *    **Voz de prisão:** quem foge de uma abordagem não espera o turno inimigo: foge na hora,
+ *    ainda no turno de quem abordou, e a fila é outra (`arrestQueue`): primeiro rola quem
+ *    abordou; se hesitar, os outros agentes, do mais perto do suspeito ao mais longe, um por
+ *    vez, até alguém arrancar (ou o jogador deixar fugir). Com vários fugindo, um por vez.
  * 2. **Iniciativa.** Só o agente rola: d20 + iniciativa, pelo menos `initiativeDC` (8), sem
  *    depender do garimpeiro (`initiativeCheck`). Passou: sai correndo. Falhou: hesita e o
  *    garimpeiro foge normal. O garimpeiro não rola nada novo: o teste de fuga da faixa amarela da
  *    abordagem continua como está (falhou, tropeça e se rende), e quem foge sem rolar segue assim.
- * 3. **Rota travada.** O jogo calcula a fuga dele até a borda (`lockRoute`), passando só por
- *    portas que ele consegue usar (abertas, encostadas, trancadas e portões; bloqueada é
- *    parede). A rota vira a "pista" e não muda mais. Nela ficam as **paradas**:
+ * 3. **Rota travada.** O jogo calcula a fuga dele até a saída (borda) mais próxima, sem limite
+ *    de passos (`lockRoute`). Ele evita o que os agentes enxergam (`agentSight`): prefere correr
+ *    por dentro das construções ou pela mata a atravessar a pista à vista. Passa só por portas
+ *    que consegue usar (abertas, encostadas, trancadas e portões; bloqueada é parede). A rota
+ *    vira a "pista" e não muda mais. Nela ficam as **paradas**:
  *    - **curva** (mudança de direção, ver `routeStops`): uma `decisao:perseguicao`. O agente
  *      precisa deslizar para o lado da curva e rolar d20 + agilidade; o garimpeiro também rola
  *      a dele (`resolveCurve`);
@@ -21,15 +27,28 @@
  *      fica aberta e o agente passa direto. A porta substitui a curva naquele hexágono.
  * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
- *    A rota travada acabou: **foge** (`chaseEnd`).
+ *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
+ *    - **grito** (`resolveShout`): uma vez por trecho reto, o jogador pode gritar, sem parar a
+ *      corrida (os dados rolam com os dois correndo). O agente rola
+ *      d20 + vigor ≥ 8 para conseguir; gritou, ele rola d20 e precisa de 4 + intimidação do
+ *      agente, senão olha para trás e a distância cai 1.
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
  *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
  *    ainda não correram (`chaseCandidates` com `alreadyChased`).
  */
-import { ENEMY_RULES, isBorder } from './enemies';
+import { ENEMY_RULES, isBorder, lineOfSight } from './enemies';
 import { Door, DoorState, isOpen } from './door';
-import { HexArea, HexCoord, hexKey, hexToWorld, pathTo, reachableHexes } from './hex';
+import {
+  HexArea,
+  HexCoord,
+  hexesInRange,
+  hexKey,
+  hexNeighbors,
+  hexToWorld,
+  pathTo,
+  reachableHexes,
+} from './hex';
 
 export const CHASE_RULES = {
   die: 20,
@@ -37,8 +56,13 @@ export const CHASE_RULES = {
   radiusBase: ENEMY_RULES.fleeSteps,
   /** Iniciativa do agente: d20 + iniciativa, pelo menos isto, para sair correndo. */
   initiativeDC: 8,
-  /** Tamanho máximo da rota travada (dois turnos de fuga, com folga). */
-  routeSteps: 12,
+  /**
+   * Visão dos agentes na fuga: até onde (hexágonos, em linha reta e sem parede, árvore ou
+   * porta fechada no meio) um agente enxerga. A rota foge desses hexágonos.
+   */
+  sightRange: 20,
+  /** Custo extra de cada hexágono que um agente enxerga: ele dá a volta pela mata ou por dentro. */
+  seenCost: 6,
   /** Curva: d20 + agilidade, pelo menos isto. Vale para agente e garimpeiro. */
   curveDC: 6,
   /** Tempo (s, relógio real) para deslizar na curva antes de contar como "não deslizou". */
@@ -52,6 +76,13 @@ export const CHASE_RULES = {
   doorOpenMax: 2,
   /** O que ele precisa tirar no d20 em cada caso. Trancada + abrir usa a fechadura da porta. */
   doorNeed: { abrirEncostada: 3, arrombarEncostada: 3, arrombarTrancada: 12 },
+  /**
+   * Grito ("Parado, Ibama!"): uma vez por trecho reto (entre paradas). O agente rola d20 + vigor
+   * e precisa disto para conseguir gritar correndo (fôlego).
+   */
+  shoutDC: 8,
+  /** Ele resiste ao grito tirando no d20 pelo menos isto + a intimidação do agente. */
+  shoutResistBase: 4,
   /** Agarrou: bônus nas rolagens do próximo interrogatório do suspeito abalado. */
   shakenBonus: 2,
 } as const;
@@ -63,6 +94,8 @@ export interface ChaseStats {
   vigor?: number;
   iniciativa?: number;
   agilidade?: number;
+  /** Só o do agente conta (no grito). */
+  intimidacao?: number;
 }
 
 // ---------- gatilho ----------
@@ -110,6 +143,33 @@ export function chaseCandidates(
 }
 
 /**
+ * Fila da voz de prisão: quem rola a iniciativa para ir atrás de um suspeito que fugiu de uma
+ * abordagem, na ordem. Primeiro o agente que abordou (`leaderId`); depois todos os outros, do
+ * mais perto do suspeito ao mais longe. Não há limite de raio: basta ter caminho andando até
+ * ele. Quem está em `alreadyChased` fica de fora.
+ */
+export function arrestQueue(
+  target: HexCoord,
+  leaderId: string,
+  agents: readonly ChaseAgent[],
+  area: HexArea,
+  blocked: ReadonlySet<string>,
+  alreadyChased: ReadonlySet<string> = new Set(),
+): ChaseCandidate[] {
+  const targetKey = hexKey(target);
+  const free = new Set(blocked);
+  free.delete(targetKey);
+  const out: ChaseCandidate[] = [];
+  for (const a of agents) {
+    if (alreadyChased.has(a.id)) continue;
+    const reach = reachableHexes(a.hex, area.hexes.length, area, free);
+    if (reach.has(targetKey)) out.push({ id: a.id, path: pathTo(reach, target) });
+  }
+  const rank = (c: ChaseCandidate) => (c.id === leaderId ? -1 : c.path.length);
+  return out.sort((x, y) => rank(x) - rank(y));
+}
+
+/**
  * Agentes que estão no raio de mais de um garimpeiro: para eles, a `decisao:alvo` (escolher
  * qual perseguir). Devolve `id do agente → ids dos garimpeiros`.
  */
@@ -151,9 +211,9 @@ export type ChaseStop =
   | { kind: 'porta'; index: number; hex: HexCoord; door: Door };
 
 export interface ChaseRoute {
-  /** Fuga do garimpeiro (sem a origem), cortada em `routeSteps`. */
+  /** Fuga do garimpeiro (sem a origem), inteira até a borda. */
   flee: HexCoord[];
-  /** A rota chega à borda (se ninguém pegar, ele foge). */
+  /** A rota chega à borda (se ninguém pegar, ele foge). Só é falso se estiver encurralado. */
   escapes: boolean;
   /** Encurralado: não há rota até a borda. */
   cornered: boolean;
@@ -164,9 +224,32 @@ export interface ChaseRoute {
 const passableForFlee = (state: DoorState): boolean => state !== 'bloqueada';
 
 /**
- * Trava a rota de fuga: caminho mais curto até a borda, desviando de `blocked` e dos agentes.
- * Portas comuns (`doors`) que não estão bloqueadas são atravessáveis mesmo fechadas (viram
- * paradas). Entre bordas igualmente próximas, prefere a mais longe dos agentes.
+ * Hexágonos que os agentes enxergam: até `range` em linha reta, sem parede, árvore, carga alta
+ * ou porta fechada (`walls`) no meio. Os agentes não têm cone: olham para todo lado.
+ */
+export function agentSight(
+  agents: readonly HexCoord[],
+  area: HexArea,
+  walls: ReadonlySet<string>,
+  range: number = CHASE_RULES.sightRange,
+): Set<string> {
+  const out = new Set<string>();
+  for (const a of agents) {
+    for (const h of hexesInRange(a, range, area)) {
+      const k = hexKey(h);
+      if (!out.has(k) && !walls.has(k) && lineOfSight(a, h, walls)) out.add(k);
+    }
+  }
+  return out;
+}
+
+/**
+ * Trava a rota de fuga: até a saída (borda) mais barata, sem limite de passos. Cada passo
+ * custa 1, e mais `seenCost` se um agente enxerga aquele hexágono (`sight`): ele prefere
+ * correr por dentro das construções ou pela mata a atravessar a pista à vista. Desvia de
+ * `blocked` e dos agentes. Portas comuns (`doors`) que não estão bloqueadas são atravessáveis
+ * mesmo fechadas (viram paradas). Entre saídas igualmente baratas, prefere a mais longe dos
+ * agentes.
  */
 export function lockRoute(
   from: HexCoord,
@@ -174,6 +257,7 @@ export function lockRoute(
   blocked: ReadonlySet<string>,
   doors: ReadonlyMap<string, Door> = new Map(),
   agents: readonly HexCoord[] = [],
+  sight: ReadonlySet<string> = new Set(),
 ): ChaseRoute {
   if (isBorder(from, area)) return { flee: [], escapes: true, cornered: false, stops: [] };
   const walls = new Set(blocked);
@@ -182,7 +266,7 @@ export function lockRoute(
     else walls.add(k);
   }
   for (const a of agents) walls.add(hexKey(a));
-  const reach = reachableHexes(from, area.hexes.length, area, walls);
+  const reach = cheapestPaths(from, area, walls, (k) => 1 + (sight.has(k) ? CHASE_RULES.seenCost : 0));
   let best: { coord: HexCoord; cost: number; safety: number } | null = null;
   for (const { coord, cost } of reach.values()) {
     if (!isBorder(coord, area)) continue;
@@ -193,14 +277,42 @@ export function lockRoute(
       best = { coord, cost, safety };
   }
   if (!best) return { flee: [], escapes: false, cornered: true, stops: [] };
-  const full = pathTo(reach, best.coord);
-  const flee = full.slice(0, CHASE_RULES.routeSteps);
-  return {
-    flee,
-    escapes: flee.length === full.length,
-    cornered: false,
-    stops: routeStops([from, ...flee], doors),
-  };
+  const flee = pathTo(reach, best.coord);
+  return { flee, escapes: true, cornered: false, stops: routeStops([from, ...flee], doors) };
+}
+
+/**
+ * Dijkstra a partir de `from` (que fica de fora do resultado, como em `reachableHexes`):
+ * `cost` de entrar em cada hexágono, pela chave. Mesmo formato de `reachableHexes`, para `pathTo`.
+ */
+function cheapestPaths(
+  from: HexCoord,
+  area: HexArea,
+  walls: ReadonlySet<string>,
+  cost: (key: string) => number,
+): Map<string, { coord: HexCoord; cost: number; prev: string }> {
+  const out = new Map<string, { coord: HexCoord; cost: number; prev: string }>();
+  const startKey = hexKey(from);
+  const done = new Set<string>();
+  // fila de prioridade simples por baldes (custos inteiros e pequenos)
+  const buckets: { coord: HexCoord; key: string }[][] = [[{ coord: from, key: startKey }]];
+  const best = new Map<string, number>([[startKey, 0]]);
+  for (let c = 0; c < buckets.length; c++) {
+    for (const { coord, key } of buckets[c] ?? []) {
+      if (done.has(key) || best.get(key) !== c) continue;
+      done.add(key);
+      for (const n of hexNeighbors(coord)) {
+        const k = hexKey(n);
+        if (done.has(k) || !area.has(n) || walls.has(k)) continue;
+        const nc = c + cost(k);
+        if (nc >= (best.get(k) ?? Infinity)) continue;
+        best.set(k, nc);
+        out.set(k, { coord: n, cost: nc, prev: key });
+        (buckets[nc] ??= []).push({ coord: n, key: k });
+      }
+    }
+  }
+  return out;
 }
 
 const worldDelta = (a: HexCoord, b: HexCoord): [number, number] => {
@@ -358,6 +470,31 @@ export function resolveFleeDoor(door: Door, d4: number, d20: number): FleeDoorRe
       ? { ...door, broken: true }
       : { ...door, state: 'aberta' };
   return { action, need, pass, door: after, delta: pass ? 0 : -1 };
+}
+
+// ---------- grito ----------
+
+/** O que ele precisa tirar no d20 para ignorar o grito: 4 + intimidação do agente. */
+export const shoutResistNeed = (agent: ChaseStats = {}): number =>
+  CHASE_RULES.shoutResistBase + (agent.intimidacao ?? 0);
+
+export interface ShoutResult {
+  /** O agente conseguiu gritar (d20 + vigor ≥ `shoutDC`). */
+  shouted: boolean;
+  /** Ele olhou para trás (não resistiu): a distância cai 1. */
+  lookedBack: boolean;
+  delta: number;
+}
+
+/**
+ * Grito na perseguição: o agente rola d20 + vigor (pelo menos `shoutDC`) para gritar. Gritou,
+ * ele rola d20 e precisa de 4 + intimidação do agente para ignorar; não conseguiu, olha para
+ * trás e o agente encosta (−1). `enemyRoll` é ignorado se o agente não gritou.
+ */
+export function resolveShout(agentRoll: number, agent: ChaseStats, enemyRoll: number): ShoutResult {
+  const shouted = agentRoll + (agent.vigor ?? 0) >= CHASE_RULES.shoutDC;
+  const lookedBack = shouted && enemyRoll < shoutResistNeed(agent);
+  return { shouted, lookedBack, delta: lookedBack ? -1 : 0 };
 }
 
 // ---------- fim ----------

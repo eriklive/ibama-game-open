@@ -38,7 +38,10 @@ export class ChaseOverlay {
   readonly hud = input<ChaseHud | null>(null);
   readonly curve = input<CurvePrompt | null>(null);
   readonly target = input<TargetPrompt | null>(null);
+  /** Grito do trecho: `ready` pode gritar, `used` já gritou neste trecho, `null` sem botão. */
+  readonly shout = input<'ready' | 'used' | null>(null);
   readonly swipe = output<Side>();
+  readonly shoutPress = output<void>();
   /** Escolha de alvo: tocou num lado (metade da tela ou seta), confirmou ou desistiu. */
   readonly targetSide = output<Side>();
   readonly targetConfirm = output<void>();

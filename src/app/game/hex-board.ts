@@ -905,6 +905,8 @@ export class HexBoard {
     enemyPath: HexCoord[],
     onStep?: (who: 'unit' | 'enemy', hex: HexCoord) => void,
     speed = 1.6,
+    /** Checado antes de cada passo: `true` para os dois no hexágono em que estão (agarrou no meio). */
+    stop?: () => boolean,
   ): Promise<void> {
     const u = this.units.get(unitId);
     const e = this.enemies.get(enemyId);
@@ -917,7 +919,10 @@ export class HexBoard {
       const epoch = u.epoch;
       u.rig?.matchSpeed('run', pace(unitPath.length));
       u.rig?.play('run', 0.15);
-      for (const step of unitPath) {
+      // `unitPath` pode crescer durante a corrida (o grito encosta): o agente segue e acelera
+      for (let i = 0; i < unitPath.length; i++) {
+        if (stop?.()) break;
+        const step = unitPath[i];
         const from = u.group.position;
         const to = this.worldOf(step);
         u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
@@ -935,6 +940,7 @@ export class HexBoard {
       e.rig?.matchSpeed('run', pace(enemyPath.length));
       e.rig?.play('run', 0.15);
       for (const step of enemyPath) {
+        if (stop?.()) break;
         const from = this.worldOf(e.hex);
         const to = this.worldOf(step);
         e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);

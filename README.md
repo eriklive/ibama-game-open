@@ -460,14 +460,31 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    controle: ✕ manda o primeiro, ○ deixa fugir.
 2. **Iniciativa.** Só o agente rola: **d20 + iniciativa ≥ 8**. Falhou: hesita e ele foge normal.
    Uma perseguição por vez; quem já correu nesta rodada não vai de novo.
-3. **Rota travada.** A fuga dele até a borda (no máximo 12 hexágonos), passando por portas que
-   ele consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
-   número de hexágonos entre eles.
+   **Voz de prisão:** quem foge de uma abordagem não espera o turno inimigo. Ao fechar o auto de
+   abordagem, ele foge na hora, ainda no turno de quem abordou. O primeiro a rolar é o agente que
+   abordou (carimbo "Voz de prisão"; basta ter caminho até ele, sem limite de raio). Se ele
+   hesitar, rolam um por vez todos os outros agentes, do mais perto do suspeito ao mais longe
+   (carimbo "Reforço"), até alguém arrancar ou o jogador deixar fugir; ninguém foi, ele corre
+   para a borda como no turno inimigo. Com vários fugindo, eles fogem em sequência (o mais perto
+   de quem abordou primeiro), sempre depois de terminar a perseguição do anterior; quem arrancou
+   atrás de um não vai atrás do próximo. Quem fugiu na hora não corre de novo no turno inimigo
+   daquela rodada. Só depois disso a vez passa.
+3. **Rota travada.** A fuga dele até a saída (borda) mais próxima, sem limite de hexágonos. Ele
+   evita o que os agentes enxergam (até 20 hexágonos em linha reta, sem parede, árvore ou porta
+   fechada no meio): cada hexágono à vista custa 6 passos a mais, então ele prefere correr por
+   dentro das construções ou pela mata a atravessar a pista à vista. Passa por portas que ele
+   consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
+   número de hexágonos entre eles. Chegou à borda: some do mapa e a perseguição acaba.
 4. **Curva.** Em cada curva o jogo para: o jogador tem **2 s** para deslizar para o lado da curva
    (toque/arrasto, setas ou A/D, direcional). Lado errado ou nada: **bate** (+1). Lado certo:
    d20 + agilidade ≥ 6 fecha a curva (−1). O garimpeiro sempre rola a dele (escorregou: −1).
 5. **Porta.** O garimpeiro rola d4 (1–2 abrir, 3–4 arrombar) e d20; falhou, perde tempo (−1) e
    tenta de novo. Passou, a porta fica aberta (ou arrombada) e o agente passa direto.
+   **Grito.** Em cada trecho reto (entre paradas) o jogador pode gritar uma vez: botão
+   **Gritar!** (G no teclado, □ no controle). Ninguém para: os dados rolam com os dois correndo.
+   O agente rola d20 + vigor ≥ 8 para conseguir gritar; gritou, o suspeito rola d20 e precisa de
+   **4 + intimidação do agente** para ignorar. Não conseguiu: olha para trás, a distância cai 1 e
+   o agente encosta ali mesmo, sem parar. Antes da curva ou porta seguinte, o grito termina de rolar.
 6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
