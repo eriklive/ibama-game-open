@@ -1905,8 +1905,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Segura o slow da perseguição (as escolhas do jogador e o dado que vem delas): enquanto
-   * alguém segurar, a música, a animação, os passos e o zoom ficam desacelerados. Devolve quem solta (uma vez só). O último
-   * a soltar volta tudo ao normal depois de `SLOW_GRACE_MS`, se ninguém segurar de novo antes.
+   * alguém segurar, a música, a animação, os passos e o zoom ficam desacelerados. Devolve quem
+   * solta (uma vez só). O último a soltar volta tudo ao normal depois de `SLOW_GRACE_MS`, se
+   * ninguém segurar de novo antes.
    */
   private holdSlow(): () => void {
     if (this.slowResume !== undefined) {
