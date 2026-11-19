@@ -21,6 +21,8 @@ const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa um
 
 /** Peças com modelo 3D: velocidade da corrida entre hexágonos (3,6 m/s ≈ 2,8 hex/s). */
 const RUN_SPEED = 3.6 * METER;
+/** Altura do pulo por cima do caixote de meia altura (no meio, em cima dele). */
+const VAULT_HOP = 0.8;
 
 /**
  * Câmera de perseguição (relativa ao agente, olhando para o inimigo): atrás e acima dele, mira à
@@ -919,6 +921,8 @@ export class HexBoard {
      * clipe parado nem virar o agente. `setChaseSlowmo(false)` devolve os dois ao repouso.
      */
     hold = false,
+    /** Hexágonos (caixote de meia altura) por cima dos quais o agente pula, num arco alto. */
+    hopOver: ReadonlySet<string> = new Set(),
   ): Promise<void> {
     const u = this.units.get(unitId);
     const e = this.enemies.get(enemyId);
@@ -938,7 +942,14 @@ export class HexBoard {
         const from = u.group.position;
         const to = this.worldOf(step);
         u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
-        await this.runTo(u, step, pace(unitPath.length), false, () => this.animRate(unitId));
+        // pulo: sobe até o caixote (metade do arco) e desce do outro lado
+        const up = hopOver.has(hexKey(step));
+        const down = !up && hopOver.has(hexKey(u.hex));
+        const arc = up ? (t: number) => (u.hop = Math.sin((t * Math.PI) / 2) * VAULT_HOP)
+          : down ? (t: number) => (u.hop = Math.cos((t * Math.PI) / 2) * VAULT_HOP)
+          : undefined;
+        await this.runTo(u, step, pace(unitPath.length), false, () => this.animRate(unitId), arc);
+        if (down) u.hop = 0;
         if (u.epoch !== epoch) return;
         u.hex = step;
         onStep?.('unit', step);
@@ -2508,7 +2519,15 @@ export class HexBoard {
 
   /** Corre em linha reta até o hexágono, em velocidade constante (quem chama vira a peça). */
   /** `rate`: velocidade do tempo agora (o slow da perseguição; 1 = normal). */
-  private runTo(u: Mover, h: HexCoord, speed: number, follow = true, rate: () => number = () => 1): Promise<void> {
+  /** `progress`: chamado a cada quadro com o andamento do trecho (0..1), para o arco do pulo. */
+  private runTo(
+    u: Mover,
+    h: HexCoord,
+    speed: number,
+    follow = true,
+    rate: () => number = () => 1,
+    progress?: (t: number) => void,
+  ): Promise<void> {
     const from = u.group.position.clone();
     const to = this.worldOf(h);
     if (follow) {
@@ -2526,6 +2545,7 @@ export class HexBoard {
         last = now;
         u.group.position.x = from.x + (to.x - from.x) * t;
         u.group.position.z = from.z + (to.z - from.z) * t;
+        progress?.(t);
         if (t < 1) requestAnimationFrame(step);
         else resolve();
       };

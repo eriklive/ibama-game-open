@@ -152,6 +152,13 @@
 }
 .curve-btn.left { left: calc(16px + var(--safe-left, 0px)); }
 .curve-btn.right { right: calc(16px + var(--safe-right, 0px)); }
+.curve-btn.vault {
+  top: auto;
+  bottom: calc(24px + var(--safe-bottom, 0px));
+  left: 50%;
+  margin-top: 0;
+  margin-left: calc(clamp(64px, 12vw, 96px) / -2);
+}
 .curve-btn:active { translate: 2px 3px; box-shadow: none; }
 @media (prefers-reduced-motion: reduce) {
   .curve-timer i { animation: none; }

@@ -119,8 +119,9 @@ export const CHARACTERS: Character[] = [
  * `=` pista de asfalto · `:` pátio · `~` terra batida · `A` avião estacionado (piso, não passa)
  *
  * Carga no piso (cobertura, ver `COVER_HEIGHT`): `B` caixotes de madeira e `M` caixas de
- * papelão (altas) · `S` sacos no palete e `G` gaiolas vazias (baixas) · `f` galões e botijão
- * (só decoração, passa)
+ * papelão (altas) · `S` sacos no palete e `G` gaiolas vazias (baixas) · `b` caixote de meia
+ * altura (baixo; o agente pula por cima na perseguição, ver `vaultHexes`) · `f` galões e
+ * botijão (só decoração, passa)
  *
  * Móveis: `m` mesa (baixa, como os sacos) · `P` prateleira encostada na parede (alta)
  *
@@ -141,10 +142,10 @@ export function parseLayout(
   const ground = new Map<string, Ground>();
   const kinds: Record<string, Ground> = {
     '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron', '~': 'dirt',
-    B: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor', m: 'floor', P: 'floor', R: 'floor', K: 'floor',
+    B: 'floor', b: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor', m: 'floor', P: 'floor', R: 'floor', K: 'floor',
   };
   const coverKinds: Record<string, CoverKind> = {
-    B: 'crates', M: 'boxes', S: 'sacks', G: 'cages', m: 'table', P: 'shelf', R: 'supplies', K: 'keys',
+    B: 'crates', b: 'lowCrate', M: 'boxes', S: 'sacks', G: 'cages', m: 'table', P: 'shelf', R: 'supplies', K: 'keys',
   };
   layout.forEach((line, row) => {
     if (line.length !== cols) throw new Error(`Linha ${row} do mapa tem ${line.length} colunas (esperado: ${cols})`);
@@ -171,6 +172,7 @@ export function parseLayout(
  */
 export const COVER_HEIGHT: Record<CoverKind, 'high' | 'low'> = {
   crates: 'high',
+  lowCrate: 'low',
   boxes: 'high',
   sacks: 'low',
   cages: 'low',
@@ -202,6 +204,10 @@ export const blockedHexes = (map: GameMap): Set<string> =>
 /** Carga baixa: ninguém entra, mas não bloqueia a visão (só esconde quem está colado nela). */
 export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map, 'low').map(hexKey));
 
+/** Carga que o agente pula por cima na perseguição (o garimpeiro dá a volta): o caixote de meia altura. */
+export const vaultHexes = (map: GameMap): Set<string> =>
+  new Set((map.cover ?? []).filter((c) => c.kind === 'lowCrate').map(hexKey));
+
 /**
  * Aeroporto clandestino: o hangar fica ao norte, com um portão largo (12 hexágonos) e duas
  * portas nos fundos. A pista é um rastro de terra de 6 hexágonos de largura que sai do meio
@@ -218,6 +224,9 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  *
  * O avião fica **trancado**; a chave está no quadro de chaves (`K`), na parede do fundo.
  *
+ * Bem em frente à porta dos fundos do oeste, entre dois caixotes altos, há um caixote de meia
+ * altura (`b`): na fuga por essa porta o garimpeiro dá a volta, e o agente pode pular por cima.
+ *
  * A missão principal é queimar o **avião** e a pilha de **suprimentos do garimpo** (`R`), no
  * fundo do hangar, à direita de quem entra pelo portão.
  */
@@ -229,7 +238,7 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTT..###D##############D###T..TTTTTTTT',
   'TTTTTTTTT..#________K___________#T...T.TTTTT',
   'TTTTTT.....#____________________#T......TTTT',
-  'TTTT....T..#_BMB_MB_____________#T.......TTT',
+  'TTTT....T..#_BbB_MB_____________#T.......TTT',
   'TTTTT...T..#_S____S____RRR_____f#T..T...TTTT',
   'TTTTT..TT..#____AAAAAAAA______B_#T...T..TTTT',
   'TTTTTT.....#____AAAAAAAA______M_#T..TT..T...',
