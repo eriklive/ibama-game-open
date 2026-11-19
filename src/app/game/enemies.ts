@@ -160,6 +160,12 @@ export interface EnemyState {
   reveals?: string;
   /** Agilidade na perseguição (ver `EnemySpawn.agilidade`). */
   agilidade?: number;
+  /**
+   * Abalado: foi agarrado numa perseguição e se rendeu. O próximo interrogatório dele tem +2
+   * para o agente (ver `CHASE_RULES.shakenBonus`). Some depois da primeira conversa ou no fim da
+   * rodada seguinte.
+   */
+  shaken?: boolean;
 }
 
 export function spawnEnemy(spawn: EnemySpawn): EnemyState {

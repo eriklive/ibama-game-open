@@ -1,0 +1,65 @@
+<!-- Perseguição: placar (distância e rota dele) -->
+@if (hud(); as h) {
+  <div class="chase-hud" role="status" aria-live="polite" data-testid="chase-hud">
+    <span class="chase-hud-kicker">{{ h.agent }} × {{ h.enemy }}</span>
+    <span class="chase-hud-row">
+      <span class="chase-hud-label">Distância</span>
+      <span class="chase-hud-dots" aria-hidden="true">
+        @for (d of [0, 1, 2, 3, 4, 5, 6, 7]; track d) {
+          @if (d < h.distance) {
+            <i class="on"></i>
+          } @else if (d < 6) {
+            <i></i>
+          }
+        }
+      </span>
+      <strong data-testid="chase-distance">{{ h.distance }}</strong>
+    </span>
+    <span class="chase-hud-row">
+      <span class="chase-hud-label">Rota dele</span>
+      <span class="chase-hud-bar" aria-hidden="true"
+        ><i [style.width.%]="h.total ? (100 * h.step) / h.total : 100"></i
+      ></span>
+      <span>{{ h.step }}/{{ h.total }}</span>
+    </span>
+  </div>
+}
+
+<!-- Perseguição: curva (decisao:perseguicao) — deslizar para o lado em poucos segundos -->
+@if (curve(); as cv) {
+  <div
+    class="curve"
+    data-testid="curve"
+    (pointerdown)="pointer($event)"
+    (pointerup)="pointer($event)"
+  >
+    <div class="curve-card" role="dialog" aria-label="Curva: deslize para o lado">
+      <span class="curve-kicker">Curva!</span>
+      <span class="curve-text">Para que lado a rota dobra, de quem corre?</span>
+      <span class="curve-timer" aria-hidden="true"
+        ><i [style.animation-duration.s]="cv.seconds"></i
+      ></span>
+      <span class="curve-btns">
+        <button
+          type="button"
+          class="curve-btn"
+          data-testid="curve-left"
+          aria-label="Esquerda"
+          (click)="swipe.emit('esquerda')"
+        >
+          ←
+        </button>
+        <button
+          type="button"
+          class="curve-btn"
+          data-testid="curve-right"
+          aria-label="Direita"
+          (click)="swipe.emit('direita')"
+        >
+          →
+        </button>
+      </span>
+      <span class="curve-hint">deslize · setas · direcional</span>
+    </div>
+  </div>
+}

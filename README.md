@@ -449,6 +449,32 @@ um agente e na abordagem (Chrome/Edge). No Chrome/Edge o DualShock 4 chega com o
 genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em
 `src/app/game/gamepad.ts` (funções puras testadas) e `gamepad.service.ts`.
 
+## Perseguição (em construção)
+
+Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regras em
+`src/app/game/chase.ts` (funções puras, testadas em `chase.spec.ts`). O que já está no jogo:
+
+1. **Gatilho.** No turno inimigo, antes de um suspeito em alerta correr, os agentes que chegam até
+   ele andando no máximo **4 + vigor + iniciativa** hexágonos podem ir atrás. Aparece o carimbo
+   **Perseguir?** com cada agente possível (e a chance de arrancar) e **Deixar fugir**. Com
+   controle: ✕ manda o primeiro, ○ deixa fugir.
+2. **Iniciativa.** Só o agente rola: **d20 + iniciativa ≥ 8**. Falhou: hesita e ele foge normal.
+   Uma perseguição por vez; quem já correu nesta rodada não vai de novo.
+3. **Rota travada.** A fuga dele até a borda (no máximo 12 hexágonos), passando por portas que
+   ele consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
+   número de hexágonos entre eles.
+4. **Curva.** Em cada curva o jogo para: o jogador tem **2 s** para deslizar para o lado da curva
+   (toque/arrasto, setas ou A/D, direcional). Lado errado ou nada: **bate** (+1). Lado certo:
+   d20 + agilidade ≥ 6 fecha a curva (−1). O garimpeiro sempre rola a dele (escorregou: −1).
+5. **Porta.** O garimpeiro rola d4 (1–2 abrir, 3–4 arrombar) e d20; falhou, perde tempo (−1) e
+   tenta de novo. Passou, a porta fica aberta (ou arrombada) e o agente passa direto.
+6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
+   interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
+   escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
+
+Por enquanto tudo acontece na câmera tática; a câmera de perseguição (atrás do agente), a pose
+de indecisão com dois fugindo e a música vêm depois.
+
 ## Auras
 
 As auras do tabuleiro são **luz por cima do chão**, não tinta: o hexágono mantém a cor do terreno

@@ -868,6 +868,63 @@ export class HexBoard {
    * Anda com o inimigo pelo caminho, virando para cada passo. `onStep` roda a cada
    * hexágono alcançado; se devolver `false` o inimigo para ali.
    */
+  /**
+   * Perseguição: o agente e o inimigo correm ao mesmo tempo, cada um pelo seu caminho (sem a
+   * origem), e chegam juntos (o mais curto corre mais devagar). A câmera segue o inimigo.
+   * Os passos de cada um avisam em `onStep` ("unit" ou "enemy").
+   */
+  async runPair(
+    unitId: string,
+    unitPath: HexCoord[],
+    enemyId: string,
+    enemyPath: HexCoord[],
+    onStep?: (who: 'unit' | 'enemy', hex: HexCoord) => void,
+    speed = 1.6,
+  ): Promise<void> {
+    const u = this.units.get(unitId);
+    const e = this.enemies.get(enemyId);
+    if (!u || !e || this.moving || (!unitPath.length && !enemyPath.length)) return;
+    this.moving = true;
+    const longest = Math.max(unitPath.length, enemyPath.length);
+    const pace = (n: number) => RUN_SPEED * speed * (n ? n / longest : 1);
+    const runUnit = async () => {
+      if (!unitPath.length) return;
+      const epoch = u.epoch;
+      u.rig?.matchSpeed('run', pace(unitPath.length));
+      u.rig?.play('run', 0.15);
+      for (const step of unitPath) {
+        const from = u.group.position;
+        const to = this.worldOf(step);
+        u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
+        await this.runTo(u, step, pace(unitPath.length), false);
+        if (u.epoch !== epoch) return;
+        u.hex = step;
+        onStep?.('unit', step);
+      }
+      u.rig?.play(this.restClip(u), 0.3);
+    };
+    const runEnemy = async () => {
+      if (!enemyPath.length) return;
+      const epoch = e.epoch;
+      e.running = true;
+      e.rig?.matchSpeed('run', pace(enemyPath.length));
+      e.rig?.play('run', 0.15);
+      for (const step of enemyPath) {
+        const from = this.worldOf(e.hex);
+        const to = this.worldOf(step);
+        e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
+        await this.runTo(e, step, pace(enemyPath.length), true);
+        if (e.epoch !== epoch) break;
+        e.hex = step;
+        onStep?.('enemy', step);
+      }
+      e.running = false;
+      e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+    };
+    await Promise.all([runUnit(), runEnemy()]);
+    this.moving = false;
+  }
+
   async moveEnemy(id: string, path: HexCoord[], onStep?: (hex: HexCoord) => boolean | void, speed = 1): Promise<void> {
     const e = this.enemies.get(id);
     if (!e || this.moving || !path.length) return;

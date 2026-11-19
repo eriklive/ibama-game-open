@@ -978,3 +978,4 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .speech-text strong { display: block; font-family: var(--stencil); font-size: 12px; text-transform: uppercase; color: var(--red-text); font-weight: 700; }
 @media (max-width: 640px) { .speech { max-width: calc(100% - 28px); bottom: calc(168px + var(--safe-bottom)); } }
 @media (prefers-reduced-motion: reduce) { .plane-note, .speech { animation: none; } }
+
