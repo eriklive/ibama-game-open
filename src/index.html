@@ -9,6 +9,24 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <link rel="icon" type="image/x-icon" href="favicon.ico">
+  <!-- Google Tag Manager, com modo de consentimento: nada de cookies até o jogador aceitar
+       no aviso (src/app/ui/consent). A escolha fica em localStorage['ibama.analytics']. -->
+  <script>
+    window.dataLayer = window.dataLayer || [];
+    function gtag(){dataLayer.push(arguments);}
+    var ibamaConsent = null;
+    try { ibamaConsent = localStorage.getItem('ibama.analytics'); } catch (e) {}
+    gtag('consent', 'default', {
+      analytics_storage: ibamaConsent === 'granted' ? 'granted' : 'denied',
+      ad_storage: 'denied',
+      ad_user_data: 'denied',
+      ad_personalization: 'denied'
+    });
+    (function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':new Date().getTime(),event:'gtm.js'});
+    var f=d.getElementsByTagName(s)[0],j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;
+    j.src='https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+    })(window,document,'script','dataLayer','GTM-5RSTJ8MV');
+  </script>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Lilita+One&family=Nunito:wght@500;700;800&family=Special+Elite&family=Stardos+Stencil:wght@400;700&family=Permanent+Marker&family=Courier+Prime:wght@400;700&family=Archivo+Narrow:wght@400;600;700&display=swap">
