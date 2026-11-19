@@ -28,6 +28,9 @@
  * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
  *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
+ *    - **grito** (`resolveShout`): uma vez por trecho reto, o jogador pode gritar. O agente rola
+ *      d20 + vigor ≥ 8 para conseguir; gritou, ele rola d20 e precisa de 4 + intimidação do
+ *      agente, senão olha para trás e a distância cai 1.
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
  *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
@@ -72,6 +75,13 @@ export const CHASE_RULES = {
   doorOpenMax: 2,
   /** O que ele precisa tirar no d20 em cada caso. Trancada + abrir usa a fechadura da porta. */
   doorNeed: { abrirEncostada: 3, arrombarEncostada: 3, arrombarTrancada: 12 },
+  /**
+   * Grito ("Parado, Ibama!"): uma vez por trecho reto (entre paradas). O agente rola d20 + vigor
+   * e precisa disto para conseguir gritar correndo (fôlego).
+   */
+  shoutDC: 8,
+  /** Ele resiste ao grito tirando no d20 pelo menos isto + a intimidação do agente. */
+  shoutResistBase: 4,
   /** Agarrou: bônus nas rolagens do próximo interrogatório do suspeito abalado. */
   shakenBonus: 2,
 } as const;
@@ -83,6 +93,8 @@ export interface ChaseStats {
   vigor?: number;
   iniciativa?: number;
   agilidade?: number;
+  /** Só o do agente conta (no grito). */
+  intimidacao?: number;
 }
 
 // ---------- gatilho ----------
@@ -457,6 +469,31 @@ export function resolveFleeDoor(door: Door, d4: number, d20: number): FleeDoorRe
       ? { ...door, broken: true }
       : { ...door, state: 'aberta' };
   return { action, need, pass, door: after, delta: pass ? 0 : -1 };
+}
+
+// ---------- grito ----------
+
+/** O que ele precisa tirar no d20 para ignorar o grito: 4 + intimidação do agente. */
+export const shoutResistNeed = (agent: ChaseStats = {}): number =>
+  CHASE_RULES.shoutResistBase + (agent.intimidacao ?? 0);
+
+export interface ShoutResult {
+  /** O agente conseguiu gritar (d20 + vigor ≥ `shoutDC`). */
+  shouted: boolean;
+  /** Ele olhou para trás (não resistiu): a distância cai 1. */
+  lookedBack: boolean;
+  delta: number;
+}
+
+/**
+ * Grito na perseguição: o agente rola d20 + vigor (pelo menos `shoutDC`) para gritar. Gritou,
+ * ele rola d20 e precisa de 4 + intimidação do agente para ignorar; não conseguiu, olha para
+ * trás e o agente encosta (−1). `enemyRoll` é ignorado se o agente não gritou.
+ */
+export function resolveShout(agentRoll: number, agent: ChaseStats, enemyRoll: number): ShoutResult {
+  const shouted = agentRoll + (agent.vigor ?? 0) >= CHASE_RULES.shoutDC;
+  const lookedBack = shouted && enemyRoll < shoutResistNeed(agent);
+  return { shouted, lookedBack, delta: lookedBack ? -1 : 0 };
 }
 
 // ---------- fim ----------

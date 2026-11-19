@@ -25,6 +25,21 @@
   </div>
 }
 
+<!-- Perseguição: grito ("Parado, Ibama!"), uma vez por trecho reto -->
+@if (hud() && shout() && !curve()) {
+  <button
+    type="button"
+    class="shout-btn"
+    [class.used]="shout() === 'used'"
+    [disabled]="shout() === 'used'"
+    data-testid="chase-shout"
+    [attr.aria-label]="shout() === 'used' ? 'Já gritou neste trecho' : 'Gritar: Parado, Ibama!'"
+    (click)="shoutPress.emit()">
+    <span class="shout-main">Gritar!</span>
+    <span class="shout-sub">{{ shout() === 'used' ? 'só na próxima reta' : 'Parado, Ibama!' }}</span>
+  </button>
+}
+
 <!-- Perseguição: curva (decisao:perseguicao). O meio da tela fica livre para ver a curva; as
      setas ficam nas bordas e arrastar para um lado em qualquer ponto também vale. -->
 @if (curve(); as cv) {

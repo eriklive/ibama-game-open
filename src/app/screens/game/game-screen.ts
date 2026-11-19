@@ -28,6 +28,8 @@ import {
   lockRoute,
   resolveCurve,
   resolveFleeDoor,
+  resolveShout,
+  shoutResistNeed,
 } from '../../game/chase';
 import { ChaseHud, ChaseOverlay, CurvePrompt, TargetPrompt } from '../../ui/chase/chase-overlay';
 import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
@@ -469,6 +471,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly caughtThisRound = new Set<string>();
   /** Placar da perseguição em curso: distância e quanto da rota dele já foi. */
   protected readonly chaseHud = signal<ChaseHud | null>(null);
+  /** Grito do trecho reto em curso (ver `shout`): `null` fora dos trechos. */
+  protected readonly chaseShout = signal<'ready' | 'used' | null>(null);
+  /** O jogador gritou: os dois param no próximo hexágono para rolar. */
+  private shoutPending = false;
   /** Curva: o jogador tem `seconds` para deslizar para o lado (`decisao:perseguicao`). */
   protected readonly curvePrompt = signal<CurvePrompt | null>(null);
   private curveDone?: (side: Side | null) => void;
@@ -1258,12 +1264,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.swipeCurve(side);
       }
     } else if (this.chaseOffer() && ev.key === 'Escape') this.pickChase(null);
+    else if (this.chaseShout() === 'ready' && (ev.key === 'g' || ev.key === 'G')) {
+      ev.preventDefault();
+      this.shout();
+    }
   }
 
   /** Atributos de perseguição do agente: os da ficha (o grupo não soma). */
   private chaseStats(id: string): ChaseStats {
-    const { vigor, iniciativa, agilidade } = this.roster.loadout(id).attributes;
-    return { vigor, iniciativa, agilidade };
+    const loadout = this.roster.loadout(id);
+    const { vigor, iniciativa, agilidade } = loadout.attributes;
+    // no grito, a intimidação toda dele (classe e itens), sem o grupo
+    return { vigor, iniciativa, agilidade, intimidacao: statBreakdown(loadout, 'intimidacao', false).total };
   }
 
   /**
@@ -1553,6 +1565,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.board?.setChaseCamera(null);
       this.sound.chaseEnd();
       this.chaseHud.set(null);
+      this.chaseShout.set(null);
+      this.shoutPending = false;
     }
   }
 
@@ -1589,8 +1603,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     await this.wait(800);
     if (!alive()) return;
     void this.sound.chaseStart(distance);
+    // passos dados no trecho em curso (para saber onde os dois pararam se o grito interromper)
+    const moved = { a: 0, g: 0 };
     const onStep = (w: 'unit' | 'enemy', hex: HexCoord) => {
       if (!alive()) return;
+      moved[w === 'unit' ? 'a' : 'g']++;
       if (w === 'unit') {
         this.positions.update((m) => new Map(m).set(agentId, hex));
         this.agentSteps(hex, false);
@@ -1600,12 +1617,32 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.enemySteps(hex, 1.6);
       }
     };
-    /** Os dois correm até ele estar no ponto `s` da rota; o agente fica `distance` atrás. */
+    /**
+     * Os dois correm até ele estar no ponto `s` da rota; o agente fica `distance` atrás. É um
+     * trecho reto: dá para gritar uma vez. O grito para os dois no próximo hexágono, rola e,
+     * se ele olhar para trás, o agente encosta; depois seguem até `s`.
+     */
     const legTo = async (s: number) => {
-      const aT = Math.max(a, Math.min(n + s - distance - 1, n + s - 1));
-      await board.runPair(agentId, track.slice(a + 1, aT + 1), enemyId, track.slice(n + g + 1, n + s + 1), onStep);
-      a = aT;
-      g = s;
+      if (g < s) this.chaseShout.set('ready');
+      while (g < s) {
+        const aT = Math.max(a, Math.min(n + s - distance - 1, n + s - 1));
+        moved.a = moved.g = 0;
+        await board.runPair(agentId, track.slice(a + 1, aT + 1), enemyId, track.slice(n + g + 1, n + s + 1), onStep, undefined, () => this.shoutPending);
+        if (!alive()) return;
+        if (!this.shoutPending) {
+          a = aT;
+          g = s;
+          break;
+        }
+        a += moved.a;
+        g += moved.g;
+        hud();
+        distance = Math.max(0, distance + (await this.chaseShoutRoll(agentId, enemyId)));
+        if (!alive()) return;
+        hud();
+        if (distance <= 0) break;
+      }
+      this.chaseShout.set(null);
       hud();
     };
 
@@ -1616,6 +1653,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         // na porta ele para colado nela; na curva, em cima dela
         await legTo(stop.kind === 'porta' ? stop.index - 1 : stop.index);
         if (!alive()) return;
+        // o grito no trecho já encostou nele
+        if (distance <= 0) break;
         if (stop.kind === 'curva') distance += await this.chaseCurve(stop.side, agentId, enemyId);
         else
           distance = await this.chaseDoor(stop.door, enemyId, distance, (d) => {
@@ -1668,6 +1707,59 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * errado ou nada: bateu. Lado certo: d20 + agilidade. O garimpeiro sempre rola a dele.
    * Devolve a mudança na distância.
    */
+  /** Botão **Gritar!** (toque, G, □): vale uma vez por trecho reto. */
+  protected shout(): void {
+    if (this.chaseShout() !== 'ready' || this.curvePrompt()) return;
+    this.chaseShout.set('used');
+    this.shoutPending = true;
+    this.sound.play('abo.carimbo');
+    this.say(`"Parado, Ibama!"`, 'alert');
+  }
+
+  /**
+   * O grito, com os dois parados: o agente rola d20 + vigor para conseguir gritar; gritou, ele
+   * rola d20 e precisa de 4 + intimidação do agente. Não conseguiu: olha para trás e o agente
+   * encosta. Devolve a mudança na distância (ver `resolveShout`).
+   */
+  private async chaseShoutRoll(agentId: string, enemyId: string): Promise<number> {
+    this.shoutPending = false;
+    const enemy = this.enemy(enemyId)!;
+    const agent = this.chaseStats(agentId);
+    const who = this.nameOf(agentId);
+    this.sound.chaseSlow(true);
+    try {
+      const vigor = agent.vigor ?? 0;
+      const ar = await this.rollD20(
+        { kicker: 'Grito · vigor', who, need: `precisa de ${CHASE_RULES.shoutDC - vigor} ou mais`, passText: 'Parado, Ibama!', failText: 'Sem fôlego' },
+        (roll) => roll + vigor >= CHASE_RULES.shoutDC,
+        800,
+      );
+      if (!ar) return 0;
+      if (!ar.pass) {
+        this.say(`${who} ficou sem fôlego para gritar.`, 'info');
+        return 0;
+      }
+      const need = shoutResistNeed(agent);
+      const er = await this.rollD20(
+        { kicker: 'Grito · intimidação', who: enemy.name, need: `precisa de ${need} ou mais`, passText: 'Nem olhou', failText: 'Olhou para trás' },
+        (roll) => roll >= need,
+        800,
+      );
+      const res = resolveShout(ar.roll, agent, er?.roll ?? 20);
+      if (res.lookedBack) {
+        const e = this.enemy(enemyId)!;
+        const facing = facingBetween(e.hex, this.positions().get(agentId)!);
+        this.board?.setEnemyFacing(enemyId, facing);
+        this.board?.startleEnemy(enemyId);
+        this.say(`${enemy.name} olhou para trás! Encostando: ${signed(res.delta)} de distância`, 'alert');
+        await this.wait(500);
+      } else this.say(`${enemy.name} nem olhou.`, 'info');
+      return res.delta;
+    } finally {
+      this.sound.chaseSlow(false);
+    }
+  }
+
   private async chaseCurve(side: Side, agentId: string, enemyId: string): Promise<number> {
     const enemy = this.enemy(enemyId)!;
     const agent = this.chaseStats(agentId);
@@ -3332,6 +3424,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     if (this.curvePrompt()) return;
+    // perseguição correndo: □ grita
+    if (this.chaseHud()) {
+      if (b === 'square') this.shout();
+      return;
+    }
     const choosing = this.phase() === 'moving-choice';
     // relatório na tela: ✕ encerra (ou recomeça, no fim) e ○ volta ao jogo
     if (this.debrief()) {

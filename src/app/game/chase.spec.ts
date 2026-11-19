@@ -18,6 +18,8 @@ import {
   lockRoute,
   resolveCurve,
   resolveFleeDoor,
+  resolveShout,
+  shoutResistNeed,
   routeCurves,
   routeStops,
   targetChoices,
@@ -312,6 +314,20 @@ describe('porta na fuga', () => {
     const fail = resolveFleeDoor(d, 4, 11);
     expect(fail).toMatchObject({ pass: false, delta: -1 });
     expect(fail.door).toBe(d);
+  });
+});
+
+describe('grito', () => {
+  it('o agente precisa de d20 + vigor ≥ 8 para gritar', () => {
+    expect(resolveShout(7, {}, 1).shouted).toBe(false);
+    expect(resolveShout(7, {}, 1).delta).toBe(0);
+    expect(resolveShout(6, { vigor: 2 }, 1).shouted).toBe(true);
+  });
+  it('gritou: ele precisa de 4 + intimidação no d20, senão olha para trás (−1)', () => {
+    expect(shoutResistNeed({ intimidacao: 3 })).toBe(7);
+    expect(resolveShout(10, { intimidacao: 3 }, 6)).toEqual({ shouted: true, lookedBack: true, delta: -1 });
+    expect(resolveShout(10, { intimidacao: 3 }, 7)).toEqual({ shouted: true, lookedBack: false, delta: 0 });
+    expect(resolveShout(10, {}, 3).lookedBack).toBe(true);
   });
 });
 

@@ -427,6 +427,8 @@
     [hud]="chaseHud()"
     [curve]="curvePrompt()"
     [target]="targetView()"
+    [shout]="chaseShout()"
+    (shoutPress)="shout()"
     (swipe)="swipeCurve($event)"
     (targetSide)="targetSide($event)"
     (targetConfirm)="targetConfirm()"
