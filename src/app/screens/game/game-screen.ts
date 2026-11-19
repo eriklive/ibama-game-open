@@ -1818,9 +1818,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const enemy = this.enemy(enemyId)!;
     const agent = this.chaseStats(agentId);
     const who = this.nameOf(agentId);
-    // os dois dados do grito num slow só
-    const release = this.holdSlow();
-    try {
+    {
       const vigor = agent.vigor ?? 0;
       const ar = await this.rollD20(
         { kicker: 'Grito · vigor', who, need: `precisa de ${CHASE_RULES.shoutDC - vigor} ou mais`, passText: 'Parado, Ibama!', failText: 'Sem fôlego' },
@@ -1847,8 +1845,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.say(`${enemy.name} olhou para trás! Encostando: ${signed(res.delta)} de distância`, 'alert');
       } else this.say(`${enemy.name} nem olhou.`, 'info');
       return res.delta;
-    } finally {
-      release();
     }
   }
 
@@ -1894,9 +1890,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async chaseEnemyCurve(enemyId: string): Promise<number> {
     const enemy = this.enemy(enemyId)!;
     const eAgi = enemy.agilidade ?? 0;
-    // a curva é dele: a cena fica lenta só para mostrar o dado
-    const release = this.holdSlow();
-    try {
+    // a curva é dele: sem slow (só as escolhas do jogador desaceleram)
+    {
       const r = await this.rollD20(
         { kicker: 'Curva · agilidade', who: enemy.name, need: `precisa de ${CHASE_RULES.curveDC - eAgi} ou mais`, passText: 'Passou', failText: 'Escorregou', side: 'enemy' },
         (roll) => roll + eAgi >= CHASE_RULES.curveDC,
@@ -1905,14 +1900,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const res = resolveEnemyCurve(r?.roll ?? 20, { agilidade: eAgi });
       this.say(res.pass ? `${enemy.name} fez a curva.` : `${enemy.name} escorregou na curva! Encostando: ${signed(res.delta)} de distância`, res.pass ? 'info' : 'alert');
       return res.delta;
-    } finally {
-      release();
     }
   }
 
   /**
-   * Segura o slow da perseguição (decisões e rolagens): enquanto alguém segurar, a música, a
-   * animação, os passos e o zoom ficam desacelerados. Devolve quem solta (uma vez só). O último
+   * Segura o slow da perseguição (as escolhas do jogador e o dado que vem delas): enquanto
+   * alguém segurar, a música, a animação, os passos e o zoom ficam desacelerados. Devolve quem solta (uma vez só). O último
    * a soltar volta tudo ao normal depois de `SLOW_GRACE_MS`, se ninguém segurar de novo antes.
    */
   private holdSlow(): () => void {
@@ -1987,13 +1980,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async chaseDoor(door: Door, enemyId: string, distance: () => number, addDistance: (delta: number) => void): Promise<void> {
     const name = this.enemy(enemyId)!.name;
     const current = this.doors().get(hexKey(door.hex)) ?? door;
-    // a porta é dele: a cena fica lenta enquanto ele rola os dados (todas as tentativas)
-    const release = this.holdSlow();
-    try {
-      await this.fleeDoorTries(current, door, name, distance, addDistance);
-    } finally {
-      release();
-    }
+    // a porta é dele: sem slow (só as escolhas do jogador desaceleram)
+    await this.fleeDoorTries(current, door, name, distance, addDistance);
   }
 
   /** As tentativas dele na porta, até passar (ou ela o alcançar). */
@@ -2505,8 +2493,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     passes: (roll: number) => boolean,
     autoMs?: number,
   ): Promise<{ roll: number; pass: boolean } | null> {
-    // na perseguição (ou emendando num slow que já está aí), o dado desacelera tudo até sumir
-    const release = this.chaseHud() || this.slowActive() ? this.holdSlow() : undefined;
+    // só as escolhas do jogador desaceleram: o dado da equipe que vem logo depois de uma (a
+    // iniciativa depois da escolha de alvo) emenda no mesmo slow; os do garimpeiro, nunca
+    const release = view.side !== 'enemy' && this.slowActive() ? this.holdSlow() : undefined;
     try {
       return await this.rollD20Sheet(view, passes, autoMs);
     } finally {
