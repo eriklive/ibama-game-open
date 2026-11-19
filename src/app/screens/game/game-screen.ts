@@ -1741,7 +1741,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Curva (`decisao:perseguicao`): o jogador desliza para o lado em até `swipeSeconds`. Lado
-   * errado ou nada: bateu. Lado certo: d20 + agilidade. O garimpeiro sempre rola a dele.
+   * errado ou nada: bateu. Lado certo: d20 + agilidade. Só o agente rola.
    * Devolve a mudança na distância.
    */
   /** Botão **Gritar!** (toque, G, □): vale uma vez por trecho reto, com os dois correndo. */
