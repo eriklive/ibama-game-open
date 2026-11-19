@@ -31,12 +31,10 @@ export const HUMANOID_ANIMS = 'assets/anims/humanoid-base.glb';
 export const HEX_WIDTH_METERS = 1.5;
 export const METER = 2 / HEX_WIDTH_METERS;
 /**
- * Exagero de miniatura: os personagens ficam 15% maiores que a escala real, para lerem
- * melhor de cima. Só a altura dos modelos usa isso; distâncias e velocidades seguem `METER`.
+ * Altura no tabuleiro de uma pessoa com `meters` de altura (1,70 m ≈ 2,27 unidades). Os
+ * personagens ficam na escala real, a mesma do cenário (portas, paredes, árvores).
  */
-export const CHARACTER_SCALE = 1.15;
-/** Altura no tabuleiro de uma pessoa com `meters` de altura (1,70 m ≈ 2,61 unidades). */
-export const heightOf = (meters: number): number => meters * METER * CHARACTER_SCALE;
+export const heightOf = (meters: number): number => meters * METER;
 
 /**
  * Velocidade de deslocamento de cada clipe de locomoção no tamanho original (m/s),

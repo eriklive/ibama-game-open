@@ -9,7 +9,7 @@ import { HexCoord, hexKey, hexToWorld } from './hex';
 
 /**
  * Altura das paredes do hangar. O telhado em arco nasce no topo delas: o agente mais alto
- * (≈ 2,73 unidades) tem que caber debaixo dele já na primeira coluna de dentro.
+ * (Bruno, 1,78 m ≈ 2,37 unidades) tem que caber debaixo dele já na primeira coluna de dentro.
  */
 const WALL_HEIGHT = 2.6;
 const WALL_THICKNESS = 0.18;
