@@ -6,8 +6,10 @@
  * 1. **Gatilho.** No turno inimigo, antes de um suspeito em alerta correr, os agentes no
  *    **raio de perseguição** dele (`chaseRadius`: base + vigor + iniciativa, com caminho livre)
  *    podem ir atrás (`chaseCandidates`). Quem já correu nesta rodada inimiga não vai de novo.
- * 2. **Iniciativa (disputa).** d20 + iniciativa do agente contra d20 + iniciativa do garimpeiro
- *    (`initiativeContest`). Ganhou: sai correndo. Perdeu: hesita e o garimpeiro foge normal.
+ * 2. **Iniciativa.** Só o agente rola: d20 + iniciativa, pelo menos `initiativeDC` (8), sem
+ *    depender do garimpeiro (`initiativeCheck`). Passou: sai correndo. Falhou: hesita e o
+ *    garimpeiro foge normal. O garimpeiro não rola nada novo: o teste de fuga da faixa amarela da
+ *    abordagem continua como está (falhou, tropeça e se rende), e quem foge sem rolar segue assim.
  * 3. **Rota travada.** O jogo calcula a fuga dele até a borda (`lockRoute`), passando só por
  *    portas que ele consegue usar (abertas, encostadas, trancadas e portões; bloqueada é
  *    parede). A rota vira a "pista" e não muda mais. Nela ficam as **paradas**:
@@ -34,8 +36,8 @@ export const CHASE_RULES = {
   die: 20,
   /** Raio de perseguição sem atributos (o que ele correria num turno de fuga). */
   radiusBase: ENEMY_RULES.fleeSteps,
-  /** Empate na iniciativa: o garimpeiro já estava em movimento e leva. */
-  tieGoesToAgent: false,
+  /** Iniciativa do agente: d20 + iniciativa, pelo menos isto, para sair correndo. */
+  initiativeDC: 8,
   /** Tamanho máximo da rota travada (dois turnos de fuga, com folga). */
   routeSteps: 12,
   /** Curva: d20 + agilidade, pelo menos isto. Vale para agente e garimpeiro. */
@@ -125,32 +127,22 @@ export function targetChoices(
 // ---------- iniciativa ----------
 
 export interface InitiativeResult {
-  agentTotal: number;
-  enemyTotal: number;
+  total: number;
   /** O agente arrancou a tempo. */
   go: boolean;
 }
 
-/** Disputa: d20 + iniciativa de cada lado. Empate segue `tieGoesToAgent`. */
-export function initiativeContest(
-  agentRoll: number,
-  agent: ChaseStats,
-  enemyRoll: number,
-  enemy: ChaseStats,
-): InitiativeResult {
-  const agentTotal = agentRoll + (agent.iniciativa ?? 0);
-  const enemyTotal = enemyRoll + (enemy.iniciativa ?? 0);
-  const go = agentTotal > enemyTotal || (agentTotal === enemyTotal && CHASE_RULES.tieGoesToAgent);
-  return { agentTotal, enemyTotal, go };
+/** Iniciativa do agente: d20 + iniciativa, pelo menos `initiativeDC`. */
+export function initiativeCheck(roll: number, agent: ChaseStats = {}): InitiativeResult {
+  const total = roll + (agent.iniciativa ?? 0);
+  return { total, go: total >= CHASE_RULES.initiativeDC };
 }
 
-/** Chance (0..1) de o agente ganhar a disputa, contando todos os pares de d20. */
-export function initiativeChance(agent: ChaseStats, enemy: ChaseStats): number {
+/** Chance (0..1) de o agente arrancar a tempo. */
+export function initiativeChance(agent: ChaseStats = {}): number {
   const d = CHASE_RULES.die;
-  let wins = 0;
-  for (let a = 1; a <= d; a++)
-    for (let e = 1; e <= d; e++) if (initiativeContest(a, agent, e, enemy).go) wins++;
-  return wins / (d * d);
+  const need = CHASE_RULES.initiativeDC - (agent.iniciativa ?? 0);
+  return Math.min(1, Math.max(0, (d + 1 - need) / d));
 }
 
 // ---------- rota travada ----------

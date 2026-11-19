@@ -11,7 +11,7 @@ import {
   fleeDoorAction,
   fleeDoorNeed,
   initiativeChance,
-  initiativeContest,
+  initiativeCheck,
   lockRoute,
   movementAfterChase,
   resolveCurve,
@@ -101,19 +101,18 @@ describe('targetChoices', () => {
   });
 });
 
-describe('initiativeContest', () => {
-  it('soma iniciativa dos dois lados; empate fica com o garimpeiro', () => {
-    expect(initiativeContest(12, { iniciativa: 2 }, 13, {}).go).toBe(true);
-    expect(initiativeContest(10, {}, 10, {}).go).toBe(false);
-    expect(initiativeContest(10, { iniciativa: 1 }, 10, { iniciativa: 2 })).toEqual({
-      agentTotal: 11,
-      enemyTotal: 12,
-      go: false,
-    });
+describe('initiativeCheck', () => {
+  it('d20 + iniciativa, 8 ou mais; só o agente rola', () => {
+    expect(CHASE_RULES.initiativeDC).toBe(8);
+    expect(initiativeCheck(8)).toEqual({ total: 8, go: true });
+    expect(initiativeCheck(7)).toEqual({ total: 7, go: false });
+    expect(initiativeCheck(6, { iniciativa: 2 })).toEqual({ total: 8, go: true });
   });
-  it('chance com atributos iguais: 190 de 400', () => {
-    expect(initiativeChance({}, {})).toBeCloseTo(190 / 400);
-    expect(initiativeChance({ iniciativa: 3 }, {})).toBeGreaterThan(0.5);
+  it('chance: 65% com +0, 75% com +2, limitada a 0..1', () => {
+    expect(initiativeChance()).toBeCloseTo(0.65);
+    expect(initiativeChance({ iniciativa: 2 })).toBeCloseTo(0.75);
+    expect(initiativeChance({ iniciativa: 10 })).toBe(1);
+    expect(initiativeChance({ iniciativa: -25 })).toBe(0);
   });
 });
 
