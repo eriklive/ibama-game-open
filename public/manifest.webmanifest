@@ -1,0 +1,14 @@
+{
+  "name": "ibama",
+  "short_name": "ibama",
+  "lang": "pt-BR",
+  "start_url": "./",
+  "display": "fullscreen",
+  "background_color": "#3d8a60",
+  "theme_color": "#123039",
+  "icons": [
+    { "src": "icons/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icons/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

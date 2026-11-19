@@ -1,0 +1,75 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+  <radialGradient id="aura" cx="50%" cy="44%" r="62%">
+    <stop offset="0" stop-color="#86cba3"/>
+    <stop offset="0.5" stop-color="#55a377"/>
+    <stop offset="1" stop-color="#3d8a60"/>
+  </radialGradient>
+  <linearGradient id="iris" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0" stop-color="#ffe24f"/><stop offset="1" stop-color="#f0a500"/>
+  </linearGradient></defs>
+  <rect width="1024" height="1024" fill="url(#aura)"/>
+  
+  <!-- ombros -->
+  <g transform="translate(512 512) scale(0.82) translate(-512 -512)"><path d="M140,1024 C170,860 320,786 512,778 C704,786 854,860 884,1024 Z" fill="#0b0b0b"/>
+  <path d="M352,1024 L392,944 L432,1024 Z M592,1024 L632,944 L672,1024 Z M472,1024 L512,960 L552,1024 Z" fill="#1c1c1c"/>
+  <!-- cabeça -->
+  <path d="M512,262 C576,260,648,254,694,240 C702,190,766,168,806,198 C846,228,846,286,818,318 C836,360,854,410,860,450 L904,486 L864,512 L914,552 L864,578 L900,624 L840,638 L862,690 L800,690 C770,762,700,822,622,852 C584,872,550,882,512,886 C474,882 440,872 402,852 C324,822 254,762 224,690 L162,690 L184,638 L124,624 L160,578 L110,552 L160,512 L120,486 L164,450 C170,410 188,360 206,318 C178,286 178,228 218,198 C258,168 322,190 330,240 C376,254 448,260 512,262 Z" fill="#151515" stroke="#000" stroke-width="14" stroke-linejoin="round"/>
+  <g id="half">
+  <!-- orelha -->
+  <path d="M716,250 C724,214 770,202 794,226 C812,246 810,282 794,302 Z" fill="#2b2b2b"/>
+  <path d="M738,262 C746,240 772,234 784,250 C792,262 790,282 782,292 Z" fill="#050505"/>
+  <!-- rosetas -->
+  <ellipse cx="635.1" cy="341.9" rx="8.4" ry="5.6" transform="rotate(107 635.1 341.9)" fill="#2a2a2a"/><ellipse cx="616.3" cy="356.0" rx="8.4" ry="5.6" transform="rotate(179 616.3 356.0)" fill="#2a2a2a"/><ellipse cx="597.1" cy="342.4" rx="8.4" ry="5.6" transform="rotate(251 597.1 342.4)" fill="#2a2a2a"/><ellipse cx="604.0" cy="320.0" rx="8.4" ry="5.6" transform="rotate(323 604.0 320.0)" fill="#2a2a2a"/><ellipse cx="627.5" cy="319.7" rx="8.4" ry="5.6" transform="rotate(395 627.5 319.7)" fill="#2a2a2a"/><circle cx="616" cy="336" r="5.0" fill="#2a2a2a"/>
+  <ellipse cx="732.9" cy="393.4" rx="10.1" ry="6.7" transform="rotate(153 732.9 393.4)" fill="#2a2a2a"/><ellipse cx="705.0" cy="389.0" rx="10.1" ry="6.7" transform="rotate(225 705.0 389.0)" fill="#2a2a2a"/><ellipse cx="700.6" cy="361.1" rx="10.1" ry="6.7" transform="rotate(297 700.6 361.1)" fill="#2a2a2a"/><ellipse cx="725.8" cy="348.3" rx="10.1" ry="6.7" transform="rotate(369 725.8 348.3)" fill="#2a2a2a"/><ellipse cx="745.7" cy="368.3" rx="10.1" ry="6.7" transform="rotate(441 745.7 368.3)" fill="#2a2a2a"/><circle cx="722" cy="372" r="6.0" fill="#2a2a2a"/>
+  <ellipse cx="814.0" cy="479.6" rx="7.1" ry="4.8" transform="rotate(124 814.0 479.6)" fill="#2a2a2a"/><ellipse cx="795.2" cy="486.3" rx="7.1" ry="4.8" transform="rotate(196 795.2 486.3)" fill="#2a2a2a"/><ellipse cx="783.0" cy="470.5" rx="7.1" ry="4.8" transform="rotate(268 783.0 470.5)" fill="#2a2a2a"/><ellipse cx="794.3" cy="454.0" rx="7.1" ry="4.8" transform="rotate(340 794.3 454.0)" fill="#2a2a2a"/><ellipse cx="813.5" cy="459.6" rx="7.1" ry="4.8" transform="rotate(412 813.5 459.6)" fill="#2a2a2a"/><circle cx="800" cy="470" r="4.3" fill="#2a2a2a"/>
+  <ellipse cx="763.6" cy="652.0" rx="8.4" ry="5.6" transform="rotate(101 763.6 652.0)" fill="#2a2a2a"/><ellipse cx="746.3" cy="667.9" rx="8.4" ry="5.6" transform="rotate(173 746.3 667.9)" fill="#2a2a2a"/><ellipse cx="725.8" cy="656.3" rx="8.4" ry="5.6" transform="rotate(245 725.8 656.3)" fill="#2a2a2a"/><ellipse cx="730.5" cy="633.3" rx="8.4" ry="5.6" transform="rotate(317 730.5 633.3)" fill="#2a2a2a"/><ellipse cx="753.8" cy="630.6" rx="8.4" ry="5.6" transform="rotate(389 753.8 630.6)" fill="#2a2a2a"/><circle cx="744" cy="648" r="5.0" fill="#2a2a2a"/>
+  <ellipse cx="678.6" cy="785.3" rx="7.1" ry="4.8" transform="rotate(142 678.6 785.3)" fill="#2a2a2a"/><ellipse cx="658.6" cy="786.2" rx="7.1" ry="4.8" transform="rotate(214 658.6 786.2)" fill="#2a2a2a"/><ellipse cx="651.6" cy="767.4" rx="7.1" ry="4.8" transform="rotate(286 651.6 767.4)" fill="#2a2a2a"/><ellipse cx="667.3" cy="755.0" rx="7.1" ry="4.8" transform="rotate(358 667.3 755.0)" fill="#2a2a2a"/><ellipse cx="683.9" cy="766.1" rx="7.1" ry="4.8" transform="rotate(430 683.9 766.1)" fill="#2a2a2a"/><circle cx="668" cy="772" r="4.3" fill="#2a2a2a"/>
+  <circle cx="674" cy="300" r="7" fill="#2b2b2b"/><circle cx="650" cy="404" r="6" fill="#2b2b2b"/>
+  <circle cx="790" cy="590" r="7" fill="#2b2b2b"/><circle cx="700" cy="712" r="6" fill="#2b2b2b"/>
+  <!-- chevrons tribais na bochecha -->
+  <g fill="none" stroke="#303030" stroke-width="11" stroke-linejoin="miter" stroke-linecap="butt">
+    <path d="M684,546 L736,566 L684,586"/>
+    <path d="M668,522 L786,566 L668,610"/>
+  </g>
+  <g fill="#2b2b2b"><circle cx="652" cy="566" r="7"/><circle cx="632" cy="566" r="5"/></g>
+  <!-- sobrancelha pesada -->
+  <path d="M528,480 L552,440 C610,420 676,416 738,430 C680,444 610,458 540,496 Z" fill="#000"/>
+  <!-- contorno do olho + lágrima -->
+  <path d="M536,514 C566,470 646,450 716,462 C688,530 600,556 536,514 Z" fill="#000"/>
+  <path d="M550,516 C546,568 536,610 546,652" fill="none" stroke="#000" stroke-width="18" stroke-linecap="round"/>
+  <!-- linha de pontos sob o olho -->
+  <g fill="#2b2b2b"><circle cx="600" cy="560" r="5"/><circle cx="622" cy="566" r="5"/><circle cx="644" cy="568" r="5"/></g>
+  <!-- olho -->
+  <path d="M554,508 C584,482 644,468 696,472 C666,520 606,536 554,508 Z" fill="url(#iris)"/>
+  <ellipse cx="624" cy="498" rx="8" ry="26" fill="#000"/>
+  <circle cx="648" cy="486" r="5" fill="#fff4a8"/>
+  <!-- almofada do focinho -->
+  <ellipse cx="566" cy="734" rx="62" ry="42" fill="#222"/>
+  <g fill="#050505">
+    <circle cx="546" cy="718" r="6"/><circle cx="574" cy="710" r="6"/><circle cx="602" cy="722" r="6"/>
+    <circle cx="558" cy="744" r="6"/><circle cx="588" cy="748" r="6"/>
+  </g>
+  <!-- boca -->
+  <path d="M512,750 C500,776 476,784 454,772" fill="none" stroke="#000" stroke-width="10" stroke-linecap="round"/>
+</g>
+  <use href="#half" transform="translate(1024 0) scale(-1 1)"/>
+  <!-- testa: totem de losangos e faixa em zigue-zague -->
+  <path d="M424,292 L446,274 L468,292 L490,274 L512,292 L534,274 L556,292 L578,274 L600,292"
+        fill="none" stroke="#303030" stroke-width="9" stroke-linejoin="miter"/>
+  <g fill="#2e2e2e">
+    <path d="M512,316 L562,344 L512,366 L462,344 Z"/>
+    <path d="M512,384 L546,404 L512,420 L478,404 Z"/>
+    
+  </g>
+  <!-- ponte do nariz -->
+  <path d="M488,480 L536,480 L556,630 L468,630 Z" fill="#1d1d1d"/>
+  <!-- nariz -->
+  <path d="M456,636 C480,620 544,620 568,636 C560,672 532,694 512,704 C492,694 464,672 456,636 Z" fill="#000"/>
+  <path d="M478,640 C500,632 524,632 546,640 C530,649 494,649 478,640 Z" fill="#2e2e2e"/>
+  <path d="M512,702 L512,752" stroke="#000" stroke-width="10" stroke-linecap="round"/>
+  <!-- queixo -->
+  <ellipse cx="512" cy="814" rx="48" ry="28" fill="#1f1f1f"/>
+  <path d="M486,806 L512,826 L538,806" fill="none" stroke="#050505" stroke-width="7"/>
+
+</g></svg>
