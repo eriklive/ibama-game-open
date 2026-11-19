@@ -1635,6 +1635,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     void this.sound.chaseStart(distance);
     // passos dados no trecho em curso (para saber onde os dois pararam se o grito interromper)
     const moved = { a: 0, g: 0 };
+    // curvas da rota de fuga: ele rola correndo, sem parar a corrida nem desacelerar (ver
+    // `enemyCurveRoll`); os dados dele que ainda rolam ficam aqui
+    const enemyCurveAt = new Set(route.stops.filter((st) => st.kind === 'curva').map((st) => st.index));
+    const enemyRolls = new Set<Promise<void>>();
+    const settleRolls = async () => {
+      while (this.shoutRoll || enemyRolls.size) await Promise.all([this.shoutRoll, ...enemyRolls]);
+    };
     const onStep = (w: 'unit' | 'enemy', hex: HexCoord) => {
       if (!alive()) return;
       moved[w === 'unit' ? 'a' : 'g']++;
@@ -1645,10 +1652,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         const prev = this.enemy(enemyId)!.hex;
         this.updateEnemy(enemyId, { hex, facing: facingBetween(prev, hex) });
         this.enemySteps(hex, 1.6);
+        if (enemyCurveAt.delete(g + moved.g)) {
+          const roll = enemyCurveRoll().finally(() => enemyRolls.delete(roll));
+          enemyRolls.add(roll);
+        }
       }
     };
     // o trecho em curso estica o caminho do agente quando o grito encosta (ver `legTo`)
     let closer: (() => void) | undefined;
+    // a curva dele, rolada com os dois correndo: escorregou, a distância cai e o agente encosta
+    const enemyCurveRoll = async () => {
+      const delta = await this.chaseEnemyCurve(enemyId);
+      if (!alive()) return;
+      distance = Math.max(0, distance + delta);
+      hud();
+      closer?.();
+    };
     // o grito rola com os dois correndo; olhou para trás, a distância cai e o agente encosta
     this.shoutStart = async () => {
       const delta = await this.chaseShoutRoll(agentId, enemyId);
@@ -1660,9 +1679,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     /**
      * Os dois correm até ele estar no ponto `s` da rota; o agente fica `distance` atrás. É um
      * trecho reto: dá para gritar uma vez, sem parar. Se o grito encostar, o caminho do agente
-     * cresce no meio da corrida; se zerar a distância, os dois param ali (agarrou). Antes de uma
-     * curva do agente, o trecho espera o grito terminar de rolar; nas paradas do garimpeiro
-     * (`waitShout = false`), os dados rolam juntos: a ficha dele entra à direita da do agente.
+     * cresce no meio da corrida; o mesmo vale quando ele escorrega numa curva dele, rolada sem
+     * parar. Se zerar a distância, os dois param ali (agarrou). Antes de uma curva do agente, o
+     * trecho espera os dados em curso; na porta dele (`waitShout = false`), rolam juntos.
      */
     const legTo = async (s: number, agentCap = Infinity, hold = false, waitShout = true) => {
       if (g >= s) return;
@@ -1683,7 +1702,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       g += moved.g;
       hud();
       if (!waitShout) return;
-      if (this.shoutRoll) await this.shoutRoll;
+      await settleRolls();
       if (!alive()) return;
       hud();
     };
@@ -1695,26 +1714,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       // nela, e em cima da curva); as curvas da pista do agente são do jogador (o lado só é
       // pedido quando o agente chega nela)
       const doorStops = route.stops.filter((st): st is Extract<typeof st, { kind: 'porta' }> => st.kind === 'porta');
-      const enemyCurves = route.stops.filter((st) => st.kind === 'curva');
       const curves = agentCurves(track, n, doorStops);
       let di = 0;
-      let ei = 0;
       let ci = 0;
       for (;;) {
         while (ci < curves.length && curves[ci].index <= a) ci++;
-        while (ei < enemyCurves.length && enemyCurves[ei].index <= g) ei++;
         const door = doorStops[di];
-        const enemyCurve = enemyCurves[ei];
         const curve = curves[ci];
         const doorAt = door ? door.index - 1 : Infinity;
-        const enemyCurveAt = enemyCurve ? enemyCurve.index : Infinity;
         // ele fica `distance` à frente: o agente chega em `curve.index` com ele neste ponto
         let curveAt = curve ? curve.index - n + distance + 1 : Infinity;
         // ele chega ao fim da rota antes de o agente chegar à curva
         if (curveAt >= route.flee.length) curveAt = Infinity;
-        const next = Math.min(doorAt, enemyCurveAt, curveAt);
+        const next = Math.min(doorAt, curveAt);
         if (next === Infinity) break;
-        const kind = next === doorAt ? 'porta' : next === enemyCurveAt ? 'curva-dele' : 'curva';
+        const kind = next === doorAt ? 'porta' : 'curva';
         // o agente nunca passa da próxima curva dele sem decidir o lado; na curva dele, os dois
         // param na pose de corrida e congelam enquanto o jogador decide
         await legTo(next, curve?.index ?? Infinity, kind === 'curva', kind === 'curva');
@@ -1728,10 +1742,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         if (kind === 'curva') {
           ci++;
           const d = await this.chaseCurve(curve!.side, agentId);
-          distance += d;
-        } else if (kind === 'curva-dele') {
-          ei++;
-          const d = await this.chaseEnemyCurve(enemyId);
           distance += d;
         } else {
           di++;
@@ -1752,8 +1762,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       }
       if (distance > 0) await legTo(route.flee.length);
     }
-    // o grito que ainda rola decide antes do desfecho
-    if (this.shoutRoll) await this.shoutRoll;
+    // os dados que ainda rolam (grito, curva dele) decidem antes do desfecho
+    await settleRolls();
     if (!alive()) return;
     // parou na pose de corrida de uma curva (agarrou ali, ou a rota acabou): repouso
     board.restChase();
@@ -1885,7 +1895,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Curva do garimpeiro (na rota de fuga dele): só ele rola d20 + agilidade, sem lado para o
-   * jogador escolher. Escorregou: −1 na distância. Devolve a mudança na distância.
+   * jogador escolher e sem parar a corrida. Escorregou: −1 na distância. Devolve a mudança.
    */
   private async chaseEnemyCurve(enemyId: string): Promise<number> {
     const enemy = this.enemy(enemyId)!;
