@@ -1,4 +1,4 @@
-import { Component, computed, input, output } from '@angular/core';
+import { Component, computed, input, output, signal } from '@angular/core';
 import { LEVEL_LABEL, NpcClass, QuestionOption } from '../../game/interrogation';
 
 /** Conversa em close-up (modo diálogo): com quem, as perguntas (cartões) e os balões. */
@@ -63,6 +63,16 @@ export class InterrogationPanel {
     return this.view().options.map((option) => ({ option, openIndex: option.done ? -1 : n++ }));
   });
   protected readonly openCount = computed(() => this.view().options.filter((o) => !o.done).length);
+  protected readonly doneCount = computed(() => this.view().options.length - this.openCount());
+  /**
+   * As já feitas ficam dobradas numa linha só ("✓ 3 já perguntadas"), para as abertas caberem
+   * no celular deitado; um toque desdobra o histórico.
+   */
+  protected readonly showDone = signal(false);
+  /** Cartões na tela: com o histórico dobrado, só as perguntas abertas. */
+  protected readonly shown = computed(() =>
+    this.showDone() ? this.cards() : this.cards().filter((c) => !c.option.done),
+  );
   /** A última fala completa, para o leitor de tela (o balão vai aparecendo letra a letra). */
   protected readonly live = computed(() => {
     const v = this.view();

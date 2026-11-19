@@ -345,9 +345,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const i = this.questionPick();
       const iv = this.interrogation();
       if (!iv || iv.busy) return;
-      queueMicrotask(() =>
-        (document.querySelectorAll<HTMLButtonElement>('.question-card:not(.done)')[i] ?? null)?.focus({ preventScroll: true }),
-      );
+      queueMicrotask(() => {
+        const card = document.querySelectorAll<HTMLButtonElement>('.question-card:not(.done)')[i];
+        // só a lista rola (não a página): o cartão escolhido não fica cortado embaixo
+        card?.focus({ preventScroll: true });
+        card?.scrollIntoView({ block: 'nearest' });
+      });
     });
   }
 

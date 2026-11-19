@@ -28,7 +28,22 @@
   <p class="sr-only" aria-live="polite">{{ live() }}</p>
   @if (cards().length) {
     <ul class="question-cards" aria-label="Perguntas">
-      @for (c of cards(); track c.option.key; let i = $index) {
+      @if (doneCount()) {
+        <li>
+          <button
+            type="button"
+            class="asked-toggle"
+            [attr.aria-expanded]="showDone()"
+            data-testid="asked-toggle"
+            (click)="showDone.set(!showDone())"
+          >
+            <span class="asked-check" aria-hidden="true">✓</span>
+            {{ doneCount() }} já {{ doneCount() === 1 ? 'perguntada' : 'perguntadas' }}
+            <span class="asked-caret" aria-hidden="true">{{ showDone() ? 'esconder ▴' : 'ver ▾' }}</span>
+          </button>
+        </li>
+      }
+      @for (c of shown(); track c.option.key; let i = $index) {
         @let o = c.option;
         <li>
           <button
