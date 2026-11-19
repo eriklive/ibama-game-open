@@ -481,9 +481,10 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
 5. **Porta.** O garimpeiro rola d4 (1–2 abrir, 3–4 arrombar) e d20; falhou, perde tempo (−1) e
    tenta de novo. Passou, a porta fica aberta (ou arrombada) e o agente passa direto.
    **Grito.** Em cada trecho reto (entre paradas) o jogador pode gritar uma vez: botão
-   **Gritar!** (G no teclado, □ no controle). Os dois param no próximo hexágono. O agente rola
-   d20 + vigor ≥ 8 para conseguir gritar correndo; gritou, o suspeito rola d20 e precisa de
-   **4 + intimidação do agente** para ignorar. Não conseguiu: olha para trás e a distância cai 1.
+   **Gritar!** (G no teclado, □ no controle). Ninguém para: os dados rolam com os dois correndo.
+   O agente rola d20 + vigor ≥ 8 para conseguir gritar; gritou, o suspeito rola d20 e precisa de
+   **4 + intimidação do agente** para ignorar. Não conseguiu: olha para trás, a distância cai 1 e
+   o agente encosta ali mesmo, sem parar. Antes da curva ou porta seguinte, o grito termina de rolar.
 6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.

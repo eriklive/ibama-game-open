@@ -28,7 +28,8 @@
  * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
  *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
- *    - **grito** (`resolveShout`): uma vez por trecho reto, o jogador pode gritar. O agente rola
+ *    - **grito** (`resolveShout`): uma vez por trecho reto, o jogador pode gritar, sem parar a
+ *      corrida (os dados rolam com os dois correndo). O agente rola
  *      d20 + vigor ≥ 8 para conseguir; gritou, ele rola d20 e precisa de 4 + intimidação do
  *      agente, senão olha para trás e a distância cai 1.
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
