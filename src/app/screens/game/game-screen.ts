@@ -109,6 +109,7 @@ import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
+import { TEST_CASES, TestCase, findTestCase } from '../../game/test-cases';
 import {
   Clues,
   DialogueMemory,
@@ -270,7 +271,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Muda a cada "Recomeçar": animações antigas param de mexer no estado. */
   private epoch = 0;
 
-  protected readonly map: GameMap | undefined = findMap(inject(ActivatedRoute).snapshot.paramMap.get('mapId'));
+  private readonly route = inject(ActivatedRoute);
+  protected readonly map: GameMap | undefined = findMap(this.route.snapshot.paramMap.get('mapId'));
   protected readonly characters = CHARACTERS;
   /** Paredes, árvores, avião e carga alta: bloqueiam passagem e visão. */
   private readonly fixedWalls = this.map ? blockedHexes(this.map) : new Set<string>();
@@ -326,6 +328,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly renderProfiles = Object.values(RENDER_PROFILES);
   protected readonly renderStats = signal<ReturnType<HexBoard['renderStats']> | null>(null);
   private statsTicker?: ReturnType<typeof setInterval>;
+
+  /** Submenu "Casos de teste" (situações prontas, ver `test-cases.ts`). */
+  protected readonly testCases = TEST_CASES;
+  protected readonly testCasesOpen = signal(false);
 
   protected toggleMenu(): void {
     this.menuOpen.update((v) => !v);
@@ -1052,7 +1058,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board.setBurnTargets([]);
     this.board.setDoors(this.doors(), true);
     this.refreshVision();
-    this.startTurn();
+    // `?caso=` abre direto num caso de teste (o menu usa isso para trocar de mapa)
+    const testCase = findTestCase(this.route.snapshot.queryParamMap.get('caso'));
+    if (testCase?.mapId === this.map.id) void this.runTestCase(testCase);
+    else this.startTurn();
     this.stopPad = this.gamepad.listen({
       button: (b) => this.padButton(b),
       move: (dir) => this.moveCursor(dir),
@@ -3537,6 +3546,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected restart(): void {
+    this.resetMatch();
+    this.startTurn();
+  }
+
+  /** Volta tudo ao começo da partida (posições, inimigos, portas, fogo…) sem começar a vez. */
+  private resetMatch(): void {
     this.epoch++;
     this.clearTimers();
     this.resetSlow();
@@ -3588,7 +3603,73 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.notice.set(null);
     this.activeIndex.set(0);
     this.turn.set(1);
-    this.startTurn();
+  }
+
+  // ---------- casos de teste (ver `test-cases.ts`) ----------
+
+  /** Escolhido no menu: no mesmo mapa, carrega aqui; em outro, abre a partida lá com `?caso=`. */
+  protected loadTestCase(testCase: TestCase): void {
+    this.menuOpen.set(false);
+    this.testCasesOpen.set(false);
+    if (testCase.mapId === this.map?.id) {
+      void this.runTestCase(testCase);
+      return;
+    }
+    // a rota é a mesma: passa pela tela inicial para a partida ser montada de novo
+    void this.router
+      .navigateByUrl('/', { skipLocationChange: true })
+      .then(() => this.router.navigate(['/jogo', testCase.mapId], { queryParams: { caso: testCase.id } }));
+  }
+
+  /** Recomeça a partida já na situação do caso e dispara o que ele começa. */
+  private async runTestCase(testCase: TestCase): Promise<void> {
+    this.resetMatch();
+    const epoch = this.epoch;
+    const positions = new Map(this.positions());
+    for (const [id, hex] of Object.entries(testCase.agents ?? {})) positions.set(id, { ...hex });
+    this.positions.set(positions);
+    this.board?.placeUnits(positions);
+    const { agent, enemy: enemyId } = testCase.start;
+    const agentHex = positions.get(agent)!;
+    for (const [id, { hex, status }] of Object.entries(testCase.enemies ?? {})) {
+      // em fuga, de costas para quem abordou
+      this.updateEnemy(id, { hex: { ...hex }, ...(status ? { status } : {}), facing: facingBetween(agentHex, hex) });
+    }
+    this.board?.placeEnemies(
+      this.enemies().map((e) => ({
+        ...e,
+        alert: e.status === 'alert',
+        surrendered: e.status === 'surrendered',
+        gone: e.status === 'hidden' || e.status === 'fled',
+      })),
+    );
+    this.refreshVision();
+    const index = CHARACTERS.findIndex((c) => c.id === testCase.active);
+    this.activeIndex.set(Math.max(0, index));
+    const active = this.active();
+    this.focusedId.set(active.id);
+    this.board?.setActive(active.id);
+    this.board?.focus(active.id);
+    this.board?.setSelected(null);
+    this.board?.setReachable([]);
+    this.say(testCase.name, 'info');
+
+    // a perseguição já em curso: sem carimbo nem iniciativa, o agente corre atrás dele
+    const enemy = this.enemy(enemyId);
+    const path = enemy
+      ? arrestQueue(enemy.hex, agent, this.chaseAgents(), this.area, this.enemyWalls()).find((c) => c.id === agent)?.path
+      : undefined;
+    if (!enemy || !path) {
+      this.startTurn();
+      return;
+    }
+    this.phase.set('chase');
+    this.ranThisRound.add(enemyId);
+    await this.runChase(enemyId, agent, path, epoch, this.caughtThisRound);
+    if (this.destroyed || this.epoch !== epoch) return;
+    this.phase.set('ending');
+    if (!this.actingEnemies().length) this.announceIfOver();
+    this.endTurn();
   }
 
   protected exit(): void {
