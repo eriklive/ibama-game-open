@@ -454,6 +454,33 @@ alcance, então o contorno não abre buracos em volta deles. Destino, caminho e 
 continuam pintando o hexágono (são escolha do jogador, não aura). Código em
 `src/app/game/aura-layer.ts`; estilos em `AURAS`, no `hex-board.ts`.
 
+## Som
+
+Sem falas por enquanto: passos, portas, fogo, dados, interface e o ambiente da mata. Os sons foram
+desenhados num caderno de som e quase todos são **sintetizados em código** com Web Audio
+(`src/app/game/audio/`), sem arquivo. O único arquivo é o alerta de avistado
+(`public/assets/sounds/alerta-inimigo.mp3`).
+
+- **Menu → Som → Sons do jogo** liga e desliga (fica guardado no navegador). O áudio começa no
+  primeiro toque ou tecla, como os navegadores exigem.
+- **Cinco canais** (`BUS_VOLUMES` em `audio/engine.ts`): Ambiente, Mundo, Passos, Interface e Estados.
+- **O ouvinte é o agente da vez:** o volume cai com a distância em hexágonos (cheio até 4, depois
+  −3 dB por hexágono; `audio/positional.ts`). Inimigos debaixo de um telhado só se ouvem até
+  5 hexágonos, abafados.
+- **Passos pelo chão** (`audio/footsteps.ts`): terra, asfalto, pátio, mato; o piso `_` é concreto
+  no hangar e tábua na casa. O grupo soa como um passo mais cheio (só o líder pisa); inimigos
+  usam galocha.
+- **Ambiente em três níveis** (`audio/ambience.ts`): o **bioma** (mata de terra firme: coro de
+  insetos, copa, brisa, cigarra, pássaros, gotas, galhos; há uma vaga reservada para animais), a
+  **zona** (hangar e casa abafam o lado de fora e somam o próprio som) e o **estado do jogo**
+  (avião queimado soma o fogo distante e espanta os pássaros; o modo abordagem abafa tudo).
+  Novos biomas e interiores entram como dados.
+- **Eventos** (`audio/sounds.ts`, ids como `porta.gazua` e `ini.rende`): turno, dados (o tamanho
+  do dado decide o peso), testes, portas, inimigos, abordagem, agrupar, inspeção, caderneta, chave
+  e fogo. Ao **Queimar**, a gasolina e as riscadas de fósforo tocam antes de o fogo pegar (com som
+  ligado, o fogo pega ~3,4 s depois). A rolagem escondida do interrogatório não faz som nenhum.
+- O serviço que o jogo usa é `Sound` (`src/app/game/sound.service.ts`).
+
 ## Modelos dos personagens
 
 Há sete modelos em `public/assets/characters/`: quatro agentes do Ibama (Ana, Bruno, Clara e

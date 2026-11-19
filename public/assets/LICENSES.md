@@ -1,4 +1,4 @@
-# Licenças dos assets 3D
+# Licenças dos assets
 
 Todo arquivo em `public/assets/` precisa estar listado aqui, com origem, autor e licença.
 Assets CC BY exigem crédito visível no jogo (tela de créditos). Os pacotes de origem estão
@@ -14,3 +14,12 @@ descritos em [README.md](README.md).
 | `characters/garimpeiro/garimpeiro.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Buzzed` | Quaternius | CC0 1.0 | Idem |
 | `characters/garimpeiro-pa/garimpeiro-pa.glb` | Universal Base Characters (Standard): `Superhero_Male_FullBody` + `Hair_Buzzed` + `Hair_Beard` | Quaternius | CC0 1.0 | Criado no refit a partir da base do caçador: roupa e pele repintadas, demais alterações idem |
 | `anims/humanoid-base.glb` | [Universal Animation Library](https://quaternius.itch.io/universal-animation-library) (Standard): `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop`, `Crouch_Idle_Loop` | Quaternius | CC0 1.0 | Clipes renomeados para `idle`, `walk`, `run` e `crouch`; boneco removido; curvas comprimidas |
+
+## Sons
+
+Quase todo som do jogo é sintetizado em código (`src/app/game/audio/`), sem arquivo. Os arquivos
+de som ficam em `public/assets/sounds/`:
+
+| Arquivo | Origem | Autor | Licença | Alterações |
+|---|---|---|---|---|
+| `sounds/alerta-inimigo.mp3` | Obra própria, sintetizada para o jogo (alerta de inimigo que avista um agente) | Autor do projeto | Mesma do projeto | Nenhuma |

@@ -20,6 +20,8 @@ const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa um
 
 /** Peças com modelo 3D: velocidade da corrida entre hexágonos (3,6 m/s ≈ 2,8 hex/s). */
 const RUN_SPEED = 3.6 * METER;
+/** Tempo (s) que um personagem leva para correr de um hexágono ao vizinho (marca os passos). */
+export const SECONDS_PER_HEX = (HEX_STEP * HEX_SIZE) / RUN_SPEED;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
 const BASE_TOP = 0.07;
 

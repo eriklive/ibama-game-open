@@ -11,7 +11,11 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { rollDie, sum } from '../../game/dice';
-import { CloseUpInsets, HexBoard } from '../../game/hex-board';
+import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
+import { Sound } from '../../game/sound.service';
+import { zoneAt } from '../../game/audio/ambience';
+import { surfaceAt } from '../../game/audio/footsteps';
+import { STRIKE_SECONDS } from '../../game/audio/sounds';
 import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
 import { MainButton } from '../../ui/main-button';
@@ -213,6 +217,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Atributos escolhidos na ficha (escalação). */
   private readonly roster = inject(RosterService);
   private readonly haptics = inject(Haptics);
+  private readonly sound = inject(Sound);
   private stopPad?: () => void;
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private board?: HexBoard;
@@ -296,6 +301,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Vibração na rolagem dos dados (celular); liga/desliga no menu. */
   protected readonly vibrationSupported = this.haptics.supported;
   protected readonly vibration = this.haptics.enabled;
+  protected readonly soundSupported = this.sound.supported;
+  protected readonly soundOn = this.sound.enabled;
+  protected setSound(on: boolean): void {
+    this.sound.setEnabled(on);
+    if (on) this.sound.play('ui.confirmar');
+  }
   protected setVibration(on: boolean): void {
     this.haptics.setEnabled(on);
     if (on) this.haptics.vibrate(SETTLE_PATTERN);
@@ -907,8 +918,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return s ? (this.reach().get(hexKey(s))?.cost ?? 0) : 0;
   });
 
+  /** O agente da vez é o ouvinte; a zona dele (e o avião queimado) decide o ambiente. */
+  private readonly soundZone = effect(() => {
+    const map = this.map;
+    if (!map) return;
+    const here = this.positions().get(this.active().id);
+    const fire = (map.burnables ?? []).some((b) => b.inspect && this.burned().has(b.id));
+    this.sound.setListener(here);
+    this.sound.setZone(zoneAt(map, here, fire ? ['fogo'] : []));
+  });
+  private readonly soundApproach = effect(() => this.sound.setApproach(this.approaching()));
+
   ngAfterViewInit(): void {
     if (!this.map) return;
+    // o toque em "Iniciar" já destravou o áudio na maioria dos navegadores
+    this.sound.unlock();
     this.board = new HexBoard(
       this.canvasRef().nativeElement,
       this.map,
@@ -920,7 +944,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       })),
       {
         onHexTap: (hex) => this.tapHex(hex),
-        onUnitTap: (id) => this.focusCharacter(id),
+        onUnitTap: (id) => this.pickCharacter(id),
         onClueTap: () => this.tapClue(),
       },
       {
@@ -958,6 +982,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     removeEventListener('resize', this.onInterrogationResize);
     clearTimeout(this.doorCheckTimer);
     this.board?.dispose();
+    this.sound.stopAll();
   }
 
   // ---------- turnos ----------
@@ -975,6 +1000,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.focus(active.id);
     this.board?.setSelected(null);
     this.board?.setReachable([]);
+    this.sound.play('ui.vez-agente');
     this.roll();
   }
 
@@ -990,6 +1016,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.rollKeys.set(Array.from({ length: MOVE_DICE.count }, (_, i) => `${seq}-${i}`));
     // no celular, os dados "quicam" na mão (a não ser que a animação esteja reduzida)
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
+    this.sound.play('dado.2d4', { delay: 0.45 });
   }
 
   /** Um dos d4 parou; quando todos pararem, mostra o total. */
@@ -1019,6 +1046,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   protected endTurn(): void {
     if (['walking', 'checking', 'door', 'plane', 'interrogating', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
+    // só quando o jogador decide passar (não depois de abordar ou queimar)
+    if (this.phase() === 'moving-choice') this.sound.play('ui.passar');
     this.clearTimers();
     this.phase.set('ending');
     this.closeApproach();
@@ -1052,6 +1081,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const epoch = this.epoch;
     const stale = () => this.destroyed || this.epoch !== epoch;
     this.say('Turno inimigo', 'info');
+    this.sound.play('ui.vez-inimigo');
     await this.wait(700);
 
     for (const { id } of this.enemies()) {
@@ -1100,7 +1130,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const plan = planFlee(enemy.hex, ENEMY_RULES.fleeSteps, this.area, this.blockedFor(enemy.id), agents);
     const covered = this.board!.isCovered(enemy.hex);
     if (plan.cornered) {
-      if (!covered) this.say(`${enemy.name} está encurralado!`, 'info');
+      if (!covered) {
+        this.say(`${enemy.name} está encurralado!`, 'info');
+        this.sound.play('ini.encurralado');
+      }
       return !covered;
     }
     let shown = false;
@@ -1121,6 +1154,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (isBorder(this.enemy(enemy.id)!.hex, this.area)) {
       this.updateEnemy(enemy.id, { status: 'fled' });
       this.say(`${enemy.name} fugiu do mapa!`, 'alert');
+      this.sound.play('ini.foge', { at: this.enemy(enemy.id)!.hex });
       await this.board!.removeEnemy(enemy.id);
       return true;
     }
@@ -1149,6 +1183,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (!from) return shown;
       if (hiddenStep(from, path[i])) {
         board.jumpEnemy(id, path[i]);
+        this.enemySteps(path[i], speed, true);
         if (!onStep(path[i++])) return shown;
         continue;
       }
@@ -1164,6 +1199,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         id,
         path.slice(i, j),
         (hex) => {
+          this.enemySteps(hex, speed);
           stopped = !onStep(hex);
           return !stopped;
         },
@@ -1189,6 +1225,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setEnemyAlert(enemyId, true);
     this.refreshVision();
     this.gamepad.rumble(0.7, 0.4, 260);
+    this.sound.spotted();
     this.say(`${enemy.name} avistou ${this.nameOf(who)}! Vai correr para a borda.`, 'alert');
     return true;
   }
@@ -1229,10 +1266,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         return;
       }
       this.selected.set(hex);
+      this.sound.play('ui.hex');
+      this.sound.play('ui.caminho', { delay: 0.06 });
     } else {
+      if (hex) this.sound.play('ui.invalido');
       this.selected.set(null);
     }
     this.board?.setSelected(this.selected(), this.selectedPath());
+  }
+
+  /** Toque numa peça ou num retrato: o mesmo que `focusCharacter`, com o som do cartão. */
+  protected pickCharacter(id: string): void {
+    if (id !== this.focusedId()) this.sound.play('ui.retrato');
+    this.focusCharacter(id);
   }
 
   protected focusCharacter(id: string): void {
@@ -1255,6 +1301,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.board || !target || this.phase() !== 'moving-choice') return;
     const path = pathTo(this.reach(), target);
     if (!path.length) return;
+    this.sound.play('ui.confirmar');
     const id = this.active().id;
     const paths = new Map([[id, path]]);
     let left: string[] = [];
@@ -1278,8 +1325,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.phase.set('walking');
     this.selected.set(null);
     const live = new Map(this.positions());
+    // o grupo soa como um passo mais cheio, não como três: só o líder pisa
+    const together = [...paths.values()].filter((p) => p.length).length > 1;
     await this.board!.moveUnits(leaderId, paths, (who, hex) => {
       if (this.epoch !== epoch) return;
+      if (who === leaderId) this.agentSteps(hex, together);
       live.set(who, hex);
       // quem entra no cone de visão é avistado na hora, mesmo só de passagem
       this.checkAllSpotted(live);
@@ -1356,6 +1406,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const free = this.freeRally();
     const cost = rallyCost(plan.cost, this.roster.classOf(id), this.commandsUsed());
     if (!(await this.walkUnits(id, plan.paths))) return;
+    this.sound.play('eq.agrupar');
     this.group.set(wholeTeam());
     if (free) this.commandsUsed.update((n) => n + 1);
     this.movesLeft.update((n) => Math.max(0, n - cost));
@@ -1373,6 +1424,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected ungroup(): void {
     if (this.phase() !== 'moving-choice' || !this.group().size) return;
     this.group.set(new Set());
+    this.sound.play('eq.desagrupar');
     this.say('Equipe desagrupada: cada um por si', 'info');
     this.refreshBoard();
   }
@@ -1406,6 +1458,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.board?.setClue(item.spot);
         this.board?.keepInView(item.spot);
         this.say(`${this.nameOf(who)} reparou em algo na ${item.furniture}!`, 'info');
+        this.sound.play('eq.percebeu');
       }
     }
     return true;
@@ -1488,9 +1541,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     });
     const motion = !reducedMotion();
     if (motion) this.haptics.vibrate(ROLL_PATTERN);
+    this.sound.play('eq.vasculhar');
+    this.sound.play('dado.d20', { delay: 0.3 });
     const result = await rolled;
     if (this.destroyed || this.epoch !== epoch) return;
     const pass = beats(result, SEARCH_RULES.find);
+    this.checkSound(result, pass);
     this.search.update((v) => v && { ...v, result, pass });
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(pass ? 0.8 : 0.3, pass ? 0.5 : 0.2, pass ? 260 : 120);
@@ -1568,9 +1624,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       pass: null,
     });
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
+    this.sound.play('dado.d20', { delay: 0.2 });
     const result = await rolled;
     if (this.destroyed || this.epoch !== epoch) return null;
     const pass = beats(result, target);
+    this.checkSound(result, pass);
     this.check.update((c) => c && { ...c, result, pass });
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.3, 0.2, 120);
@@ -1654,8 +1712,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         if (stale()) return;
         if (out.opened) {
           settle('swing');
+          this.sound.play('porta.abrir');
           this.say('Porta aberta', 'info');
         } else {
+          this.sound.play('porta.trancada');
           board.pushDoor(door.hex, id, 'rattle');
           await this.wait(260);
           board.pushDoor(door.hex, id, 'rattle');
@@ -1669,14 +1729,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         await this.wait(450);
         if (out.rolled) {
           const reveal = this.startDoorCheck('Destrancar', this.nameOf(id), this.needText(need!, gazua), 'Destrancou!', 'Não deu', roll, 1300);
+          this.sound.play('porta.gazua');
           await this.wait(1300); // mexendo na fechadura
           if (stale()) return;
           reveal(roll, out.pass);
           if (out.opened) {
+            this.sound.play('porta.destrancou');
             await this.wait(250);
             settle('swing');
           } else board.pushDoor(door.hex, id, 'rattle');
         } else {
+          this.sound.play('porta.destrancou');
           await this.wait(300);
           settle('swing');
           this.say('Sem tranca: abriu sozinha', 'info');
@@ -1695,6 +1758,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         await board.kick(id, () => {
           if (stale()) return;
           reveal?.(roll, out.pass);
+          this.sound.play(out.pass ? 'porta.chute-ok' : 'porta.chute-falha');
           if (out.pass) settle('slam');
           else board.pushDoor(door.hex, id, 'rattle');
           this.gamepad.rumble(out.pass ? 1 : 0.6, 0.5, 220);
@@ -1733,8 +1797,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.checkRolled = undefined;
     this.check.set({ id: ++this.checkSeq, kicker, who, need, passText, failText, value, duration, result: null, pass: null });
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
+    this.sound.play('dado.d20', { delay: 0.1 });
     return (result, pass) => {
       this.check.update((c) => c && { ...c, result, pass });
+      this.checkSound(result, pass);
       this.haptics.vibrate(SETTLE_PATTERN);
       this.doorCheckTimer = setTimeout(() => this.check.update((c) => (c?.waiting ? c : null)), 3200);
     };
@@ -1788,6 +1854,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       board.setEnemyFacing(e.id, facing);
       board.startleEnemy(e.id);
       if (r.outcome === 'surrender') {
+        if (!rolls.slice(0, rolls.indexOf(r)).some((o) => o.outcome === 'surrender')) this.sound.play('ini.rende', { at: e.hex });
         this.updateEnemy(e.id, { status: 'surrendered', facing });
         board.setEnemySurrendered(e.id, true);
       } else if (r.outcome === 'flee') {
@@ -1891,6 +1958,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board.setReachable([]);
     this.board.setInputEnabled(false);
     this.phase.set('interrogating');
+    this.sound.play('eq.closeup');
     this.board.closeUp(this.active().id, e.hex, { frame: 'pair', faceEnemy: e.id, insets: this.interrogationInsets() });
     addEventListener('resize', this.onInterrogationResize);
     this.questionPick.set(0);
@@ -2015,6 +2083,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ...ns,
       { id: ++this.noteSeq, suspect: iv.suspect, text: out.note, kind: noteKind(out), depth: answer.option.depth },
     ]);
+    this.sound.play(noteKind(out) === 'confessou' ? 'eq.confessou' : 'eq.anotar');
     // entregou alguém: aparece no mapa ao encerrar (se a missão tiver essa unidade escondida)
     const hidden = out.reveal ? this.hiddenAccomplice(iv.enemyId) : null;
     // entregou um esconderijo: conta como percebido (sem rolar percepção; a lupa aparece)
@@ -2110,6 +2179,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeBurn();
     this.clearBoardForApproach();
     this.approaching.set(true);
+    this.sound.play('abo.modo');
     const zones = this.paintApproachZones();
     // só ficam em cor quem está na vez, os suspeitos no raio e o próprio raio
     const { surrender, roll, flee } = this.approachPlan();
@@ -2163,6 +2233,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected cancelApproach(): void {
+    if (this.approaching()) this.sound.play('abo.cancelar');
     this.closeApproach();
     if (this.phase() === 'moving-choice') this.refreshBoard();
   }
@@ -2197,7 +2268,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.refreshVision();
     this.gamepad.rumble(1, 0.6, 320);
     this.haptics.vibrate(APPROACH_PATTERN);
+    this.sound.play('abo.carimbo');
+    this.sound.play('abo.onda', { delay: 0.12 });
+    this.sound.duck();
     const radius = this.activeApproach().radius;
+    const firstSurrender = [...surrender].sort((a, b) => hexDistance(from, a.hex) - hexDistance(from, b.hex))[0];
     if (motion) this.board?.playApproachWave(from, radius);
     for (const e of [...surrender, ...flee]) {
       const delay = motion ? waveArrival(hexDistance(from, e.hex)) * 1000 : 0;
@@ -2205,8 +2280,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         const facing = facingBetween(e.hex, from);
         this.board?.setEnemyFacing(e.id, facing);
         if (motion) this.board?.startleEnemy(e.id);
-        if (surrender.includes(e)) this.board?.setEnemySurrendered(e.id, true);
-        else this.board?.setEnemyAlert(e.id, true);
+        if (surrender.includes(e)) {
+          this.board?.setEnemySurrendered(e.id, true);
+          // a cena congela uma vez só, no primeiro que se rende
+          if (e === firstSurrender) this.sound.play('ini.rende');
+        } else this.board?.setEnemyAlert(e.id, true);
       });
     }
     this.later(motion ? waveDuration(radius) * 1000 : 300, () => {
@@ -2264,8 +2342,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.burning() || !target || this.phase() !== 'moving-choice') return;
     const witnesses = this.burnWitnesses();
     this.closeBurn();
+    this.phase.set('ending');
+    // com som, o fogo só pega depois da gasolina e das riscadas de fósforo
+    this.sound.play('fogo.riscar', { at: target.hexes[0] });
+    this.sound.duck();
+    this.later(this.sound.audible() ? STRIKE_SECONDS * 1000 : 0, () => this.setFire(target, witnesses));
+  }
+
+  private setFire(target: Burnable, witnesses: EnemyState[]): void {
     this.burned.update((s) => new Set([...s, target.id]));
     this.board?.ignite(target.id, target.hexes);
+    const plane = !!target.inspect;
+    this.sound.ignite(target.id, target.hexes, plane);
+    this.sound.play(plane ? 'fogo.aviao' : 'fogo.pegar', { at: target.hexes[0] });
+    if (!plane) this.sound.play('fogo.tambor', { at: target.hexes[0], delay: 2.5 });
     for (const e of witnesses) {
       const facing = facingBetween(e.hex, target.hexes[0]);
       this.updateEnemy(e.id, { status: 'alert', facing });
@@ -2285,7 +2375,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         (unlocked ? ' A equipe já pode encerrar a operação.' : ''),
       'alert',
     );
-    this.phase.set('ending');
     this.later(reducedMotion() ? 400 : 2000, () => this.endTurn());
   }
 
@@ -2396,9 +2485,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.phase() !== 'plane') return;
     if (lookInside(this.planeState()) === 'open') {
       this.planeNote.set('Destrancado com a chave. Dentro: galões e caixas lacradas de combustível para o garimpo.');
+      this.sound.play('porta.destrancou');
       return;
     }
     this.planeTried.set(true);
+    this.sound.play('eq.aviao-trancado');
     this.clueLog.update((c) => new Set([...c, PLANE_LOCKED]));
     this.planeNote.set('O avião está trancado. Pergunte ao piloto e aos ajudantes onde está a chave.');
     this.board?.setCineZoom(1.45);
@@ -2444,6 +2535,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.say(`${this.nameOf(who)} não viu nada de interessante no quadro de chaves`, 'info');
       return;
     }
+    if (pass) this.sound.play('eq.percebeu');
     this.keyPrompt.set(true);
   }
 
@@ -2452,6 +2544,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.keyPrompt()) return;
     this.keyPrompt.set(false);
     this.hasKey.set(true);
+    this.sound.play('eq.chave');
     this.keySeenBy.set([]);
     this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
     this.closeSpeech();
@@ -2496,6 +2589,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(null);
     this.board?.setActive(null);
     this.gamepad.rumble(0.6, 0.6, 300);
+    this.sound.play('fogo.encerrar');
   }
 
   protected cancel(): void {
@@ -2545,6 +2639,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeBurn();
     this.debrief.set(null);
     this.board?.clearFires();
+    this.sound.clearFires();
     this.board?.placeEnemies(
       this.enemies().map((e) => ({ ...e, alert: false, surrendered: false, gone: e.status === 'hidden' })),
     );
@@ -2798,6 +2893,31 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         visionHexes(e, this.area, this.walls(), ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, this.lowCover).map(hexKey),
       );
     this.board?.setVision(keys);
+  }
+
+  // ---------- som ----------
+
+  /** Passos do agente ao chegar num hexágono: duas pisadas por hexágono, na corrida. */
+  private agentSteps(hex: HexCoord, together: boolean): void {
+    if (!this.map) return;
+    const surface = surfaceAt(this.map, hex);
+    const gain = together ? 1.15 : 1;
+    this.sound.step(surface, { gain });
+    this.sound.step(surface, { gain: gain * 0.85, delay: SECONDS_PER_HEX / 2 });
+  }
+
+  /** Passos de galocha do inimigo (de longe, mais baixos; debaixo de telhado, abafados e só de perto). */
+  private enemySteps(hex: HexCoord, speed: number, hidden = false): void {
+    if (!this.map) return;
+    const surface = surfaceAt(this.map, hex);
+    const opts = { boot: 'galocha' as const, at: hex, hidden, gain: speed > 1 ? 1 : 0.7 };
+    this.sound.step(surface, opts);
+    if (!hidden) this.sound.step(surface, { ...opts, gain: opts.gain * 0.85, delay: SECONDS_PER_HEX / speed / 2 });
+  }
+
+  /** Resultado de um d20 que o jogador vê (o do interrogatório é escondido e não passa por aqui). */
+  private checkSound(result: number, pass: boolean): void {
+    this.sound.play(result === 20 && pass ? 'teste.20' : pass ? 'teste.passou' : 'teste.falhou');
   }
 
   private say(text: string, tone: 'alert' | 'info'): void {
