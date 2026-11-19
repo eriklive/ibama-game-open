@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { DOOR_RULES, Door, DoorState } from './door';
-import { HexCoord, hexKey, rectArea } from './hex';
+import { HexCoord, hexKey, hexNeighbors, rectArea } from './hex';
 import { blockedHexes, findMap, playArea } from './maps';
 import { spawnDoors } from './door';
 import { spawnEnemy } from './enemies';
 import {
   CHASE_RULES,
+  arrestQueue,
   chaseCandidates,
   chaseEnd,
   chaseRadius,
@@ -82,6 +83,57 @@ describe('chaseCandidates', () => {
       new Set([hexKey(h(10, 10))]),
     );
     expect(out.length).toBe(1);
+  });
+});
+
+describe('arrestQueue (voz de prisão)', () => {
+  const area = rectArea(20, 20);
+  const arrest = { agentId: 'chefe', movement: 4 };
+
+  it('quem abordou rola primeiro, mesmo fora do raio de perseguição; depois os reforços do mais perto do suspeito ao mais longe', () => {
+    const out = arrestQueue(
+      h(10, 2),
+      arrest,
+      [
+        { id: 'longe', hex: h(10, 15) },
+        { id: 'chefe', hex: h(10, 12) },
+        { id: 'perto', hex: h(10, 10) },
+      ],
+      area,
+      new Set(),
+    );
+    expect(out.map((c) => c.id)).toEqual(['chefe', 'perto', 'longe']);
+    expect(out[0].path.at(-1)).toEqual(h(10, 2));
+    expect(out[0].path.length).toBe(10);
+  });
+
+  it('reforço só no raio de movimento de quem abordou (andando a partir dele)', () => {
+    const agents = [
+      { id: 'chefe', hex: h(10, 12) },
+      { id: 'fora', hex: h(10, 17) },
+    ];
+    expect(arrestQueue(h(10, 8), arrest, agents, area, new Set()).map((c) => c.id)).toEqual(['chefe']);
+    expect(
+      arrestQueue(h(10, 8), { ...arrest, movement: 5 }, agents, area, new Set()).map((c) => c.id),
+    ).toEqual(['chefe', 'fora']);
+  });
+
+  it('quem já correu fica de fora; sem quem abordou no tabuleiro, ninguém reforça', () => {
+    const agents = [
+      { id: 'chefe', hex: h(10, 12) },
+      { id: 'b', hex: h(10, 13) },
+    ];
+    expect(
+      arrestQueue(h(10, 8), arrest, agents, area, new Set(), new Set(['chefe'])).map((c) => c.id),
+    ).toEqual(['b']);
+    expect(arrestQueue(h(10, 8), arrest, [agents[1]], area, new Set())).toEqual([]);
+  });
+
+  it('sem caminho até o suspeito, não entra na fila', () => {
+    const ring = new Set(hexNeighbors(h(10, 8)).map(hexKey));
+    expect(
+      arrestQueue(h(10, 8), arrest, [{ id: 'chefe', hex: h(10, 12) }], area, ring),
+    ).toEqual([]);
   });
 });
 

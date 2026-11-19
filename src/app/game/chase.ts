@@ -6,6 +6,9 @@
  * 1. **Gatilho.** No turno inimigo, antes de um suspeito em alerta correr, os agentes no
  *    **raio de perseguição** dele (`chaseRadius`: base + vigor + iniciativa, com caminho livre)
  *    podem ir atrás (`chaseCandidates`). Quem já correu nesta rodada inimiga não vai de novo.
+ *    **Voz de prisão:** se ele fugiu de uma abordagem, a fila é outra (`arrestQueue`): primeiro
+ *    rola quem abordou; se hesitar, os agentes no raio de movimento dele, do mais perto do
+ *    suspeito ao mais longe, um por vez, até alguém arrancar (ou o jogador deixar fugir).
  * 2. **Iniciativa.** Só o agente rola: d20 + iniciativa, pelo menos `initiativeDC` (8), sem
  *    depender do garimpeiro (`initiativeCheck`). Passou: sai correndo. Falhou: hesita e o
  *    garimpeiro foge normal. O garimpeiro não rola nada novo: o teste de fuga da faixa amarela da
@@ -107,6 +110,53 @@ export function chaseCandidates(
     out.push({ id: a.id, path: pathTo(reach, target) });
   }
   return out.sort((x, y) => x.path.length - y.path.length);
+}
+
+/** Quem deu a voz de prisão num suspeito que fugiu da abordagem. */
+export interface ArrestOrigin {
+  /** O agente que abordou. */
+  agentId: string;
+  /** O movimento dele no turno da abordagem (2d4 + vigor): o raio de quem pode reforçar. */
+  movement: number;
+}
+
+/**
+ * Fila da voz de prisão: quem rola a iniciativa para ir atrás de um suspeito que fugiu de uma
+ * abordagem, na ordem. Primeiro o agente que abordou (basta ter caminho até o suspeito). Se ele
+ * hesitar, entram os agentes no raio de movimento dele (andando, a partir do hexágono dele,
+ * no máximo `arrest.movement` passos), do mais perto do suspeito ao mais longe. Quem está em
+ * `alreadyChased` fica de fora; quem não tem caminho até o suspeito também.
+ */
+export function arrestQueue(
+  target: HexCoord,
+  arrest: ArrestOrigin,
+  agents: readonly ChaseAgent[],
+  area: HexArea,
+  blocked: ReadonlySet<string>,
+  alreadyChased: ReadonlySet<string> = new Set(),
+): ChaseCandidate[] {
+  const targetKey = hexKey(target);
+  const free = new Set(blocked);
+  free.delete(targetKey);
+  const pathFrom = (a: ChaseAgent): HexCoord[] | null => {
+    const reach = reachableHexes(a.hex, area.hexes.length, area, free);
+    return reach.has(targetKey) ? pathTo(reach, target) : null;
+  };
+  const leader = agents.find((a) => a.id === arrest.agentId);
+  const out: ChaseCandidate[] = [];
+  if (leader && !alreadyChased.has(leader.id)) {
+    const path = pathFrom(leader);
+    if (path) out.push({ id: leader.id, path });
+  }
+  if (!leader) return out;
+  const nearLeader = reachableHexes(leader.hex, Math.max(0, arrest.movement), area, free);
+  const backups: ChaseCandidate[] = [];
+  for (const a of agents) {
+    if (a.id === leader.id || alreadyChased.has(a.id) || !nearLeader.has(hexKey(a.hex))) continue;
+    const path = pathFrom(a);
+    if (path) backups.push({ id: a.id, path });
+  }
+  return [...out, ...backups.sort((x, y) => x.path.length - y.path.length)];
 }
 
 /**

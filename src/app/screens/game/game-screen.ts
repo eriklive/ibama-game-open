@@ -12,11 +12,13 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { rollDie, sum } from '../../game/dice';
 import {
+  ArrestOrigin,
   CHASE_RULES,
   ChaseAgent,
   ChaseCandidate,
   ChaseStats,
   Side,
+  arrestQueue,
   chaseCandidates,
   fleeDoorAction,
   targetChoices,
@@ -453,10 +455,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly check = signal<CheckView | null>(null);
   /** Carimbo "Perseguir?" do turno inimigo (ver `tryChase`). */
   protected readonly chaseOffer = signal<{
+    /** Linha de cima do carimbo ("Ele vai correr", "Voz de prisão", "Reforço"). */
+    kicker: string;
     enemy: string;
     options: { id: string; name: string; steps: number; chance: string }[];
   } | null>(null);
   private chaseOfferDone?: (agentId: string | null) => void;
+  /**
+   * Suspeitos que fugiram de uma abordagem nesta rodada: quem deu a voz de prisão (ver
+   * `arrestQueue`). Vale até o fim do próximo turno inimigo.
+   */
+  private readonly arrests = new Map<string, ArrestOrigin>();
   /** Placar da perseguição em curso: distância e quanto da rota dele já foi. */
   protected readonly chaseHud = signal<ChaseHud | null>(null);
   /** Curva: o jogador tem `seconds` para deslizar para o lado (`decisao:perseguicao`). */
@@ -1145,7 +1154,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       // parado no lugar (o Jô comendo): não anda nem gira, então nem chama a câmera
       if (enemy.status === 'patrol' && stationary(enemy)) continue;
       // em alerta: antes de correr, quem está perto pode ir atrás dele
-      if (enemy.status === 'alert' && (await this.tryChase(enemy, epoch, chased, caught))) {
+      if (enemy.status === 'alert' && (await this.tryChase(enemy, epoch, chased, caught, handled))) {
         if (stale()) return;
         await this.wait(300);
         continue;
@@ -1156,6 +1165,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (shown) await this.wait(300);
     }
     if (stale()) return;
+    // a voz de prisão vale só para a corrida logo depois da abordagem
+    this.arrests.clear();
     // o abalado de uma rodada atrás passa
     for (const e of this.enemies()) if (e.shaken && !caught.has(e.id)) this.updateEnemy(e.id, { shaken: false });
     this.announceIfOver();
@@ -1257,15 +1268,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * O jogador escolhe quem (ou deixa fugir), o agente rola a iniciativa e, se arrancar, a
    * perseguição roda inteira. Devolve se houve perseguição (`false`: ele foge como sempre).
    */
-  private async tryChase(enemy: EnemyState, epoch: number, chased: Set<string>, caught: Set<string>): Promise<boolean> {
+  private async tryChase(
+    enemy: EnemyState,
+    epoch: number,
+    chased: Set<string>,
+    caught: Set<string>,
+    handled: Set<string>,
+  ): Promise<boolean> {
     const board = this.board!;
     // debaixo de um telhado que o jogador não enxerga, ninguém vê ele arrancar
     if (board.isCovered(enemy.hex)) return false;
-    const agents: ChaseAgent[] = CHARACTERS.flatMap((c) => {
-      const hex = this.positions().get(c.id);
-      return hex ? [{ id: c.id, hex, stats: this.chaseStats(c.id) }] : [];
-    });
-    const offers = chaseCandidates(enemy.hex, agents, this.area, this.enemyWalls(), chased);
+    const arrest = this.arrests.get(enemy.id);
+    if (arrest) return this.chaseArrest(enemy, arrest, epoch, chased, caught, handled);
+    const offers = chaseCandidates(enemy.hex, this.chaseAgents(), this.area, this.enemyWalls(), chased);
     if (!offers.length) return false;
     board.focusHex(enemy.hex);
     board.startleEnemy(enemy.id);
@@ -1274,6 +1289,96 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.destroyed || this.epoch !== epoch) return true;
     if (!agentId) return false;
     return this.startChase(enemy, agentId, offers.find((o) => o.id === agentId)!.path, epoch, chased, caught);
+  }
+
+  /** Agentes no tabuleiro, com os atributos de perseguição. */
+  private chaseAgents(): ChaseAgent[] {
+    return CHARACTERS.flatMap((c) => {
+      const hex = this.positions().get(c.id);
+      return hex ? [{ id: c.id, hex, stats: this.chaseStats(c.id) }] : [];
+    });
+  }
+
+  /** Fila da voz de prisão para este suspeito agora (ver `arrestQueue`). */
+  private arrestOffers(enemy: EnemyState, arrest: ArrestOrigin, chased: ReadonlySet<string>): ChaseCandidate[] {
+    return arrestQueue(enemy.hex, arrest, this.chaseAgents(), this.area, this.enemyWalls(), chased);
+  }
+
+  /**
+   * Suspeito que fugiu de uma abordagem: quem deu a voz de prisão rola primeiro. Se ele tiver
+   * dois ou mais fugindo dele, escolhe antes qual perseguir (`decisao:alvo`); o escolhido corre
+   * a fila dele na hora e sai da vez. Devolve se houve perseguição.
+   */
+  private async chaseArrest(
+    enemy: EnemyState,
+    arrest: ArrestOrigin,
+    epoch: number,
+    chased: Set<string>,
+    caught: Set<string>,
+    handled: Set<string>,
+  ): Promise<boolean> {
+    const alive = () => !this.destroyed && this.epoch === epoch;
+    const leader = arrest.agentId;
+    this.arrests.delete(enemy.id);
+    const leads = (e: EnemyState, a: ArrestOrigin) => this.arrestOffers(e, a, chased)[0]?.id === leader;
+    let picked: string | null | undefined;
+    if (leads(enemy, arrest)) {
+      const rivals = this.enemies().filter((e) => {
+        const a = this.arrests.get(e.id);
+        return e.status === 'alert' && !handled.has(e.id) && a?.agentId === leader && !this.board!.isCovered(e.hex) && leads(e, a);
+      });
+      if (rivals.length) {
+        picked = await this.chooseTarget(leader, [enemy.id, ...rivals.map((e) => e.id)]);
+        if (!alive()) return true;
+        if (picked !== enemy.id) {
+          // foi atrás de outro (ou de nenhum): este segue a fila sem ele
+          if (picked) {
+            const other = this.enemy(picked)!;
+            const otherArrest = this.arrests.get(picked)!;
+            this.arrests.delete(picked);
+            handled.add(picked);
+            if (!(await this.runArrestQueue(other, otherArrest, epoch, chased, caught, true)) && alive()) await this.flee(other, epoch);
+            if (!alive()) return true;
+            await this.wait(300);
+          }
+          chased.add(leader);
+        }
+      }
+    }
+    return this.runArrestQueue(enemy, arrest, epoch, chased, caught, picked === enemy.id);
+  }
+
+  /**
+   * A fila da voz de prisão, um agente por vez: carimbo "Perseguir?" só com o da vez (ou
+   * direto, se ele já escolheu este alvo), iniciativa e, se arrancar, a perseguição. Hesitou:
+   * o próximo da fila. Devolve se houve perseguição (`false`: ninguém foi, ele foge normal).
+   */
+  private async runArrestQueue(
+    enemy: EnemyState,
+    arrest: ArrestOrigin,
+    epoch: number,
+    chased: Set<string>,
+    caught: Set<string>,
+    chosen: boolean,
+  ): Promise<boolean> {
+    const board = this.board!;
+    for (let first = true; ; first = false) {
+      if (this.destroyed || this.epoch !== epoch) return true;
+      const queue = this.arrestOffers(this.enemy(enemy.id) ?? enemy, arrest, chased);
+      const [next] = queue;
+      if (!next) return false;
+      if (!(first && chosen)) {
+        board.focusHex(enemy.hex);
+        board.startleEnemy(enemy.id);
+        this.sound.play('abo.carimbo');
+        const kicker = next.id === arrest.agentId ? 'Voz de prisão' : 'Reforço';
+        const agentId = await this.offerChase(enemy, [next], kicker);
+        if (this.destroyed || this.epoch !== epoch) return true;
+        if (!agentId) return false;
+      }
+      const more = queue.length > 1;
+      if (await this.startChase(enemy, next.id, next.path, epoch, chased, caught, more)) return true;
+    }
   }
 
   /**
@@ -1287,6 +1392,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     epoch: number,
     chased: Set<string>,
     caught: Set<string>,
+    /** Ainda tem gente na fila da voz de prisão depois dele. */
+    backup = false,
   ): Promise<boolean> {
     chased.add(agentId);
     const stats = this.chaseStats(agentId);
@@ -1300,7 +1407,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!ini.pass) {
       this.sound.chaseEnd();
       this.board?.setChaseCamera(null);
-      this.say(`${this.nameOf(agentId)} hesitou. ${enemy.name} corre!`, 'alert');
+      this.say(backup ? `${this.nameOf(agentId)} hesitou! Quem vai?` : `${this.nameOf(agentId)} hesitou. ${enemy.name} corre!`, 'alert');
       return false;
     }
     await this.runChase(enemy.id, agentId, path, epoch, caught);
@@ -1316,13 +1423,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async resolveTargetChoices(epoch: number, chased: Set<string>, caught: Set<string>, handled: Set<string>): Promise<void> {
     const board = this.board!;
     const alive = () => !this.destroyed && this.epoch === epoch;
-    const agents = (): ChaseAgent[] =>
-      CHARACTERS.flatMap((c) => {
-        const hex = this.positions().get(c.id);
-        return hex ? [{ id: c.id, hex, stats: this.chaseStats(c.id) }] : [];
-      });
+    const agents = () => this.chaseAgents();
+    // quem fugiu de uma abordagem tem a fila da voz de prisão (ver `chaseArrest`)
     const runners = () =>
-      this.enemies().filter((e) => e.status === 'alert' && !handled.has(e.id) && !board.isCovered(e.hex));
+      this.enemies().filter((e) => e.status === 'alert' && !handled.has(e.id) && !this.arrests.has(e.id) && !board.isCovered(e.hex));
     for (;;) {
       if (!alive()) return;
       const offers = new Map(runners().map((e) => [e.id, chaseCandidates(e.hex, agents(), this.area, this.enemyWalls(), chased)]));
@@ -1440,10 +1544,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /** Mostra o carimbo "Perseguir?" com os agentes que podem ir. Resolve com o escolhido (ou `null`). */
-  private offerChase(enemy: EnemyState, offers: readonly ChaseCandidate[]): Promise<string | null> {
+  private offerChase(enemy: EnemyState, offers: readonly ChaseCandidate[], kicker = 'Ele vai correr'): Promise<string | null> {
     return new Promise((done) => {
       this.chaseOfferDone = done;
       this.chaseOffer.set({
+        kicker,
         enemy: enemy.name,
         options: offers.map((o) => ({
           id: o.id,
@@ -2831,6 +2936,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const motion = !reducedMotion();
     for (const e of surrender) this.updateEnemy(e.id, { status: 'surrendered', facing: facingBetween(e.hex, from) });
     for (const e of flee) this.updateEnemy(e.id, { status: 'alert', facing: facingBetween(e.hex, from) });
+    // voz de prisão: quem abordou rola primeiro na perseguição; os reforços vêm do raio de movimento dele
+    const movement = turnMovement(this.rolled(), this.roster.loadout(this.active().id), this.grouped(), this.led());
+    for (const e of flee) this.arrests.set(e.id, { agentId: this.active().id, movement });
     this.refreshVision();
     this.gamepad.rumble(1, 0.6, 320);
     this.haptics.vibrate(APPROACH_PATTERN);
@@ -3172,6 +3280,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeGrouping();
     this.board?.placeUnits(this.positions());
     this.enemies.set(this.initialEnemies());
+    this.arrests.clear();
     this.noticed.set(new Set());
     this.found.set(new Set());
     this.searchFails.set(new Map());

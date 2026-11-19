@@ -384,7 +384,7 @@
   @if (chaseOffer(); as offer) {
     <aside class="door-sheet chase-offer" aria-label="Perseguir o suspeito" data-testid="chase-offer">
       <div class="door-head">
-        <span class="door-kicker">Ele vai correr</span>
+        <span class="door-kicker">{{ offer.kicker }}</span>
         <h2 class="door-name">Perseguir {{ offer.enemy }}?</h2>
       </div>
       <ul class="door-opts">
