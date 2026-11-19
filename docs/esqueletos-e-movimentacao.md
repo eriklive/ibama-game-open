@@ -54,9 +54,9 @@ Regras:
   `(dx, dz)` — a mesma convenção da "alça" (`nub` em `z = +0.42`) da peça atual.
 - **Altura no tabuleiro**: o hexágono tem raio 1 (`HEX_SIZE`), distância entre centros vizinhos
   √3 ≈ 1,73. A referência é o hexágono caber num quadrado de **1,5 m × 1,5 m** (1,5 m de ponta a
-  ponta), então 1 m = 2 / 1,5 ≈ 1,33 unidade (`METER`). Os personagens ganham mais 15% por cima disso
-  (`CHARACTER_SCALE`, exagero de miniatura): um humano de 1,70 m fica com **~2,61 unidades** de
-  altura (`heightOf`; escala calculada pela bounding box do bind pose).
+  ponta), então 1 m = 2 / 1,5 ≈ 1,33 unidade (`METER`). Os personagens ficam na escala real, sem
+  exagero de miniatura: um humano de 1,70 m fica com **~2,27 unidades** de altura (`heightOf`;
+  escala calculada pela bounding box do bind pose).
 - **Origem** do modelo no chão, centrada entre os pés; o bind pose pode ser T ou A, mas **todo o
   catálogo usa o mesmo** (A-pose da UAL).
 
