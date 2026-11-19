@@ -21,7 +21,8 @@
  *    vira a "pista" e não muda mais. Nela ficam as **paradas**:
  *    - **curva** (mudança de direção na pista do agente, ver `agentCurves`): uma
  *      `decisao:perseguicao`, pedida quando o **agente** chega nela. O agente precisa deslizar
- *      para o lado da curva e rolar d20 + agilidade; só ele rola (`resolveCurve`);
+ *      para o lado da curva e rolar d20 + agilidade (`resolveCurve`). Nas curvas da rota de
+ *      fuga quem rola é o garimpeiro, sozinho e sem lado a escolher (`resolveEnemyCurve`);
  *    - **porta** fechada no caminho: o garimpeiro rola d4 para escolher abrir ou arrombar e d20
  *      para conseguir (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta
  *      fica aberta e o agente passa direto. A porta substitui a curva naquele hexágono.
@@ -442,6 +443,15 @@ export function resolveCurve(i: CurveInput): CurveResult {
   const agentPass = !crashed && i.agentRoll + (i.agent.agilidade ?? 0) >= CHASE_RULES.curveDC;
   const delta = crashed ? 1 : agentPass ? -1 : 0;
   return { crashed, agentPass, delta };
+}
+
+/**
+ * Curva **do garimpeiro** (na rota de fuga dele): só ele rola d20 + agilidade, sem lado para o
+ * jogador escolher. Escorregou (< `curveDC`) = −1 na distância; passou = 0.
+ */
+export function resolveEnemyCurve(roll: number, enemy: ChaseStats): { pass: boolean; delta: number } {
+  const pass = roll + (enemy.agilidade ?? 0) >= CHASE_RULES.curveDC;
+  return { pass, delta: pass ? 0 : -1 };
 }
 
 export type FleeDoorAction = 'abrir' | 'arrombar';

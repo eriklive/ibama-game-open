@@ -17,6 +17,7 @@ import {
   initiativeCheck,
   lockRoute,
   resolveCurve,
+  resolveEnemyCurve,
   resolveFleeDoor,
   resolveShout,
   shoutResistNeed,
@@ -303,6 +304,16 @@ describe('resolveCurve', () => {
   it('agilidade soma no d20 do agente', () => {
     const r = resolveCurve({ ...base, swiped: 'direita', agentRoll: 4, agent: { agilidade: 2 } });
     expect(r).toMatchObject({ agentPass: true, delta: -1 });
+  });
+});
+
+describe('resolveEnemyCurve', () => {
+  it('só ele rola: escorregou encosta 1, passou não muda', () => {
+    expect(resolveEnemyCurve(2, {})).toEqual({ pass: false, delta: -1 });
+    expect(resolveEnemyCurve(6, {})).toEqual({ pass: true, delta: 0 });
+  });
+  it('agilidade dele soma no d20', () => {
+    expect(resolveEnemyCurve(4, { agilidade: 2 }).pass).toBe(true);
   });
 });
 
