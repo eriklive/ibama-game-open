@@ -66,6 +66,11 @@ export const CHASE_RULES = {
   seenCost: 6,
   /** Curva: d20 + agilidade, pelo menos isto. Vale para agente e garimpeiro. */
   curveDC: 6,
+  /**
+   * Hexágonos antes da curva dele em que o garimpeiro já rola o d20: o resultado está pronto
+   * quando ele pisa nela, e a corrida não para.
+   */
+  enemyCurveLead: 3,
   /** Tempo (s, relógio real) para deslizar na curva antes de contar como "não deslizou". */
   swipeSeconds: 2,
   /** Ângulo mínimo (graus) entre dois trechos retos da rota para contar como curva. */
@@ -449,7 +454,13 @@ export function resolveCurve(i: CurveInput): CurveResult {
  * Curva **do garimpeiro** (na rota de fuga dele): só ele rola d20 + agilidade, sem lado para o
  * jogador escolher. Escorregou (< `curveDC`) = −1 na distância; passou = 0.
  */
-export function resolveEnemyCurve(roll: number, enemy: ChaseStats): { pass: boolean; delta: number } {
+/** Resultado da curva do garimpeiro: passou, e a mudança na distância (−1 se escorregou). */
+export interface EnemyCurveResult {
+  pass: boolean;
+  delta: number;
+}
+
+export function resolveEnemyCurve(roll: number, enemy: ChaseStats): EnemyCurveResult {
   const pass = roll + (enemy.agilidade ?? 0) >= CHASE_RULES.curveDC;
   return { pass, delta: pass ? 0 : -1 };
 }
