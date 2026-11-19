@@ -25,41 +25,29 @@
   </div>
 }
 
-<!-- Perseguição: curva (decisao:perseguicao) — deslizar para o lado em poucos segundos -->
+<!-- Perseguição: curva (decisao:perseguicao). O meio da tela fica livre para ver a curva; as
+     setas ficam nas bordas e arrastar para um lado em qualquer ponto também vale. -->
 @if (curve(); as cv) {
   <div
     class="curve"
     data-testid="curve"
+    role="dialog"
+    aria-label="Curva: deslize para o lado da curva"
     (pointerdown)="pointer($event)"
     (pointerup)="pointer($event)"
   >
-    <div class="curve-card" role="dialog" aria-label="Curva: deslize para o lado">
+    <div class="curve-head">
       <span class="curve-kicker">Curva!</span>
-      <span class="curve-text">Para que lado a rota dobra, de quem corre?</span>
+      <span class="curve-text">deslize para o lado</span>
       <span class="curve-timer" aria-hidden="true"
         ><i [style.animation-duration.s]="cv.seconds"></i
       ></span>
-      <span class="curve-btns">
-        <button
-          type="button"
-          class="curve-btn"
-          data-testid="curve-left"
-          aria-label="Esquerda"
-          (click)="swipe.emit('esquerda')"
-        >
-          ←
-        </button>
-        <button
-          type="button"
-          class="curve-btn"
-          data-testid="curve-right"
-          aria-label="Direita"
-          (click)="swipe.emit('direita')"
-        >
-          →
-        </button>
-      </span>
-      <span class="curve-hint">deslize · setas · direcional</span>
     </div>
+    <button type="button" class="curve-btn left" data-testid="curve-left" aria-label="Esquerda" (click)="swipe.emit('esquerda')">
+      ←
+    </button>
+    <button type="button" class="curve-btn right" data-testid="curve-right" aria-label="Direita" (click)="swipe.emit('direita')">
+      →
+    </button>
   </div>
 }

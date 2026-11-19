@@ -812,7 +812,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 
 /* menu da porta: a papelada da HUD sai de cena; as ações entram como fichas na direita */
 .game.rolling .goal { visibility: hidden; }
-.game.door-focus :is(.corner, .goal, .left, .suspects, .actions, .end-op) { opacity: 0; pointer-events: none; }
+.game:is(.door-focus, .chase-mode) :is(.corner, .goal, .left, .suspects, .actions, .end-op) { opacity: 0; pointer-events: none; }
 .game.door-focus .telegram {
   left: calc((100% - var(--door-w)) / 2);
   max-width: min(260px, calc(100% - var(--door-w) - 28px - var(--safe-left)));

@@ -478,8 +478,13 @@ porta a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e vo
 mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
 `CHASE_MUSIC` (`sound.service.ts`).
 
-Por enquanto tudo acontece na câmera tática; a câmera de perseguição (atrás do agente) e a pose
-de indecisão com dois fugindo vêm depois.
+**Câmera.** Ao arrancar, a câmera desce (~0,8 s) e encosta nas costas do agente, um pouco à
+direita, olhando para o suspeito (atrás 4,4 · altura 2,5 · mira 7 à frente; em retrato, atrás 6,2 ·
+altura 3,6). O FOV abre um pouco e a névoa fecha mais perto. A HUD de papel some (fica o placar
+embaixo) e, na curva, as setas ficam nas bordas da tela, com o meio livre para ver a rota acesa
+dobrar. No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
+
+A pose de indecisão com dois fugindo vem depois.
 
 ## Auras
 

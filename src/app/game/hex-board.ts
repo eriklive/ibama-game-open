@@ -20,6 +20,23 @@ const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa um
 
 /** Peças com modelo 3D: velocidade da corrida entre hexágonos (3,6 m/s ≈ 2,8 hex/s). */
 const RUN_SPEED = 3.6 * METER;
+
+/**
+ * Câmera de perseguição (relativa ao agente, olhando para o inimigo): atrás e acima dele, mira à
+ * frente. Em retrato ela recua e sobe para o inimigo caber na mesma tela. O FOV abre um pouco.
+ */
+const CHASE_CAMERA = {
+  back: 4.4,
+  height: 2.5,
+  portraitBack: 6.2,
+  portraitHeight: 3.6,
+  aim: 7,
+  aimHeight: 0.9,
+  side: 0.8,
+  fovBoost: 8,
+  /** Quanto a névoa fecha (fração do raio de visão) com a câmera rasante. */
+  viewCut: 0.5,
+} as const;
 /** Tempo (s) que um personagem leva para correr de um hexágono ao vizinho (marca os passos). */
 export const SECONDS_PER_HEX = (HEX_STEP * HEX_SIZE) / RUN_SPEED;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
@@ -331,6 +348,14 @@ export class HexBoard {
   private cine: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number; zoom: number } | null = null;
   private cineLast: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number; zoom: number } | null = null;
   private cineBlend = 0;
+  /**
+   * Câmera de perseguição: desce e encosta nas costas do agente, olhando para o inimigo que ele
+   * persegue. `chaseBlend` vai de 0 (câmera de sempre) a 1 (atrás do agente) e volta.
+   */
+  private chase: { unitId: string; enemyId: string } | null = null;
+  private chaseLast: { unitId: string; enemyId: string } | null = null;
+  private chaseBlend = 0;
+  private readonly chaseDir = new THREE.Vector3(0, 0, 1);
   /** Afastamento atual da cena (1 = padrão); acompanha `cine.zoom` devagar (ver `setCineZoom`). */
   private cineZoom = 1;
   /** Estado das portas comuns: fechadas, mantêm o telhado e escondem o interior. */
@@ -922,6 +947,9 @@ export class HexBoard {
       e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
     };
     await Promise.all([runUnit(), runEnemy()]);
+    // parados (curva, porta, fim): o agente encara quem persegue
+    const d = e.group.position.clone().sub(u.group.position);
+    if (d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
     this.moving = false;
   }
 
@@ -1329,6 +1357,61 @@ export class HexBoard {
    * Mistura a câmera com a da cena da porta (ver `focusDoor`), como a inspeção: ajusta a
    * posição e `look`, desloca a vista para a esquerda das fichas e devolve a distância.
    */
+  /** Liga (com o agente e o inimigo) ou desliga (`null`) a câmera de perseguição. */
+  setChaseCamera(unitId: string | null, enemyId?: string): void {
+    if (unitId && enemyId) {
+      const u = this.units.get(unitId);
+      const e = this.enemies.get(enemyId);
+      // começa olhando para ele, sem girar do nada
+      if (u && e) this.chaseDir.copy(e.group.position).sub(u.group.position).setY(0).normalize();
+      this.chase = this.chaseLast = { unitId, enemyId };
+    } else {
+      this.chase = null;
+      // a câmera de sempre volta para quem perseguiu
+      if (this.chaseLast) {
+        const u = this.units.get(this.chaseLast.unitId);
+        if (u) this.camGoal.copy(this.worldOf(u.hex));
+      }
+    }
+  }
+
+  private blendChase(dt: number, look: THREE.Vector3, dist: number): number {
+    const goal = this.chase ? 1 : 0;
+    // ~0,8 s para descer ou subir
+    this.chaseBlend += (goal - this.chaseBlend) * (1 - Math.exp(-dt * 3.6));
+    if (Math.abs(goal - this.chaseBlend) < 0.002) this.chaseBlend = goal;
+    const c = this.chase ?? this.chaseLast;
+    const fov = 40 + CHASE_CAMERA.fovBoost * this.chaseBlend;
+    if (Math.abs(this.camera.fov - fov) > 0.05) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    const u = c && this.units.get(c.unitId);
+    if (!c || !u || this.chaseBlend <= 0) return dist;
+    const e = this.enemies.get(c.enemyId);
+    // olha para ele (ou para onde o agente corre); suave, para o zigue-zague do grid não balançar
+    const want = e && !e.gone
+      ? e.group.position.clone().sub(u.group.position).setY(0)
+      : new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
+    if (want.lengthSq() > 0.01) this.chaseDir.lerp(want.normalize(), 1 - Math.exp(-dt * 3)).normalize();
+    const portrait = this.camera.aspect < 1;
+    const back = portrait ? CHASE_CAMERA.portraitBack : CHASE_CAMERA.back;
+    const height = portrait ? CHASE_CAMERA.portraitHeight : CHASE_CAMERA.height;
+    const p = u.group.position;
+    // um pouco para a direita do agente: ele fica à esquerda e o inimigo aparece ao lado dele
+    const right = new THREE.Vector3(-this.chaseDir.z, 0, this.chaseDir.x);
+    const pos = new THREE.Vector3(p.x, height, p.z)
+      .addScaledVector(this.chaseDir, -back)
+      .addScaledVector(right, CHASE_CAMERA.side);
+    const target = new THREE.Vector3(p.x, CHASE_CAMERA.aimHeight, p.z)
+      .addScaledVector(this.chaseDir, CHASE_CAMERA.aim)
+      .addScaledVector(right, CHASE_CAMERA.side * 0.3);
+    const k = this.chaseBlend * this.chaseBlend * (3 - 2 * this.chaseBlend);
+    this.camera.position.lerp(pos, k);
+    look.lerp(target, k);
+    return THREE.MathUtils.lerp(dist, back + CHASE_CAMERA.aim, k);
+  }
+
   private blendCine(dt: number, look: THREE.Vector3, dist: number): number {
     const goal = this.cine ? 1 : 0;
     this.cineBlend += (goal - this.cineBlend) * (1 - Math.exp(-dt * 5));
@@ -2410,6 +2493,7 @@ export class HexBoard {
     this.viewShift.x = this.viewShift.y = 0;
     dist = this.blendInspect(dt, look, dist);
     dist = this.blendCine(dt, look, dist);
+    dist = this.blendChase(dt, look, dist);
     this.camera.lookAt(look);
     this.updateOccluders(dt);
     // a cena da porta empurra a vista para a esquerda das fichas; o close-up, para cima da papelada
@@ -2420,7 +2504,8 @@ export class HexBoard {
 
     // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
     // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
-    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE;
+    // na perseguição a câmera rasante enxergaria mata demais: a névoa fecha mais perto
+    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE * (1 - CHASE_CAMERA.viewCut * this.chaseBlend);
     const fog = this.scene.fog as THREE.Fog;
     fog.far = dist + view;
     fog.near = dist + view * 0.45;

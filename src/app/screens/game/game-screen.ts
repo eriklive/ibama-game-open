@@ -1297,7 +1297,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     try {
       await this.chaseSteps(enemyId, agentId, agentPath, epoch, caught);
     } finally {
-      // terminou, ou a partida recomeçou no meio: a faixa some e o placar sai
+      // terminou, ou a partida recomeçou no meio: a câmera sobe, a faixa some e o placar sai
+      this.board?.setChaseCamera(null);
       this.sound.chaseEnd();
       this.chaseHud.set(null);
     }
@@ -1329,6 +1330,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sound.chaseDistance(distance);
     };
     hud();
+    // a câmera desce e encosta nas costas do agente; a faixa entra quando ela chega
+    board.setChaseCamera(agentId, enemyId);
+    await this.wait(800);
+    if (!alive()) return;
     void this.sound.chaseStart(distance);
     const onStep = (w: 'unit' | 'enemy', hex: HexCoord) => {
       if (!alive()) return;
@@ -1398,6 +1403,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.refreshVision();
     this.sound.chaseEnd();
     await this.wait(1400);
+    if (!alive()) return;
+    board.setChaseCamera(null);
+    this.chaseHud.set(null);
+    await this.wait(800);
   }
 
   /**
