@@ -1,0 +1,290 @@
+import { describe, expect, it } from 'vitest';
+import { DOOR_RULES, Door, DoorState } from './door';
+import { HexCoord, hexKey, rectArea } from './hex';
+import { blockedHexes, findMap, playArea } from './maps';
+import { spawnDoors } from './door';
+import {
+  CHASE_RULES,
+  chaseCandidates,
+  chaseEnd,
+  chaseRadius,
+  fleeDoorAction,
+  fleeDoorNeed,
+  initiativeChance,
+  initiativeContest,
+  lockRoute,
+  movementAfterChase,
+  resolveCurve,
+  resolveFleeDoor,
+  routeCurves,
+  routeStops,
+  targetChoices,
+} from './chase';
+
+const h = (col: number, row: number): HexCoord => ({ col, row });
+const door = (hex: HexCoord, state: DoorState, extra: Partial<Door> = {}): Door => ({
+  hex,
+  state,
+  lock: DOOR_RULES.lock,
+  broken: false,
+  ...extra,
+});
+const line = (from: HexCoord, n: number, dc: number, dr: number): HexCoord[] =>
+  Array.from({ length: n }, (_, i) => h(from.col + dc * i, from.row + dr * i));
+
+describe('chaseRadius', () => {
+  it('base + vigor + iniciativa, nunca negativo', () => {
+    expect(chaseRadius()).toBe(CHASE_RULES.radiusBase);
+    expect(chaseRadius({ vigor: 1, iniciativa: 2 })).toBe(CHASE_RULES.radiusBase + 3);
+    expect(chaseRadius({ vigor: -5, iniciativa: -5 })).toBe(0);
+  });
+});
+
+describe('chaseCandidates', () => {
+  const area = rectArea(20, 20);
+  it('entra quem chega até ele dentro do raio, o mais perto primeiro', () => {
+    const out = chaseCandidates(
+      h(10, 10),
+      [
+        { id: 'longe', hex: h(10, 14) },
+        { id: 'perto', hex: h(10, 12) },
+        { id: 'fora', hex: h(10, 18) },
+      ],
+      area,
+      new Set(),
+    );
+    expect(out.map((c) => c.id)).toEqual(['perto', 'longe']);
+    expect(out[0].path.at(-1)).toEqual(h(10, 10));
+    expect(out[0].path.length).toBe(2);
+  });
+
+  it('parede no meio aumenta o caminho; quem já correu fica de fora', () => {
+    const wall = new Set(line(h(9, 11), 3, 1, 0).map(hexKey));
+    const out = chaseCandidates(h(10, 10), [{ id: 'a', hex: h(10, 12) }], area, wall);
+    expect(out).toEqual([]);
+    const far = chaseCandidates(
+      h(10, 10),
+      [{ id: 'a', hex: h(10, 12), stats: { vigor: 3 } }],
+      area,
+      wall,
+    );
+    expect(far[0].path.length).toBeGreaterThan(2);
+    expect(
+      chaseCandidates(h(10, 10), [{ id: 'a', hex: h(10, 12) }], area, new Set(), new Set(['a'])),
+    ).toEqual([]);
+  });
+
+  it('o hexágono do garimpeiro pode estar bloqueado (é o destino)', () => {
+    const out = chaseCandidates(
+      h(10, 10),
+      [{ id: 'a', hex: h(10, 12) }],
+      area,
+      new Set([hexKey(h(10, 10))]),
+    );
+    expect(out.length).toBe(1);
+  });
+});
+
+describe('targetChoices', () => {
+  it('só os agentes no raio de mais de um garimpeiro', () => {
+    const offers = new Map([
+      [
+        'g1',
+        [
+          { id: 'ana', path: [] },
+          { id: 'bruno', path: [] },
+        ],
+      ],
+      ['g2', [{ id: 'ana', path: [] }]],
+    ]);
+    expect([...targetChoices(offers)]).toEqual([['ana', ['g1', 'g2']]]);
+  });
+});
+
+describe('initiativeContest', () => {
+  it('soma iniciativa dos dois lados; empate fica com o garimpeiro', () => {
+    expect(initiativeContest(12, { iniciativa: 2 }, 13, {}).go).toBe(true);
+    expect(initiativeContest(10, {}, 10, {}).go).toBe(false);
+    expect(initiativeContest(10, { iniciativa: 1 }, 10, { iniciativa: 2 })).toEqual({
+      agentTotal: 11,
+      enemyTotal: 12,
+      go: false,
+    });
+  });
+  it('chance com atributos iguais: 190 de 400', () => {
+    expect(initiativeChance({}, {})).toBeCloseTo(190 / 400);
+    expect(initiativeChance({ iniciativa: 3 }, {})).toBeGreaterThan(0.5);
+  });
+});
+
+describe('routeCurves', () => {
+  it('reta para o sul ou para o oeste (zigue-zague do grid) não tem curva', () => {
+    expect(routeCurves(line(h(5, 1), 8, 0, 1))).toEqual([]);
+    expect(routeCurves(line(h(12, 5), 8, -1, 0))).toEqual([]);
+  });
+  it('L: desce e vira para o leste = curva à esquerda de quem corre', () => {
+    const pts = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
+    const curves = routeCurves(pts);
+    expect(curves.length).toBe(1);
+    expect(curves[0].side).toBe('esquerda');
+    expect(Math.abs(curves[0].index - 5)).toBeLessThanOrEqual(1);
+  });
+  it('desce e vira para o oeste = direita', () => {
+    const pts = [...line(h(10, 1), 6, 0, 1), ...line(h(9, 6), 5, -1, 0)];
+    expect(routeCurves(pts).map((c) => c.side)).toEqual(['direita']);
+  });
+});
+
+describe('routeStops', () => {
+  it('porta fechada vira parada e substitui a curva no mesmo hexágono', () => {
+    const pts = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
+    const corner = routeCurves(pts)[0].index;
+    const d = door(pts[corner], 'encostada');
+    const stops = routeStops(pts, new Map([[hexKey(d.hex), d]]));
+    expect(stops.map((s) => s.kind)).toEqual(['porta']);
+  });
+  it('porta aberta não para', () => {
+    const pts = line(h(5, 1), 6, 0, 1);
+    const d = door(pts[3], 'aberta');
+    expect(routeStops(pts, new Map([[hexKey(d.hex), d]]))).toEqual([]);
+  });
+});
+
+describe('lockRoute', () => {
+  // corredor: parede na coluna 8 com uma porta em (8, 5); a borda leste fica do outro lado
+  const area = rectArea(12, 11);
+  const wall = new Set(Array.from({ length: 11 }, (_, r) => hexKey(h(8, r))));
+  const at = (state: DoorState) => {
+    const d = door(h(8, 5), state);
+    return new Map([[hexKey(d.hex), d]]);
+  };
+
+  it('na borda: já fugiu', () => {
+    expect(lockRoute(h(0, 5), area, new Set()).escapes).toBe(true);
+  });
+  it('passa pela porta encostada ou trancada e para nela', () => {
+    for (const state of ['encostada', 'trancada'] as const) {
+      const r = lockRoute(h(9, 5), rectArea(12, 11), wall, at(state), [
+        h(10, 5),
+        h(10, 4),
+        h(10, 6),
+        h(11, 5),
+        h(11, 4),
+        h(11, 6),
+        h(9, 6),
+        h(9, 4),
+      ]);
+      expect(r.cornered).toBe(false);
+      expect(r.flee[0]).toEqual(h(8, 5));
+      expect(r.stops[0]).toMatchObject({ kind: 'porta', index: 1 });
+    }
+  });
+  it('bloqueada é parede: encurralado se não houver outra saída', () => {
+    const r = lockRoute(h(9, 5), area, wall, at('bloqueada'), [
+      h(10, 5),
+      h(10, 4),
+      h(10, 6),
+      h(11, 5),
+      h(11, 4),
+      h(11, 6),
+      h(9, 6),
+      h(9, 4),
+    ]);
+    expect(r.cornered).toBe(true);
+  });
+  it('rota longa é cortada em routeSteps e não chega à borda', () => {
+    const big = rectArea(40, 40);
+    const r = lockRoute(h(20, 20), big, new Set());
+    expect(r.flee.length).toBe(CHASE_RULES.routeSteps);
+    expect(r.escapes).toBe(false);
+  });
+});
+
+describe('resolveCurve', () => {
+  const base = { side: 'direita' as const, agent: {}, enemy: {} };
+  const cases: [string, 'direita' | 'esquerda' | null, number, number, number][] = [
+    ['bateu, ele passou', 'esquerda', 20, 10, 1],
+    ['não deslizou, ele escorregou', null, 20, 2, 0],
+    ['certo, falhou, ele passou', 'direita', 3, 10, 0],
+    ['certo, falhou, ele escorregou', 'direita', 3, 2, -1],
+    ['certo, passou, ele passou', 'direita', 6, 6, -1],
+    ['certo, passou, ele escorregou', 'direita', 15, 5, -2],
+  ];
+  for (const [name, swiped, agentRoll, enemyRoll, delta] of cases) {
+    it(name, () =>
+      expect(resolveCurve({ ...base, swiped, agentRoll, enemyRoll }).delta).toBe(delta),
+    );
+  }
+  it('agilidade soma no d20 dos dois', () => {
+    const r = resolveCurve({
+      ...base,
+      swiped: 'direita',
+      agentRoll: 4,
+      agent: { agilidade: 2 },
+      enemyRoll: 4,
+      enemy: { agilidade: 2 },
+    });
+    expect(r).toMatchObject({ agentPass: true, enemyPass: true, delta: -1 });
+  });
+});
+
+describe('porta na fuga', () => {
+  it('d4 1–2 abre, 3–4 arromba', () => {
+    expect([1, 2, 3, 4].map(fleeDoorAction)).toEqual(['abrir', 'abrir', 'arrombar', 'arrombar']);
+  });
+  it('o que ele precisa tirar', () => {
+    expect(fleeDoorNeed('abrir', door(h(0, 0), 'encostada'))).toBe(3);
+    expect(fleeDoorNeed('arrombar', door(h(0, 0), 'encostada'))).toBe(3);
+    expect(fleeDoorNeed('abrir', door(h(0, 0), 'trancada', { lock: 10 }))).toBe(10);
+    expect(fleeDoorNeed('arrombar', door(h(0, 0), 'trancada'))).toBe(12);
+    expect(fleeDoorNeed('abrir', door(h(0, 0), 'aberta'))).toBe(0);
+    expect(fleeDoorNeed('arrombar', door(h(0, 0), 'bloqueada'))).toBe(Infinity);
+  });
+  it('passou: abrir deixa aberta, arrombar deixa quebrada; falhou: −1 e porta igual', () => {
+    const d = door(h(0, 0), 'trancada');
+    expect(resolveFleeDoor(d, 1, 12).door.state).toBe('aberta');
+    expect(resolveFleeDoor(d, 4, 12).door.broken).toBe(true);
+    const fail = resolveFleeDoor(d, 4, 11);
+    expect(fail).toMatchObject({ pass: false, delta: -1 });
+    expect(fail.door).toBe(d);
+  });
+});
+
+describe('fim e cansaço', () => {
+  it('distância 0 agarra; fôlego ou rota no fim, foge', () => {
+    expect(chaseEnd(0, 3, 8, false)).toBe('agarrou');
+    expect(chaseEnd(2, 8, 8, false)).toBe('fugiu');
+    expect(chaseEnd(2, 3, 8, true)).toBe('fugiu');
+    expect(chaseEnd(2, 3, 8, false)).toBeNull();
+  });
+  it('passos corridos saem do próximo movimento', () => {
+    expect(movementAfterChase(7, 3)).toBe(4);
+    expect(movementAfterChase(4, 9)).toBe(0);
+  });
+});
+
+describe('rotas no Aeroporto', () => {
+  const m = findMap('aeroporto')!;
+  const route = (from: HexCoord, agent: HexCoord) =>
+    lockRoute(from, playArea(m), blockedHexes(m), spawnDoors(m.doors ?? [], m.doorStates), [agent]);
+
+  it('pista de terra: reta para o sul, sem paradas', () => {
+    const r = route(h(22, 26), h(21, 21));
+    expect(r.flee.every((p) => p.col === 22)).toBe(true);
+    expect(r.stops).toEqual([]);
+  });
+  it('trilha na mata: o zigue-zague vira poucas curvas, espaçadas', () => {
+    const r = route(h(11, 21), h(15, 21));
+    expect(r.stops.length).toBeGreaterThan(0);
+    expect(r.stops.length).toBeLessThanOrEqual(3);
+    r.stops
+      .slice(1)
+      .forEach((s, i) =>
+        expect(s.index - r.stops[i].index).toBeGreaterThanOrEqual(CHASE_RULES.curveSpacing),
+      );
+  });
+  it('casa: sai pela porta encostada, que é a primeira parada', () => {
+    const r = route(h(33, 28), h(31, 28));
+    expect(r.stops[0]).toMatchObject({ kind: 'porta', door: { state: 'encostada' } });
+  });
+});
