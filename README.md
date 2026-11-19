@@ -472,8 +472,14 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
 
-Por enquanto tudo acontece na câmera tática; a câmera de perseguição (atrás do agente), a pose
-de indecisão com dois fugindo e a música vêm depois.
+**Música.** A faixa da perseguição (`public/assets/sounds/perseguicao.mp3`, 11,9 s em loop) entra
+quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. Na curva e na
+porta a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
+mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
+`CHASE_MUSIC` (`sound.service.ts`).
+
+Por enquanto tudo acontece na câmera tática; a câmera de perseguição (atrás do agente) e a pose
+de indecisão com dois fugindo vêm depois.
 
 ## Auras
 
@@ -500,8 +506,9 @@ continuam pintando o hexágono (são escolha do jogador, não aura). Código em
 
 Sem falas por enquanto: passos, portas, fogo, dados, interface e o ambiente da mata. Os sons foram
 desenhados num caderno de som e quase todos são **sintetizados em código** com Web Audio
-(`src/app/game/audio/`), sem arquivo. O único arquivo é o alerta de avistado
-(`public/assets/sounds/alerta-inimigo.mp3`).
+(`src/app/game/audio/`), sem arquivo. Os arquivos são o alerta de avistado
+(`public/assets/sounds/alerta-inimigo.mp3`) e a faixa da perseguição
+(`public/assets/sounds/perseguicao.mp3`; ver [Perseguição](#perseguição-em-construção)).
 
 - **Menu → Som → Sons do jogo** liga e desliga (fica guardado no navegador). O áudio começa no
   primeiro toque ou tecla, como os navegadores exigem.

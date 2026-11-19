@@ -4,10 +4,10 @@
  * Tudo é gerado na hora com Web Audio; arquivos (MP3) entram por `sample`.
  *
  * Os barramentos e seus volumes vêm do caderno de som (rodada 6):
- * Ambiente, Mundo, Passos, Interface e Estados.
+ * Ambiente, Mundo, Passos, Interface e Estados; Música entrou com a perseguição.
  */
 
-export type BusId = 'amb' | 'mundo' | 'passos' | 'ui' | 'estado';
+export type BusId = 'amb' | 'mundo' | 'passos' | 'ui' | 'estado' | 'musica';
 export type NoiseKind = 'white' | 'pink' | 'brown';
 
 /** Volumes de cada barramento (0–1), acertados no caderno de som. */
@@ -17,6 +17,8 @@ export const BUS_VOLUMES: Readonly<Record<BusId, number>> = {
   passos: 1,
   ui: 1,
   estado: 1,
+  // a faixa da perseguição (arquivo): por baixo dos passos e dos dados
+  musica: 0.7,
 };
 
 /** Volume geral (antes do compressor). */
@@ -61,6 +63,17 @@ export interface ToneOpts extends Voice {
 export interface LoopHandle {
   stop(fade?: number): void;
   setLevel(level: number, ramp?: number): void;
+}
+
+/** Uma faixa de música tocando em loop (ver `AudioEngine.music`). */
+export interface MusicHandle extends LoopHandle {
+  /**
+   * Velocidade da fita (1 = normal). Abaixo de 1 o tom cai junto, como fita arrastando: o
+   * "ultra slow" da perseguição é 0,25.
+   */
+  setRate(rate: number, ramp?: number): void;
+  /** Brilho (0–1): abre o passa-baixa da faixa (mais perto do suspeito, mais aberta). */
+  setBrightness(amount: number, ramp?: number): void;
 }
 
 export const rnd = (a: number, b: number): number => a + Math.random() * (b - a);
@@ -348,6 +361,48 @@ export class AudioEngine {
     };
     this.loops.add(handle);
     return handle;
+  }
+
+  /**
+   * Toca `buffer` em loop no barramento de música, entrando em `fadeIn` segundos. A fita passa
+   * por um passa-baixa (`setBrightness`) e a velocidade pode cair e voltar (`setRate`).
+   */
+  music(buffer: AudioBuffer, level: number, fadeIn = 0.4): MusicHandle {
+    const c = this.ctx!;
+    const s = c.createBufferSource();
+    s.buffer = buffer;
+    s.loop = true;
+    const lp = c.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.Q.value = 0.7;
+    lp.frequency.value = 18000;
+    s.connect(lp);
+    const handle = this.loop(
+      this.bus('musica'),
+      level,
+      (out, stoppers) => {
+        lp.connect(out);
+        s.start(c.currentTime);
+        stoppers.push(s);
+      },
+      fadeIn,
+    );
+    return {
+      ...handle,
+      setRate: (rate, ramp = 0.35) => {
+        if (!this.ctx) return;
+        const t = this.ctx.currentTime;
+        s.playbackRate.cancelScheduledValues(t);
+        s.playbackRate.setValueAtTime(s.playbackRate.value, t);
+        s.playbackRate.linearRampToValueAtTime(Math.max(0.05, rate), t + Math.max(0.01, ramp));
+      },
+      setBrightness: (amount, ramp = 0.4) => {
+        if (!this.ctx) return;
+        // de 900 Hz (longe, abafada) a 18 kHz (colado, aberta), em escala exponencial
+        const f = 900 * Math.pow(20, Math.min(1, Math.max(0, amount)));
+        lp.frequency.setTargetAtTime(f, this.ctx.currentTime, ramp / 3);
+      },
+    };
   }
 
   private build(c: AudioContext): void {

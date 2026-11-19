@@ -1294,6 +1294,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * agarrou, ele se rende abalado. Rota no fim: ele escapa (e foge do mapa, se chegou à borda).
    */
   private async runChase(enemyId: string, agentId: string, agentPath: HexCoord[], epoch: number, caught: Set<string>): Promise<void> {
+    try {
+      await this.chaseSteps(enemyId, agentId, agentPath, epoch, caught);
+    } finally {
+      // terminou, ou a partida recomeçou no meio: a faixa some e o placar sai
+      this.sound.chaseEnd();
+      this.chaseHud.set(null);
+    }
+  }
+
+  private async chaseSteps(enemyId: string, agentId: string, agentPath: HexCoord[], epoch: number, caught: Set<string>): Promise<void> {
     const board = this.board!;
     const alive = () => !this.destroyed && this.epoch === epoch;
     const enemy = this.enemy(enemyId)!;
@@ -1314,8 +1324,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const who = this.nameOf(agentId);
     this.say(`${who} persegue ${enemy.name}!`, 'alert');
     board.setSelected(route.flee.at(-1) ?? null, route.flee);
-    const hud = () => this.chaseHud.set({ agent: who, enemy: enemy.name, distance, step: g, total: route.flee.length });
+    const hud = () => {
+      this.chaseHud.set({ agent: who, enemy: enemy.name, distance, step: g, total: route.flee.length });
+      this.sound.chaseDistance(distance);
+    };
     hud();
+    void this.sound.chaseStart(distance);
     const onStep = (w: 'unit' | 'enemy', hex: HexCoord) => {
       if (!alive()) return;
       if (w === 'unit') {
@@ -1382,8 +1396,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       await board.removeEnemy(enemyId);
     } else this.say(`${enemy.name} escapou de ${who}.`, 'alert');
     this.refreshVision();
+    this.sound.chaseEnd();
     await this.wait(1400);
-    this.chaseHud.set(null);
   }
 
   /**
@@ -1394,7 +1408,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async chaseCurve(side: Side, agentId: string, enemyId: string): Promise<number> {
     const enemy = this.enemy(enemyId)!;
     const agent = this.chaseStats(agentId);
+    // a fita cai para o ultra slow enquanto o jogador decide; volta no gesto
+    this.sound.chaseSlow(true);
     const swiped = await this.askCurve();
+    this.sound.chaseSlow(false);
     const crashed = swiped !== side;
     let agentRoll = 0;
     if (crashed) {
@@ -1453,9 +1470,26 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * tempo (−1) e tenta de novo. Passou: a porta fica aberta (ou arrombada). Devolve a distância.
    */
   private async chaseDoor(door: Door, enemyId: string, distance: number, onDistance: (d: number) => void): Promise<number> {
-    const board = this.board!;
     const name = this.enemy(enemyId)!.name;
-    let current = this.doors().get(hexKey(door.hex)) ?? door;
+    const current = this.doors().get(hexKey(door.hex)) ?? door;
+    // a porta é dele: a cena fica lenta só para mostrar os dados
+    this.sound.chaseSlow(true);
+    try {
+      return await this.fleeDoorTries(current, door, name, distance, onDistance);
+    } finally {
+      this.sound.chaseSlow(false);
+    }
+  }
+
+  /** As tentativas dele na porta, até passar (ou ela o alcançar). Devolve a distância. */
+  private async fleeDoorTries(
+    current: Door,
+    door: Door,
+    name: string,
+    distance: number,
+    onDistance: (d: number) => void,
+  ): Promise<number> {
+    const board = this.board!;
     for (;;) {
       const d4 = rollDie(CHASE_RULES.doorChoiceDie);
       const action = fleeDoorAction(d4);
