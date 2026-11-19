@@ -1,6 +1,6 @@
 import { Injectable, signal } from '@angular/core';
 import { AmbiencePlayer, Zone, sameZone } from './audio/ambience';
-import { AudioEngine, LoopHandle } from './audio/engine';
+import { AudioEngine, LoopHandle, MusicHandle } from './audio/engine';
 import { Boot, Surface, step } from './audio/footsteps';
 import { HIDDEN_RANGE, OCCLUDED, distanceGain } from './audio/positional';
 import { SOUNDS, SoundId, fireLoop, spottedFallback } from './audio/sounds';
@@ -9,6 +9,22 @@ import { HexCoord, hexDistance } from './hex';
 const STORAGE_KEY = 'ibama.sound';
 /** Alerta de avistado (arquivo do dono do projeto; ver `public/assets/LICENSES.md`). */
 export const ALERT_URL = 'assets/sounds/alerta-inimigo.mp3';
+/** Faixa da perseguição (arquivo do dono do projeto; ver `public/assets/LICENSES.md`). */
+export const CHASE_MUSIC_URL = 'assets/sounds/perseguicao.mp3';
+
+/** A faixa da perseguição: volume, velocidade do "ultra slow" e tempos das rampas. */
+export const CHASE_MUSIC = {
+  level: 0.9,
+  fadeIn: 0.3,
+  fadeOut: 1.2,
+  /** Curva, porta, escolha: a fita cai para isto (tempo e tom juntos). */
+  slowRate: 0.25,
+  slowRamp: 0.4,
+  /** Na decisão a fita volta rápido, no mesmo ponto da faixa. */
+  resumeRamp: 0.15,
+  /** Distância (hexágonos) em que a faixa fica toda abafada; colado, toda aberta. */
+  farDistance: 6,
+} as const;
 
 /** Volume de cada fogo, de perto. */
 const FIRE_LEVEL = { plane: 1.2, other: 0.8 } as const;
@@ -33,6 +49,9 @@ export class Sound {
   private readonly ambience = new AmbiencePlayer(this.engine);
   private alert: AudioBuffer | null = null;
   private alertLoading = false;
+  private chaseTrack: AudioBuffer | null = null;
+  private chaseLoading?: Promise<void>;
+  private music?: MusicHandle;
   private listener?: HexCoord;
   private zone?: Zone;
   private readonly fires = new Map<string, Fire>();
@@ -61,6 +80,7 @@ export class Sound {
     if (!this.engine.start()) return;
     this.engine.setMaster(1, 0.05);
     void this.loadAlert();
+    void this.loadChase();
     if (this.zone && !this.ambience.on) this.ambience.start(this.zone);
   }
 
@@ -127,6 +147,35 @@ export class Sound {
     if (this.ready()) this.ambience.setApproach(on);
   }
 
+  // ---------- perseguição ----------
+
+  /** Começou a perseguição: entra a faixa e o ambiente abafa. */
+  async chaseStart(distance: number): Promise<void> {
+    if (!this.ready()) return;
+    await this.loadChase();
+    if (!this.chaseTrack || !this.ready() || this.music) return;
+    this.music = this.engine.music(this.chaseTrack, CHASE_MUSIC.level, CHASE_MUSIC.fadeIn);
+    this.chaseDistance(distance, 0.05);
+    this.ambience.setApproach(true);
+  }
+
+  /** Curva, porta ou escolha: a fita cai para o ultra slow (`true`) ou volta (`false`). */
+  chaseSlow(on: boolean): void {
+    this.music?.setRate(on ? CHASE_MUSIC.slowRate : 1, on ? CHASE_MUSIC.slowRamp : CHASE_MUSIC.resumeRamp);
+  }
+
+  /** A distância mudou: mais perto, a faixa abre. */
+  chaseDistance(distance: number, ramp = 0.4): void {
+    this.music?.setBrightness(1 - Math.min(distance, CHASE_MUSIC.farDistance) / CHASE_MUSIC.farDistance, ramp);
+  }
+
+  /** Fim da perseguição: a faixa some e o ambiente volta. */
+  chaseEnd(): void {
+    this.music?.stop(CHASE_MUSIC.fadeOut);
+    this.music = undefined;
+    if (this.ready()) this.ambience.setApproach(false);
+  }
+
   /** Um alvo pegou fogo: fica queimando (em loop) até recomeçar ou sair. */
   ignite(id: string, hexes: readonly HexCoord[], plane: boolean): void {
     if (!this.ready() || this.fires.has(id)) return;
@@ -143,6 +192,7 @@ export class Sound {
   /** Saiu da partida: para o ambiente e os loops. */
   stopAll(): void {
     this.clearFires();
+    this.music = undefined;
     this.ambience.stop();
     this.engine.stopLoops();
     this.zone = undefined;
@@ -193,6 +243,21 @@ export class Sound {
     } finally {
       this.alertLoading = false;
     }
+  }
+
+  private loadChase(): Promise<void> {
+    if (this.chaseTrack || typeof fetch === 'undefined' || !this.engine.ctx) return Promise.resolve();
+    this.chaseLoading ??= (async () => {
+      try {
+        const res = await fetch(CHASE_MUSIC_URL);
+        if (res.ok) this.chaseTrack = await this.engine.decode(await res.arrayBuffer());
+      } catch {
+        // sem o arquivo, a perseguição corre sem música
+      } finally {
+        this.chaseLoading = undefined;
+      }
+    })();
+    return this.chaseLoading;
   }
 
   private load(): boolean {

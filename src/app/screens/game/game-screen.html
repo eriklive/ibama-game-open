@@ -1,4 +1,4 @@
-<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.rolling]="phase() === 'rolling'">
+<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
 
   <!-- Topo: voltar e menu soltos; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
@@ -379,6 +379,58 @@
       </ul>
     </aside>
   }
+
+  <!-- Perseguição: o carimbo "Perseguir?" nas fichas da direita -->
+  @if (chaseOffer(); as offer) {
+    <aside class="door-sheet chase-offer" aria-label="Perseguir o suspeito" data-testid="chase-offer">
+      <div class="door-head">
+        <span class="door-kicker">Ele vai correr</span>
+        <h2 class="door-name">Perseguir {{ offer.enemy }}?</h2>
+      </div>
+      <ul class="door-opts">
+        @for (o of offer.options; track o.id; let i = $index) {
+          <li>
+            <button type="button" class="door-opt" [style.--i]="i" [style.--tilt]="['-1deg', '.8deg', '-.6deg'][i % 3]" [attr.data-testid]="'chase-' + o.id" [attr.aria-label]="o.name + ' persegue: ' + o.chance + ' de arrancar'" (click)="pickChase(o.id)">
+              <span class="door-slot" aria-hidden="true">
+                <span class="d20">
+                  <svg viewBox="0 0 100 100">
+                    <polygon class="d20-body" points="50,3 91,26 91,74 50,97 9,74 9,26" />
+                    <path d="M50 30L76 70H24Z M50 30L50 3 M50 30L9 26 M50 30L91 26 M24 70L9 26 M24 70L9 74 M24 70L50 97 M76 70L91 26 M76 70L91 74 M76 70L50 97" />
+                  </svg>
+                  <span class="d20-value">{{ o.chance }}</span>
+                </span>
+              </span>
+              <span class="door-text">
+                <span class="door-opt-name">{{ o.name }} vai</span>
+                <span class="door-opt-need">iniciativa · {{ o.steps }} hex até ele</span>
+              </span>
+              @if (pad() && i === 0) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+            </button>
+          </li>
+        }
+        <li>
+          <button type="button" class="door-opt" [style.--i]="offer.options.length" style="--tilt: .6deg" data-testid="chase-skip" aria-label="Deixar fugir" (click)="pickChase(null)">
+            <span class="door-slot none" aria-hidden="true"></span>
+            <span class="door-text">
+              <span class="door-opt-name">Deixar fugir</span>
+              <span class="door-opt-need free">ele corre como sempre</span>
+            </span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+          </button>
+        </li>
+      </ul>
+    </aside>
+  }
+
+  <!-- Perseguição: placar e curva (decisao:perseguicao) -->
+  <app-chase-overlay
+    [hud]="chaseHud()"
+    [curve]="curvePrompt()"
+    [target]="targetView()"
+    (swipe)="swipeCurve($event)"
+    (targetSide)="targetSide($event)"
+    (targetConfirm)="targetConfirm()"
+    (targetCancel)="targetCancel()" />
 
   <!-- Teste de d20 (percepção, portas): uma ficha na lateral; a percepção espera o Continuar -->
   @for (ck of checks(); track ck.id) {

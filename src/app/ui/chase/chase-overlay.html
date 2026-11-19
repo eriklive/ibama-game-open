@@ -1,0 +1,73 @@
+<!-- Perseguição: placar (distância e rota dele) -->
+@if (hud(); as h) {
+  <div class="chase-hud" role="status" aria-live="polite" data-testid="chase-hud">
+    <span class="chase-hud-kicker">{{ h.agent }} × {{ h.enemy }}</span>
+    <span class="chase-hud-row">
+      <span class="chase-hud-label">Distância</span>
+      <span class="chase-hud-dots" aria-hidden="true">
+        @for (d of [0, 1, 2, 3, 4, 5, 6, 7]; track d) {
+          @if (d < h.distance) {
+            <i class="on"></i>
+          } @else if (d < 6) {
+            <i></i>
+          }
+        }
+      </span>
+      <strong data-testid="chase-distance">{{ h.distance }}</strong>
+    </span>
+    <span class="chase-hud-row">
+      <span class="chase-hud-label">Rota dele</span>
+      <span class="chase-hud-bar" aria-hidden="true"
+        ><i [style.width.%]="h.total ? (100 * h.step) / h.total : 100"></i
+      ></span>
+      <span>{{ h.step }}/{{ h.total }}</span>
+    </span>
+  </div>
+}
+
+<!-- Perseguição: curva (decisao:perseguicao). O meio da tela fica livre para ver a curva; as
+     setas ficam nas bordas e arrastar para um lado em qualquer ponto também vale. -->
+@if (curve(); as cv) {
+  <div
+    class="curve"
+    data-testid="curve"
+    role="dialog"
+    aria-label="Curva: deslize para o lado da curva"
+    (pointerdown)="pointer($event)"
+    (pointerup)="pointer($event)"
+  >
+    <div class="curve-head">
+      <span class="curve-kicker">Curva!</span>
+      <span class="curve-text">deslize para o lado</span>
+      <span class="curve-timer" aria-hidden="true"
+        ><i [style.animation-duration.s]="cv.seconds"></i
+      ></span>
+    </div>
+    <button type="button" class="curve-btn left" data-testid="curve-left" aria-label="Esquerda" (click)="swipe.emit('esquerda')">
+      ←
+    </button>
+    <button type="button" class="curve-btn right" data-testid="curve-right" aria-label="Direita" (click)="swipe.emit('direita')">
+      →
+    </button>
+  </div>
+}
+
+<!-- Escolha de alvo (decisao:alvo): metade da tela = um lado; 1º toque olha, 2º confirma -->
+@if (target(); as t) {
+  <div class="target" data-testid="target" role="dialog" aria-label="Escolha qual suspeito perseguir" (click)="targetTap($event)">
+    <div class="curve-head">
+      <span class="curve-kicker">{{ t.count === 2 ? 'Dois fugindo!' : t.count + ' fugindo!' }}</span>
+      <span class="curve-text">{{ t.picked ? 'de novo no mesmo lado: vai' : 'toque num lado para olhar' }}</span>
+    </div>
+    <button type="button" class="curve-btn left" data-testid="target-left" aria-label="Olhar para a esquerda" (click)="$event.stopPropagation(); targetSide.emit('esquerda')">←</button>
+    <button type="button" class="curve-btn right" data-testid="target-right" aria-label="Olhar para a direita" (click)="$event.stopPropagation(); targetSide.emit('direita')">→</button>
+    <div class="target-actions">
+      @if (t.picked) {
+        <button type="button" class="target-go" data-testid="target-go" (click)="$event.stopPropagation(); targetConfirm.emit()">
+          {{ t.agent }} vai atrás de {{ t.picked }}
+        </button>
+      }
+      <button type="button" class="target-skip" data-testid="target-skip" (click)="$event.stopPropagation(); targetCancel.emit()">Deixar os dois</button>
+    </div>
+  </div>
+}

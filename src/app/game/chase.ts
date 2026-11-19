@@ -1,0 +1,375 @@
+/**
+ * Modo Perseguição — regras puras (testadas em `chase.spec.ts`). Nada de tela aqui: o jogo
+ * decide quando chamar cada função e o que mostrar.
+ *
+ * Fluxo de uma perseguição:
+ * 1. **Gatilho.** No turno inimigo, antes de um suspeito em alerta correr, os agentes no
+ *    **raio de perseguição** dele (`chaseRadius`: base + vigor + iniciativa, com caminho livre)
+ *    podem ir atrás (`chaseCandidates`). Quem já correu nesta rodada inimiga não vai de novo.
+ * 2. **Iniciativa.** Só o agente rola: d20 + iniciativa, pelo menos `initiativeDC` (8), sem
+ *    depender do garimpeiro (`initiativeCheck`). Passou: sai correndo. Falhou: hesita e o
+ *    garimpeiro foge normal. O garimpeiro não rola nada novo: o teste de fuga da faixa amarela da
+ *    abordagem continua como está (falhou, tropeça e se rende), e quem foge sem rolar segue assim.
+ * 3. **Rota travada.** O jogo calcula a fuga dele até a borda (`lockRoute`), passando só por
+ *    portas que ele consegue usar (abertas, encostadas, trancadas e portões; bloqueada é
+ *    parede). A rota vira a "pista" e não muda mais. Nela ficam as **paradas**:
+ *    - **curva** (mudança de direção, ver `routeStops`): uma `decisao:perseguicao`. O agente
+ *      precisa deslizar para o lado da curva e rolar d20 + agilidade; o garimpeiro também rola
+ *      a dele (`resolveCurve`);
+ *    - **porta** fechada no caminho: o garimpeiro rola d4 para escolher abrir ou arrombar e d20
+ *      para conseguir (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta
+ *      fica aberta e o agente passa direto. A porta substitui a curva naquele hexágono.
+ * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
+ *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
+ *    A rota travada acabou: **foge** (`chaseEnd`).
+ * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
+ * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
+ *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
+ *    ainda não correram (`chaseCandidates` com `alreadyChased`).
+ */
+import { ENEMY_RULES, isBorder } from './enemies';
+import { Door, DoorState, isOpen } from './door';
+import { HexArea, HexCoord, hexKey, hexToWorld, pathTo, reachableHexes } from './hex';
+
+export const CHASE_RULES = {
+  die: 20,
+  /** Raio de perseguição sem atributos (o que ele correria num turno de fuga). */
+  radiusBase: ENEMY_RULES.fleeSteps,
+  /** Iniciativa do agente: d20 + iniciativa, pelo menos isto, para sair correndo. */
+  initiativeDC: 8,
+  /** Tamanho máximo da rota travada (dois turnos de fuga, com folga). */
+  routeSteps: 12,
+  /** Curva: d20 + agilidade, pelo menos isto. Vale para agente e garimpeiro. */
+  curveDC: 6,
+  /** Tempo (s, relógio real) para deslizar na curva antes de contar como "não deslizou". */
+  swipeSeconds: 2,
+  /** Ângulo mínimo (graus) entre dois trechos retos da rota para contar como curva. */
+  curveAngle: 40,
+  /** Passos mínimos entre duas curvas (e da largada à primeira): trilha sinuosa vira uma curva só. */
+  curveSpacing: 3,
+  /** Garimpeiro numa porta fechada: d4 1–2 tenta abrir, 3–4 arromba. */
+  doorChoiceDie: 4,
+  doorOpenMax: 2,
+  /** O que ele precisa tirar no d20 em cada caso. Trancada + abrir usa a fechadura da porta. */
+  doorNeed: { abrirEncostada: 3, arrombarEncostada: 3, arrombarTrancada: 12 },
+  /** Agarrou: bônus nas rolagens do próximo interrogatório do suspeito abalado. */
+  shakenBonus: 2,
+} as const;
+
+export type Side = 'esquerda' | 'direita';
+
+/** Atributos de perseguição (agente ou garimpeiro). Os que faltam valem 0. */
+export interface ChaseStats {
+  vigor?: number;
+  iniciativa?: number;
+  agilidade?: number;
+}
+
+// ---------- gatilho ----------
+
+/** Raio de perseguição: base + vigor + iniciativa (nunca negativo). */
+export const chaseRadius = (s: ChaseStats = {}): number =>
+  Math.max(0, CHASE_RULES.radiusBase + (s.vigor ?? 0) + (s.iniciativa ?? 0));
+
+export interface ChaseAgent {
+  id: string;
+  hex: HexCoord;
+  stats?: ChaseStats;
+}
+
+export interface ChaseCandidate {
+  id: string;
+  /** Caminho do agente até o garimpeiro (sem a origem, termina no hexágono dele). */
+  path: HexCoord[];
+}
+
+/**
+ * Agentes que podem perseguir o garimpeiro em `target`: chegam até ele andando no máximo o
+ * raio de perseguição, sem atravessar `blocked` (o hexágono dele pode estar em `blocked`; é o
+ * destino). Quem está em `alreadyChased` fica de fora. Ordem: o mais perto primeiro.
+ */
+export function chaseCandidates(
+  target: HexCoord,
+  agents: readonly ChaseAgent[],
+  area: HexArea,
+  blocked: ReadonlySet<string>,
+  alreadyChased: ReadonlySet<string> = new Set(),
+): ChaseCandidate[] {
+  const targetKey = hexKey(target);
+  const free = new Set(blocked);
+  free.delete(targetKey);
+  const out: ChaseCandidate[] = [];
+  for (const a of agents) {
+    if (alreadyChased.has(a.id)) continue;
+    const radius = chaseRadius(a.stats);
+    const reach = reachableHexes(a.hex, radius, area, free);
+    if (!reach.has(targetKey)) continue;
+    out.push({ id: a.id, path: pathTo(reach, target) });
+  }
+  return out.sort((x, y) => x.path.length - y.path.length);
+}
+
+/**
+ * Agentes que estão no raio de mais de um garimpeiro: para eles, a `decisao:alvo` (escolher
+ * qual perseguir). Devolve `id do agente → ids dos garimpeiros`.
+ */
+export function targetChoices(
+  offers: ReadonlyMap<string, readonly ChaseCandidate[]>,
+): Map<string, string[]> {
+  const byAgent = new Map<string, string[]>();
+  for (const [enemyId, cands] of offers) {
+    for (const c of cands) byAgent.set(c.id, [...(byAgent.get(c.id) ?? []), enemyId]);
+  }
+  return new Map([...byAgent].filter(([, es]) => es.length > 1));
+}
+
+// ---------- iniciativa ----------
+
+export interface InitiativeResult {
+  total: number;
+  /** O agente arrancou a tempo. */
+  go: boolean;
+}
+
+/** Iniciativa do agente: d20 + iniciativa, pelo menos `initiativeDC`. */
+export function initiativeCheck(roll: number, agent: ChaseStats = {}): InitiativeResult {
+  const total = roll + (agent.iniciativa ?? 0);
+  return { total, go: total >= CHASE_RULES.initiativeDC };
+}
+
+/** Chance (0..1) de o agente arrancar a tempo. */
+export function initiativeChance(agent: ChaseStats = {}): number {
+  const d = CHASE_RULES.die;
+  const need = CHASE_RULES.initiativeDC - (agent.iniciativa ?? 0);
+  return Math.min(1, Math.max(0, (d + 1 - need) / d));
+}
+
+// ---------- rota travada ----------
+
+export type ChaseStop =
+  | { kind: 'curva'; index: number; hex: HexCoord; side: Side }
+  | { kind: 'porta'; index: number; hex: HexCoord; door: Door };
+
+export interface ChaseRoute {
+  /** Fuga do garimpeiro (sem a origem), cortada em `routeSteps`. */
+  flee: HexCoord[];
+  /** A rota chega à borda (se ninguém pegar, ele foge). */
+  escapes: boolean;
+  /** Encurralado: não há rota até a borda. */
+  cornered: boolean;
+  stops: ChaseStop[];
+}
+
+/** Portas que a fuga pode atravessar (a bloqueada vira parede). */
+const passableForFlee = (state: DoorState): boolean => state !== 'bloqueada';
+
+/**
+ * Trava a rota de fuga: caminho mais curto até a borda, desviando de `blocked` e dos agentes.
+ * Portas comuns (`doors`) que não estão bloqueadas são atravessáveis mesmo fechadas (viram
+ * paradas). Entre bordas igualmente próximas, prefere a mais longe dos agentes.
+ */
+export function lockRoute(
+  from: HexCoord,
+  area: HexArea,
+  blocked: ReadonlySet<string>,
+  doors: ReadonlyMap<string, Door> = new Map(),
+  agents: readonly HexCoord[] = [],
+): ChaseRoute {
+  if (isBorder(from, area)) return { flee: [], escapes: true, cornered: false, stops: [] };
+  const walls = new Set(blocked);
+  for (const [k, d] of doors) {
+    if (d.broken || passableForFlee(d.state)) walls.delete(k);
+    else walls.add(k);
+  }
+  for (const a of agents) walls.add(hexKey(a));
+  const reach = reachableHexes(from, area.hexes.length, area, walls);
+  let best: { coord: HexCoord; cost: number; safety: number } | null = null;
+  for (const { coord, cost } of reach.values()) {
+    if (!isBorder(coord, area)) continue;
+    const safety = agents.length
+      ? Math.min(...agents.map((a) => Math.hypot(...worldDelta(a, coord))))
+      : 0;
+    if (!best || cost < best.cost || (cost === best.cost && safety > best.safety))
+      best = { coord, cost, safety };
+  }
+  if (!best) return { flee: [], escapes: false, cornered: true, stops: [] };
+  const full = pathTo(reach, best.coord);
+  const flee = full.slice(0, CHASE_RULES.routeSteps);
+  return {
+    flee,
+    escapes: flee.length === full.length,
+    cornered: false,
+    stops: routeStops([from, ...flee], doors),
+  };
+}
+
+const worldDelta = (a: HexCoord, b: HexCoord): [number, number] => {
+  const p = hexToWorld(a, 1);
+  const q = hexToWorld(b, 1);
+  return [q.x - p.x, q.z - p.z];
+};
+
+/**
+ * Pontos onde a rota dobra. No grid de topo chato, andar "para o oeste" já é um zigue-zague de
+ * vizinhos; por isso a rota é simplificada em trechos retos (Ramer–Douglas–Peucker no plano) e
+ * só conta como curva o vértice em que a direção muda pelo menos `curveAngle` graus. Curvas a
+ * menos de `curveSpacing` passos da anterior (ou da largada) não contam: numa trilha sinuosa,
+ * um zigue-zague é uma curva só. `points` inclui a origem. Os índices devolvidos são de `points`.
+ */
+export function routeCurves(points: readonly HexCoord[]): { index: number; side: Side }[] {
+  if (points.length < 3) return [];
+  const w = points.map((h) => hexToWorld(h, 1));
+  const keep = simplify(w, 0, w.length - 1, 0.75);
+  const idx = [0, ...keep, w.length - 1].sort((a, b) => a - b);
+  const out: { index: number; side: Side }[] = [];
+  const minCos = Math.cos((CHASE_RULES.curveAngle * Math.PI) / 180);
+  for (let i = 1; i < idx.length - 1; i++) {
+    const [a, b, c] = [w[idx[i - 1]], w[idx[i]], w[idx[i + 1]]];
+    const f = { x: b.x - a.x, z: b.z - a.z };
+    const g = { x: c.x - b.x, z: c.z - b.z };
+    const cos = (f.x * g.x + f.z * g.z) / (Math.hypot(f.x, f.z) * Math.hypot(g.x, g.z));
+    if (cos > minCos) continue;
+    if (idx[i] - (out.at(-1)?.index ?? 0) < CHASE_RULES.curveSpacing) continue;
+    // y para cima, x a leste, z ao sul: produto vetorial positivo = virou à direita
+    const cross = f.x * g.z - f.z * g.x;
+    out.push({ index: idx[i], side: cross > 0 ? 'direita' : 'esquerda' });
+  }
+  return out;
+}
+
+/** Índices (internos) que o Ramer–Douglas–Peucker mantém entre `i` e `j`. */
+function simplify(
+  w: readonly { x: number; z: number }[],
+  i: number,
+  j: number,
+  eps: number,
+): number[] {
+  let worst = -1;
+  let dist = eps;
+  const a = w[i];
+  const b = w[j];
+  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
+  for (let k = i + 1; k < j; k++) {
+    const d = Math.abs((b.x - a.x) * (a.z - w[k].z) - (a.x - w[k].x) * (b.z - a.z)) / len;
+    if (d > dist) {
+      dist = d;
+      worst = k;
+    }
+  }
+  if (worst < 0) return [];
+  return [...simplify(w, i, worst, eps), worst, ...simplify(w, worst, j, eps)];
+}
+
+/**
+ * Paradas da rota (`points` com a origem): curvas e portas fechadas, em ordem. Perto de uma
+ * porta fechada (menos de `curveSpacing` passos) a parada é só a porta, mesmo que a rota dobre
+ * ali. Índices são de `points`.
+ */
+export function routeStops(
+  points: readonly HexCoord[],
+  doors: ReadonlyMap<string, Door> = new Map(),
+): ChaseStop[] {
+  const stops: ChaseStop[] = [];
+  points.forEach((hex, index) => {
+    const door = doors.get(hexKey(hex));
+    if (index > 0 && door && !isOpen(door)) stops.push({ kind: 'porta', index, hex, door });
+  });
+  // curva colada numa porta (antes ou depois) é a própria porta
+  const nearDoor = (i: number) =>
+    stops.some((d) => Math.abs(d.index - i) < CHASE_RULES.curveSpacing);
+  for (const { index, side } of routeCurves(points)) {
+    if (!nearDoor(index)) stops.push({ kind: 'curva', index, hex: points[index], side });
+  }
+  return stops.sort((a, b) => a.index - b.index);
+}
+
+// ---------- paradas ----------
+
+export interface CurveInput {
+  /** Lado da curva. */
+  side: Side;
+  /** Para onde o jogador deslizou (`null`: não deslizou a tempo). */
+  swiped: Side | null;
+  /** d20 do agente (ignorado se ele bateu). */
+  agentRoll: number;
+  agent: ChaseStats;
+  /** d20 do garimpeiro (ele sempre rola). */
+  enemyRoll: number;
+  enemy: ChaseStats;
+}
+
+export interface CurveResult {
+  /** Deslizou errado ou não deslizou: bateu, voltou para a rota certa. */
+  crashed: boolean;
+  /** O agente fez a curva fechada (só se não bateu). */
+  agentPass: boolean;
+  /** O garimpeiro passou (falhou = escorregou). */
+  enemyPass: boolean;
+  /** Mudança na distância (negativo = o agente chegou mais perto). */
+  delta: number;
+}
+
+/**
+ * Curva: bater = +1; lado certo e d20 + agilidade ≥ 6 = −1 (falhou = 0); garimpeiro escorregou
+ * (d20 + agilidade < 6) = −1. Resultado de −2 a +1.
+ */
+export function resolveCurve(i: CurveInput): CurveResult {
+  const crashed = i.swiped !== i.side;
+  const agentPass = !crashed && i.agentRoll + (i.agent.agilidade ?? 0) >= CHASE_RULES.curveDC;
+  const enemyPass = i.enemyRoll + (i.enemy.agilidade ?? 0) >= CHASE_RULES.curveDC;
+  const delta = (crashed ? 1 : agentPass ? -1 : 0) + (enemyPass ? 0 : -1);
+  return { crashed, agentPass, enemyPass, delta };
+}
+
+export type FleeDoorAction = 'abrir' | 'arrombar';
+
+/** O que o garimpeiro tenta na porta, pelo d4. */
+export const fleeDoorAction = (d4: number): FleeDoorAction =>
+  d4 <= CHASE_RULES.doorOpenMax ? 'abrir' : 'arrombar';
+
+/** O que ele precisa tirar no d20 (0 = passa direto; porta aberta ou arrombada). */
+export function fleeDoorNeed(action: FleeDoorAction, door: Door): number {
+  if (isOpen(door)) return 0;
+  const n = CHASE_RULES.doorNeed;
+  if (door.state === 'encostada')
+    return action === 'abrir' ? n.abrirEncostada : n.arrombarEncostada;
+  if (door.state === 'trancada') return action === 'abrir' ? door.lock : n.arrombarTrancada;
+  return Infinity; // bloqueada: a rota nem passa por ela
+}
+
+export interface FleeDoorResult {
+  action: FleeDoorAction;
+  need: number;
+  pass: boolean;
+  /** A porta depois da tentativa (aberta ou arrombada; igual se falhou). */
+  door: Door;
+  /** Falhou: perdeu tempo, a distância cai 1 e ele tenta de novo. */
+  delta: number;
+}
+
+/** Uma tentativa do garimpeiro numa porta fechada da rota: d4 escolhe, d20 resolve. */
+export function resolveFleeDoor(door: Door, d4: number, d20: number): FleeDoorResult {
+  const action = fleeDoorAction(d4);
+  const need = fleeDoorNeed(action, door);
+  const pass = need !== Infinity && d20 >= need;
+  const after: Door = !pass
+    ? door
+    : action === 'arrombar'
+      ? { ...door, broken: true }
+      : { ...door, state: 'aberta' };
+  return { action, need, pass, door: after, delta: pass ? 0 : -1 };
+}
+
+// ---------- fim ----------
+
+export type ChaseEnd = 'agarrou' | 'fugiu';
+
+/**
+ * Como termina com esta distância (null = continua). Não há fôlego nem custo: a perseguição
+ * dura a rota travada inteira.
+ */
+export function chaseEnd(distance: number, routeDone: boolean): ChaseEnd | null {
+  if (distance <= 0) return 'agarrou';
+  if (routeDone) return 'fugiu';
+  return null;
+}

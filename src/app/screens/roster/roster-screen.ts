@@ -20,6 +20,7 @@ import {
   CLASS_INFO,
   CLASS_RULES,
   classAbilities,
+  classBaseStats,
   classOf,
   classSkills,
 } from '../../game/agent-class';
@@ -57,6 +58,20 @@ const STAT_TEXT: Record<
     on: 'de alcance na abordagem',
     off: 'Abordagem sem modificador',
     field: 'Abordagem',
+  },
+  iniciativa: {
+    name: 'Iniciativa',
+    aria: 'iniciativa',
+    on: 'para arrancar',
+    off: 'Arrancada sem modificador',
+    field: 'Arrancada',
+  },
+  agilidade: {
+    name: 'Agilidade',
+    aria: 'agilidade',
+    on: 'nas curvas',
+    off: 'Curvas sem modificador',
+    field: 'Curvas',
   },
 };
 
@@ -152,16 +167,18 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
   protected readonly stats = computed(() => {
     const spent = this.spent();
     const free = this.free();
+    const base = classBaseStats(this.cls());
     return STAT_KEYS.map((key) => {
-      const v = spent[key];
+      const v = base[key] + spent[key];
       const t = STAT_TEXT[key];
+      const fromClass = base[key] ? ` (${signed(base[key])} da classe)` : '';
       return {
         key,
         ...t,
         value: v,
-        effect: v ? `${signed(v)} ${t.on}` : t.off,
+        effect: (v ? `${signed(v)} ${t.on}` : t.off) + fromClass,
         cells: rulerCells(v, free),
-        canInc: canAddPoint(spent, key),
+        canInc: canAddPoint(spent, key, base),
         canDec: canRemovePoint(spent, key),
         group: GROUP_STAT_BONUS[key],
         leader: this.captain() ? CLASS_RULES.leadership[key] : 0,
@@ -220,7 +237,7 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
   }
 
   protected inc(key: StatKey): void {
-    this.update((s) => addPoint(s, key));
+    this.update((s) => addPoint(s, key, classBaseStats(this.cls())));
   }
 
   /** Troca a classe do agente da ficha (marcar Capitão tira a classe de quem era). */

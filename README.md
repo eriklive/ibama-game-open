@@ -42,15 +42,20 @@ equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a 
 - **Vigor:** cada ponto vale **+1 de movimento** no turno (somado aos 2d4).
 - **Intimidação:** cada ponto vale **+1 no raio de abordagem** (a zona de rendição). A zona de
   rolagem e a de fuga se afastam junto.
+- **Iniciativa** e **Agilidade** (Modo Perseguição, em construção; regras em `src/app/game/chase.ts`):
+  a iniciativa soma no raio de perseguição e no d20 para arrancar (8 ou mais); a agilidade soma no
+  d20 das curvas (6 ou mais). A **classe dá a base**: Capitão começa com **+1 de iniciativa**,
+  Agente com **+1 de agilidade**.
 - Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
   direita, negativo em vermelho para a esquerda; o tracejado mostra onde o ponto livre pode
-  entrar). Todo agente começa com 0 nos dois.
-- Cada agente tem **1 ponto** para pôr em **um** dos dois atributos. Dá para tirar só o ponto que
+  entrar). Todo agente começa com 0, mais a base da classe.
+- Cada agente tem **1 ponto** para pôr em **um** dos quatro atributos. Dá para tirar só o ponto que
   você colocou: pelo jogador, o mínimo é 0. O lado negativo fica para penalidades (peso,
   equipamento).
 - **Total em campo:** atributo + equipamento (por enquanto, nenhum) + **grupo**. Enquanto os
   agentes estão **agrupados**, cada um ganha **+1 de vigor** (movimento) e **+1 de intimidação**
-  (alcance da abordagem), e mais **+1** em cada com o Capitão no grupo; separou, perdeu.
+  (alcance da abordagem), e mais **+1** em cada com o Capitão no grupo; separou, perdeu. Grupo e
+  Liderança não somam em iniciativa nem agilidade: a perseguição é individual.
 - **Anterior / Próximo agente** passam pelas fichas; no último, **Confirmar escalação** começa a
   partida com esses atributos (a escolha fica guardada na sessão do navegador e vale também para
   "Recomeçar"). Com controle: L1/R1 trocam de agente, cima/baixo escolhem o atributo,
@@ -444,6 +449,50 @@ um agente e na abordagem (Chrome/Edge). No Chrome/Edge o DualShock 4 chega com o
 genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em
 `src/app/game/gamepad.ts` (funções puras testadas) e `gamepad.service.ts`.
 
+## Perseguição (em construção)
+
+Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regras em
+`src/app/game/chase.ts` (funções puras, testadas em `chase.spec.ts`). O que já está no jogo:
+
+1. **Gatilho.** No turno inimigo, antes de um suspeito em alerta correr, os agentes que chegam até
+   ele andando no máximo **4 + vigor + iniciativa** hexágonos podem ir atrás. Aparece o carimbo
+   **Perseguir?** com cada agente possível (e a chance de arrancar) e **Deixar fugir**. Com
+   controle: ✕ manda o primeiro, ○ deixa fugir.
+2. **Iniciativa.** Só o agente rola: **d20 + iniciativa ≥ 8**. Falhou: hesita e ele foge normal.
+   Uma perseguição por vez; quem já correu nesta rodada não vai de novo.
+3. **Rota travada.** A fuga dele até a borda (no máximo 12 hexágonos), passando por portas que
+   ele consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
+   número de hexágonos entre eles.
+4. **Curva.** Em cada curva o jogo para: o jogador tem **2 s** para deslizar para o lado da curva
+   (toque/arrasto, setas ou A/D, direcional). Lado errado ou nada: **bate** (+1). Lado certo:
+   d20 + agilidade ≥ 6 fecha a curva (−1). O garimpeiro sempre rola a dele (escorregou: −1).
+5. **Porta.** O garimpeiro rola d4 (1–2 abrir, 3–4 arrombar) e d20; falhou, perde tempo (−1) e
+   tenta de novo. Passou, a porta fica aberta (ou arrombada) e o agente passa direto.
+6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
+   interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
+   escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
+
+**Música.** A faixa da perseguição (`public/assets/sounds/perseguicao.mp3`, 11,9 s em loop) entra
+quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. Na curva e na
+porta a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
+mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
+`CHASE_MUSIC` (`sound.service.ts`).
+
+**Câmera.** Ao arrancar, a câmera desce (~0,8 s) e encosta nas costas do agente, um pouco à
+direita, olhando para o suspeito (atrás 4,4 · altura 2,5 · mira 7 à frente; em retrato, atrás 6,2 ·
+altura 3,6). O FOV abre um pouco e a névoa fecha mais perto. A HUD de papel some (fica o placar
+embaixo) e, na curva, as setas ficam nas bordas da tela, com o meio livre para ver a rota acesa
+dobrar. No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
+
+**Dois fugindo (`decisao:alvo`).** No começo do turno inimigo, se um agente está no raio de dois ou
+mais suspeitos em alerta, ele escolhe qual perseguir: a câmera desce atrás dele olhando para o meio
+deles, tudo fica cinza (menos eles, com a etiqueta **esquerda**/**direita**) e a faixa entra em
+ultra slow. O 1º toque numa metade da tela (ou seta, ou A/D, ou direcional) vira o agente para
+aquele suspeito; o 2º no mesmo lado (ou ✕, Enter, o botão "vai atrás") confirma. **Deixar os dois**
+(○, Esc) desiste. Depois da iniciativa e da perseguição, o outro segue a fila normal: é oferecido
+aos agentes que ainda não correram. A pose animada de indecisão (cabeça varrendo, tronco para trás)
+ainda não existe: por enquanto o agente só vira o corpo.
+
 ## Auras
 
 As auras do tabuleiro são **luz por cima do chão**, não tinta: o hexágono mantém a cor do terreno
@@ -469,8 +518,9 @@ continuam pintando o hexágono (são escolha do jogador, não aura). Código em
 
 Sem falas por enquanto: passos, portas, fogo, dados, interface e o ambiente da mata. Os sons foram
 desenhados num caderno de som e quase todos são **sintetizados em código** com Web Audio
-(`src/app/game/audio/`), sem arquivo. O único arquivo é o alerta de avistado
-(`public/assets/sounds/alerta-inimigo.mp3`).
+(`src/app/game/audio/`), sem arquivo. Os arquivos são o alerta de avistado
+(`public/assets/sounds/alerta-inimigo.mp3`) e a faixa da perseguição
+(`public/assets/sounds/perseguicao.mp3`; ver [Perseguição](#perseguição-em-construção)).
 
 - **Menu → Som → Sons do jogo** liga e desliga (fica guardado no navegador). O áudio começa no
   primeiro toque ou tecla, como os navegadores exigem.

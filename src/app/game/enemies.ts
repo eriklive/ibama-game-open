@@ -134,6 +134,8 @@ export interface EnemySpawn {
   hidden?: boolean;
   /** Id do inimigo escondido que este suspeito pode entregar no interrogatório. */
   reveals?: string;
+  /** Agilidade na perseguição (curvas; ver `chase.ts`). Sem ela, 0. */
+  agilidade?: number;
 }
 
 export interface EnemyState {
@@ -156,6 +158,14 @@ export interface EnemyState {
   npc?: string;
   /** Inimigo escondido que este pode entregar (ver `EnemySpawn.reveals`). */
   reveals?: string;
+  /** Agilidade na perseguição (ver `EnemySpawn.agilidade`). */
+  agilidade?: number;
+  /**
+   * Abalado: foi agarrado numa perseguição e se rendeu. O próximo interrogatório dele tem +2
+   * para o agente (ver `CHASE_RULES.shakenBonus`). Some depois da primeira conversa ou no fim da
+   * rodada seguinte.
+   */
+  shaken?: boolean;
 }
 
 export function spawnEnemy(spawn: EnemySpawn): EnemyState {
@@ -172,6 +182,7 @@ export function spawnEnemy(spawn: EnemySpawn): EnemyState {
     ...(spawn.wander ? { wander: spawn.wander } : {}),
     ...(spawn.npc ? { npc: spawn.npc } : {}),
     ...(spawn.reveals ? { reveals: spawn.reveals } : {}),
+    ...(spawn.agilidade ? { agilidade: spawn.agilidade } : {}),
   };
 }
 

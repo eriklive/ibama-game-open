@@ -23,3 +23,4 @@ de som ficam em `public/assets/sounds/`:
 | Arquivo | Origem | Autor | Licença | Alterações |
 |---|---|---|---|---|
 | `sounds/alerta-inimigo.mp3` | Obra própria, sintetizada para o jogo (alerta de inimigo que avista um agente) | Autor do projeto | Mesma do projeto | Nenhuma |
+| `sounds/perseguicao.mp3` | Enviado pelo dono do projeto (faixa da perseguição, 11,9 s em loop) | A confirmar | A confirmar | Nenhuma (só renomeado de `Som_perseguição.mp3`) |

@@ -4,6 +4,12 @@
  * - **Vigor:** cada ponto vale +1 de movimento no turno (somado aos 2d4).
  * - **Intimidação:** cada ponto vale +1 no raio de abordagem; a zona de rolagem e a de fuga
  *   se afastam junto (ver `approachRulesFor`). No interrogatório, a da ficha sobe a CD.
+ * - **Iniciativa:** perseguição: soma no raio e no d20 para arrancar (ver `chase.ts`).
+ * - **Agilidade:** perseguição: soma no d20 das curvas.
+ *
+ * A classe dá a base (Capitão +1 de iniciativa, Agente +1 de agilidade; ver
+ * `CLASS_RULES.baseStats`) e o ponto livre pode ir em qualquer um dos quatro. Grupo e Liderança
+ * só somam em vigor e intimidação.
  *
  * Cada atributo vai de −5 a +5 e todo agente começa com 0. O jogador tem `points` (1) para pôr
  * em um dos dois; o lado negativo fica para penalidades de outras fontes (peso, equipamento).
@@ -17,8 +23,8 @@ import { APPROACH_RULES, ApproachZones, approachZones } from './enemies';
 import { leadershipBonus } from './agent-class';
 import { GROUP_RULES } from './group';
 
-export type StatKey = 'vigor' | 'intimidacao';
-export const STAT_KEYS: readonly StatKey[] = ['vigor', 'intimidacao'];
+export type StatKey = 'vigor' | 'intimidacao' | 'iniciativa' | 'agilidade';
+export const STAT_KEYS: readonly StatKey[] = ['vigor', 'intimidacao', 'iniciativa', 'agilidade'];
 
 /** Valor de cada atributo. */
 export type Stats = Readonly<Record<StatKey, number>>;
@@ -31,7 +37,7 @@ export const STAT_RULES = {
   points: 1,
 } as const;
 
-export const ZERO_STATS: Stats = { vigor: 0, intimidacao: 0 };
+export const ZERO_STATS: Stats = { vigor: 0, intimidacao: 0, iniciativa: 0, agilidade: 0 };
 
 const clampStat = (v: number): number => Math.min(STAT_RULES.max, Math.max(STAT_RULES.min, v));
 
@@ -87,6 +93,9 @@ export interface Loadout {
 export const GROUP_STAT_BONUS: Stats = {
   vigor: GROUP_RULES.moveBonus,
   intimidacao: GROUP_RULES.approachBonus,
+  // a perseguição é individual: o grupo não soma
+  iniciativa: 0,
+  agilidade: 0,
 };
 
 /**
@@ -103,10 +112,7 @@ export function statBreakdown(loadout: Loadout, key: StatKey, grouped: boolean, 
 
 /** Atributos da ficha a partir da base do agente e dos pontos distribuídos. */
 export function sheetStats(spent: Stats, base: Stats = ZERO_STATS): Stats {
-  return {
-    vigor: clampStat(base.vigor + spent.vigor),
-    intimidacao: clampStat(base.intimidacao + spent.intimidacao),
-  };
+  return Object.fromEntries(STAT_KEYS.map((k) => [k, clampStat(base[k] + spent[k])])) as Stats;
 }
 
 /** Movimento do turno: soma dos dados + vigor (+ grupo, + Liderança). Nunca fica negativo. */

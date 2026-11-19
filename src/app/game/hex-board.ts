@@ -20,6 +20,23 @@ const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa um
 
 /** Peças com modelo 3D: velocidade da corrida entre hexágonos (3,6 m/s ≈ 2,8 hex/s). */
 const RUN_SPEED = 3.6 * METER;
+
+/**
+ * Câmera de perseguição (relativa ao agente, olhando para o inimigo): atrás e acima dele, mira à
+ * frente. Em retrato ela recua e sobe para o inimigo caber na mesma tela. O FOV abre um pouco.
+ */
+const CHASE_CAMERA = {
+  back: 4.4,
+  height: 2.5,
+  portraitBack: 6.2,
+  portraitHeight: 3.6,
+  aim: 7,
+  aimHeight: 0.9,
+  side: 0.8,
+  fovBoost: 8,
+  /** Quanto a névoa fecha (fração do raio de visão) com a câmera rasante. */
+  viewCut: 0.5,
+} as const;
 /** Tempo (s) que um personagem leva para correr de um hexágono ao vizinho (marca os passos). */
 export const SECONDS_PER_HEX = (HEX_STEP * HEX_SIZE) / RUN_SPEED;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
@@ -331,6 +348,14 @@ export class HexBoard {
   private cine: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number; zoom: number } | null = null;
   private cineLast: { target: THREE.Vector3; dir: THREE.Vector3; offsetPx: number; zoom: number } | null = null;
   private cineBlend = 0;
+  /**
+   * Câmera de perseguição: desce e encosta nas costas do agente, olhando para o inimigo que ele
+   * persegue. `chaseBlend` vai de 0 (câmera de sempre) a 1 (atrás do agente) e volta.
+   */
+  private chase: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
+  private chaseLast: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
+  private chaseBlend = 0;
+  private readonly chaseDir = new THREE.Vector3(0, 0, 1);
   /** Afastamento atual da cena (1 = padrão); acompanha `cine.zoom` devagar (ver `setCineZoom`). */
   private cineZoom = 1;
   /** Estado das portas comuns: fechadas, mantêm o telhado e escondem o interior. */
@@ -868,6 +893,66 @@ export class HexBoard {
    * Anda com o inimigo pelo caminho, virando para cada passo. `onStep` roda a cada
    * hexágono alcançado; se devolver `false` o inimigo para ali.
    */
+  /**
+   * Perseguição: o agente e o inimigo correm ao mesmo tempo, cada um pelo seu caminho (sem a
+   * origem), e chegam juntos (o mais curto corre mais devagar). A câmera segue o inimigo.
+   * Os passos de cada um avisam em `onStep` ("unit" ou "enemy").
+   */
+  async runPair(
+    unitId: string,
+    unitPath: HexCoord[],
+    enemyId: string,
+    enemyPath: HexCoord[],
+    onStep?: (who: 'unit' | 'enemy', hex: HexCoord) => void,
+    speed = 1.6,
+  ): Promise<void> {
+    const u = this.units.get(unitId);
+    const e = this.enemies.get(enemyId);
+    if (!u || !e || this.moving || (!unitPath.length && !enemyPath.length)) return;
+    this.moving = true;
+    const longest = Math.max(unitPath.length, enemyPath.length);
+    const pace = (n: number) => RUN_SPEED * speed * (n ? n / longest : 1);
+    const runUnit = async () => {
+      if (!unitPath.length) return;
+      const epoch = u.epoch;
+      u.rig?.matchSpeed('run', pace(unitPath.length));
+      u.rig?.play('run', 0.15);
+      for (const step of unitPath) {
+        const from = u.group.position;
+        const to = this.worldOf(step);
+        u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
+        await this.runTo(u, step, pace(unitPath.length), false);
+        if (u.epoch !== epoch) return;
+        u.hex = step;
+        onStep?.('unit', step);
+      }
+      u.rig?.play(this.restClip(u), 0.3);
+    };
+    const runEnemy = async () => {
+      if (!enemyPath.length) return;
+      const epoch = e.epoch;
+      e.running = true;
+      e.rig?.matchSpeed('run', pace(enemyPath.length));
+      e.rig?.play('run', 0.15);
+      for (const step of enemyPath) {
+        const from = this.worldOf(e.hex);
+        const to = this.worldOf(step);
+        e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
+        await this.runTo(e, step, pace(enemyPath.length), true);
+        if (e.epoch !== epoch) break;
+        e.hex = step;
+        onStep?.('enemy', step);
+      }
+      e.running = false;
+      e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+    };
+    await Promise.all([runUnit(), runEnemy()]);
+    // parados (curva, porta, fim): o agente encara quem persegue
+    const d = e.group.position.clone().sub(u.group.position);
+    if (d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
+    this.moving = false;
+  }
+
   async moveEnemy(id: string, path: HexCoord[], onStep?: (hex: HexCoord) => boolean | void, speed = 1): Promise<void> {
     const e = this.enemies.get(id);
     if (!e || this.moving || !path.length) return;
@@ -1272,6 +1357,81 @@ export class HexBoard {
    * Mistura a câmera com a da cena da porta (ver `focusDoor`), como a inspeção: ajusta a
    * posição e `look`, desloca a vista para a esquerda das fichas e devolve a distância.
    */
+  /**
+   * Liga ou desliga (`null`) a câmera de perseguição. Ela olha para o inimigo `enemyId`; sem
+   * ele, para o ponto médio dos hexágonos de `lookAt` (a escolha entre dois que fogem).
+   */
+  setChaseCamera(unitId: string | null, enemyId?: string, lookAt?: readonly HexCoord[]): void {
+    const u = unitId ? this.units.get(unitId) : undefined;
+    if (unitId && u && (enemyId || lookAt?.length)) {
+      const e = enemyId ? this.enemies.get(enemyId) : undefined;
+      const look = lookAt?.length
+        ? lookAt.reduce((acc, h) => acc.add(this.worldOf(h)), new THREE.Vector3()).divideScalar(lookAt.length)
+        : undefined;
+      const toward = e ? e.group.position : look;
+      // começa olhando para lá, sem girar do nada; na escolha, o agente também vira para eles
+      if (toward) this.chaseDir.copy(toward).sub(u.group.position).setY(0).normalize();
+      if (look && this.chaseDir.lengthSq() > 0) u.yaw = Math.atan2(this.chaseDir.x, this.chaseDir.z);
+      this.chase = this.chaseLast = { unitId, enemyId, look };
+    } else {
+      this.chase = null;
+      // a câmera de sempre volta para quem perseguiu
+      if (this.chaseLast) {
+        const u = this.units.get(this.chaseLast.unitId);
+        if (u) this.camGoal.copy(this.worldOf(u.hex));
+      }
+    }
+  }
+
+  /** Vira o agente para o inimigo (a "cabeça" da escolha de alvo). */
+  faceEnemy(unitId: string, enemyId: string): void {
+    const u = this.units.get(unitId);
+    const e = this.enemies.get(enemyId);
+    if (!u || !e) return;
+    const d = e.group.position.clone().sub(u.group.position);
+    if (d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
+  }
+
+  private blendChase(dt: number, look: THREE.Vector3, dist: number): number {
+    const goal = this.chase ? 1 : 0;
+    // ~0,8 s para descer ou subir
+    this.chaseBlend += (goal - this.chaseBlend) * (1 - Math.exp(-dt * 3.6));
+    if (Math.abs(goal - this.chaseBlend) < 0.002) this.chaseBlend = goal;
+    const c = this.chase ?? this.chaseLast;
+    const fov = 40 + CHASE_CAMERA.fovBoost * this.chaseBlend;
+    if (Math.abs(this.camera.fov - fov) > 0.05) {
+      this.camera.fov = fov;
+      this.camera.updateProjectionMatrix();
+    }
+    const u = c && this.units.get(c.unitId);
+    if (!c || !u || this.chaseBlend <= 0) return dist;
+    const e = c.enemyId ? this.enemies.get(c.enemyId) : undefined;
+    // olha para ele (ou para o ponto escolhido, ou para onde o agente corre); suave, para o
+    // zigue-zague do grid não balançar
+    const want = e && !e.gone
+      ? e.group.position.clone().sub(u.group.position).setY(0)
+      : c.look
+        ? c.look.clone().sub(u.group.position).setY(0)
+        : new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
+    if (want.lengthSq() > 0.01) this.chaseDir.lerp(want.normalize(), 1 - Math.exp(-dt * 3)).normalize();
+    const portrait = this.camera.aspect < 1;
+    const back = portrait ? CHASE_CAMERA.portraitBack : CHASE_CAMERA.back;
+    const height = portrait ? CHASE_CAMERA.portraitHeight : CHASE_CAMERA.height;
+    const p = u.group.position;
+    // um pouco para a direita do agente: ele fica à esquerda e o inimigo aparece ao lado dele
+    const right = new THREE.Vector3(-this.chaseDir.z, 0, this.chaseDir.x);
+    const pos = new THREE.Vector3(p.x, height, p.z)
+      .addScaledVector(this.chaseDir, -back)
+      .addScaledVector(right, CHASE_CAMERA.side);
+    const target = new THREE.Vector3(p.x, CHASE_CAMERA.aimHeight, p.z)
+      .addScaledVector(this.chaseDir, CHASE_CAMERA.aim)
+      .addScaledVector(right, CHASE_CAMERA.side * 0.3);
+    const k = this.chaseBlend * this.chaseBlend * (3 - 2 * this.chaseBlend);
+    this.camera.position.lerp(pos, k);
+    look.lerp(target, k);
+    return THREE.MathUtils.lerp(dist, back + CHASE_CAMERA.aim, k);
+  }
+
   private blendCine(dt: number, look: THREE.Vector3, dist: number): number {
     const goal = this.cine ? 1 : 0;
     this.cineBlend += (goal - this.cineBlend) * (1 - Math.exp(-dt * 5));
@@ -2353,6 +2513,7 @@ export class HexBoard {
     this.viewShift.x = this.viewShift.y = 0;
     dist = this.blendInspect(dt, look, dist);
     dist = this.blendCine(dt, look, dist);
+    dist = this.blendChase(dt, look, dist);
     this.camera.lookAt(look);
     this.updateOccluders(dt);
     // a cena da porta empurra a vista para a esquerda das fichas; o close-up, para cima da papelada
@@ -2363,7 +2524,8 @@ export class HexBoard {
 
     // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
     // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
-    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE;
+    // na perseguição a câmera rasante enxergaria mata demais: a névoa fecha mais perto
+    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE * (1 - CHASE_CAMERA.viewCut * this.chaseBlend);
     const fog = this.scene.fog as THREE.Fog;
     fog.far = dist + view;
     fog.near = dist + view * 0.45;
