@@ -89,6 +89,18 @@
         }
       </fieldset>
       <fieldset class="menu-group">
+        <legend>Som</legend>
+        <label class="menu-option" [class.checked]="soundOn() && soundSupported" data-testid="sound">
+          <input type="checkbox" [checked]="soundOn()" [disabled]="!soundSupported" (change)="setSound($any($event.target).checked)" />
+          <span class="menu-option-text">
+            <span class="menu-option-label">Sons do jogo</span>
+            <span class="menu-option-hint">
+              @if (soundSupported) { Passos, portas, fogo e o ambiente da mata } @else { Este navegador não toca som }
+            </span>
+          </span>
+        </label>
+      </fieldset>
+      <fieldset class="menu-group">
         <legend>Celular</legend>
         <label class="menu-option" [class.checked]="vibration() && vibrationSupported" data-testid="vibration">
           <input type="checkbox" [checked]="vibration()" [disabled]="!vibrationSupported" (change)="setVibration($any($event.target).checked)" />
@@ -184,7 +196,7 @@
           [attr.aria-pressed]="c.id === focused().id"
           [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + (isCaptain(c) ? ', Capitão' : ', Agente') + '. Vigor ' + signed(fieldStats(c).vig) + ', intimidação ' + signed(fieldStats(c).int) + ', alcance da abordagem ' + fieldStats(c).range + '. Toque para ver no tabuleiro.'"
           [attr.data-testid]="'chip-' + c.id"
-          (click)="focusCharacter(c.id)">
+          (click)="pickCharacter(c.id)">
           <span class="photo-img" [style.background]="hexColor(c)">
             <svg viewBox="0 0 24 24" aria-hidden="true" [style.fill]="shade(c)"><circle cx="12" cy="9" r="4.5" /><path d="M3 24c0-6 4-9.5 9-9.5s9 3.5 9 9.5z" /></svg>
           </span>
