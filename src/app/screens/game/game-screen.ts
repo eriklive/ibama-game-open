@@ -12,7 +12,6 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { rollDie, sum } from '../../game/dice';
 import {
-  ArrestOrigin,
   CHASE_RULES,
   ChaseAgent,
   ChaseCandidate,
@@ -136,7 +135,7 @@ const MISSION_DEADLINE = 5;
  * `interrogating`: interrogatório em close-up (balões e cartões de pergunta na tela).
  * `over`: a operação foi encerrada (fica o relatório na tela).
  */
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'plane' | 'interrogating' | 'ending' | 'enemy' | 'over';
+type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'plane' | 'interrogating' | 'ending' | 'chase' | 'enemy' | 'over';
 
 /** Anotação da caderneta de campo (vai para o relatório da operação). */
 export interface FieldNote {
@@ -461,11 +460,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     options: { id: string; name: string; steps: number; chance: string }[];
   } | null>(null);
   private chaseOfferDone?: (agentId: string | null) => void;
-  /**
-   * Suspeitos que fugiram de uma abordagem nesta rodada: quem deu a voz de prisão (ver
-   * `arrestQueue`). Vale até o fim do próximo turno inimigo.
-   */
-  private readonly arrests = new Map<string, ArrestOrigin>();
+  /** Fuga da voz de prisão que roda quando o auto de abordagem fecha (ver `approachFlight`). */
+  private flight: { agentId: string; enemies: string[] } | null = null;
+  /** Já correram nesta rodada (fugiram na hora da abordagem): no turno inimigo, não correm de novo. */
+  private readonly ranThisRound = new Set<string>();
+  /** Agarrados na fuga da abordagem: ficam abalados até o fim do turno inimigo seguinte. */
+  private readonly caughtThisRound = new Set<string>();
   /** Placar da perseguição em curso: distância e quanto da rota dele já foi. */
   protected readonly chaseHud = signal<ChaseHud | null>(null);
   /** Curva: o jogador tem `seconds` para deslizar para o lado (`decisao:perseguicao`). */
@@ -848,6 +848,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly toolsVisible = computed(
     () =>
       this.phase() !== 'enemy' &&
+      this.phase() !== 'chase' &&
       this.phase() !== 'rolling' &&
       !this.approaching() &&
       !(this.burning() && this.burnable()) &&
@@ -1102,7 +1103,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected endTurn(): void {
-    if (['walking', 'checking', 'door', 'plane', 'interrogating', 'rolling', 'enemy', 'over'].includes(this.phase())) return;
+    if (['walking', 'checking', 'door', 'plane', 'interrogating', 'rolling', 'chase', 'enemy', 'over'].includes(this.phase())) return;
     // só quando o jogador decide passar (não depois de abordar ou queimar)
     if (this.phase() === 'moving-choice') this.sound.play('ui.passar');
     this.clearTimers();
@@ -1143,9 +1144,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
     // perseguição: quem já correu nesta rodada não vai de novo; quem foi agarrado agora fica abalado
     const chased = new Set<string>();
-    const caught = new Set<string>();
-    // um agente no raio de dois que vão correr escolhe antes qual perseguir
-    const handled = new Set<string>();
+    const caught = new Set<string>(this.caughtThisRound);
+    this.caughtThisRound.clear();
+    // um agente no raio de dois que vão correr escolhe antes qual perseguir; quem já fugiu na
+    // hora da abordagem não corre de novo nesta rodada
+    const handled = new Set<string>(this.ranThisRound);
+    this.ranThisRound.clear();
     await this.resolveTargetChoices(epoch, chased, caught, handled);
     for (const { id } of this.enemies()) {
       if (stale()) return;
@@ -1154,7 +1158,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       // parado no lugar (o Jô comendo): não anda nem gira, então nem chama a câmera
       if (enemy.status === 'patrol' && stationary(enemy)) continue;
       // em alerta: antes de correr, quem está perto pode ir atrás dele
-      if (enemy.status === 'alert' && (await this.tryChase(enemy, epoch, chased, caught, handled))) {
+      if (enemy.status === 'alert' && (await this.tryChase(enemy, epoch, chased, caught))) {
         if (stale()) return;
         await this.wait(300);
         continue;
@@ -1165,8 +1169,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (shown) await this.wait(300);
     }
     if (stale()) return;
-    // a voz de prisão vale só para a corrida logo depois da abordagem
-    this.arrests.clear();
     // o abalado de uma rodada atrás passa
     for (const e of this.enemies()) if (e.shaken && !caught.has(e.id)) this.updateEnemy(e.id, { shaken: false });
     this.announceIfOver();
@@ -1268,18 +1270,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * O jogador escolhe quem (ou deixa fugir), o agente rola a iniciativa e, se arrancar, a
    * perseguição roda inteira. Devolve se houve perseguição (`false`: ele foge como sempre).
    */
-  private async tryChase(
-    enemy: EnemyState,
-    epoch: number,
-    chased: Set<string>,
-    caught: Set<string>,
-    handled: Set<string>,
-  ): Promise<boolean> {
+  private async tryChase(enemy: EnemyState, epoch: number, chased: Set<string>, caught: Set<string>): Promise<boolean> {
     const board = this.board!;
     // debaixo de um telhado que o jogador não enxerga, ninguém vê ele arrancar
     if (board.isCovered(enemy.hex)) return false;
-    const arrest = this.arrests.get(enemy.id);
-    if (arrest) return this.chaseArrest(enemy, arrest, epoch, chased, caught, handled);
     const offers = chaseCandidates(enemy.hex, this.chaseAgents(), this.area, this.enemyWalls(), chased);
     if (!offers.length) return false;
     board.focusHex(enemy.hex);
@@ -1299,85 +1293,61 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     });
   }
 
-  /** Fila da voz de prisão para este suspeito agora (ver `arrestQueue`). */
-  private arrestOffers(enemy: EnemyState, arrest: ArrestOrigin, chased: ReadonlySet<string>): ChaseCandidate[] {
-    return arrestQueue(enemy.hex, arrest, this.chaseAgents(), this.area, this.enemyWalls(), chased);
-  }
-
   /**
-   * Suspeito que fugiu de uma abordagem: quem deu a voz de prisão rola primeiro. Se ele tiver
-   * dois ou mais fugindo dele, escolhe antes qual perseguir (`decisao:alvo`); o escolhido corre
-   * a fila dele na hora e sai da vez. Devolve se houve perseguição.
+   * Voz de prisão: depois do auto de abordagem, quem não se rendeu foge na hora, um por vez
+   * (sempre depois de terminar a perseguição do anterior). Para cada um, a fila da voz de
+   * prisão (`arrestQueue`); ninguém foi, ele corre como no turno inimigo. Depois passa a vez.
    */
-  private async chaseArrest(
-    enemy: EnemyState,
-    arrest: ArrestOrigin,
-    epoch: number,
-    chased: Set<string>,
-    caught: Set<string>,
-    handled: Set<string>,
-  ): Promise<boolean> {
+  private async approachFlight(): Promise<void> {
+    const flight = this.flight;
+    this.flight = null;
+    const epoch = this.epoch;
     const alive = () => !this.destroyed && this.epoch === epoch;
-    const leader = arrest.agentId;
-    this.arrests.delete(enemy.id);
-    const leads = (e: EnemyState, a: ArrestOrigin) => this.arrestOffers(e, a, chased)[0]?.id === leader;
-    let picked: string | null | undefined;
-    if (leads(enemy, arrest)) {
-      const rivals = this.enemies().filter((e) => {
-        const a = this.arrests.get(e.id);
-        return e.status === 'alert' && !handled.has(e.id) && a?.agentId === leader && !this.board!.isCovered(e.hex) && leads(e, a);
-      });
-      if (rivals.length) {
-        picked = await this.chooseTarget(leader, [enemy.id, ...rivals.map((e) => e.id)]);
-        if (!alive()) return true;
-        if (picked !== enemy.id) {
-          // foi atrás de outro (ou de nenhum): este segue a fila sem ele
-          if (picked) {
-            const other = this.enemy(picked)!;
-            const otherArrest = this.arrests.get(picked)!;
-            this.arrests.delete(picked);
-            handled.add(picked);
-            if (!(await this.runArrestQueue(other, otherArrest, epoch, chased, caught, true)) && alive()) await this.flee(other, epoch);
-            if (!alive()) return true;
-            await this.wait(300);
-          }
-          chased.add(leader);
-        }
+    if (flight?.enemies.length) {
+      this.phase.set('chase');
+      // quem arrancou atrás de um não vai atrás do próximo
+      const ran = new Set<string>();
+      for (const id of flight.enemies) {
+        const enemy = this.enemy(id);
+        if (!enemy || enemy.status !== 'alert') continue;
+        this.ranThisRound.add(id);
+        const went = await this.runArrestQueue(enemy, flight.agentId, epoch, ran);
+        if (!alive()) return;
+        if (!went) await this.flee(this.enemy(id)!, epoch);
+        if (!alive()) return;
+        await this.wait(300);
       }
+      this.phase.set('ending');
     }
-    return this.runArrestQueue(enemy, arrest, epoch, chased, caught, picked === enemy.id);
+    if (!this.actingEnemies().length) this.announceIfOver();
+    this.endTurn();
   }
 
   /**
-   * A fila da voz de prisão, um agente por vez: carimbo "Perseguir?" só com o da vez (ou
-   * direto, se ele já escolheu este alvo), iniciativa e, se arrancar, a perseguição. Hesitou:
-   * o próximo da fila. Devolve se houve perseguição (`false`: ninguém foi, ele foge normal).
+   * A fila da voz de prisão de um suspeito, um agente por vez: carimbo "Perseguir?" só com o
+   * da vez, iniciativa e, se arrancar, a perseguição. Hesitou: o próximo. Devolve se houve
+   * perseguição (`false`: ninguém foi). Quem arrancou entra em `ran`.
    */
-  private async runArrestQueue(
-    enemy: EnemyState,
-    arrest: ArrestOrigin,
-    epoch: number,
-    chased: Set<string>,
-    caught: Set<string>,
-    chosen: boolean,
-  ): Promise<boolean> {
+  private async runArrestQueue(enemy: EnemyState, leaderId: string, epoch: number, ran: Set<string>): Promise<boolean> {
     const board = this.board!;
-    for (let first = true; ; first = false) {
+    // quem já rolou para este (ou já correu atrás de outro) fica de fora
+    const tried = new Set(ran);
+    for (;;) {
       if (this.destroyed || this.epoch !== epoch) return true;
-      const queue = this.arrestOffers(this.enemy(enemy.id) ?? enemy, arrest, chased);
+      const now = this.enemy(enemy.id) ?? enemy;
+      const queue = arrestQueue(now.hex, leaderId, this.chaseAgents(), this.area, this.enemyWalls(), tried);
       const [next] = queue;
       if (!next) return false;
-      if (!(first && chosen)) {
-        board.focusHex(enemy.hex);
-        board.startleEnemy(enemy.id);
-        this.sound.play('abo.carimbo');
-        const kicker = next.id === arrest.agentId ? 'Voz de prisão' : 'Reforço';
-        const agentId = await this.offerChase(enemy, [next], kicker);
-        if (this.destroyed || this.epoch !== epoch) return true;
-        if (!agentId) return false;
+      board.focusHex(now.hex);
+      board.startleEnemy(enemy.id);
+      this.sound.play('abo.carimbo');
+      const agentId = await this.offerChase(now, [next], next.id === leaderId ? 'Voz de prisão' : 'Reforço');
+      if (this.destroyed || this.epoch !== epoch) return true;
+      if (!agentId) return false;
+      if (await this.startChase(now, next.id, next.path, epoch, tried, this.caughtThisRound, queue.length > 1)) {
+        ran.add(next.id);
+        return true;
       }
-      const more = queue.length > 1;
-      if (await this.startChase(enemy, next.id, next.path, epoch, chased, caught, more)) return true;
     }
   }
 
@@ -1424,9 +1394,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const board = this.board!;
     const alive = () => !this.destroyed && this.epoch === epoch;
     const agents = () => this.chaseAgents();
-    // quem fugiu de uma abordagem tem a fila da voz de prisão (ver `chaseArrest`)
     const runners = () =>
-      this.enemies().filter((e) => e.status === 'alert' && !handled.has(e.id) && !this.arrests.has(e.id) && !board.isCovered(e.hex));
+      this.enemies().filter((e) => e.status === 'alert' && !handled.has(e.id) && !board.isCovered(e.hex));
     for (;;) {
       if (!alive()) return;
       const offers = new Map(runners().map((e) => [e.id, chaseCandidates(e.hex, agents(), this.area, this.enemyWalls(), chased)]));
@@ -2936,9 +2905,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const motion = !reducedMotion();
     for (const e of surrender) this.updateEnemy(e.id, { status: 'surrendered', facing: facingBetween(e.hex, from) });
     for (const e of flee) this.updateEnemy(e.id, { status: 'alert', facing: facingBetween(e.hex, from) });
-    // voz de prisão: quem abordou rola primeiro na perseguição; os reforços vêm do raio de movimento dele
-    const movement = turnMovement(this.rolled(), this.roster.loadout(this.active().id), this.grouped(), this.led());
-    for (const e of flee) this.arrests.set(e.id, { agentId: this.active().id, movement });
+    // voz de prisão: quem não se rendeu foge na hora, depois do auto (o mais perto de quem abordou primeiro)
+    this.flight = {
+      agentId: this.active().id,
+      enemies: [...flee].sort((a, b) => hexDistance(from, a.hex) - hexDistance(from, b.hex)).map((e) => e.id),
+    };
     this.refreshVision();
     this.gamepad.rumble(1, 0.6, 320);
     this.haptics.vibrate(APPROACH_PATTERN);
@@ -2972,8 +2943,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected closeReport(): void {
     if (!this.report()) return;
     this.report.set(null);
-    if (!this.actingEnemies().length) this.announceIfOver();
-    this.endTurn();
+    void this.approachFlight();
   }
 
   private closeApproach(): void {
@@ -3280,7 +3250,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeGrouping();
     this.board?.placeUnits(this.positions());
     this.enemies.set(this.initialEnemies());
-    this.arrests.clear();
+    this.flight = null;
+    this.ranThisRound.clear();
+    this.caughtThisRound.clear();
     this.noticed.set(new Set());
     this.found.set(new Set());
     this.searchFails.set(new Map());
@@ -3449,7 +3421,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         break;
       case 'l1':
       case 'r1': {
-        if (this.phase() === 'enemy' || this.aiming() || this.search()) break;
+        if (this.phase() === 'enemy' || this.phase() === 'chase' || this.aiming() || this.search()) break;
         const ids = CHARACTERS.map((c) => c.id);
         const i = ids.indexOf(this.focusedId());
         this.focusCharacter(ids[(i + (b === 'r1' ? 1 : ids.length - 1)) % ids.length]);
@@ -3485,7 +3457,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     const map = this.map;
-    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'door' || this.phase() === 'plane' || this.approaching() || this.burning() || this.aiming() || this.debrief()) return;
+    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.approaching() || this.burning() || this.aiming() || this.debrief()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
     const next = neighborToward(from, dir);

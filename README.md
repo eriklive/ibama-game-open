@@ -460,12 +460,15 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    controle: ✕ manda o primeiro, ○ deixa fugir.
 2. **Iniciativa.** Só o agente rola: **d20 + iniciativa ≥ 8**. Falhou: hesita e ele foge normal.
    Uma perseguição por vez; quem já correu nesta rodada não vai de novo.
-   **Voz de prisão:** se ele fugiu de uma abordagem, o primeiro a rolar é o agente que abordou
-   (basta ter caminho até ele, sem limite de raio; carimbo "Voz de prisão"). Se ele hesitar,
-   rolam um por vez os agentes que estão no raio de movimento de quem abordou (o 2d4 + vigor
-   daquele turno, andando a partir dele), do mais perto do suspeito ao mais longe (carimbo
-   "Reforço"), até alguém arrancar ou o jogador deixar fugir. Quem abordou e tem dois ou mais
-   fugindo dele escolhe antes qual perseguir. Vale só no turno inimigo logo depois da abordagem.
+   **Voz de prisão:** quem foge de uma abordagem não espera o turno inimigo. Ao fechar o auto de
+   abordagem, ele foge na hora, ainda no turno de quem abordou. O primeiro a rolar é o agente que
+   abordou (carimbo "Voz de prisão"; basta ter caminho até ele, sem limite de raio). Se ele
+   hesitar, rolam um por vez todos os outros agentes, do mais perto do suspeito ao mais longe
+   (carimbo "Reforço"), até alguém arrancar ou o jogador deixar fugir; ninguém foi, ele corre
+   para a borda como no turno inimigo. Com vários fugindo, eles fogem em sequência (o mais perto
+   de quem abordou primeiro), sempre depois de terminar a perseguição do anterior; quem arrancou
+   atrás de um não vai atrás do próximo. Quem fugiu na hora não corre de novo no turno inimigo
+   daquela rodada. Só depois disso a vez passa.
 3. **Rota travada.** A fuga dele até a borda (no máximo 12 hexágonos), passando por portas que
    ele consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
    número de hexágonos entre eles.
