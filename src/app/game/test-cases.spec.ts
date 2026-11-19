@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { CHARACTERS, MAPS, blockedHexes, findMap, lowCoverHexes, playArea } from './maps';
+import {
+  CHARACTERS,
+  MAPS,
+  blockedHexes,
+  findMap,
+  inStructure,
+  lowCoverHexes,
+  playArea,
+} from './maps';
 import { agentSight, arrestQueue, lockRoute } from './chase';
 import { isOpen, spawnDoors } from './door';
 import { hexKey } from './hex';
@@ -28,7 +36,7 @@ describe('casos de teste', () => {
     }
   });
 
-  it('fuga pelo aeroporto: o vigia corre para os fundos (norte, pela trilha atrás do hangar)', () => {
+  it('fuga pelo aeroporto: o vigia cruza o hangar por dentro e sai pelos fundos, pela esquerda', () => {
     const c = findTestCase('fuga-aeroporto')!;
     const map = MAPS.find((m) => m.id === c.mapId)!;
     const area = playArea(map);
@@ -49,8 +57,15 @@ describe('casos de teste', () => {
       sight,
     );
     expect(route.escapes).toBe(true);
-    expect(route.flee.at(-1)!.row).toBeLessThan(0);
-    expect(route.stops.length).toBeGreaterThan(0);
+    // sai do mapa pelo norte (fundos), do lado esquerdo
+    const end = route.flee.at(-1)!;
+    expect(end.row).toBeLessThan(0);
+    expect(end.col).toBeLessThanOrEqual(16);
+    // corre por dentro do hangar e passa pela porta dos fundos do oeste
+    const hangar = map.structures!.find((s) => s.kind === 'hangar')!.rect;
+    expect(route.flee.filter((h) => inStructure(h, hangar)).length).toBeGreaterThanOrEqual(10);
+    expect(route.flee.some((h) => h.col === 14 && h.row === 4)).toBe(true);
+    expect(route.stops.some((s) => s.kind === 'porta')).toBe(true);
     // acabou de abordar: começa colada nele (distância = passos até ele − 1)
     const chase = arrestQueue(
       vigia,
