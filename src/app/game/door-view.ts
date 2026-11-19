@@ -3,9 +3,16 @@ import { Door, isOpen } from './door';
 import { HexCoord, hexKey, hexToWorld } from './hex';
 import { HexRect, inStructure } from './maps';
 import { castsMovingShadow } from './static-shadow';
+import { METER } from './character-model';
 
-/** Altura da folha da porta e do vão (as paredes da casa têm 2,4 e as do hangar, 2,6). */
-const LEAF_HEIGHT = 2.05;
+/**
+ * Altura da folha da porta e do vão: 1,8 m (2,4 unidades), perto da altura dos personagens
+ * (≈ 2,6 com o exagero de miniatura). É o máximo que cabe nas paredes de hoje (casa 2,4 e
+ * hangar 2,6): a verga, fina, fica logo acima da folha.
+ */
+const LEAF_HEIGHT = 1.8 * METER;
+/** Altura da verga sobre o vão. */
+const LINTEL_HEIGHT = 0.2;
 const LEAF_THICKNESS = 0.08;
 /** Folga entre a folha e os postes do batente. */
 const POST_GAP = 0.14;
@@ -98,8 +105,8 @@ export class DoorViews {
       this.group.add(holder);
 
       // verga sobre o vão (a parede se interrompe na porta) e soleira
-      const lintel = new THREE.Mesh(new THREE.BoxGeometry(gap, 0.5, 0.2), frame);
-      lintel.position.y = LEAF_HEIGHT + 0.3;
+      const lintel = new THREE.Mesh(new THREE.BoxGeometry(gap, LINTEL_HEIGHT, 0.2), frame);
+      lintel.position.y = LEAF_HEIGHT + 0.02 + LINTEL_HEIGHT / 2;
       lintel.castShadow = lintel.receiveShadow = true;
       holder.add(lintel);
 
