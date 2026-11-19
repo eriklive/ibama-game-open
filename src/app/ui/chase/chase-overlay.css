@@ -156,3 +156,31 @@
 @media (prefers-reduced-motion: reduce) {
   .curve-timer i { animation: none; }
 }
+
+/* tela deitada de celular (pouca altura): título e placar em uma linha, menores */
+@media (max-height: 500px) {
+  .chase-hud {
+    bottom: calc(6px + var(--safe-bottom, 0px));
+    grid-auto-flow: column;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 10px;
+    font-size: 11px;
+  }
+  .chase-hud-kicker { font-size: 13px; white-space: nowrap; }
+  .chase-hud-label { width: auto; white-space: nowrap; }
+  .chase-hud-row strong { font-size: 16px; }
+  .chase-hud-dots i { width: 10px; height: 8px; }
+  .chase-hud-bar { width: 70px; }
+  .curve-head {
+    top: calc(6px + var(--safe-top, 0px));
+    width: auto;
+    grid-auto-flow: column;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 12px;
+  }
+  .curve-kicker { font-size: 20px; }
+  .curve-text { font-size: 13px; }
+  .curve-timer { width: 70px; }
+}
