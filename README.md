@@ -533,3 +533,15 @@ npm run build    # saída em dist/ibama-game/browser (pode ser servida estaticam
 
 O roteamento usa hash (`#/jogo/...`), então o build funciona em qualquer
 hospedagem estática.
+
+## Métricas de acesso
+
+O Google Tag Manager (`GTM-5RSTJ8MV`) é carregado em `src/index.html` com o **modo de
+consentimento**: até o jogador tocar em **Aceitar** no aviso de cookies
+(`src/app/ui/consent/consent-banner.ts`), o Analytics não grava cookies. A escolha fica em
+`localStorage['ibama.analytics']`.
+
+Como o roteamento usa hash, cada troca de tela é enviada ao `dataLayer` como o evento
+`virtual_page_view`, com `page_path` sem o `#` (ex.: `/ibama-game-open/escalacao/teste-12x12`),
+`page_location` e `page_title` (`src/app/game/analytics.ts`). Eventos do jogo podem ser
+enviados com `Analytics.event('nome', { ... })`.
