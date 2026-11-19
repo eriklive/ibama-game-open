@@ -6,6 +6,7 @@ import { spawnDoors } from './door';
 import { spawnEnemy } from './enemies';
 import {
   CHASE_RULES,
+  agentSight,
   arrestQueue,
   chaseCandidates,
   chaseEnd,
@@ -228,11 +229,39 @@ describe('lockRoute', () => {
     ]);
     expect(r.cornered).toBe(true);
   });
-  it('rota longa é cortada em routeSteps e não chega à borda', () => {
+  it('rota longa vai inteira até a borda, sem corte', () => {
     const big = rectArea(40, 40);
     const r = lockRoute(h(20, 20), big, new Set());
-    expect(r.flee.length).toBe(CHASE_RULES.routeSteps);
-    expect(r.escapes).toBe(false);
+    expect(r.flee.length).toBeGreaterThan(12);
+    expect(big.isEdge(r.flee.at(-1)!)).toBe(true);
+    expect(r.escapes).toBe(true);
+  });
+  it('foge do que os agentes enxergam: dá a volta por trás do muro', () => {
+    // campo 30×21; muro na coluna 14 com vão só na fileira 20 (a de baixo); o agente vê o lado oeste
+    const field = rectArea(30, 21);
+    const wall = new Set(Array.from({ length: 20 }, (_, r) => hexKey(h(14, r))));
+    const sight = agentSight([h(5, 10)], field, wall, 30);
+    expect(sight.has(hexKey(h(10, 10)))).toBe(true);
+    expect(sight.has(hexKey(h(20, 10)))).toBe(false);
+    const open = lockRoute(h(15, 2), field, wall);
+    const hidden = lockRoute(h(15, 2), field, wall, new Map(), [h(5, 10)], sight);
+    // sem ninguém olhando, a borda de cima é a mais perto; com o agente, ainda é (ele já está escondido)
+    expect(open.flee.length).toBe(hidden.flee.length);
+    expect(hidden.flee.every((p) => !sight.has(hexKey(p)))).toBe(true);
+  });
+  it('prefere o caminho mais longo escondido ao curto à vista', () => {
+    // a borda oeste é a mais perto, mas o agente perto dela enxerga 3 hexágonos em volta
+    const field = rectArea(21, 21);
+    const agent = h(2, 10);
+    const sight = agentSight([agent], field, new Set(), 3);
+    const from = h(6, 10);
+    const seen = (r: { flee: HexCoord[] }) => r.flee.filter((p) => sight.has(hexKey(p))).length;
+    const plain = lockRoute(from, field, new Set(), new Map(), [agent]);
+    const hidden = lockRoute(from, field, new Set(), new Map(), [agent], sight);
+    expect(seen(plain)).toBeGreaterThan(0);
+    expect(seen(hidden)).toBeLessThan(seen(plain));
+    expect(hidden.flee.length).toBeGreaterThan(plain.flee.length);
+    expect(field.isEdge(hidden.flee.at(-1)!)).toBe(true);
   });
 });
 
@@ -304,6 +333,16 @@ describe('rotas no Aeroporto', () => {
     const r = route(h(22, 26), h(21, 21));
     expect(r.flee.every((p) => p.col === 22)).toBe(true);
     expect(r.stops).toEqual([]);
+  });
+  it('com um agente olhando a pista, ele sai dela pela mata até a borda', () => {
+    const area = playArea(m);
+    const agent = h(21, 21);
+    const sight = agentSight([agent], area, blockedHexes(m));
+    const r = lockRoute(h(22, 26), area, blockedHexes(m), spawnDoors(m.doors ?? [], m.doorStates), [agent], sight);
+    const onRunway = r.flee.filter((p) => m.ground?.get(hexKey(p)) === 'dirt').length;
+    expect(onRunway).toBeLessThanOrEqual(2);
+    expect(r.flee.filter((p) => sight.has(hexKey(p))).length).toBeLessThan(r.flee.length / 3);
+    expect(area.isEdge(r.flee.at(-1)!)).toBe(true);
   });
   it('trilha na mata: o zigue-zague vira poucas curvas, espaçadas', () => {
     const r = route(h(11, 21), h(15, 21));

@@ -469,9 +469,12 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    de quem abordou primeiro), sempre depois de terminar a perseguição do anterior; quem arrancou
    atrás de um não vai atrás do próximo. Quem fugiu na hora não corre de novo no turno inimigo
    daquela rodada. Só depois disso a vez passa.
-3. **Rota travada.** A fuga dele até a borda (no máximo 12 hexágonos), passando por portas que
-   ele consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
-   número de hexágonos entre eles.
+3. **Rota travada.** A fuga dele até a saída (borda) mais próxima, sem limite de hexágonos. Ele
+   evita o que os agentes enxergam (até 20 hexágonos em linha reta, sem parede, árvore ou porta
+   fechada no meio): cada hexágono à vista custa 6 passos a mais, então ele prefere correr por
+   dentro das construções ou pela mata a atravessar a pista à vista. Passa por portas que ele
+   consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
+   número de hexágonos entre eles. Chegou à borda: some do mapa e a perseguição acaba.
 4. **Curva.** Em cada curva o jogo para: o jogador tem **2 s** para deslizar para o lado da curva
    (toque/arrasto, setas ou A/D, direcional). Lado errado ou nada: **bate** (+1). Lado certo:
    d20 + agilidade ≥ 6 fecha a curva (−1). O garimpeiro sempre rola a dele (escorregou: −1).

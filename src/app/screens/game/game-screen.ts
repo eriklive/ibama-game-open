@@ -17,6 +17,7 @@ import {
   ChaseCandidate,
   ChaseStats,
   Side,
+  agentSight,
   arrestQueue,
   chaseCandidates,
   fleeDoorAction,
@@ -1566,7 +1567,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ...this.lowCover,
       ...this.onBoardEnemies().filter((e) => e.id !== enemyId).map((e) => hexKey(e.hex)),
     ]);
-    const route = lockRoute(enemy.hex, this.area, blocked, this.doors(), others);
+    // ele foge do que os agentes enxergam (todos, inclusive quem corre atrás dele)
+    const sight = agentSight([...this.positions().values()], this.area, this.walls());
+    const route = lockRoute(enemy.hex, this.area, blocked, this.doors(), others, sight);
     // a pista: do agente até ele e, dali, a rota de fuga travada
     const track = [agentFrom, ...agentPath, ...route.flee];
     const n = agentPath.length;

@@ -14,9 +14,11 @@
  *    depender do garimpeiro (`initiativeCheck`). Passou: sai correndo. Falhou: hesita e o
  *    garimpeiro foge normal. O garimpeiro não rola nada novo: o teste de fuga da faixa amarela da
  *    abordagem continua como está (falhou, tropeça e se rende), e quem foge sem rolar segue assim.
- * 3. **Rota travada.** O jogo calcula a fuga dele até a borda (`lockRoute`), passando só por
- *    portas que ele consegue usar (abertas, encostadas, trancadas e portões; bloqueada é
- *    parede). A rota vira a "pista" e não muda mais. Nela ficam as **paradas**:
+ * 3. **Rota travada.** O jogo calcula a fuga dele até a saída (borda) mais próxima, sem limite
+ *    de passos (`lockRoute`). Ele evita o que os agentes enxergam (`agentSight`): prefere correr
+ *    por dentro das construções ou pela mata a atravessar a pista à vista. Passa só por portas
+ *    que consegue usar (abertas, encostadas, trancadas e portões; bloqueada é parede). A rota
+ *    vira a "pista" e não muda mais. Nela ficam as **paradas**:
  *    - **curva** (mudança de direção, ver `routeStops`): uma `decisao:perseguicao`. O agente
  *      precisa deslizar para o lado da curva e rolar d20 + agilidade; o garimpeiro também rola
  *      a dele (`resolveCurve`);
@@ -25,15 +27,24 @@
  *      fica aberta e o agente passa direto. A porta substitui a curva naquele hexágono.
  * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
- *    A rota travada acabou: **foge** (`chaseEnd`).
+ *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
  *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
  *    ainda não correram (`chaseCandidates` com `alreadyChased`).
  */
-import { ENEMY_RULES, isBorder } from './enemies';
+import { ENEMY_RULES, isBorder, lineOfSight } from './enemies';
 import { Door, DoorState, isOpen } from './door';
-import { HexArea, HexCoord, hexKey, hexToWorld, pathTo, reachableHexes } from './hex';
+import {
+  HexArea,
+  HexCoord,
+  hexesInRange,
+  hexKey,
+  hexNeighbors,
+  hexToWorld,
+  pathTo,
+  reachableHexes,
+} from './hex';
 
 export const CHASE_RULES = {
   die: 20,
@@ -41,8 +52,13 @@ export const CHASE_RULES = {
   radiusBase: ENEMY_RULES.fleeSteps,
   /** Iniciativa do agente: d20 + iniciativa, pelo menos isto, para sair correndo. */
   initiativeDC: 8,
-  /** Tamanho máximo da rota travada (dois turnos de fuga, com folga). */
-  routeSteps: 12,
+  /**
+   * Visão dos agentes na fuga: até onde (hexágonos, em linha reta e sem parede, árvore ou
+   * porta fechada no meio) um agente enxerga. A rota foge desses hexágonos.
+   */
+  sightRange: 20,
+  /** Custo extra de cada hexágono que um agente enxerga: ele dá a volta pela mata ou por dentro. */
+  seenCost: 6,
   /** Curva: d20 + agilidade, pelo menos isto. Vale para agente e garimpeiro. */
   curveDC: 6,
   /** Tempo (s, relógio real) para deslizar na curva antes de contar como "não deslizou". */
@@ -182,9 +198,9 @@ export type ChaseStop =
   | { kind: 'porta'; index: number; hex: HexCoord; door: Door };
 
 export interface ChaseRoute {
-  /** Fuga do garimpeiro (sem a origem), cortada em `routeSteps`. */
+  /** Fuga do garimpeiro (sem a origem), inteira até a borda. */
   flee: HexCoord[];
-  /** A rota chega à borda (se ninguém pegar, ele foge). */
+  /** A rota chega à borda (se ninguém pegar, ele foge). Só é falso se estiver encurralado. */
   escapes: boolean;
   /** Encurralado: não há rota até a borda. */
   cornered: boolean;
@@ -195,9 +211,32 @@ export interface ChaseRoute {
 const passableForFlee = (state: DoorState): boolean => state !== 'bloqueada';
 
 /**
- * Trava a rota de fuga: caminho mais curto até a borda, desviando de `blocked` e dos agentes.
- * Portas comuns (`doors`) que não estão bloqueadas são atravessáveis mesmo fechadas (viram
- * paradas). Entre bordas igualmente próximas, prefere a mais longe dos agentes.
+ * Hexágonos que os agentes enxergam: até `range` em linha reta, sem parede, árvore, carga alta
+ * ou porta fechada (`walls`) no meio. Os agentes não têm cone: olham para todo lado.
+ */
+export function agentSight(
+  agents: readonly HexCoord[],
+  area: HexArea,
+  walls: ReadonlySet<string>,
+  range: number = CHASE_RULES.sightRange,
+): Set<string> {
+  const out = new Set<string>();
+  for (const a of agents) {
+    for (const h of hexesInRange(a, range, area)) {
+      const k = hexKey(h);
+      if (!out.has(k) && !walls.has(k) && lineOfSight(a, h, walls)) out.add(k);
+    }
+  }
+  return out;
+}
+
+/**
+ * Trava a rota de fuga: até a saída (borda) mais barata, sem limite de passos. Cada passo
+ * custa 1, e mais `seenCost` se um agente enxerga aquele hexágono (`sight`): ele prefere
+ * correr por dentro das construções ou pela mata a atravessar a pista à vista. Desvia de
+ * `blocked` e dos agentes. Portas comuns (`doors`) que não estão bloqueadas são atravessáveis
+ * mesmo fechadas (viram paradas). Entre saídas igualmente baratas, prefere a mais longe dos
+ * agentes.
  */
 export function lockRoute(
   from: HexCoord,
@@ -205,6 +244,7 @@ export function lockRoute(
   blocked: ReadonlySet<string>,
   doors: ReadonlyMap<string, Door> = new Map(),
   agents: readonly HexCoord[] = [],
+  sight: ReadonlySet<string> = new Set(),
 ): ChaseRoute {
   if (isBorder(from, area)) return { flee: [], escapes: true, cornered: false, stops: [] };
   const walls = new Set(blocked);
@@ -213,7 +253,7 @@ export function lockRoute(
     else walls.add(k);
   }
   for (const a of agents) walls.add(hexKey(a));
-  const reach = reachableHexes(from, area.hexes.length, area, walls);
+  const reach = cheapestPaths(from, area, walls, (k) => 1 + (sight.has(k) ? CHASE_RULES.seenCost : 0));
   let best: { coord: HexCoord; cost: number; safety: number } | null = null;
   for (const { coord, cost } of reach.values()) {
     if (!isBorder(coord, area)) continue;
@@ -224,14 +264,42 @@ export function lockRoute(
       best = { coord, cost, safety };
   }
   if (!best) return { flee: [], escapes: false, cornered: true, stops: [] };
-  const full = pathTo(reach, best.coord);
-  const flee = full.slice(0, CHASE_RULES.routeSteps);
-  return {
-    flee,
-    escapes: flee.length === full.length,
-    cornered: false,
-    stops: routeStops([from, ...flee], doors),
-  };
+  const flee = pathTo(reach, best.coord);
+  return { flee, escapes: true, cornered: false, stops: routeStops([from, ...flee], doors) };
+}
+
+/**
+ * Dijkstra a partir de `from` (que fica de fora do resultado, como em `reachableHexes`):
+ * `cost` de entrar em cada hexágono, pela chave. Mesmo formato de `reachableHexes`, para `pathTo`.
+ */
+function cheapestPaths(
+  from: HexCoord,
+  area: HexArea,
+  walls: ReadonlySet<string>,
+  cost: (key: string) => number,
+): Map<string, { coord: HexCoord; cost: number; prev: string }> {
+  const out = new Map<string, { coord: HexCoord; cost: number; prev: string }>();
+  const startKey = hexKey(from);
+  const done = new Set<string>();
+  // fila de prioridade simples por baldes (custos inteiros e pequenos)
+  const buckets: { coord: HexCoord; key: string }[][] = [[{ coord: from, key: startKey }]];
+  const best = new Map<string, number>([[startKey, 0]]);
+  for (let c = 0; c < buckets.length; c++) {
+    for (const { coord, key } of buckets[c] ?? []) {
+      if (done.has(key) || best.get(key) !== c) continue;
+      done.add(key);
+      for (const n of hexNeighbors(coord)) {
+        const k = hexKey(n);
+        if (done.has(k) || !area.has(n) || walls.has(k)) continue;
+        const nc = c + cost(k);
+        if (nc >= (best.get(k) ?? Infinity)) continue;
+        best.set(k, nc);
+        out.set(k, { coord: n, cost: nc, prev: key });
+        (buckets[nc] ??= []).push({ coord: n, key: k });
+      }
+    }
+  }
+  return out;
 }
 
 const worldDelta = (a: HexCoord, b: HexCoord): [number, number] => {
