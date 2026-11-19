@@ -13,7 +13,6 @@ import {
   initiativeChance,
   initiativeCheck,
   lockRoute,
-  movementAfterChase,
   resolveCurve,
   resolveFleeDoor,
   routeCurves,
@@ -249,16 +248,12 @@ describe('porta na fuga', () => {
   });
 });
 
-describe('fim e cansaço', () => {
-  it('distância 0 agarra; fôlego ou rota no fim, foge', () => {
-    expect(chaseEnd(0, 3, 8, false)).toBe('agarrou');
-    expect(chaseEnd(2, 8, 8, false)).toBe('fugiu');
-    expect(chaseEnd(2, 3, 8, true)).toBe('fugiu');
-    expect(chaseEnd(2, 3, 8, false)).toBeNull();
-  });
-  it('passos corridos saem do próximo movimento', () => {
-    expect(movementAfterChase(7, 3)).toBe(4);
-    expect(movementAfterChase(4, 9)).toBe(0);
+describe('fim', () => {
+  it('distância 0 agarra (mesmo no fim da rota); rota no fim, foge', () => {
+    expect(chaseEnd(0, false)).toBe('agarrou');
+    expect(chaseEnd(0, true)).toBe('agarrou');
+    expect(chaseEnd(2, true)).toBe('fugiu');
+    expect(chaseEnd(2, false)).toBeNull();
   });
 });
 

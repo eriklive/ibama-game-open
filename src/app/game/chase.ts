@@ -21,9 +21,8 @@
  *      fica aberta e o agente passa direto. A porta substitui a curva naquele hexágono.
  * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
- *    Fôlego acabou ou ele chegou à borda: **foge**.
- * 5. **Cansaço.** Os passos corridos saem do movimento do próximo turno do agente
- *    (`movementAfterChase`).
+ *    A rota travada acabou: **foge** (`chaseEnd`).
+ * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
  *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
  *    ainda não correram (`chaseCandidates` com `alreadyChased`).
@@ -361,22 +360,16 @@ export function resolveFleeDoor(door: Door, d4: number, d20: number): FleeDoorRe
   return { action, need, pass, door: after, delta: pass ? 0 : -1 };
 }
 
-// ---------- fim e cansaço ----------
+// ---------- fim ----------
 
 export type ChaseEnd = 'agarrou' | 'fugiu';
 
-/** Como termina com esta distância, passos corridos e fôlego (null = continua). */
-export function chaseEnd(
-  distance: number,
-  ran: number,
-  stamina: number,
-  routeDone: boolean,
-): ChaseEnd | null {
+/**
+ * Como termina com esta distância (null = continua). Não há fôlego nem custo: a perseguição
+ * dura a rota travada inteira.
+ */
+export function chaseEnd(distance: number, routeDone: boolean): ChaseEnd | null {
   if (distance <= 0) return 'agarrou';
-  if (ran >= stamina || routeDone) return 'fugiu';
+  if (routeDone) return 'fugiu';
   return null;
 }
-
-/** Movimento do próximo turno depois de correr `ran` passos na perseguição (mínimo 0). */
-export const movementAfterChase = (movement: number, ran: number): number =>
-  Math.max(0, movement - ran);
