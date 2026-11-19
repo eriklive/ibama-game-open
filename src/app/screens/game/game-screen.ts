@@ -17,6 +17,7 @@ import {
   ChaseCandidate,
   ChaseStats,
   Side,
+  agentCurves,
   agentSight,
   arrestQueue,
   chaseCandidates,
@@ -1636,17 +1637,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
      * cresce no meio da corrida; se zerar a distância, os dois param ali (agarrou). Antes da
      * parada seguinte, o trecho espera o grito terminar de rolar.
      */
-    const legTo = async (s: number) => {
+    const legTo = async (s: number, agentCap = Infinity, hold = false) => {
       if (g >= s) return;
       this.chaseShout.set('ready');
-      let aEnd = Math.max(a, Math.min(n + s - distance - 1, n + s - 1));
+      let aEnd = Math.max(a, Math.min(n + s - distance - 1, n + s - 1, agentCap));
       const unitPath = track.slice(a + 1, aEnd + 1);
       closer = () => {
-        const want = Math.min(n + s - distance - 1, n + s - 1);
+        // numa curva, o agente para nela mesmo que o grito o tenha feito encostar
+        const want = Math.min(n + s - distance - 1, n + s - 1, agentCap);
         while (aEnd < want) unitPath.push(track[++aEnd]);
       };
       moved.a = moved.g = 0;
-      await board.runPair(agentId, unitPath, enemyId, track.slice(n + g + 1, n + s + 1), onStep, undefined, () => distance <= 0);
+      await board.runPair(agentId, unitPath, enemyId, track.slice(n + g + 1, n + s + 1), onStep, undefined, () => distance <= 0, hold);
       closer = undefined;
       this.chaseShout.set(null);
       a += moved.a;
@@ -1660,18 +1662,42 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // encurralado, ela chega nele; colada nele (distância 0), agarra na largada
     if (route.cornered) distance = 0;
     else if (distance > 0) {
-      for (const stop of route.stops) {
-        // na porta ele para colado nela; na curva, em cima dela
-        await legTo(stop.kind === 'porta' ? stop.index - 1 : stop.index);
+      // portas são dele (para colado nela); curvas são do agente (o lado só é pedido quando o
+      // agente chega na curva, não quando o garimpeiro passa por ela)
+      const doorStops = route.stops.filter((st): st is Extract<typeof st, { kind: 'porta' }> => st.kind === 'porta');
+      const curves = agentCurves(track, n, doorStops);
+      let di = 0;
+      let ci = 0;
+      for (;;) {
+        while (ci < curves.length && curves[ci].index <= a) ci++;
+        const door = doorStops[di];
+        const curve = curves[ci];
+        const doorAt = door ? door.index - 1 : Infinity;
+        // ele fica `distance` à frente: o agente chega em `curve.index` com ele neste ponto
+        let curveAt = curve ? curve.index - n + distance + 1 : Infinity;
+        // ele chega ao fim da rota antes de o agente chegar à curva
+        if (curveAt >= route.flee.length) curveAt = Infinity;
+        if (doorAt === Infinity && curveAt === Infinity) break;
+        const isDoor = doorAt <= curveAt;
+        // o agente nunca passa da próxima curva dele sem decidir o lado
+        // na curva, os dois param na pose de corrida e congelam enquanto o jogador decide
+        await legTo(isDoor ? doorAt : curveAt, curve?.index ?? Infinity, !isDoor);
         if (!alive()) return;
-        // o grito no trecho já encostou nele
-        if (distance <= 0) break;
-        if (stop.kind === 'curva') distance += await this.chaseCurve(stop.side, agentId, enemyId);
-        else
-          distance = await this.chaseDoor(stop.door, enemyId, distance, (d) => {
+        // o grito no trecho já encostou nele: sai da pose de corrida
+        if (distance <= 0) {
+          board.setChaseSlowmo(false);
+          break;
+        }
+        if (!isDoor) {
+          ci++;
+          distance += await this.chaseCurve(curve!.side, agentId, enemyId);
+        } else {
+          di++;
+          distance = await this.chaseDoor(door.door, enemyId, distance, (d) => {
             distance = Math.max(0, d);
             hud();
           });
+        }
         if (!alive()) return;
         distance = Math.max(0, distance);
         hud();
@@ -1773,10 +1799,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async chaseCurve(side: Side, agentId: string, enemyId: string): Promise<number> {
     const enemy = this.enemy(enemyId)!;
     const agent = this.chaseStats(agentId);
-    // a fita cai para o ultra slow enquanto o jogador decide; volta no gesto
+    // a fita cai para o ultra slow enquanto o jogador decide; volta no gesto. A cena vai junto:
+    // os dois congelam no meio da corrida e a câmera fecha um pouco (ver `CHASE_SLOWMO`)
     this.sound.chaseSlow(true);
+    this.board?.setChaseSlowmo(true);
     const swiped = await this.askCurve();
     this.sound.chaseSlow(false);
+    this.board?.setChaseSlowmo(false);
     const crashed = swiped !== side;
     let agentRoll = 0;
     if (crashed) {

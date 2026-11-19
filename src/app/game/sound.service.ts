@@ -4,6 +4,7 @@ import { AudioEngine, LoopHandle, MusicHandle } from './audio/engine';
 import { Boot, Surface, step } from './audio/footsteps';
 import { HIDDEN_RANGE, OCCLUDED, distanceGain } from './audio/positional';
 import { SOUNDS, SoundId, fireLoop, spottedFallback } from './audio/sounds';
+import { CHASE_SLOWMO } from './chase-slowmo';
 import { HexCoord, hexDistance } from './hex';
 
 const STORAGE_KEY = 'ibama.sound';
@@ -18,10 +19,10 @@ export const CHASE_MUSIC = {
   fadeIn: 0.3,
   fadeOut: 1.2,
   /** Curva, porta, escolha: a fita cai para isto (tempo e tom juntos). */
-  slowRate: 0.25,
-  slowRamp: 0.4,
+  slowRate: CHASE_SLOWMO.rate,
+  slowRamp: CHASE_SLOWMO.slowRamp,
   /** Na decisão a fita volta rápido, no mesmo ponto da faixa. */
-  resumeRamp: 0.15,
+  resumeRamp: CHASE_SLOWMO.resumeRamp,
   /** Distância (hexágonos) em que a faixa fica toda abafada; colado, toda aberta. */
   farDistance: 6,
 } as const;

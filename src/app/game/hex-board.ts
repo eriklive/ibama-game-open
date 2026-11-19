@@ -3,6 +3,7 @@ import { COVER_HEIGHT, GameMap, Ground, HexRect, doorsOf, inStructure, playArea,
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, METER, ModelDef } from './character-model';
+import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
@@ -355,6 +356,12 @@ export class HexBoard {
   private chase: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
   private chaseLast: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
   private chaseBlend = 0;
+  /**
+   * Slow da curva (ver `setChaseSlowmo`): 0 normal, 1 no fundo. Anda em rampa linear, com os
+   * tempos da fita da música, e dá a velocidade da animação de quem corre e o zoom.
+   */
+  private slowmo = 0;
+  private slowmoGoal = 0;
   private readonly chaseDir = new THREE.Vector3(0, 0, 1);
   /** Afastamento atual da cena (1 = padrão); acompanha `cine.zoom` devagar (ver `setCineZoom`). */
   private cineZoom = 1;
@@ -907,6 +914,11 @@ export class HexBoard {
     speed = 1.6,
     /** Checado antes de cada passo: `true` para os dois no hexágono em que estão (agarrou no meio). */
     stop?: () => boolean,
+    /**
+     * Para na pose de corrida (a curva vem a seguir, ver `setChaseSlowmo`): sem trocar para o
+     * clipe parado nem virar o agente. `setChaseSlowmo(false)` devolve os dois ao repouso.
+     */
+    hold = false,
   ): Promise<void> {
     const u = this.units.get(unitId);
     const e = this.enemies.get(enemyId);
@@ -931,7 +943,7 @@ export class HexBoard {
         u.hex = step;
         onStep?.('unit', step);
       }
-      u.rig?.play(this.restClip(u), 0.3);
+      if (!hold) u.rig?.play(this.restClip(u), 0.3);
     };
     const runEnemy = async () => {
       if (!enemyPath.length) return;
@@ -950,12 +962,12 @@ export class HexBoard {
         onStep?.('enemy', step);
       }
       e.running = false;
-      e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+      if (!hold) e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
     };
     await Promise.all([runUnit(), runEnemy()]);
-    // parados (curva, porta, fim): o agente encara quem persegue
+    // parados (porta, fim): o agente encara quem persegue; na curva fica como corria
     const d = e.group.position.clone().sub(u.group.position);
-    if (d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
+    if (!hold && d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
     this.moving = false;
   }
 
@@ -1381,12 +1393,34 @@ export class HexBoard {
       this.chase = this.chaseLast = { unitId, enemyId, look };
     } else {
       this.chase = null;
+      this.slowmoGoal = this.slowmo = 0;
       // a câmera de sempre volta para quem perseguiu
       if (this.chaseLast) {
         const u = this.units.get(this.chaseLast.unitId);
         if (u) this.camGoal.copy(this.worldOf(u.hex));
       }
     }
+  }
+
+  /**
+   * Curva da perseguição: `true` congela o agente e o inimigo no meio da corrida (a animação cai
+   * para `CHASE_SLOWMO.rate`, como a fita da música) e a câmera fecha um pouco; `false` volta
+   * rápido, abre a câmera e põe os dois em repouso. Use depois de `runPair(..., hold = true)`.
+   */
+  setChaseSlowmo(on: boolean): void {
+    this.slowmoGoal = on ? 1 : 0;
+    if (on) return;
+    const c = this.chaseLast;
+    const u = c && this.units.get(c.unitId);
+    const e = c?.enemyId ? this.enemies.get(c.enemyId) : undefined;
+    if (u) u.rig?.play(this.restClip(u), 0.3);
+    if (e && !e.running) e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+  }
+
+  /** Velocidade da animação de `id` agora: só quem está na perseguição desacelera. */
+  private animRate(id: string): number {
+    const c = this.chaseLast;
+    return c && (c.unitId === id || c.enemyId === id) ? slowmoRate(this.slowmo) : 1;
   }
 
   /** Vira o agente para o inimigo (a "cabeça" da escolha de alvo). */
@@ -1404,7 +1438,9 @@ export class HexBoard {
     this.chaseBlend += (goal - this.chaseBlend) * (1 - Math.exp(-dt * 3.6));
     if (Math.abs(goal - this.chaseBlend) < 0.002) this.chaseBlend = goal;
     const c = this.chase ?? this.chaseLast;
-    const fov = 40 + CHASE_CAMERA.fovBoost * this.chaseBlend;
+    // o zoom do slow acompanha a fita: mesma rampa, mesma proporção (sem ele em "menos movimento")
+    const zoomRate = reducedMotionQuery() ? 1 : slowmoRate(this.slowmo);
+    const fov = slowmoFov(40 + CHASE_CAMERA.fovBoost * this.chaseBlend, zoomRate);
     if (Math.abs(this.camera.fov - fov) > 0.05) {
       this.camera.fov = fov;
       this.camera.updateProjectionMatrix();
@@ -2828,6 +2864,12 @@ export class HexBoard {
     this.frameId = requestAnimationFrame(this.loop);
     const dt = Math.min(this.clock.getDelta(), 0.1);
     const t = this.clock.elapsedTime;
+    // slow da curva: rampa linear, com os tempos da fita
+    if (this.slowmo !== this.slowmoGoal) {
+      const ramp = this.slowmoGoal > this.slowmo ? CHASE_SLOWMO.slowRamp : CHASE_SLOWMO.resumeRamp;
+      const step = dt / ramp;
+      this.slowmo = this.slowmoGoal > this.slowmo ? Math.min(1, this.slowmo + step) : Math.max(0, this.slowmo - step);
+    }
 
     const bob = Math.sin(t * 2.4) * 0.08;
     const lk = 1 - Math.exp(-dt * 8);
@@ -2841,7 +2883,7 @@ export class HexBoard {
       if (u.rig) {
         // personagem com modelo: fica de pé sobre o hexágono (acompanha a flutuação do caminho)
         // e vira suavemente para onde vai; quem está na vez é marcado só pelo anel
-        u.rig.update(dt);
+        u.rig.update(dt * this.animRate(u.id));
         const ground = this.groundAt(u.group.position.x, u.group.position.z);
         u.group.position.y += (ground + BASE_TOP - u.group.position.y) * (1 - Math.exp(-dt * 14));
         const turn = Math.atan2(Math.sin(u.yaw - u.group.rotation.y), Math.cos(u.yaw - u.group.rotation.y));
@@ -2860,7 +2902,7 @@ export class HexBoard {
     }
 
     for (const e of this.enemies.values()) {
-      e.rig?.update(dt);
+      e.rig?.update(dt * this.animRate(e.id));
       e.facing += angleDelta(e.facing, e.facingGoal) * (1 - Math.exp(-dt * 12));
       e.group.rotation.y = -e.facing;
       e.presence += ((e.gone ? 0 : 1) - e.presence) * (1 - Math.exp(-dt * 7));
