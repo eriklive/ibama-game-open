@@ -180,6 +180,17 @@ ou chega a até 2 hexágonos do portão ou de uma porta **aberta**: porta fechad
 
 Arraste para mover a câmera; use pinça (ou a roda do mouse) para aproximar.
 
+**Escala:** tudo está em metros reais (o hexágono mede 1,5 m de ponta a ponta; `METER` em
+`character-model.ts`). Os personagens têm a altura real (1,68–1,78 m), as portas 2,1 m, as paredes da
+casa 2,7 m e as do hangar 5 m (o arco do telhado chega a 9 m), os postes 7 m e a mata 4–8 m
+(`TREE_HEIGHT` em `world-stream.ts`).
+
+**Esmaecimento:** o que fica entre a câmera e um personagem esmaece para não tapar a visão. As árvores
+na frente de agentes e inimigos, e as que cobririam o alcance de movimento de quem está na vez, ficam
+translúcidas; as paredes do hangar e da casa também. Um inimigo dentro de uma estrutura ainda fechada não
+faz a parede esmaecer, para não entregar quem está escondido. No close-up vale a mesma regra para as
+árvores (`updateTreeFade` e `wallBlockers` em `hex-board.ts`).
+
 ### Casa do Caseiro Jô e testes de percepção (d20)
 
 A leste da pista, numa clareira, fica a **casa** dos garimpeiros: dois cômodos de 5 × 5 hexágonos, de
