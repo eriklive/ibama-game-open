@@ -136,6 +136,12 @@ import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../gam
 const MISSION_DEADLINE = 5;
 
 /**
+ * Folga (ms) entre um "segura" do slow e o próximo: decisão → rolagem, ou um dado atrás do outro,
+ * ficam no mesmo slow, sem voltar ao normal no meio.
+ */
+const SLOW_GRACE_MS = 300;
+
+/**
  * `checking`: rolando um d20 (percepção, inspecionar) — nada mais anda até o dado parar.
  * `interrogating`: interrogatório em close-up (balões e cartões de pergunta na tela).
  * `over`: a operação foi encerrada (fica o relatório na tela).
@@ -246,6 +252,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private board?: HexBoard;
   private timers: ReturnType<typeof setTimeout>[] = [];
+  /** Quantos seguram o slow da perseguição agora (decisões e rolagens); > 0: tudo desacelera. */
+  private slowHolds = 0;
+  /** Volta do slow agendada (a folga de `SLOW_GRACE_MS`). */
+  private slowResume?: ReturnType<typeof setTimeout>;
+  /** Muda no `resetSlow`: quem segurava antes não solta mais nada. */
+  private slowGen = 0;
   private readonly rollConfirmBtn = viewChild('rollConfirm', { read: ElementRef<HTMLButtonElement> });
   private destroyed = false;
   /** Muda a cada "Recomeçar": animações antigas param de mexer no estado. */
@@ -1044,6 +1056,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.destroyed = true;
     this.stopPad?.();
     this.clearTimers();
+    clearTimeout(this.slowResume);
     clearTimeout(this.noticeTimer);
     clearTimeout(this.speechTimer);
     clearInterval(this.statsTicker);
@@ -1392,6 +1405,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     if (!ini) return true;
     if (!ini.pass) {
+      this.resetSlow();
       this.sound.chaseEnd();
       this.board?.setChaseCamera(null);
       this.say(backup ? `${this.nameOf(agentId)} hesitou! Quem vai?` : `${this.nameOf(agentId)} hesitou. ${enemy.name} corre!`, 'alert');
@@ -1457,7 +1471,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       }));
     board.setChaseCamera(agentId, undefined, enemies.map((e) => e.hex));
     await this.sound.chaseStart(4);
-    this.sound.chaseSlow(true);
+    const release = this.holdSlow();
     this.say(`${this.nameOf(agentId)}: dois fugindo! Qual?`, 'alert');
     const picked = await new Promise<string | null>((done) => {
       this.targetDone = done;
@@ -1465,8 +1479,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.paintTargets();
     });
     this.board?.setSpotlight(null);
-    this.sound.chaseSlow(false);
+    // escolheu: o slow emenda na iniciativa (ver `SLOW_GRACE_MS`)
+    release();
     if (!picked) {
+      this.resetSlow();
       this.sound.chaseEnd();
       this.board?.setChaseCamera(null);
     }
@@ -1566,6 +1582,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       await this.chaseSteps(enemyId, agentId, agentPath, epoch, caught);
     } finally {
       // terminou, ou a partida recomeçou no meio: a câmera sobe, a faixa some e o placar sai
+      this.resetSlow();
       this.board?.setChaseCamera(null);
       this.sound.chaseEnd();
       this.chaseHud.set(null);
@@ -1693,7 +1710,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         if (!alive()) return;
         // o grito no trecho já encostou nele: sai da pose de corrida
         if (distance <= 0) {
-          board.setChaseSlowmo(false);
+          board.restChase();
           break;
         }
         if (kind === 'curva') {
@@ -1717,6 +1734,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (distance > 0) await legTo(route.flee.length);
     }
     if (!alive()) return;
+    // parou na pose de corrida de uma curva (agarrou ali, ou a rota acabou): repouso
+    board.restChase();
     board.setSelected(null);
 
     if (distance <= 0) {
@@ -1778,7 +1797,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const enemy = this.enemy(enemyId)!;
     const agent = this.chaseStats(agentId);
     const who = this.nameOf(agentId);
-    {
+    // os dois dados do grito num slow só
+    const release = this.holdSlow();
+    try {
       const vigor = agent.vigor ?? 0;
       const ar = await this.rollD20(
         { kicker: 'Grito · vigor', who, need: `precisa de ${CHASE_RULES.shoutDC - vigor} ou mais`, passText: 'Parado, Ibama!', failText: 'Sem fôlego' },
@@ -1805,18 +1826,25 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.say(`${enemy.name} olhou para trás! Encostando: ${signed(res.delta)} de distância`, 'alert');
       } else this.say(`${enemy.name} nem olhou.`, 'info');
       return res.delta;
+    } finally {
+      release();
     }
   }
 
   private async chaseCurve(side: Side, agentId: string): Promise<number> {
+    // decisão e rolagem num slow só: a fita, os dois congelados no meio da corrida e o zoom
+    // (ver `CHASE_SLOWMO`) seguram do deslize até o dado sumir
+    const release = this.holdSlow();
+    try {
+      return await this.chaseCurveSteps(side, agentId);
+    } finally {
+      release();
+    }
+  }
+
+  private async chaseCurveSteps(side: Side, agentId: string): Promise<number> {
     const agent = this.chaseStats(agentId);
-    // a fita cai para o ultra slow enquanto o jogador decide; volta no gesto. A cena vai junto:
-    // os dois congelam no meio da corrida e a câmera fecha um pouco (ver `CHASE_SLOWMO`)
-    this.sound.chaseSlow(true);
-    this.board?.setChaseSlowmo(true);
     const swiped = await this.askCurve();
-    this.sound.chaseSlow(false);
-    this.board?.setChaseSlowmo(false);
     const crashed = swiped !== side;
     let agentRoll = 0;
     if (crashed) {
@@ -1846,7 +1874,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const enemy = this.enemy(enemyId)!;
     const eAgi = enemy.agilidade ?? 0;
     // a curva é dele: a cena fica lenta só para mostrar o dado
-    this.sound.chaseSlow(true);
+    const release = this.holdSlow();
     try {
       const r = await this.rollD20(
         { kicker: 'Curva · agilidade', who: enemy.name, need: `precisa de ${CHASE_RULES.curveDC - eAgi} ou mais`, passText: 'Passou', failText: 'Escorregou' },
@@ -1857,8 +1885,52 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.say(res.pass ? `${enemy.name} fez a curva.` : `${enemy.name} escorregou na curva! Encostando: ${signed(res.delta)} de distância`, res.pass ? 'info' : 'alert');
       return res.delta;
     } finally {
-      this.sound.chaseSlow(false);
+      release();
     }
+  }
+
+  /**
+   * Segura o slow da perseguição (decisões e rolagens): enquanto alguém segurar, a música, a
+   * animação, os passos e o zoom ficam desacelerados. Devolve quem solta (uma vez só). O último
+   * a soltar volta tudo ao normal depois de `SLOW_GRACE_MS`, se ninguém segurar de novo antes.
+   */
+  private holdSlow(): () => void {
+    if (this.slowResume !== undefined) {
+      clearTimeout(this.slowResume);
+      this.slowResume = undefined;
+    } else if (this.slowHolds === 0) this.applySlow(true);
+    this.slowHolds++;
+    const gen = this.slowGen;
+    let held = true;
+    return () => {
+      if (!held || gen !== this.slowGen) return;
+      held = false;
+      if (--this.slowHolds > 0) return;
+      this.slowResume = setTimeout(() => {
+        this.slowResume = undefined;
+        if (this.slowHolds === 0) this.applySlow(false);
+      }, SLOW_GRACE_MS);
+    };
+  }
+
+  /** O slow está valendo (alguém segura, ou acabou de soltar e ainda está na folga). */
+  private slowActive(): boolean {
+    return this.slowHolds > 0 || this.slowResume !== undefined;
+  }
+
+  private applySlow(on: boolean): void {
+    this.sound.chaseSlow(on);
+    this.board?.setChaseSlowmo(on);
+  }
+
+  /** Fim da perseguição (ou recomeço): ninguém segura mais, e tudo volta ao normal na hora. */
+  private resetSlow(): void {
+    clearTimeout(this.slowResume);
+    const was = this.slowActive();
+    this.slowResume = undefined;
+    this.slowHolds = 0;
+    this.slowGen++;
+    if (was) this.applySlow(false);
   }
 
   /** Espera o deslize da curva (← ou →) por `swipeSeconds`; `null` se não veio a tempo. */
@@ -1894,12 +1966,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async chaseDoor(door: Door, enemyId: string, distance: number, onDistance: (d: number) => void): Promise<number> {
     const name = this.enemy(enemyId)!.name;
     const current = this.doors().get(hexKey(door.hex)) ?? door;
-    // a porta é dele: a cena fica lenta só para mostrar os dados
-    this.sound.chaseSlow(true);
+    // a porta é dele: a cena fica lenta enquanto ele rola os dados (todas as tentativas)
+    const release = this.holdSlow();
     try {
       return await this.fleeDoorTries(current, door, name, distance, onDistance);
     } finally {
-      this.sound.chaseSlow(false);
+      release();
     }
   }
 
@@ -2409,6 +2481,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * não para a cada dado). `null` se a partida foi recomeçada.
    */
   private async rollD20(
+    view: Pick<CheckView, 'kicker' | 'who' | 'need' | 'passText' | 'failText'>,
+    passes: (roll: number) => boolean,
+    autoMs?: number,
+  ): Promise<{ roll: number; pass: boolean } | null> {
+    // na perseguição (ou emendando num slow que já está aí), o dado desacelera tudo até sumir
+    const release = this.chaseHud() || this.slowActive() ? this.holdSlow() : undefined;
+    try {
+      return await this.rollD20Sheet(view, passes, autoMs);
+    } finally {
+      release?.();
+    }
+  }
+
+  private async rollD20Sheet(
     view: Pick<CheckView, 'kicker' | 'who' | 'need' | 'passText' | 'failText'>,
     passes: (roll: number) => boolean,
     autoMs?: number,
@@ -3406,6 +3492,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected restart(): void {
     this.epoch++;
     this.clearTimers();
+    this.resetSlow();
     this.report.set(null);
     this.positions.set(this.initialPositions());
     this.group.set(wholeTeam());
