@@ -253,10 +253,18 @@ button:disabled { cursor: not-allowed; }
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 
 /* ---------- teste de d20: ficha na lateral esquerda, embaixo ---------- */
-.check {
+.checks {
   position: absolute;
   left: calc(14px + var(--safe-left));
   bottom: calc(14px + var(--safe-bottom));
+  max-width: calc(100% - 28px - var(--safe-left) - var(--safe-right));
+  display: flex; align-items: flex-end; gap: 10px;
+  pointer-events: none;
+  z-index: 4;
+}
+.check {
+  position: relative;
+  flex: 0 0 auto;
   width: 132px;
   padding: 8px 10px 10px;
   background: var(--paper-light);
@@ -284,6 +292,9 @@ button:disabled { cursor: not-allowed; }
 }
 .check.pass .check-result { color: var(--green-ok); }
 .check.fail .check-result { color: var(--red-text); }
+/* a ficha do garimpeiro: inclinada para o outro lado, com a tarja vermelha em cima */
+.check.enemy { transform: rotate(2deg); border-top: 4px solid var(--red-text); }
+.check.enemy .check-kicker { color: var(--red-text); }
 .check-close {
   margin-top: 8px;
   white-space: nowrap;

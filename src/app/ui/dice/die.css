@@ -17,6 +17,7 @@ path { fill: none; stroke-width: 3; stroke-linejoin: round; }
 :host(.die-d20) polygon { fill: #2f5a3b; }
 :host(.die-d20) path { stroke: rgba(244, 236, 214, .35); }
 :host(.die-d20) .value { color: #f4ecd6; }
+:host(.die-d20.die-red) polygon { fill: #8e2119; }
 :host(.die-rolling.die-flat) svg { animation: die-tumble .42s linear infinite; }
 :host(.die-rolling.die-flat) .value { opacity: .6; }
 :host(.die-flat:not(.die-rolling)) svg { animation: die-land .45s cubic-bezier(.3, 1.6, .5, 1) both; }

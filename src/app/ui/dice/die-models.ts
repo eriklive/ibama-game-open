@@ -43,6 +43,15 @@ export const D20_PALETTE: DiePalette = {
   hitGlow: 'rgba(255, 200, 80, .95)',
 };
 
+/** d20 do garimpeiro: vermelho, para não confundir com o da equipe. */
+export const D20_RED_PALETTE: DiePalette = {
+  body: '#8e2119',
+  bevel: 'rgba(244, 236, 214, .28)',
+  ink: '#f4ecd6',
+  hit: '#ffd772',
+  hitGlow: 'rgba(255, 200, 80, .95)',
+};
+
 interface Face {
   texture: THREE.CanvasTexture;
   material: THREE.MeshStandardMaterial;
