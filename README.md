@@ -42,15 +42,20 @@ equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a 
 - **Vigor:** cada ponto vale **+1 de movimento** no turno (somado aos 2d4).
 - **Intimidação:** cada ponto vale **+1 no raio de abordagem** (a zona de rendição). A zona de
   rolagem e a de fuga se afastam junto.
+- **Iniciativa** e **Agilidade** (Modo Perseguição, em construção; regras em `src/app/game/chase.ts`):
+  a iniciativa soma no raio de perseguição e no d20 para arrancar (8 ou mais); a agilidade soma no
+  d20 das curvas (6 ou mais). A **classe dá a base**: Capitão começa com **+1 de iniciativa**,
+  Agente com **+1 de agilidade**.
 - Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
   direita, negativo em vermelho para a esquerda; o tracejado mostra onde o ponto livre pode
-  entrar). Todo agente começa com 0 nos dois.
-- Cada agente tem **1 ponto** para pôr em **um** dos dois atributos. Dá para tirar só o ponto que
+  entrar). Todo agente começa com 0, mais a base da classe.
+- Cada agente tem **1 ponto** para pôr em **um** dos quatro atributos. Dá para tirar só o ponto que
   você colocou: pelo jogador, o mínimo é 0. O lado negativo fica para penalidades (peso,
   equipamento).
 - **Total em campo:** atributo + equipamento (por enquanto, nenhum) + **grupo**. Enquanto os
   agentes estão **agrupados**, cada um ganha **+1 de vigor** (movimento) e **+1 de intimidação**
-  (alcance da abordagem), e mais **+1** em cada com o Capitão no grupo; separou, perdeu.
+  (alcance da abordagem), e mais **+1** em cada com o Capitão no grupo; separou, perdeu. Grupo e
+  Liderança não somam em iniciativa nem agilidade: a perseguição é individual.
 - **Anterior / Próximo agente** passam pelas fichas; no último, **Confirmar escalação** começa a
   partida com esses atributos (a escolha fica guardada na sessão do navegador e vale também para
   "Recomeçar"). Com controle: L1/R1 trocam de agente, cima/baixo escolhem o atributo,

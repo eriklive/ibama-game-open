@@ -1,5 +1,5 @@
 import { Injectable, signal } from '@angular/core';
-import { AgentClass, classOf } from './agent-class';
+import { AgentClass, classBaseStats, classOf } from './agent-class';
 import { CHARACTERS } from './maps';
 import { Loadout, STAT_KEYS, StatKey, Stats, ZERO_STATS, freePoints, sheetStats } from './stats';
 
@@ -26,9 +26,9 @@ export class RosterService {
     return this.points()[id] ?? ZERO_STATS;
   }
 
-  /** Atributos de um agente em campo (equipamento ainda não existe). */
+  /** Atributos de um agente em campo: base da classe + pontos (equipamento ainda não existe). */
   loadout(id: string): Loadout {
-    return { attributes: sheetStats(this.spent(id)) };
+    return { attributes: sheetStats(this.spent(id), classBaseStats(this.classOf(id))) };
   }
 
   /** Classe do agente: Capitão ou Agente. */
@@ -58,7 +58,7 @@ function load(): Record<string, Stats> {
     const out: Record<string, Stats> = {};
     for (const [id, s] of Object.entries(raw ?? {})) {
       // escalações guardadas antes do Vigor chamavam o atributo de "velocidade"
-      const src: Partial<Stats> = { vigor: s?.vigor ?? s?.velocidade, intimidacao: s?.intimidacao };
+      const src: Partial<Stats> = { ...s, vigor: s?.vigor ?? s?.velocidade };
       const v: Record<StatKey, number> = { ...ZERO_STATS };
       for (const k of STAT_KEYS) if (Number.isInteger(src[k]) && src[k]! >= 0) v[k] = src[k]!;
       // só aceita uma distribuição possível (sem gastar mais pontos do que há)

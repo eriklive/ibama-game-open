@@ -78,8 +78,16 @@ export const CLASS_RULES = {
   /** Quantas vezes por turno o Comando deixa o Agrupar sem custo. */
   commandPerTurn: 1,
   /** O que a Liderança soma em cada atributo de quem está no grupo com o Capitão. */
-  leadership: { vigor: 1, intimidacao: 1 } satisfies Stats,
+  leadership: { vigor: 1, intimidacao: 1, iniciativa: 0, agilidade: 0 } satisfies Stats,
+  /** Atributos com que cada classe começa, antes do ponto livre. */
+  baseStats: {
+    capitao: { vigor: 0, intimidacao: 0, iniciativa: 1, agilidade: 0 },
+    agente: { vigor: 0, intimidacao: 0, iniciativa: 0, agilidade: 1 },
+  } satisfies Record<AgentClass, Stats>,
 } as const;
+
+/** Base de atributos da classe (o ponto livre vem por cima). */
+export const classBaseStats = (cls: AgentClass): Stats => CLASS_RULES.baseStats[cls];
 
 export const hasAbility = (cls: AgentClass, ability: AbilityKey): boolean => ABILITIES[ability].cls === cls;
 
