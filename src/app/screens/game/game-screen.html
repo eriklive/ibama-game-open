@@ -119,6 +119,30 @@
           <br />{{ st.calls }} desenhos · {{ (st.triangles / 1000).toFixed(0) }} mil triângulos
         </p>
       }
+      <div class="menu-sub">
+        <button
+          type="button"
+          class="menu-sub-toggle"
+          [class.open]="testCasesOpen()"
+          (click)="testCasesOpen.set(!testCasesOpen())"
+          [attr.aria-expanded]="testCasesOpen()"
+          aria-controls="test-cases"
+          data-testid="test-cases-toggle">
+          Casos de teste <span class="menu-sub-arrow" aria-hidden="true">›</span>
+        </button>
+        @if (testCasesOpen()) {
+          <ul id="test-cases" class="menu-sub-list" role="list" data-testid="test-cases">
+            @for (c of testCases; track c.id) {
+              <li>
+                <button type="button" class="menu-case" (click)="loadTestCase(c)" [attr.data-testid]="'test-case-' + c.id">
+                  <span class="menu-option-label">{{ c.name }}</span>
+                  <span class="menu-option-hint">{{ c.hint }}</span>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      </div>
       <button type="button" class="menu-restart" (click)="toggleMenu(); restart()" data-testid="menu-restart">Recomeçar a partida</button>
       <button type="button" class="menu-close" (click)="toggleMenu()">Fechar</button>
     </section>
@@ -426,10 +450,12 @@
   <app-chase-overlay
     [hud]="chaseHud()"
     [curve]="curvePrompt()"
+    [vault]="vaultPrompt()"
     [target]="targetView()"
     [shout]="chaseShout()"
     (shoutPress)="shout()"
     (swipe)="swipeCurve($event)"
+    (vaultPress)="vaultAnswer(true)"
     (targetSide)="targetSide($event)"
     (targetConfirm)="targetConfirm()"
     (targetCancel)="targetCancel()" />

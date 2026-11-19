@@ -689,7 +689,7 @@ function cage(w: number, h: number, d: number): THREE.Group {
   return g;
 }
 
-export type CoverKind = 'crates' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shelf' | 'supplies' | 'keys';
+export type CoverKind = 'crates' | 'lowCrate' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shelf' | 'supplies' | 'keys';
 
 /**
  * Monta a carga de um hexágono. `seed` varia a arrumação (giro, quantas peças, quais
@@ -702,7 +702,16 @@ export function buildCover(kind: CoverKind, seed: number): THREE.Group {
   if (kind === 'supplies') return supplyPile(seed);
   const rnd = seeded(seed);
   const g = new THREE.Group();
-  if (kind === 'crates') {
+  if (kind === 'lowCrate') {
+    // caixote de meia altura: dois caixotes lado a lado, sem nada em cima (dá para pular)
+    const s = 0.62;
+    ([[-0.33, -0.08], [0.35, 0.1]] as const).forEach(([x, z], i) => {
+      const c = woodenCrate(s);
+      c.position.set(x, 0, z);
+      c.rotation.y = (rnd(i) - 0.5) * 0.25;
+      g.add(c);
+    });
+  } else if (kind === 'crates') {
     // dois caixotes embaixo, um em cima (às vezes dois), levemente tortos
     const s = 0.82;
     const lower: [number, number][] = [[-0.36, -0.12], [0.4, 0.14]];

@@ -26,6 +26,11 @@
  *    - **porta** fechada no caminho: o garimpeiro rola d4 para escolher abrir ou arrombar e d20
  *      para conseguir (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta
  *      fica aberta e o agente passa direto. A porta substitui a curva naquele hexágono.
+ *    - **pulo** (`agentVaults`): onde a pista do agente dá a volta num caixote de meia altura
+ *      (o garimpeiro não pula, contorna), o agente tem `vaultSeconds` para pular por cima.
+ *      Pulou: d20 + agilidade ≥ `vaultDC` (`resolveVault`) corta caminho (a distância cai o que
+ *      a volta custaria) e pula as curvas da volta; falhou, tropeça (+1) e dá a volta. Sem
+ *      pular, dá a volta como ele, sem rolar.
  * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
  *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
@@ -89,6 +94,12 @@ export const CHASE_RULES = {
   shoutDC: 8,
   /** Ele resiste ao grito tirando no d20 pelo menos isto + a intimidação do agente. */
   shoutResistBase: 4,
+  /** Caixote de meia altura: tempo (s, relógio real) para escolher pular. */
+  vaultSeconds: 2,
+  /** Pulo por cima do caixote: d20 + agilidade, pelo menos isto. */
+  vaultDC: 8,
+  /** Tropeçou no pulo: a distância abre isto. */
+  vaultFailDelta: 1,
   /** Agarrou: bônus nas rolagens do próximo interrogatório do suspeito abalado. */
   shakenBonus: 2,
 } as const;
@@ -419,6 +430,66 @@ export function agentCurves(
   );
 }
 
+/** Atalho do agente por cima de um caixote de meia altura (índices de `track`). */
+export interface VaultSpot {
+  /** Onde o agente está quando decide pular. */
+  index: number;
+  /** O caixote (o agente passa por cima dele). */
+  over: HexCoord;
+  /** Onde o atalho volta para a pista. */
+  land: number;
+  /** O atalho, sem a origem: até o caixote, por cima dele e de volta à pista (termina em `land`). */
+  path: HexCoord[];
+  /** Passos que o atalho poupa em relação à volta da pista. */
+  saves: number;
+}
+
+/**
+ * Pulos da pista do agente: onde ela dá a volta num caixote de meia altura (`vaultable`) e um
+ * atalho por cima dele (chegando a até `reach` passos do caixote, sem atravessar `walls`) volta
+ * à pista mais adiante, poupando pelo menos 1 passo. Em cada caixote vale o atalho que mais
+ * poupa (no empate, o que sai mais perto do caixote). Os pulos não se sobrepõem.
+ */
+export function agentVaults(
+  track: readonly HexCoord[],
+  vaultable: ReadonlySet<string>,
+  area: HexArea,
+  walls: ReadonlySet<string> = new Set(),
+  reach = 3,
+): VaultSpot[] {
+  const found: VaultSpot[] = [];
+  for (const key of vaultable) {
+    const [col, row] = key.split(',').map(Number);
+    const over = { col, row };
+    // a pé, a partir do caixote: quantos passos até cada hexágono em volta
+    const near = reachableHexes(over, reach, area, walls);
+    const dist = (h: HexCoord) => near.get(hexKey(h))?.cost;
+    let best: VaultSpot | null = null;
+    let bestOut = Infinity;
+    for (let i = 0; i < track.length; i++) {
+      const din = dist(track[i]);
+      if (din === undefined) continue;
+      for (let j = i + 1; j < track.length; j++) {
+        const dout = dist(track[j]);
+        if (dout === undefined) continue;
+        const saves = j - i - (din + dout);
+        if (saves < 1) continue;
+        if (best && (saves < best.saves || (saves === best.saves && din >= bestOut))) continue;
+        const into = pathTo(near, track[i]).reverse().slice(1);
+        const out = pathTo(near, track[j]);
+        best = { index: i, over, land: j, path: [...into, over, ...out], saves };
+        bestOut = din;
+      }
+    }
+    if (best) found.push(best);
+  }
+  // em ordem na pista, sem sobreposição
+  found.sort((a, b) => a.index - b.index);
+  const out: VaultSpot[] = [];
+  for (const v of found) if (!out.length || v.index >= out.at(-1)!.land) out.push(v);
+  return out;
+}
+
 // ---------- paradas ----------
 
 export interface CurveInput {
@@ -463,6 +534,15 @@ export interface EnemyCurveResult {
 export function resolveEnemyCurve(roll: number, enemy: ChaseStats): EnemyCurveResult {
   const pass = roll + (enemy.agilidade ?? 0) >= CHASE_RULES.curveDC;
   return { pass, delta: pass ? 0 : -1 };
+}
+
+/**
+ * Pulo do caixote (só o agente rola): d20 + agilidade ≥ `vaultDC` corta caminho (a distância cai
+ * `saves`); falhou, tropeça e dá a volta (+`vaultFailDelta`).
+ */
+export function resolveVault(roll: number, agent: ChaseStats, saves: number): { pass: boolean; delta: number } {
+  const pass = roll + (agent.agilidade ?? 0) >= CHASE_RULES.vaultDC;
+  return { pass, delta: pass ? -saves : CHASE_RULES.vaultFailDelta };
 }
 
 export type FleeDoorAction = 'abrir' | 'arrombar';

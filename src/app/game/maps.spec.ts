@@ -20,6 +20,9 @@ describe('parseLayout', () => {
     expect(m.cover?.map((c) => c.kind)).toEqual(['crates', 'boxes', 'sacks', 'cages']);
     expect(m.cover?.map((c) => COVER_HEIGHT[c.kind])).toEqual(['high', 'high', 'low', 'low']);
     expect(parseLayout(['R']).cover).toEqual([{ col: 0, row: 0, kind: 'supplies' }]);
+    // `b`: caixote de meia altura (baixo: dá para pular na perseguição)
+    expect(parseLayout(['b']).cover).toEqual([{ col: 0, row: 0, kind: 'lowCrate' }]);
+    expect(COVER_HEIGHT.lowCrate).toBe('low');
     expect(COVER_HEIGHT.supplies).toBe('high');
     expect(m.props).toEqual([{ col: 4, row: 0 }]);
     const map = { ...m, id: 'x', name: 'x', subtitle: '', available: true, starts: [], enemies: [] };

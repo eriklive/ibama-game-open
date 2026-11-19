@@ -785,6 +785,8 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   box-shadow: var(--drop);
   transform: rotate(0.6deg);
   z-index: 5;
+  max-height: calc(100% - 90px - var(--safe-top));
+  overflow-y: auto;
   animation: slap .2s ease-out both;
 }
 .menu-title { margin: 0 0 8px; font-family: var(--stencil); font-size: 20px; font-weight: 400; text-transform: uppercase; letter-spacing: .04em; }
@@ -811,6 +813,24 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .menu-restart:active, .menu-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35); }
 
 .menu-close { margin-top: 8px; }
+
+/* submenu "Casos de teste": abre uma lista de situações prontas */
+.menu-sub { margin-top: 12px; }
+.menu-sub-toggle {
+  width: 100%; height: 40px; padding: 0 12px;
+  display: flex; align-items: center; justify-content: space-between;
+  background: var(--paper); box-shadow: var(--drop);
+  font-size: 14px; text-transform: uppercase;
+}
+.menu-sub-arrow { font-size: 20px; line-height: 1; transition: transform .15s ease-out; }
+.menu-sub-toggle.open .menu-sub-arrow { transform: rotate(90deg); }
+.menu-sub-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.menu-case {
+  width: 100%; padding: 8px 10px;
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
+  border: 2px dashed var(--ink-paper); background: transparent;
+}
+.menu-case:active { transform: translateY(1px); background: var(--paper); }
 
 /* ---------- portas ---------- */
 /* bônus do arrombamento: anotação a caneta na fita, enquanto durar */
