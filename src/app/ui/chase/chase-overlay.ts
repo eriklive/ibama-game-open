@@ -16,10 +16,18 @@ export interface CurvePrompt {
   seconds: number;
 }
 
+/** Escolha de alvo aberta: quem escolhe, quantos fogem e qual está em prévia (`null`: nenhum). */
+export interface TargetPrompt {
+  agent: string;
+  count: number;
+  picked: string | null;
+}
+
 /**
  * Por cima do tabuleiro durante a perseguição: o placar no topo e, na curva, o cartão de
  * deslizar (← / →, com o prazo correndo). Arrastar para um lado em qualquer ponto da tela
- * também vale. Quem decide o que o deslize faz é a tela da partida (`swipe`).
+ * também vale. Quem decide o que o deslize faz é a tela da partida (`swipe`). Na escolha de
+ * alvo (`decisao:alvo`), tocar numa metade da tela olha para aquele lado e tocar de novo confirma.
  */
 @Component({
   selector: 'app-chase-overlay',
@@ -29,7 +37,19 @@ export interface CurvePrompt {
 export class ChaseOverlay {
   readonly hud = input<ChaseHud | null>(null);
   readonly curve = input<CurvePrompt | null>(null);
+  readonly target = input<TargetPrompt | null>(null);
   readonly swipe = output<Side>();
+  /** Escolha de alvo: tocou num lado (metade da tela ou seta), confirmou ou desistiu. */
+  readonly targetSide = output<Side>();
+  readonly targetConfirm = output<void>();
+  readonly targetCancel = output<void>();
+
+  /** Toque na metade esquerda ou direita da tela, na escolha de alvo. */
+  protected targetTap(ev: MouseEvent): void {
+    const el = ev.currentTarget as HTMLElement;
+    const r = el.getBoundingClientRect();
+    this.targetSide.emit(ev.clientX < r.left + r.width / 2 ? 'esquerda' : 'direita');
+  }
 
   private startX?: number;
 

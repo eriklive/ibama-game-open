@@ -1,4 +1,4 @@
-<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer()" [class.rolling]="phase() === 'rolling'">
+<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
 
   <!-- Topo: voltar e menu soltos; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
@@ -423,7 +423,14 @@
   }
 
   <!-- Perseguição: placar e curva (decisao:perseguicao) -->
-  <app-chase-overlay [hud]="chaseHud()" [curve]="curvePrompt()" (swipe)="swipeCurve($event)" />
+  <app-chase-overlay
+    [hud]="chaseHud()"
+    [curve]="curvePrompt()"
+    [target]="targetView()"
+    (swipe)="swipeCurve($event)"
+    (targetSide)="targetSide($event)"
+    (targetConfirm)="targetConfirm()"
+    (targetCancel)="targetCancel()" />
 
   <!-- Teste de d20 (percepção, portas): uma ficha na lateral; a percepção espera o Continuar -->
   @for (ck of checks(); track ck.id) {

@@ -157,6 +157,38 @@
   .curve-timer i { animation: none; }
 }
 
+.target {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  cursor: pointer;
+}
+.target-actions {
+  position: absolute;
+  left: 50%;
+  bottom: calc(14px + var(--safe-bottom, 0px));
+  transform: translateX(-50%);
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: center;
+  width: max-content;
+  max-width: calc(100% - 32px);
+}
+.target-go,
+.target-skip {
+  padding: 8px 14px;
+  font: 700 15px/1 var(--stencil);
+  text-transform: uppercase;
+  color: var(--ink-paper);
+  border: 3px solid var(--ink-paper);
+  box-shadow: var(--drop);
+  cursor: pointer;
+  animation: slap 0.2s ease-out both;
+}
+.target-go { background: var(--postit); }
+.target-skip { background: var(--paper-light); }
+
 /* tela deitada de celular (pouca altura): título e placar em uma linha, menores */
 @media (max-height: 500px) {
   .chase-hud {
@@ -183,4 +215,7 @@
   .curve-kicker { font-size: 20px; }
   .curve-text { font-size: 13px; }
   .curve-timer { width: 70px; }
+  .target-actions { bottom: calc(6px + var(--safe-bottom, 0px)); }
+  .target-go,
+  .target-skip { padding: 5px 10px; font-size: 13px; }
 }

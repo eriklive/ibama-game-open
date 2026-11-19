@@ -19,6 +19,7 @@ import {
   Side,
   chaseCandidates,
   fleeDoorAction,
+  targetChoices,
   fleeDoorNeed,
   initiativeChance,
   initiativeCheck,
@@ -26,7 +27,7 @@ import {
   resolveCurve,
   resolveFleeDoor,
 } from '../../game/chase';
-import { ChaseHud, ChaseOverlay, CurvePrompt } from '../../ui/chase/chase-overlay';
+import { ChaseHud, ChaseOverlay, CurvePrompt, TargetPrompt } from '../../ui/chase/chase-overlay';
 import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
 import { Sound } from '../../game/sound.service';
 import { zoneAt } from '../../game/audio/ambience';
@@ -99,7 +100,7 @@ import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } f
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
-import { HexCoord, hexDistance, hexKey, hexNeighbors, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
+import { HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import {
@@ -461,6 +462,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Curva: o jogador tem `seconds` para deslizar para o lado (`decisao:perseguicao`). */
   protected readonly curvePrompt = signal<CurvePrompt | null>(null);
   private curveDone?: (side: Side | null) => void;
+  /** Escolha de alvo (`decisao:alvo`): os suspeitos, da esquerda para a direita, e o em prévia. */
+  protected readonly targetPrompt = signal<{
+    id: number;
+    agent: string;
+    agentId: string;
+    options: { enemyId: string; name: string; label: string }[];
+    pick: number | null;
+  } | null>(null);
+  private targetDone?: (enemyId: string | null) => void;
+  /** O que a camada da perseguição mostra na escolha de alvo. */
+  protected readonly targetView = computed<TargetPrompt | null>(() => {
+    const t = this.targetPrompt();
+    return t && { agent: t.agent, count: t.options.length, picked: t.pick === null ? null : t.options[t.pick].name };
+  });
+  private targetSeq = 0;
   private curveSeq = 0;
   /** Quem espera o jogador fechar a ficha (**Continuar**, ✕). */
   private checkDone?: () => void;
@@ -1119,10 +1135,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // perseguição: quem já correu nesta rodada não vai de novo; quem foi agarrado agora fica abalado
     const chased = new Set<string>();
     const caught = new Set<string>();
+    // um agente no raio de dois que vão correr escolhe antes qual perseguir
+    const handled = new Set<string>();
+    await this.resolveTargetChoices(epoch, chased, caught, handled);
     for (const { id } of this.enemies()) {
       if (stale()) return;
       const enemy = this.enemy(id);
-      if (!enemy || !canAct(enemy)) continue;
+      if (!enemy || !canAct(enemy) || handled.has(id)) continue;
       // parado no lugar (o Jô comendo): não anda nem gira, então nem chama a câmera
       if (enemy.status === 'patrol' && stationary(enemy)) continue;
       // em alerta: antes de correr, quem está perto pode ir atrás dele
@@ -1209,6 +1228,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Teclado na perseguição: setas (ou A/D) deslizam na curva; Esc deixa fugir. */
   protected onKey(ev: KeyboardEvent): void {
+    if (this.targetPrompt()) {
+      if (ev.key === 'ArrowLeft' || ev.key === 'a') this.targetSide('esquerda');
+      else if (ev.key === 'ArrowRight' || ev.key === 'd') this.targetSide('direita');
+      else if (ev.key === 'Enter' || ev.key === ' ') this.targetConfirm();
+      else if (ev.key === 'Escape') this.targetCancel();
+      else return;
+      ev.preventDefault();
+      return;
+    }
     if (this.curvePrompt()) {
       const side = ev.key === 'ArrowLeft' || ev.key === 'a' ? 'esquerda' : ev.key === 'ArrowRight' || ev.key === 'd' ? 'direita' : null;
       if (side) {
@@ -1245,6 +1273,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const agentId = await this.offerChase(enemy, offers);
     if (this.destroyed || this.epoch !== epoch) return true;
     if (!agentId) return false;
+    return this.startChase(enemy, agentId, offers.find((o) => o.id === agentId)!.path, epoch, chased, caught);
+  }
+
+  /**
+   * O agente escolhido rola a iniciativa e, se arrancar, corre. Devolve se houve perseguição
+   * (`false`: ele hesitou e o suspeito foge como sempre).
+   */
+  private async startChase(
+    enemy: EnemyState,
+    agentId: string,
+    path: HexCoord[],
+    epoch: number,
+    chased: Set<string>,
+    caught: Set<string>,
+  ): Promise<boolean> {
     chased.add(agentId);
     const stats = this.chaseStats(agentId);
     const need = CHASE_RULES.initiativeDC - (stats.iniciativa ?? 0);
@@ -1255,11 +1298,145 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     if (!ini) return true;
     if (!ini.pass) {
+      this.sound.chaseEnd();
+      this.board?.setChaseCamera(null);
       this.say(`${this.nameOf(agentId)} hesitou. ${enemy.name} corre!`, 'alert');
       return false;
     }
-    await this.runChase(enemy.id, agentId, offers.find((o) => o.id === agentId)!.path, epoch, caught);
+    await this.runChase(enemy.id, agentId, path, epoch, caught);
     return true;
+  }
+
+  /**
+   * Escolha de alvo (`decisao:alvo`): um agente no raio de dois ou mais suspeitos que vão
+   * correr escolhe qual perseguir. Roda no começo do turno inimigo; quem foi escolhido (e
+   * perseguido) entra em `handled` e não age de novo no turno. O outro segue a fila normal:
+   * é oferecido aos agentes que ainda não correram.
+   */
+  private async resolveTargetChoices(epoch: number, chased: Set<string>, caught: Set<string>, handled: Set<string>): Promise<void> {
+    const board = this.board!;
+    const alive = () => !this.destroyed && this.epoch === epoch;
+    const agents = (): ChaseAgent[] =>
+      CHARACTERS.flatMap((c) => {
+        const hex = this.positions().get(c.id);
+        return hex ? [{ id: c.id, hex, stats: this.chaseStats(c.id) }] : [];
+      });
+    const runners = () =>
+      this.enemies().filter((e) => e.status === 'alert' && !handled.has(e.id) && !board.isCovered(e.hex));
+    for (;;) {
+      if (!alive()) return;
+      const offers = new Map(runners().map((e) => [e.id, chaseCandidates(e.hex, agents(), this.area, this.enemyWalls(), chased)]));
+      const [choice] = targetChoices(offers);
+      if (!choice) return;
+      const [agentId, enemyIds] = choice;
+      const enemyId = await this.chooseTarget(agentId, enemyIds);
+      if (!alive()) return;
+      // desistiu dos dois: ele não vai atrás de ninguém nesta rodada (os outros ainda podem)
+      chased.add(agentId);
+      if (!enemyId) continue;
+      const enemy = this.enemy(enemyId)!;
+      const path = offers.get(enemyId)!.find((o) => o.id === agentId)!.path;
+      if (await this.startChase(enemy, agentId, path, epoch, chased, caught)) handled.add(enemyId);
+      if (!alive()) return;
+      await this.wait(300);
+    }
+  }
+
+  /**
+   * A cena da escolha: a câmera desce atrás do agente olhando para o meio dos suspeitos, tudo
+   * fica cinza (menos eles, com a etiqueta do lado) e a música entra em ultra slow. O 1º toque
+   * num lado vira o agente para aquele; o 2º no mesmo lado confirma. Resolve com o escolhido
+   * (ou `null`: deixar os dois).
+   */
+  private async chooseTarget(agentId: string, enemyIds: readonly string[]): Promise<string | null> {
+    const board = this.board!;
+    const from = this.positions().get(agentId)!;
+    const enemies = enemyIds.map((id) => this.enemy(id)!).filter(Boolean);
+    // lado de cada um para quem olha do agente para o meio deles (produto vetorial no plano)
+    const w = (h: HexCoord) => hexToWorld(h, 1);
+    const a = w(from);
+    const mid = enemies.reduce((m, e) => ({ x: m.x + w(e.hex).x / enemies.length, z: m.z + w(e.hex).z / enemies.length }), { x: 0, z: 0 });
+    const f = { x: mid.x - a.x, z: mid.z - a.z };
+    const across = (e: EnemyState) => f.x * (w(e.hex).z - a.z) - f.z * (w(e.hex).x - a.x);
+    const options = [...enemies]
+      .sort((p, q) => across(p) - across(q))
+      .map((e, i, all) => ({
+        enemyId: e.id,
+        name: e.name,
+        label: all.length === 2 ? (i === 0 ? 'esquerda' : 'direita') : `${i + 1}`,
+      }));
+    board.setChaseCamera(agentId, undefined, enemies.map((e) => e.hex));
+    await this.sound.chaseStart(4);
+    this.sound.chaseSlow(true);
+    this.say(`${this.nameOf(agentId)}: dois fugindo! Qual?`, 'alert');
+    const picked = await new Promise<string | null>((done) => {
+      this.targetDone = done;
+      this.targetPrompt.set({ id: ++this.targetSeq, agent: this.nameOf(agentId), agentId, options, pick: null });
+      this.paintTargets();
+    });
+    this.board?.setSpotlight(null);
+    this.sound.chaseSlow(false);
+    if (!picked) {
+      this.sound.chaseEnd();
+      this.board?.setChaseCamera(null);
+    }
+    return picked;
+  }
+
+  /** Cinza da escolha de alvo, com a etiqueta de cada um (a do que está em prévia, marcada). */
+  private paintTargets(): void {
+    const t = this.targetPrompt();
+    if (!t) return;
+    this.board?.setSpotlight({
+      units: [t.agentId],
+      labels: t.options.map((o, i) => ({
+        id: o.enemyId,
+        text: t.pick === i ? `▶ ${o.label} · ${o.name}` : o.label,
+        tone: t.pick === i ? ('roll' as const) : ('flee' as const),
+      })),
+      hexes: [],
+    });
+  }
+
+  /**
+   * Toque/seta para um lado na escolha de alvo: o 1º vira o agente para aquele suspeito, o 2º
+   * no mesmo lado confirma. Com mais de dois, cada toque anda um para aquele lado.
+   */
+  protected targetSide(side: Side, confirmAgain = true): void {
+    const t = this.targetPrompt();
+    if (!t) return;
+    const n = t.options.length;
+    const next =
+      t.pick === null ? (side === 'esquerda' ? 0 : n - 1) : Math.max(0, Math.min(n - 1, t.pick + (side === 'esquerda' ? -1 : 1)));
+    if (t.pick === next) {
+      // no controle o direcional repete enquanto segura: lá só ✕ confirma
+      if (confirmAgain) this.targetConfirm();
+      return;
+    }
+    this.sound.play('ui.hex');
+    this.targetPrompt.set({ ...t, pick: next });
+    this.board?.faceEnemy(t.agentId, t.options[next].enemyId);
+    this.paintTargets();
+  }
+
+  /** Confirma o alvo em prévia (✕, Enter, 2º toque). */
+  protected targetConfirm(): void {
+    const t = this.targetPrompt();
+    if (!t || t.pick === null) return;
+    this.sound.play('ui.confirmar');
+    this.finishTarget(t.options[t.pick].enemyId);
+  }
+
+  /** Deixa os dois fugirem (○, Esc). */
+  protected targetCancel(): void {
+    if (this.targetPrompt()) this.finishTarget(null);
+  }
+
+  private finishTarget(enemyId: string | null): void {
+    const done = this.targetDone;
+    this.targetDone = undefined;
+    this.targetPrompt.set(null);
+    done?.(enemyId);
   }
 
   /** Mostra o carimbo "Perseguir?" com os agentes que podem ir. Resolve com o escolhido (ou `null`). */
@@ -3065,6 +3242,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (b === 'circle') this.pickChase(null);
       return;
     }
+    if (this.targetPrompt()) {
+      if (b === 'cross') this.targetConfirm();
+      else if (b === 'circle') this.targetCancel();
+      return;
+    }
     if (this.curvePrompt()) return;
     const choosing = this.phase() === 'moving-choice';
     // relatório na tela: ✕ encerra (ou recomeça, no fim) e ○ volta ao jogo
@@ -3176,6 +3358,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Anda o cursor um hexágono; sobre um destino alcançável, já mostra o caminho (como o 1º toque). */
   private moveCursor(dir: Stick): void {
+    // escolha de alvo: esquerda/direita olham (e, de novo, confirmam)
+    if (this.targetPrompt()) {
+      if (Math.abs(dir.x) > Math.abs(dir.y)) this.targetSide(dir.x < 0 ? 'esquerda' : 'direita', false);
+      return;
+    }
     // curva da perseguição: esquerda/direita deslizam
     if (this.curvePrompt()) {
       if (Math.abs(dir.x) > Math.abs(dir.y)) this.swipeCurve(dir.x < 0 ? 'esquerda' : 'direita');

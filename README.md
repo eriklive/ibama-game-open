@@ -484,7 +484,14 @@ altura 3,6). O FOV abre um pouco e a névoa fecha mais perto. A HUD de papel som
 embaixo) e, na curva, as setas ficam nas bordas da tela, com o meio livre para ver a rota acesa
 dobrar. No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
 
-A pose de indecisão com dois fugindo vem depois.
+**Dois fugindo (`decisao:alvo`).** No começo do turno inimigo, se um agente está no raio de dois ou
+mais suspeitos em alerta, ele escolhe qual perseguir: a câmera desce atrás dele olhando para o meio
+deles, tudo fica cinza (menos eles, com a etiqueta **esquerda**/**direita**) e a faixa entra em
+ultra slow. O 1º toque numa metade da tela (ou seta, ou A/D, ou direcional) vira o agente para
+aquele suspeito; o 2º no mesmo lado (ou ✕, Enter, o botão "vai atrás") confirma. **Deixar os dois**
+(○, Esc) desiste. Depois da iniciativa e da perseguição, o outro segue a fila normal: é oferecido
+aos agentes que ainda não correram. A pose animada de indecisão (cabeça varrendo, tronco para trás)
+ainda não existe: por enquanto o agente só vira o corpo.
 
 ## Auras
 

@@ -51,3 +51,23 @@
     </button>
   </div>
 }
+
+<!-- Escolha de alvo (decisao:alvo): metade da tela = um lado; 1º toque olha, 2º confirma -->
+@if (target(); as t) {
+  <div class="target" data-testid="target" role="dialog" aria-label="Escolha qual suspeito perseguir" (click)="targetTap($event)">
+    <div class="curve-head">
+      <span class="curve-kicker">{{ t.count === 2 ? 'Dois fugindo!' : t.count + ' fugindo!' }}</span>
+      <span class="curve-text">{{ t.picked ? 'de novo no mesmo lado: vai' : 'toque num lado para olhar' }}</span>
+    </div>
+    <button type="button" class="curve-btn left" data-testid="target-left" aria-label="Olhar para a esquerda" (click)="$event.stopPropagation(); targetSide.emit('esquerda')">←</button>
+    <button type="button" class="curve-btn right" data-testid="target-right" aria-label="Olhar para a direita" (click)="$event.stopPropagation(); targetSide.emit('direita')">→</button>
+    <div class="target-actions">
+      @if (t.picked) {
+        <button type="button" class="target-go" data-testid="target-go" (click)="$event.stopPropagation(); targetConfirm.emit()">
+          {{ t.agent }} vai atrás de {{ t.picked }}
+        </button>
+      }
+      <button type="button" class="target-skip" data-testid="target-skip" (click)="$event.stopPropagation(); targetCancel.emit()">Deixar os dois</button>
+    </div>
+  </div>
+}

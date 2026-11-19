@@ -352,8 +352,8 @@ export class HexBoard {
    * Câmera de perseguição: desce e encosta nas costas do agente, olhando para o inimigo que ele
    * persegue. `chaseBlend` vai de 0 (câmera de sempre) a 1 (atrás do agente) e volta.
    */
-  private chase: { unitId: string; enemyId: string } | null = null;
-  private chaseLast: { unitId: string; enemyId: string } | null = null;
+  private chase: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
+  private chaseLast: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
   private chaseBlend = 0;
   private readonly chaseDir = new THREE.Vector3(0, 0, 1);
   /** Afastamento atual da cena (1 = padrão); acompanha `cine.zoom` devagar (ver `setCineZoom`). */
@@ -1357,14 +1357,22 @@ export class HexBoard {
    * Mistura a câmera com a da cena da porta (ver `focusDoor`), como a inspeção: ajusta a
    * posição e `look`, desloca a vista para a esquerda das fichas e devolve a distância.
    */
-  /** Liga (com o agente e o inimigo) ou desliga (`null`) a câmera de perseguição. */
-  setChaseCamera(unitId: string | null, enemyId?: string): void {
-    if (unitId && enemyId) {
-      const u = this.units.get(unitId);
-      const e = this.enemies.get(enemyId);
-      // começa olhando para ele, sem girar do nada
-      if (u && e) this.chaseDir.copy(e.group.position).sub(u.group.position).setY(0).normalize();
-      this.chase = this.chaseLast = { unitId, enemyId };
+  /**
+   * Liga ou desliga (`null`) a câmera de perseguição. Ela olha para o inimigo `enemyId`; sem
+   * ele, para o ponto médio dos hexágonos de `lookAt` (a escolha entre dois que fogem).
+   */
+  setChaseCamera(unitId: string | null, enemyId?: string, lookAt?: readonly HexCoord[]): void {
+    const u = unitId ? this.units.get(unitId) : undefined;
+    if (unitId && u && (enemyId || lookAt?.length)) {
+      const e = enemyId ? this.enemies.get(enemyId) : undefined;
+      const look = lookAt?.length
+        ? lookAt.reduce((acc, h) => acc.add(this.worldOf(h)), new THREE.Vector3()).divideScalar(lookAt.length)
+        : undefined;
+      const toward = e ? e.group.position : look;
+      // começa olhando para lá, sem girar do nada; na escolha, o agente também vira para eles
+      if (toward) this.chaseDir.copy(toward).sub(u.group.position).setY(0).normalize();
+      if (look && this.chaseDir.lengthSq() > 0) u.yaw = Math.atan2(this.chaseDir.x, this.chaseDir.z);
+      this.chase = this.chaseLast = { unitId, enemyId, look };
     } else {
       this.chase = null;
       // a câmera de sempre volta para quem perseguiu
@@ -1373,6 +1381,15 @@ export class HexBoard {
         if (u) this.camGoal.copy(this.worldOf(u.hex));
       }
     }
+  }
+
+  /** Vira o agente para o inimigo (a "cabeça" da escolha de alvo). */
+  faceEnemy(unitId: string, enemyId: string): void {
+    const u = this.units.get(unitId);
+    const e = this.enemies.get(enemyId);
+    if (!u || !e) return;
+    const d = e.group.position.clone().sub(u.group.position);
+    if (d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
   }
 
   private blendChase(dt: number, look: THREE.Vector3, dist: number): number {
@@ -1388,11 +1405,14 @@ export class HexBoard {
     }
     const u = c && this.units.get(c.unitId);
     if (!c || !u || this.chaseBlend <= 0) return dist;
-    const e = this.enemies.get(c.enemyId);
-    // olha para ele (ou para onde o agente corre); suave, para o zigue-zague do grid não balançar
+    const e = c.enemyId ? this.enemies.get(c.enemyId) : undefined;
+    // olha para ele (ou para o ponto escolhido, ou para onde o agente corre); suave, para o
+    // zigue-zague do grid não balançar
     const want = e && !e.gone
       ? e.group.position.clone().sub(u.group.position).setY(0)
-      : new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
+      : c.look
+        ? c.look.clone().sub(u.group.position).setY(0)
+        : new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
     if (want.lengthSq() > 0.01) this.chaseDir.lerp(want.normalize(), 1 - Math.exp(-dt * 3)).normalize();
     const portrait = this.camera.aspect < 1;
     const back = portrait ? CHASE_CAMERA.portraitBack : CHASE_CAMERA.back;
