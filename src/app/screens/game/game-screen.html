@@ -434,32 +434,46 @@
     (targetConfirm)="targetConfirm()"
     (targetCancel)="targetCancel()" />
 
-  <!-- Teste de d20 (percepção, portas): uma ficha na lateral; a percepção espera o Continuar -->
-  @for (ck of checks(); track ck.id) {
-    <aside class="check" [class.pass]="ck.pass === true" [class.fail]="ck.pass === false" role="status" aria-live="polite" data-testid="check">
-      <span class="check-kicker">{{ ck.kicker }} · d20</span>
-      <span class="check-who">{{ ck.who }}</span>
-      <app-d20
-        class="check-die"
-        aria-hidden="true"
-        [value]="ck.value"
-        [duration]="ck.duration ?? 1200"
-        [tone]="ck.pass === null ? 'gold' : ck.pass ? 'pass' : 'fail'"
-        (rolled)="checkDieRolled($event)" />
-      @if (ck.result !== null) { <span class="check-value" data-testid="check-value">{{ ck.result }}</span> }
-      <span class="check-need">{{ ck.need }}</span>
-      @if (ck.pass !== null) {
-        <span class="check-result" data-testid="check-result">{{ ck.pass ? ck.passText : ck.failText }}</span>
-      } @else {
-        <span class="sr-only">Rolando o d20…</span>
+  <!-- Testes de d20 (percepção, portas, perseguição): fichas lado a lado no canto; várias rolam
+       juntas. As do garimpeiro (dado vermelho) ficam à direita das da equipe. -->
+  @if (checks().length) {
+    <div class="checks" data-testid="checks">
+      @for (ck of checks(); track ck.id) {
+        <aside
+          class="check"
+          [class.enemy]="ck.side === 'enemy'"
+          [class.pass]="ck.pass === true"
+          [class.fail]="ck.pass === false"
+          role="status"
+          aria-live="polite"
+          data-testid="check"
+          [attr.data-side]="ck.side">
+          <span class="check-kicker">{{ ck.kicker }} · d20</span>
+          <span class="check-who">{{ ck.who }}</span>
+          <app-d20
+            class="check-die"
+            aria-hidden="true"
+            [value]="ck.value"
+            [duration]="ck.duration ?? 1200"
+            [color]="ck.side === 'enemy' ? 'red' : 'green'"
+            [tone]="ck.pass === null ? 'gold' : ck.pass ? 'pass' : 'fail'"
+            (rolled)="checkDieRolled(ck.id, $event)" />
+          @if (ck.result !== null) { <span class="check-value" data-testid="check-value">{{ ck.result }}</span> }
+          <span class="check-need">{{ ck.need }}</span>
+          @if (ck.pass !== null) {
+            <span class="check-result" data-testid="check-result">{{ ck.pass ? ck.passText : ck.failText }}</span>
+          } @else {
+            <span class="sr-only">Rolando o d20…</span>
+          }
+          @if (ck.waiting) {
+            <button type="button" class="check-close" #checkClose data-testid="check-close" (click)="closeCheck(ck.id)">
+              Continuar &#8250;
+              @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+            </button>
+          }
+        </aside>
       }
-      @if (ck.waiting) {
-        <button type="button" class="check-close" #checkClose data-testid="check-close" (click)="closeCheck()">
-          Continuar &#8250;
-          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-        </button>
-      }
-    </aside>
+    </div>
   }
 
   <!-- Ações: um carimbo contextual, uma aba e, na abordagem, um bilhete -->

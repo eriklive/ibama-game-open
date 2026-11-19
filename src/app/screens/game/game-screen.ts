@@ -136,6 +136,12 @@ import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../gam
 const MISSION_DEADLINE = 5;
 
 /**
+ * Folga (ms) entre um "segura" do slow e o próximo: decisão → rolagem, ou um dado atrás do outro,
+ * ficam no mesmo slow, sem voltar ao normal no meio.
+ */
+const SLOW_GRACE_MS = 300;
+
+/**
  * `checking`: rolando um d20 (percepção, inspecionar) — nada mais anda até o dado parar.
  * `interrogating`: interrogatório em close-up (balões e cartões de pergunta na tela).
  * `over`: a operação foi encerrada (fica o relatório na tela).
@@ -185,7 +191,14 @@ interface CheckView {
   pass: boolean | null;
   /** O resultado já foi visto e o jogo espera o **Continuar**. */
   waiting?: boolean;
+  /** De quem é o dado: o do garimpeiro é vermelho e fica à direita das fichas da equipe. */
+  side: CheckSide;
 }
+
+type CheckSide = 'team' | 'enemy';
+
+/** O que quem rola informa (o resto da ficha é montado por `rollD20`). */
+type CheckAsk = Pick<CheckView, 'kicker' | 'who' | 'need' | 'passText' | 'failText'> & { side?: CheckSide };
 
 /** Uma linha do menu da porta (as fichas da direita). */
 interface DoorOption {
@@ -246,6 +259,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private board?: HexBoard;
   private timers: ReturnType<typeof setTimeout>[] = [];
+  /** Quantos seguram o slow da perseguição agora (decisões e rolagens); > 0: tudo desacelera. */
+  private slowHolds = 0;
+  /** Volta do slow agendada (a folga de `SLOW_GRACE_MS`). */
+  private slowResume?: ReturnType<typeof setTimeout>;
+  /** Muda no `resetSlow`: quem segurava antes não solta mais nada. */
+  private slowGen = 0;
   private readonly rollConfirmBtn = viewChild('rollConfirm', { read: ElementRef<HTMLButtonElement> });
   private destroyed = false;
   /** Muda a cada "Recomeçar": animações antigas param de mexer no estado. */
@@ -456,7 +475,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   // ---------- percepção e esconderijos ----------
 
   /** Teste de d20 na ficha da lateral (percepção ao entrar no cômodo, inspecionar o móvel). */
-  protected readonly check = signal<CheckView | null>(null);
   /** Carimbo "Perseguir?" do turno inimigo (ver `tryChase`). */
   protected readonly chaseOffer = signal<{
     /** Linha de cima do carimbo ("Ele vai correr", "Voz de prisão", "Reforço"). */
@@ -498,18 +516,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   });
   private targetSeq = 0;
   private curveSeq = 0;
-  /** Quem espera o jogador fechar a ficha (**Continuar**, ✕). */
-  private checkDone?: () => void;
-  /** Some com a ficha do d20 das portas (essas não esperam o Continuar: a cena da porta segue). */
+  /**
+   * As fichas de d20 na tela, lado a lado: várias podem rolar juntas (o agente grita enquanto o
+   * garimpeiro rola a curva dele). As da equipe ficam à esquerda; as do garimpeiro, à direita.
+   */
+  protected readonly checks = signal<readonly CheckView[]>([]);
+  /** Quem espera o jogador fechar cada ficha (**Continuar**, ✕), pelo `id` dela. */
+  private readonly checkDone = new Map<number, () => void>();
+  /** Quem espera o d20 de cada ficha parar, pelo `id` dela. */
+  private readonly checkRolled = new Map<number, (value: number) => void>();
+  /** A ficha das portas em cena (essas não esperam o Continuar: a cena da porta segue). */
+  private doorCheckId?: number;
+  /** Some com a ficha do d20 das portas. */
   private doorCheckTimer?: ReturnType<typeof setTimeout>;
-  /** A ficha como lista (0 ou 1 item), para o `@for` recriar o d20 a cada teste novo. */
-  protected readonly checks = computed(() => {
-    const c = this.check();
-    return c ? [c] : [];
-  });
   private checkSeq = 0;
-  /** Quem espera o d20 da ficha parar. */
-  private checkRolled?: (value: number) => void;
   protected readonly searchRules = SEARCH_RULES;
   /**
    * Inspeção em close-up (toque na lupa): a câmera aproxima, o d20 rola no meio da cena e o
@@ -1044,6 +1064,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.destroyed = true;
     this.stopPad?.();
     this.clearTimers();
+    clearTimeout(this.slowResume);
     clearTimeout(this.noticeTimer);
     clearTimeout(this.speechTimer);
     clearInterval(this.statsTicker);
@@ -1392,6 +1413,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     if (!ini) return true;
     if (!ini.pass) {
+      this.resetSlow();
       this.sound.chaseEnd();
       this.board?.setChaseCamera(null);
       this.say(backup ? `${this.nameOf(agentId)} hesitou! Quem vai?` : `${this.nameOf(agentId)} hesitou. ${enemy.name} corre!`, 'alert');
@@ -1457,7 +1479,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       }));
     board.setChaseCamera(agentId, undefined, enemies.map((e) => e.hex));
     await this.sound.chaseStart(4);
-    this.sound.chaseSlow(true);
+    const release = this.holdSlow();
     this.say(`${this.nameOf(agentId)}: dois fugindo! Qual?`, 'alert');
     const picked = await new Promise<string | null>((done) => {
       this.targetDone = done;
@@ -1465,8 +1487,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.paintTargets();
     });
     this.board?.setSpotlight(null);
-    this.sound.chaseSlow(false);
+    // escolheu: o slow emenda na iniciativa (ver `SLOW_GRACE_MS`)
+    release();
     if (!picked) {
+      this.resetSlow();
       this.sound.chaseEnd();
       this.board?.setChaseCamera(null);
     }
@@ -1566,6 +1590,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       await this.chaseSteps(enemyId, agentId, agentPath, epoch, caught);
     } finally {
       // terminou, ou a partida recomeçou no meio: a câmera sobe, a faixa some e o placar sai
+      this.resetSlow();
       this.board?.setChaseCamera(null);
       this.sound.chaseEnd();
       this.chaseHud.set(null);
@@ -1635,12 +1660,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     /**
      * Os dois correm até ele estar no ponto `s` da rota; o agente fica `distance` atrás. É um
      * trecho reto: dá para gritar uma vez, sem parar. Se o grito encostar, o caminho do agente
-     * cresce no meio da corrida; se zerar a distância, os dois param ali (agarrou). Antes da
-     * parada seguinte, o trecho espera o grito terminar de rolar.
+     * cresce no meio da corrida; se zerar a distância, os dois param ali (agarrou). Antes de uma
+     * curva do agente, o trecho espera o grito terminar de rolar; nas paradas do garimpeiro
+     * (`waitShout = false`), os dados rolam juntos: a ficha dele entra à direita da do agente.
      */
-    const legTo = async (s: number, agentCap = Infinity, hold = false) => {
+    const legTo = async (s: number, agentCap = Infinity, hold = false, waitShout = true) => {
       if (g >= s) return;
-      this.chaseShout.set('ready');
+      // o grito do trecho anterior ainda rolando vale por este também
+      this.chaseShout.set(this.shoutRoll ? 'used' : 'ready');
       let aEnd = Math.max(a, Math.min(n + s - distance - 1, n + s - 1, agentCap));
       const unitPath = track.slice(a + 1, aEnd + 1);
       closer = () => {
@@ -1655,6 +1682,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       a += moved.a;
       g += moved.g;
       hud();
+      if (!waitShout) return;
       if (this.shoutRoll) await this.shoutRoll;
       if (!alive()) return;
       hud();
@@ -1689,25 +1717,33 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         const kind = next === doorAt ? 'porta' : next === enemyCurveAt ? 'curva-dele' : 'curva';
         // o agente nunca passa da próxima curva dele sem decidir o lado; na curva dele, os dois
         // param na pose de corrida e congelam enquanto o jogador decide
-        await legTo(next, curve?.index ?? Infinity, kind === 'curva');
+        await legTo(next, curve?.index ?? Infinity, kind === 'curva', kind === 'curva');
         if (!alive()) return;
         // o grito no trecho já encostou nele: sai da pose de corrida
         if (distance <= 0) {
-          board.setChaseSlowmo(false);
+          board.restChase();
           break;
         }
+        // a distância só muda depois do dado (o grito pode mexer nela enquanto o dele rola)
         if (kind === 'curva') {
           ci++;
-          distance += await this.chaseCurve(curve!.side, agentId);
+          const d = await this.chaseCurve(curve!.side, agentId);
+          distance += d;
         } else if (kind === 'curva-dele') {
           ei++;
-          distance += await this.chaseEnemyCurve(enemyId);
+          const d = await this.chaseEnemyCurve(enemyId);
+          distance += d;
         } else {
           di++;
-          distance = await this.chaseDoor(door.door, enemyId, distance, (d) => {
-            distance = Math.max(0, d);
-            hud();
-          });
+          await this.chaseDoor(
+            door.door,
+            enemyId,
+            () => distance,
+            (d) => {
+              distance = Math.max(0, distance + d);
+              hud();
+            },
+          );
         }
         if (!alive()) return;
         distance = Math.max(0, distance);
@@ -1716,7 +1752,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       }
       if (distance > 0) await legTo(route.flee.length);
     }
+    // o grito que ainda rola decide antes do desfecho
+    if (this.shoutRoll) await this.shoutRoll;
     if (!alive()) return;
+    // parou na pose de corrida de uma curva (agarrou ali, ou a rota acabou): repouso
+    board.restChase();
     board.setSelected(null);
 
     if (distance <= 0) {
@@ -1778,7 +1818,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const enemy = this.enemy(enemyId)!;
     const agent = this.chaseStats(agentId);
     const who = this.nameOf(agentId);
-    {
+    // os dois dados do grito num slow só
+    const release = this.holdSlow();
+    try {
       const vigor = agent.vigor ?? 0;
       const ar = await this.rollD20(
         { kicker: 'Grito · vigor', who, need: `precisa de ${CHASE_RULES.shoutDC - vigor} ou mais`, passText: 'Parado, Ibama!', failText: 'Sem fôlego' },
@@ -1792,7 +1834,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       }
       const need = shoutResistNeed(agent);
       const er = await this.rollD20(
-        { kicker: 'Grito · intimidação', who: enemy.name, need: `precisa de ${need} ou mais`, passText: 'Nem olhou', failText: 'Olhou para trás' },
+        { kicker: 'Grito · intimidação', who: enemy.name, need: `precisa de ${need} ou mais`, passText: 'Nem olhou', failText: 'Olhou para trás', side: 'enemy' },
         (roll) => roll >= need,
         800,
       );
@@ -1805,18 +1847,25 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.say(`${enemy.name} olhou para trás! Encostando: ${signed(res.delta)} de distância`, 'alert');
       } else this.say(`${enemy.name} nem olhou.`, 'info');
       return res.delta;
+    } finally {
+      release();
     }
   }
 
   private async chaseCurve(side: Side, agentId: string): Promise<number> {
+    // decisão e rolagem num slow só: a fita, os dois congelados no meio da corrida e o zoom
+    // (ver `CHASE_SLOWMO`) seguram do deslize até o dado sumir
+    const release = this.holdSlow();
+    try {
+      return await this.chaseCurveSteps(side, agentId);
+    } finally {
+      release();
+    }
+  }
+
+  private async chaseCurveSteps(side: Side, agentId: string): Promise<number> {
     const agent = this.chaseStats(agentId);
-    // a fita cai para o ultra slow enquanto o jogador decide; volta no gesto. A cena vai junto:
-    // os dois congelam no meio da corrida e a câmera fecha um pouco (ver `CHASE_SLOWMO`)
-    this.sound.chaseSlow(true);
-    this.board?.setChaseSlowmo(true);
     const swiped = await this.askCurve();
-    this.sound.chaseSlow(false);
-    this.board?.setChaseSlowmo(false);
     const crashed = swiped !== side;
     let agentRoll = 0;
     if (crashed) {
@@ -1846,10 +1895,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const enemy = this.enemy(enemyId)!;
     const eAgi = enemy.agilidade ?? 0;
     // a curva é dele: a cena fica lenta só para mostrar o dado
-    this.sound.chaseSlow(true);
+    const release = this.holdSlow();
     try {
       const r = await this.rollD20(
-        { kicker: 'Curva · agilidade', who: enemy.name, need: `precisa de ${CHASE_RULES.curveDC - eAgi} ou mais`, passText: 'Passou', failText: 'Escorregou' },
+        { kicker: 'Curva · agilidade', who: enemy.name, need: `precisa de ${CHASE_RULES.curveDC - eAgi} ou mais`, passText: 'Passou', failText: 'Escorregou', side: 'enemy' },
         (roll) => roll + eAgi >= CHASE_RULES.curveDC,
         800,
       );
@@ -1857,8 +1906,52 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.say(res.pass ? `${enemy.name} fez a curva.` : `${enemy.name} escorregou na curva! Encostando: ${signed(res.delta)} de distância`, res.pass ? 'info' : 'alert');
       return res.delta;
     } finally {
-      this.sound.chaseSlow(false);
+      release();
     }
+  }
+
+  /**
+   * Segura o slow da perseguição (decisões e rolagens): enquanto alguém segurar, a música, a
+   * animação, os passos e o zoom ficam desacelerados. Devolve quem solta (uma vez só). O último
+   * a soltar volta tudo ao normal depois de `SLOW_GRACE_MS`, se ninguém segurar de novo antes.
+   */
+  private holdSlow(): () => void {
+    if (this.slowResume !== undefined) {
+      clearTimeout(this.slowResume);
+      this.slowResume = undefined;
+    } else if (this.slowHolds === 0) this.applySlow(true);
+    this.slowHolds++;
+    const gen = this.slowGen;
+    let held = true;
+    return () => {
+      if (!held || gen !== this.slowGen) return;
+      held = false;
+      if (--this.slowHolds > 0) return;
+      this.slowResume = setTimeout(() => {
+        this.slowResume = undefined;
+        if (this.slowHolds === 0) this.applySlow(false);
+      }, SLOW_GRACE_MS);
+    };
+  }
+
+  /** O slow está valendo (alguém segura, ou acabou de soltar e ainda está na folga). */
+  private slowActive(): boolean {
+    return this.slowHolds > 0 || this.slowResume !== undefined;
+  }
+
+  private applySlow(on: boolean): void {
+    this.sound.chaseSlow(on);
+    this.board?.setChaseSlowmo(on);
+  }
+
+  /** Fim da perseguição (ou recomeço): ninguém segura mais, e tudo volta ao normal na hora. */
+  private resetSlow(): void {
+    clearTimeout(this.slowResume);
+    const was = this.slowActive();
+    this.slowResume = undefined;
+    this.slowHolds = 0;
+    this.slowGen++;
+    if (was) this.applySlow(false);
   }
 
   /** Espera o deslize da curva (← ou →) por `swipeSeconds`; `null` se não veio a tempo. */
@@ -1889,28 +1982,28 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Porta fechada na rota: o garimpeiro rola d4 (1–2 abre, 3–4 arromba) e d20. Falhou: perde
-   * tempo (−1) e tenta de novo. Passou: a porta fica aberta (ou arrombada). Devolve a distância.
+   * tempo (−1, por `addDistance`) e tenta de novo. Passou: a porta fica aberta (ou arrombada).
    */
-  private async chaseDoor(door: Door, enemyId: string, distance: number, onDistance: (d: number) => void): Promise<number> {
+  private async chaseDoor(door: Door, enemyId: string, distance: () => number, addDistance: (delta: number) => void): Promise<void> {
     const name = this.enemy(enemyId)!.name;
     const current = this.doors().get(hexKey(door.hex)) ?? door;
-    // a porta é dele: a cena fica lenta só para mostrar os dados
-    this.sound.chaseSlow(true);
+    // a porta é dele: a cena fica lenta enquanto ele rola os dados (todas as tentativas)
+    const release = this.holdSlow();
     try {
-      return await this.fleeDoorTries(current, door, name, distance, onDistance);
+      await this.fleeDoorTries(current, door, name, distance, addDistance);
     } finally {
-      this.sound.chaseSlow(false);
+      release();
     }
   }
 
-  /** As tentativas dele na porta, até passar (ou ela o alcançar). Devolve a distância. */
+  /** As tentativas dele na porta, até passar (ou ela o alcançar). */
   private async fleeDoorTries(
     current: Door,
     door: Door,
     name: string,
-    distance: number,
-    onDistance: (d: number) => void,
-  ): Promise<number> {
+    distance: () => number,
+    addDistance: (delta: number) => void,
+  ): Promise<void> {
     const board = this.board!;
     for (;;) {
       const d4 = rollDie(CHASE_RULES.doorChoiceDie);
@@ -1920,22 +2013,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       await this.wait(800);
       const need = fleeDoorNeed(action, current);
       const r = await this.rollD20(
-        { kicker: action === 'abrir' ? 'Abrir' : 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: action === 'abrir' ? 'Abriu' : 'Arrombou', failText: 'Travou' },
+        { kicker: action === 'abrir' ? 'Abrir' : 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: action === 'abrir' ? 'Abriu' : 'Arrombou', failText: 'Travou', side: 'enemy' },
         (roll) => roll >= need,
         800,
       );
-      if (!r) return distance;
+      if (!r) return;
       const res = resolveFleeDoor(current, d4, r.roll);
       if (res.pass) {
         this.sound.play(action === 'abrir' ? (current.state === 'trancada' ? 'porta.destrancou' : 'porta.abrir') : 'porta.chute-ok', { at: door.hex });
         this.doors.update((m) => new Map(m).set(hexKey(door.hex), res.door));
         board.setDoors(this.doors());
-        return distance;
+        return;
       }
       this.sound.play(action === 'abrir' ? 'porta.trancada' : 'porta.chute-falha', { at: door.hex });
-      distance += res.delta;
-      onDistance(distance);
-      if (distance <= 0) return distance;
+      addDistance(res.delta);
+      if (distance() <= 0) return;
       current = res.door;
     }
   }
@@ -2409,33 +2501,48 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * não para a cada dado). `null` se a partida foi recomeçada.
    */
   private async rollD20(
-    view: Pick<CheckView, 'kicker' | 'who' | 'need' | 'passText' | 'failText'>,
+    view: CheckAsk,
+    passes: (roll: number) => boolean,
+    autoMs?: number,
+  ): Promise<{ roll: number; pass: boolean } | null> {
+    // na perseguição (ou emendando num slow que já está aí), o dado desacelera tudo até sumir
+    const release = this.chaseHud() || this.slowActive() ? this.holdSlow() : undefined;
+    try {
+      return await this.rollD20Sheet(view, passes, autoMs);
+    } finally {
+      release?.();
+    }
+  }
+
+  private async rollD20Sheet(
+    { side = 'team', ...view }: CheckAsk,
     passes: (roll: number) => boolean,
     autoMs?: number,
   ): Promise<{ roll: number; pass: boolean } | null> {
     const epoch = this.epoch;
-    const rolled = new Promise<number>((done) => (this.checkRolled = done));
-    this.check.set({ id: ++this.checkSeq, ...view, result: null, pass: null });
+    const id = ++this.checkSeq;
+    const rolled = new Promise<number>((done) => this.checkRolled.set(id, done));
+    this.addCheck({ id, ...view, side, result: null, pass: null });
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
     this.sound.play('dado.d20', { delay: 0.2 });
     const result = await rolled;
     if (this.destroyed || this.epoch !== epoch) return null;
     const pass = passes(result);
     this.checkSound(result, pass);
-    this.check.update((c) => c && { ...c, result, pass });
+    this.patchCheck(id, { result, pass });
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.3, 0.2, 120);
     if (autoMs !== undefined) {
       await this.wait(autoMs);
       if (this.destroyed || this.epoch !== epoch) return null;
-      this.check.set(null);
+      this.dropCheck(id);
       return { roll: result, pass };
     }
     // um instante para o carimbo aparecer antes do botão (evita fechar sem querer)
     await this.wait(450);
     if (this.destroyed || this.epoch !== epoch) return null;
-    const closed = new Promise<void>((done) => (this.checkDone = done));
-    this.check.update((c) => c && { ...c, waiting: true });
+    const closed = new Promise<void>((done) => this.checkDone.set(id, done));
+    this.patchCheck(id, { waiting: true });
     await closed;
     if (this.destroyed || this.epoch !== epoch) return null;
     return { roll: result, pass };
@@ -2591,17 +2698,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     failText: string,
     value: number,
     duration: number,
+    side: CheckSide = 'team',
   ): (result: number, pass: boolean) => void {
     clearTimeout(this.doorCheckTimer);
-    this.checkRolled = undefined;
-    this.check.set({ id: ++this.checkSeq, kicker, who, need, passText, failText, value, duration, result: null, pass: null });
+    if (this.doorCheckId !== undefined) this.dropCheck(this.doorCheckId);
+    const id = (this.doorCheckId = ++this.checkSeq);
+    this.addCheck({ id, kicker, who, need, passText, failText, value, duration, side, result: null, pass: null });
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
     this.sound.play('dado.d20', { delay: 0.1 });
     return (result, pass) => {
-      this.check.update((c) => c && { ...c, result, pass });
+      this.patchCheck(id, { result, pass });
       this.checkSound(result, pass);
       this.haptics.vibrate(SETTLE_PATTERN);
-      this.doorCheckTimer = setTimeout(() => this.check.update((c) => (c?.waiting ? c : null)), 3200);
+      this.doorCheckTimer = setTimeout(() => {
+        if (this.doorCheckId === id) this.doorCheckId = undefined;
+        this.dropCheck(id);
+      }, 3200);
     };
   }
 
@@ -2644,6 +2756,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         resist ? 'Resistiu: vai correr' : 'Vai correr',
         r.roll,
         1000,
+        'enemy',
       );
       board.focusHex(e.hex);
       await this.wait(1000);
@@ -2690,20 +2803,50 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.speak(witness.id, DOOR_REACTIONS[Math.floor(Math.random() * DOOR_REACTIONS.length)]);
   }
 
-  /** Fecha a ficha do d20 (**Continuar** ou ✕) e deixa o jogo seguir. */
-  protected closeCheck(): void {
-    if (!this.check()?.waiting) return;
-    this.check.set(null);
-    const done = this.checkDone;
-    this.checkDone = undefined;
+  /** Fecha uma ficha do d20 (**Continuar** ou ✕; sem `id`, a primeira que espera) e o jogo segue. */
+  protected closeCheck(id = this.waitingCheck()?.id): void {
+    if (id === undefined || !this.checks().find((c) => c.id === id)?.waiting) return;
+    const done = this.checkDone.get(id);
+    this.dropCheck(id);
     done?.();
   }
 
-  /** O d20 da ficha parou. */
-  protected checkDieRolled(value: number): void {
-    const done = this.checkRolled;
-    this.checkRolled = undefined;
+  /** A primeira ficha que espera o **Continuar** (a do controle e do teclado). */
+  private waitingCheck(): CheckView | undefined {
+    return this.checks().find((c) => c.waiting);
+  }
+
+  /** O d20 de uma ficha parou. */
+  protected checkDieRolled(id: number, value: number): void {
+    const done = this.checkRolled.get(id);
+    this.checkRolled.delete(id);
     done?.(value);
+  }
+
+  /** Põe uma ficha na tela, ao lado das que já estão (as do garimpeiro sempre à direita). */
+  private addCheck(view: CheckView): void {
+    this.checks.update((cs) => {
+      const team = [...cs.filter((c) => c.side === 'team'), ...(view.side === 'team' ? [view] : [])];
+      const enemy = [...cs.filter((c) => c.side === 'enemy'), ...(view.side === 'enemy' ? [view] : [])];
+      return [...team, ...enemy];
+    });
+  }
+
+  private patchCheck(id: number, patch: Partial<CheckView>): void {
+    this.checks.update((cs) => cs.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  }
+
+  private dropCheck(id: number): void {
+    this.checkRolled.delete(id);
+    this.checkDone.delete(id);
+    this.checks.update((cs) => cs.filter((c) => c.id !== id));
+  }
+
+  private clearChecks(): void {
+    this.checkRolled.clear();
+    this.checkDone.clear();
+    this.doorCheckId = undefined;
+    this.checks.set([]);
   }
 
   private nameOf(id: string): string {
@@ -3406,6 +3549,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected restart(): void {
     this.epoch++;
     this.clearTimers();
+    this.resetSlow();
     this.report.set(null);
     this.positions.set(this.initialPositions());
     this.group.set(wholeTeam());
@@ -3419,9 +3563,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.found.set(new Set());
     this.searchFails.set(new Map());
     this.noticeRolled.clear();
-    this.checkRolled = undefined;
-    this.checkDone = undefined;
-    this.check.set(null);
+    this.clearChecks();
     this.dropSearch();
     this.dropInterrogation();
     this.dialogues.set(new Map());
@@ -3533,7 +3675,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         if (this.keyPrompt()) this.takeKey();
         else if (this.search()?.pass === false && this.movesLeft() >= SEARCH_RULES.inspectCost) this.retryInspect();
         else if (this.search()) this.closeSearch();
-        else if (this.check()?.waiting) this.closeCheck();
+        else if (this.waitingCheck()) this.closeCheck();
         else if (this.aiming()) void this.inspect();
         else if (this.report()) this.closeReport();
         else if (this.phase() === 'rolling') this.confirmRoll();

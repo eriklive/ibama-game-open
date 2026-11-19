@@ -938,7 +938,7 @@ export class HexBoard {
         const from = u.group.position;
         const to = this.worldOf(step);
         u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
-        await this.runTo(u, step, pace(unitPath.length), false);
+        await this.runTo(u, step, pace(unitPath.length), false, () => this.animRate(unitId));
         if (u.epoch !== epoch) return;
         u.hex = step;
         onStep?.('unit', step);
@@ -956,7 +956,7 @@ export class HexBoard {
         const from = this.worldOf(e.hex);
         const to = this.worldOf(step);
         e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
-        await this.runTo(e, step, pace(enemyPath.length), true);
+        await this.runTo(e, step, pace(enemyPath.length), true, () => this.animRate(enemyId));
         if (e.epoch !== epoch) break;
         e.hex = step;
         onStep?.('enemy', step);
@@ -1403,13 +1403,20 @@ export class HexBoard {
   }
 
   /**
-   * Curva da perseguição: `true` congela o agente e o inimigo no meio da corrida (a animação cai
-   * para `CHASE_SLOWMO.rate`, como a fita da música) e a câmera fecha um pouco; `false` volta
-   * rápido, abre a câmera e põe os dois em repouso. Use depois de `runPair(..., hold = true)`.
+   * Slow da perseguição: `true` desacelera o agente e o inimigo (animação e passos caem para
+   * `CHASE_SLOWMO.rate`, como a fita da música) e a câmera fecha um pouco; `false` volta rápido
+   * e abre a câmera. Quem decide quando é a tela (decisões e rolagens seguram o slow).
    */
   setChaseSlowmo(on: boolean): void {
     this.slowmoGoal = on ? 1 : 0;
-    if (on) return;
+  }
+
+  /**
+   * Tira o agente e o inimigo da pose de corrida em que `runPair(..., hold = true)` os deixou.
+   * Não mexe em quem está correndo (o próximo trecho já começou).
+   */
+  restChase(): void {
+    if (this.moving) return;
     const c = this.chaseLast;
     const u = c && this.units.get(c.unitId);
     const e = c?.enemyId ? this.enemies.get(c.enemyId) : undefined;
@@ -2500,7 +2507,8 @@ export class HexBoard {
   }
 
   /** Corre em linha reta até o hexágono, em velocidade constante (quem chama vira a peça). */
-  private runTo(u: Mover, h: HexCoord, speed: number, follow = true): Promise<void> {
+  /** `rate`: velocidade do tempo agora (o slow da perseguição; 1 = normal). */
+  private runTo(u: Mover, h: HexCoord, speed: number, follow = true, rate: () => number = () => 1): Promise<void> {
     const from = u.group.position.clone();
     const to = this.worldOf(h);
     if (follow) {
@@ -2508,12 +2516,14 @@ export class HexBoard {
       this.clampGoal();
     }
     const duration = (Math.hypot(to.x - from.x, to.z - from.z) / speed) * 1000;
-    const start = performance.now();
+    let last = performance.now();
+    let t = 0;
     const epoch = u.epoch;
     return new Promise((resolve) => {
       const step = (now: number) => {
         if (u.epoch !== epoch) return resolve();
-        const t = this.disposed ? 1 : Math.min(1, (now - start) / duration);
+        t = this.disposed || duration <= 0 ? 1 : Math.min(1, t + ((now - last) / duration) * rate());
+        last = now;
         u.group.position.x = from.x + (to.x - from.x) * t;
         u.group.position.z = from.z + (to.z - from.z) * t;
         if (t < 1) requestAnimationFrame(step);
