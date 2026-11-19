@@ -436,7 +436,10 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .inspect-slip.pass strong { color: var(--green-ok); }
 
 /* inspecionar pelo teclado: o botão só aparece quando recebe o foco */
-.inspect.keyboard-only:not(:focus-visible) { opacity: 0; pointer-events: none; }
+/* (o toque segue valendo enquanto ele tem o foco: no iOS o :focus-visible cai no próprio toque,
+   e o pointer-events: none fazia o toque atravessar o botão) */
+.inspect.keyboard-only:not(:focus-visible) { opacity: 0; }
+.inspect.keyboard-only:not(:focus) { pointer-events: none; }
 
 /* ---------- modo de abordagem: o resto da HUD apaga e a decisão fica em dois botões ---------- */
 .corner, .goal, .suspects, .end-op { transition: filter .25s ease; }
@@ -810,7 +813,17 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 /* menu da porta: a papelada da HUD sai de cena; as ações entram como fichas na direita */
 .game.rolling .goal { visibility: hidden; }
 .game.door-focus :is(.corner, .goal, .left, .suspects, .actions, .end-op) { opacity: 0; pointer-events: none; }
-.game.door-focus .telegram { left: calc((100% - var(--door-w)) / 2); }
+.game.door-focus .telegram {
+  left: calc((100% - var(--door-w)) / 2);
+  max-width: min(260px, calc(100% - var(--door-w) - 28px - var(--safe-left)));
+}
+/* celular em pé: ao lado das fichas não cabe; o aviso desce para o rodapé, na largura toda */
+@media (max-width: 640px) and (orientation: portrait) {
+  .game.door-focus .telegram {
+    top: auto; bottom: calc(24px + var(--safe-bottom));
+    left: 50%; max-width: calc(100% - 32px - var(--safe-left) - var(--safe-right));
+  }
+}
 
 .game { --door-w: calc(min(300px, 40vw) + 14px); }
 .door-back {
