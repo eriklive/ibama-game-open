@@ -290,30 +290,19 @@ describe('lockRoute', () => {
 });
 
 describe('resolveCurve', () => {
-  const base = { side: 'direita' as const, agent: {}, enemy: {} };
-  const cases: [string, 'direita' | 'esquerda' | null, number, number, number][] = [
-    ['bateu, ele passou', 'esquerda', 20, 10, 1],
-    ['não deslizou, ele escorregou', null, 20, 2, 0],
-    ['certo, falhou, ele passou', 'direita', 3, 10, 0],
-    ['certo, falhou, ele escorregou', 'direita', 3, 2, -1],
-    ['certo, passou, ele passou', 'direita', 6, 6, -1],
-    ['certo, passou, ele escorregou', 'direita', 15, 5, -2],
+  const base = { side: 'direita' as const, agent: {} };
+  const cases: [string, 'direita' | 'esquerda' | null, number, number][] = [
+    ['bateu', 'esquerda', 20, 1],
+    ['não deslizou', null, 20, 1],
+    ['certo, falhou', 'direita', 3, 0],
+    ['certo, passou', 'direita', 6, -1],
   ];
-  for (const [name, swiped, agentRoll, enemyRoll, delta] of cases) {
-    it(name, () =>
-      expect(resolveCurve({ ...base, swiped, agentRoll, enemyRoll }).delta).toBe(delta),
-    );
+  for (const [name, swiped, agentRoll, delta] of cases) {
+    it(name, () => expect(resolveCurve({ ...base, swiped, agentRoll }).delta).toBe(delta));
   }
-  it('agilidade soma no d20 dos dois', () => {
-    const r = resolveCurve({
-      ...base,
-      swiped: 'direita',
-      agentRoll: 4,
-      agent: { agilidade: 2 },
-      enemyRoll: 4,
-      enemy: { agilidade: 2 },
-    });
-    expect(r).toMatchObject({ agentPass: true, enemyPass: true, delta: -1 });
+  it('agilidade soma no d20 do agente', () => {
+    const r = resolveCurve({ ...base, swiped: 'direita', agentRoll: 4, agent: { agilidade: 2 } });
+    expect(r).toMatchObject({ agentPass: true, delta: -1 });
   });
 });
 

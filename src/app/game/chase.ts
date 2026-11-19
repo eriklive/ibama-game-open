@@ -20,8 +20,8 @@
  *    que consegue usar (abertas, encostadas, trancadas e portões; bloqueada é parede). A rota
  *    vira a "pista" e não muda mais. Nela ficam as **paradas**:
  *    - **curva** (mudança de direção na pista do agente, ver `agentCurves`): uma
- *      `decisao:perseguicao`, pedida quando o **agente** chega nela. O agente precisa deslizar para o lado da curva e rolar d20 + agilidade; o garimpeiro também rola
- *      a dele (`resolveCurve`);
+ *      `decisao:perseguicao`, pedida quando o **agente** chega nela. O agente precisa deslizar
+ *      para o lado da curva e rolar d20 + agilidade; só ele rola (`resolveCurve`);
  *    - **porta** fechada no caminho: o garimpeiro rola d4 para escolher abrir ou arrombar e d20
  *      para conseguir (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta
  *      fica aberta e o agente passa direto. A porta substitui a curva naquele hexágono.
@@ -423,9 +423,6 @@ export interface CurveInput {
   /** d20 do agente (ignorado se ele bateu). */
   agentRoll: number;
   agent: ChaseStats;
-  /** d20 do garimpeiro (ele sempre rola). */
-  enemyRoll: number;
-  enemy: ChaseStats;
 }
 
 export interface CurveResult {
@@ -433,22 +430,18 @@ export interface CurveResult {
   crashed: boolean;
   /** O agente fez a curva fechada (só se não bateu). */
   agentPass: boolean;
-  /** O garimpeiro passou (falhou = escorregou). */
-  enemyPass: boolean;
   /** Mudança na distância (negativo = o agente chegou mais perto). */
   delta: number;
 }
 
 /**
- * Curva: bater = +1; lado certo e d20 + agilidade ≥ 6 = −1 (falhou = 0); garimpeiro escorregou
- * (d20 + agilidade < 6) = −1. Resultado de −2 a +1.
+ * Curva (só o agente rola): bater = +1; lado certo e d20 + agilidade ≥ 6 = −1; falhou = 0.
  */
 export function resolveCurve(i: CurveInput): CurveResult {
   const crashed = i.swiped !== i.side;
   const agentPass = !crashed && i.agentRoll + (i.agent.agilidade ?? 0) >= CHASE_RULES.curveDC;
-  const enemyPass = i.enemyRoll + (i.enemy.agilidade ?? 0) >= CHASE_RULES.curveDC;
-  const delta = (crashed ? 1 : agentPass ? -1 : 0) + (enemyPass ? 0 : -1);
-  return { crashed, agentPass, enemyPass, delta };
+  const delta = crashed ? 1 : agentPass ? -1 : 0;
+  return { crashed, agentPass, delta };
 }
 
 export type FleeDoorAction = 'abrir' | 'arrombar';

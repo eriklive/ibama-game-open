@@ -1690,7 +1690,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         }
         if (!isDoor) {
           ci++;
-          distance += await this.chaseCurve(curve!.side, agentId, enemyId);
+          distance += await this.chaseCurve(curve!.side, agentId);
         } else {
           di++;
           distance = await this.chaseDoor(door.door, enemyId, distance, (d) => {
@@ -1796,8 +1796,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
   }
 
-  private async chaseCurve(side: Side, agentId: string, enemyId: string): Promise<number> {
-    const enemy = this.enemy(enemyId)!;
+  private async chaseCurve(side: Side, agentId: string): Promise<number> {
     const agent = this.chaseStats(agentId);
     // a fita cai para o ultra slow enquanto o jogador decide; volta no gesto. A cena vai junto:
     // os dois congelam no meio da corrida e a câmera fecha um pouco (ver `CHASE_SLOWMO`)
@@ -1822,13 +1821,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       );
       agentRoll = r?.roll ?? 0;
     }
-    const eAgi = enemy.agilidade ?? 0;
-    const er = await this.rollD20(
-      { kicker: 'Curva · agilidade', who: enemy.name, need: `precisa de ${CHASE_RULES.curveDC - eAgi} ou mais`, passText: 'Passou', failText: 'Escorregou' },
-      (roll) => roll + eAgi >= CHASE_RULES.curveDC,
-      800,
-    );
-    const res = resolveCurve({ side, swiped, agentRoll, agent, enemyRoll: er?.roll ?? 20, enemy: { agilidade: eAgi } });
+    const res = resolveCurve({ side, swiped, agentRoll, agent });
     this.say(res.delta < 0 ? `Encostando: ${signed(res.delta)} de distância` : res.delta > 0 ? `Ele abriu: ${signed(res.delta)}` : 'Distância igual', 'info');
     return res.delta;
   }
