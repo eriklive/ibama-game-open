@@ -17,7 +17,9 @@ import {
   ChaseCandidate,
   ChaseStats,
   Side,
+  VaultSpot,
   agentCurves,
+  agentVaults,
   agentSight,
   arrestQueue,
   chaseCandidates,
@@ -31,9 +33,10 @@ import {
   resolveEnemyCurve,
   resolveFleeDoor,
   resolveShout,
+  resolveVault,
   shoutResistNeed,
 } from '../../game/chase';
-import { ChaseHud, ChaseOverlay, CurvePrompt, TargetPrompt } from '../../ui/chase/chase-overlay';
+import { ChaseHud, ChaseOverlay, CurvePrompt, TargetPrompt, VaultPrompt } from '../../ui/chase/chase-overlay';
 import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
 import { Sound } from '../../game/sound.service';
 import { zoneAt } from '../../game/audio/ambience';
@@ -107,7 +110,7 @@ import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } fro
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
+import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea, vaultHexes } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import {
   Clues,
@@ -276,6 +279,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly fixedWalls = this.map ? blockedHexes(this.map) : new Set<string>();
   /** Carga baixa: bloqueia passagem; esconde da visão só quem está colado nela. */
   private readonly lowCover = this.map ? lowCoverHexes(this.map) : new Set<string>();
+  /** Caixotes de meia altura: na perseguição, o agente pula por cima (ver `agentVaults`). */
+  private readonly vaultable = this.map ? vaultHexes(this.map) : new Set<string>();
   /** Portas comuns (ver `door.ts`): fechadas, bloqueiam passagem e visão como parede. */
   protected readonly doors = signal<ReadonlyMap<string, Door>>(this.initialDoors());
   private readonly closedDoors = computed(
@@ -500,6 +505,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Curva: o jogador tem `seconds` para deslizar para o lado (`decisao:perseguicao`). */
   protected readonly curvePrompt = signal<CurvePrompt | null>(null);
   private curveDone?: (side: Side | null) => void;
+  /** Caixote de meia altura: o jogador tem `seconds` para pular (ver `askVault`). */
+  protected readonly vaultPrompt = signal<VaultPrompt | null>(null);
+  private vaultDone?: (jump: boolean) => void;
+  private vaultSeq = 0;
   /** Escolha de alvo (`decisao:alvo`): os suspeitos, da esquerda para a direita, e o em prévia. */
   protected readonly targetPrompt = signal<{
     id: number;
@@ -1282,6 +1291,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ev.preventDefault();
       return;
     }
+    if (this.vaultPrompt()) {
+      if (['ArrowUp', 'w', 'W', ' ', 'Enter'].includes(ev.key)) {
+        ev.preventDefault();
+        this.vaultAnswer(true);
+      }
+      return;
+    }
     if (this.curvePrompt()) {
       const side = ev.key === 'ArrowLeft' || ev.key === 'a' ? 'esquerda' : ev.key === 'ArrowRight' || ev.key === 'd' ? 'direita' : null;
       if (side) {
@@ -1697,27 +1713,42 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const doorStops = route.stops.filter((st): st is Extract<typeof st, { kind: 'porta' }> => st.kind === 'porta');
       const enemyCurves = route.stops.filter((st) => st.kind === 'curva');
       const curves = agentCurves(track, n, doorStops);
+      // caixotes de meia altura que a pista dele contorna: o agente pode pular por cima
+      const vaults = agentVaults(track, this.vaultable, this.area, blocked);
       let di = 0;
       let ei = 0;
       let ci = 0;
+      let vi = 0;
       for (;;) {
         while (ci < curves.length && curves[ci].index <= a) ci++;
         while (ei < enemyCurves.length && enemyCurves[ei].index <= g) ei++;
+        while (vi < vaults.length && vaults[vi].index < a) vi++;
         const door = doorStops[di];
         const enemyCurve = enemyCurves[ei];
         const curve = curves[ci];
+        const vault = vaults[vi];
         const doorAt = door ? door.index - 1 : Infinity;
         const enemyCurveAt = enemyCurve ? enemyCurve.index : Infinity;
         // ele fica `distance` à frente: o agente chega em `curve.index` com ele neste ponto
         let curveAt = curve ? curve.index - n + distance + 1 : Infinity;
         // ele chega ao fim da rota antes de o agente chegar à curva
         if (curveAt >= route.flee.length) curveAt = Infinity;
-        const next = Math.min(doorAt, enemyCurveAt, curveAt);
+        // o pulo, como a curva, é do agente; ele corre enquanto o agente corta por cima, e o atalho
+        // não passa à frente dele (poupar mais do que a distância seria ultrapassá-lo)
+        const vaultAt = vault ? vault.index - n + distance + 1 : Infinity;
+        if (vault && (vaultAt + vault.path.length > route.flee.length || vault.saves > distance)) {
+          vi++;
+          continue;
+        }
+        const next = Math.min(doorAt, enemyCurveAt, curveAt, vaultAt);
         if (next === Infinity) break;
-        const kind = next === doorAt ? 'porta' : next === enemyCurveAt ? 'curva-dele' : 'curva';
-        // o agente nunca passa da próxima curva dele sem decidir o lado; na curva dele, os dois
-        // param na pose de corrida e congelam enquanto o jogador decide
-        await legTo(next, curve?.index ?? Infinity, kind === 'curva', kind === 'curva');
+        const kind =
+          next === doorAt ? 'porta' : next === enemyCurveAt ? 'curva-dele' : next === curveAt ? 'curva' : 'pulo';
+        const mine = kind === 'curva' || kind === 'pulo';
+        // o agente nunca passa da próxima curva (nem do próximo caixote) sem decidir; nas
+        // decisões dele, os dois param na pose de corrida e congelam enquanto o jogador decide
+        const cap = Math.min(curve?.index ?? Infinity, vault?.index ?? Infinity);
+        await legTo(next, cap, mine, mine);
         if (!alive()) return;
         // o grito no trecho já encostou nele: sai da pose de corrida
         if (distance <= 0) {
@@ -1732,6 +1763,36 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         } else if (kind === 'curva-dele') {
           ei++;
           const d = await this.chaseEnemyCurve(enemyId);
+          distance += d;
+        } else if (kind === 'pulo') {
+          vi++;
+          // ficou para trás (parou numa curva antes): chega ao caixote antes de decidir
+          if (a < vault!.index) {
+            moved.a = 0;
+            await board.runPair(agentId, track.slice(a + 1, vault!.index + 1), enemyId, [], onStep, undefined, undefined, true);
+            a += moved.a;
+            if (!alive()) return;
+          }
+          const d = await this.chaseVault(vault!, agentId);
+          if (!alive()) return;
+          if (d < 0) {
+            // o atalho por cima do caixote, enquanto ele corre o mesmo tanto de passos
+            const over = vault!.over;
+            moved.a = moved.g = 0;
+            await board.runPair(
+              agentId,
+              vault!.path,
+              enemyId,
+              route.flee.slice(g, g + vault!.path.length),
+              (w, hex) => (w === 'unit' && hexKey(hex) === hexKey(over) ? undefined : onStep(w, hex)),
+              undefined,
+              undefined,
+              true,
+              new Set([hexKey(over)]),
+            );
+            a = vault!.land;
+            g += moved.g;
+          }
           distance += d;
         } else {
           di++;
@@ -1799,7 +1860,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Botão **Gritar!** (toque, G, □): vale uma vez por trecho reto, com os dois correndo. */
   protected shout(): void {
     const start = this.shoutStart;
-    if (this.chaseShout() !== 'ready' || this.curvePrompt() || !start) return;
+    if (this.chaseShout() !== 'ready' || this.curvePrompt() || this.vaultPrompt() || !start) return;
     this.chaseShout.set('used');
     this.sound.play('abo.carimbo');
     this.say(`"Parado, Ibama!"`, 'alert');
@@ -1885,6 +1946,62 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const res = resolveCurve({ side, swiped, agentRoll, agent });
     this.say(res.delta < 0 ? `Encostando: ${signed(res.delta)} de distância` : res.delta > 0 ? `Ele abriu: ${signed(res.delta)}` : 'Distância igual', 'info');
     return res.delta;
+  }
+
+  /**
+   * Caixote de meia altura na pista do agente: o jogador tem `vaultSeconds` para pular. Pulou:
+   * d20 + agilidade ≥ `vaultDC` corta a volta (devolve −`saves`); tropeçou, dá a volta (+1). Não
+   * pulou a tempo: dá a volta como ele, sem rolar (0). Devolve a mudança na distância.
+   */
+  private async chaseVault(vault: VaultSpot, agentId: string): Promise<number> {
+    // decisão e rolagem num slow só, como na curva
+    const release = this.holdSlow();
+    try {
+      const who = this.nameOf(agentId);
+      if (!(await this.askVault())) {
+        this.say(`${who} dá a volta no caixote.`, 'info');
+        return 0;
+      }
+      const agent = this.chaseStats(agentId);
+      const agi = agent.agilidade ?? 0;
+      const r = await this.rollD20(
+        { kicker: 'Pulo · agilidade', who, need: `precisa de ${CHASE_RULES.vaultDC - agi} ou mais`, passText: 'Pulou o caixote', failText: 'Tropeçou' },
+        (roll) => roll + agi >= CHASE_RULES.vaultDC,
+        800,
+      );
+      const res = resolveVault(r?.roll ?? 1, agent, vault.saves);
+      if (res.pass) this.say(`${who} pulou o caixote! Cortando caminho: ${signed(res.delta)} de distância`, 'alert');
+      else {
+        this.sound.play('ui.invalido');
+        this.gamepad.rumble(0.9, 0.6, 260);
+        this.say(`${who} tropeçou no caixote e deu a volta: ${signed(res.delta)}`, 'alert');
+      }
+      return res.delta;
+    } finally {
+      release();
+    }
+  }
+
+  /** Espera o pulo por `vaultSeconds`; `false` se não veio a tempo (dá a volta). */
+  private askVault(): Promise<boolean> {
+    return new Promise((done) => {
+      const id = ++this.vaultSeq;
+      this.vaultDone = done;
+      this.vaultPrompt.set({ id, seconds: CHASE_RULES.vaultSeconds });
+      this.sound.play('abo.modo');
+      // tempo real: é o prazo do jogador
+      this.timers.push(setTimeout(() => this.vaultPrompt()?.id === id && this.vaultAnswer(false), CHASE_RULES.vaultSeconds * 1000));
+    });
+  }
+
+  /** Pulo do caixote: toque, teclado ou controle (`false`: o prazo acabou). */
+  protected vaultAnswer(jump: boolean): void {
+    const done = this.vaultDone;
+    if (!done) return;
+    this.vaultDone = undefined;
+    this.vaultPrompt.set(null);
+    if (jump) this.sound.play('ui.hex');
+    done(jump);
   }
 
   /**
@@ -3632,6 +3749,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (b === 'circle') this.targetCancel();
       return;
     }
+    if (this.vaultPrompt()) {
+      if (b === 'cross') this.vaultAnswer(true);
+      return;
+    }
     if (this.curvePrompt()) return;
     // perseguição correndo: □ grita
     if (this.chaseHud()) {
@@ -3751,6 +3872,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // escolha de alvo: esquerda/direita olham (e, de novo, confirmam)
     if (this.targetPrompt()) {
       if (Math.abs(dir.x) > Math.abs(dir.y)) this.targetSide(dir.x < 0 ? 'esquerda' : 'direita', false);
+      return;
+    }
+    // caixote da perseguição: para cima pula
+    if (this.vaultPrompt()) {
+      if (dir.y < 0 && Math.abs(dir.y) >= Math.abs(dir.x)) this.vaultAnswer(true);
       return;
     }
     // curva da perseguição: esquerda/direita deslizam

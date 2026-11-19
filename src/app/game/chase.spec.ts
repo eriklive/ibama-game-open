@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOOR_RULES, Door, DoorState } from './door';
-import { HexCoord, hexKey, hexNeighbors, rectArea } from './hex';
-import { blockedHexes, findMap, playArea } from './maps';
+import { HexCoord, hexKey, hexNeighbors, pathTo, reachableHexes, rectArea } from './hex';
+import { blockedHexes, findMap, lowCoverHexes, playArea, vaultHexes } from './maps';
 import { spawnDoors } from './door';
 import { spawnEnemy } from './enemies';
 import {
@@ -22,6 +22,8 @@ import {
   resolveShout,
   shoutResistNeed,
   agentCurves,
+  agentVaults,
+  resolveVault,
   routeCurves,
   routeStops,
   targetChoices,
@@ -395,6 +397,52 @@ describe('rotas no Aeroporto', () => {
   it('casa: sai pela porta encostada, que é a primeira parada', () => {
     const r = route(h(33, 28), h(31, 28));
     expect(r.stops[0]).toMatchObject({ kind: 'porta', door: { state: 'encostada' } });
+  });
+});
+
+describe('pulo do caixote de meia altura', () => {
+  it('atalho por cima do caixote onde a pista dá a volta; só se poupar passos', () => {
+    const area = rectArea(10, 10);
+    const crate = h(4, 4);
+    // a pista sobe pela coluna 4 e contorna o caixote pela coluna 5
+    const around = [h(4, 7), h(4, 6), h(4, 5), h(5, 5), h(6, 4), h(6, 3), h(5, 3), h(4, 2), h(4, 1)];
+    const [v, ...rest] = agentVaults(around, new Set([hexKey(crate)]), area);
+    expect(rest).toEqual([]);
+    expect(v.over).toEqual(crate);
+    expect(v.path).toContainEqual(crate);
+    expect(v.path.at(-1)).toEqual(around[v.land]);
+    expect(v.saves).toBe(v.land - v.index - v.path.length);
+    expect(v.saves).toBeGreaterThan(0);
+    // pista reta, sem caixote no caminho: nada a pular
+    expect(agentVaults(line(h(2, 8), 8, 0, -1), new Set([hexKey(crate)]), area)).toEqual([]);
+  });
+  it('pulou: corta o que a volta custaria; tropeçou: +1', () => {
+    const need = CHASE_RULES.vaultDC;
+    expect(resolveVault(need, {}, 2)).toEqual({ pass: true, delta: -2 });
+    expect(resolveVault(need - 1, {}, 2)).toEqual({ pass: false, delta: CHASE_RULES.vaultFailDelta });
+    expect(resolveVault(need - 2, { agilidade: 2 }, 1)).toEqual({ pass: true, delta: -1 });
+  });
+  it('aeroporto: na fuga pela porta dos fundos do oeste, ele contorna o caixote e o agente pode pular', () => {
+    const m = findMap('aeroporto')!;
+    const area = playArea(m);
+    const crate = h(14, 7);
+    expect(vaultHexes(m)).toEqual(new Set([hexKey(crate)]));
+    // meia altura: ninguém anda por ele, mas não tapa a visão
+    expect(lowCoverHexes(m).has(hexKey(crate))).toBe(true);
+    expect(blockedHexes(m).has(hexKey(crate))).toBe(false);
+    const blocked = new Set([...blockedHexes(m), ...lowCoverHexes(m)]);
+    const from = h(14, 9);
+    const agent = h(14, 12);
+    const r = lockRoute(from, area, blocked, spawnDoors(m.doors ?? [], m.doorStates), [agent]);
+    expect(r.flee).toContainEqual(h(14, 4));
+    expect(r.flee).not.toContainEqual(crate);
+    const free = new Set(blocked);
+    free.delete(hexKey(from));
+    const approach = pathTo(reachableHexes(agent, 10, area, free), from);
+    const vaults = agentVaults([agent, ...approach, ...r.flee], vaultHexes(m), area, blocked);
+    expect(vaults).toHaveLength(1);
+    expect(vaults[0].over).toEqual(crate);
+    expect(vaults[0].saves).toBeGreaterThanOrEqual(1);
   });
 });
 

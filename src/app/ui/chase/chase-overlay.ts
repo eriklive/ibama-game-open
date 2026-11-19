@@ -16,6 +16,12 @@ export interface CurvePrompt {
   seconds: number;
 }
 
+/** Caixote de meia altura no caminho: o jogador tem `seconds` para pular (`id` muda a cada um). */
+export interface VaultPrompt {
+  id: number;
+  seconds: number;
+}
+
 /** Escolha de alvo aberta: quem escolhe, quantos fogem e qual está em prévia (`null`: nenhum). */
 export interface TargetPrompt {
   agent: string;
@@ -26,7 +32,7 @@ export interface TargetPrompt {
 /**
  * Por cima do tabuleiro durante a perseguição: o placar no topo e, na curva, o cartão de
  * deslizar (← / →, com o prazo correndo). Arrastar para um lado em qualquer ponto da tela
- * também vale. Quem decide o que o deslize faz é a tela da partida (`swipe`). Na escolha de
+ * também vale. No caixote de meia altura, o cartão de pular (botão ou arrastar para cima). Quem decide o que o deslize faz é a tela da partida (`swipe`). Na escolha de
  * alvo (`decisao:alvo`), tocar numa metade da tela olha para aquele lado e tocar de novo confirma.
  */
 @Component({
@@ -37,10 +43,13 @@ export interface TargetPrompt {
 export class ChaseOverlay {
   readonly hud = input<ChaseHud | null>(null);
   readonly curve = input<CurvePrompt | null>(null);
+  readonly vault = input<VaultPrompt | null>(null);
   readonly target = input<TargetPrompt | null>(null);
   /** Grito do trecho: `ready` pode gritar, `used` já gritou neste trecho, `null` sem botão. */
   readonly shout = input<'ready' | 'used' | null>(null);
   readonly swipe = output<Side>();
+  /** Pulou o caixote (botão ou arrasto para cima). */
+  readonly vaultPress = output<void>();
   readonly shoutPress = output<void>();
   /** Escolha de alvo: tocou num lado (metade da tela ou seta), confirmou ou desistiu. */
   readonly targetSide = output<Side>();
@@ -55,15 +64,22 @@ export class ChaseOverlay {
   }
 
   private startX?: number;
+  private startY?: number;
 
-  /** Arrasto de pelo menos 30 px: para que lado foi. */
+  /** Arrasto de pelo menos 30 px: para que lado foi (no caixote, para cima pula). */
   protected pointer(ev: PointerEvent): void {
     if (ev.type === 'pointerdown') {
       this.startX = ev.clientX;
+      this.startY = ev.clientY;
       return;
     }
     const dx = ev.clientX - (this.startX ?? ev.clientX);
-    this.startX = undefined;
+    const dy = ev.clientY - (this.startY ?? ev.clientY);
+    this.startX = this.startY = undefined;
+    if (this.vault()) {
+      if (dy <= -30 && Math.abs(dy) > Math.abs(dx)) this.vaultPress.emit();
+      return;
+    }
     if (Math.abs(dx) >= 30) this.swipe.emit(dx < 0 ? 'esquerda' : 'direita');
   }
 }

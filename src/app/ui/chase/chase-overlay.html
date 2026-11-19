@@ -26,7 +26,7 @@
 }
 
 <!-- Perseguição: grito ("Parado, Ibama!"), uma vez por trecho reto -->
-@if (hud() && shout() && !curve()) {
+@if (hud() && shout() && !curve() && !vault()) {
   <button
     type="button"
     class="shout-btn"
@@ -63,6 +63,30 @@
     </button>
     <button type="button" class="curve-btn right" data-testid="curve-right" aria-label="Direita" (click)="swipe.emit('direita')">
       →
+    </button>
+  </div>
+}
+
+<!-- Perseguição: caixote de meia altura no caminho. Pular (botão, arrastar para cima) corta a
+     volta; sem pular a tempo, o agente dá a volta como ele. -->
+@if (vault(); as vt) {
+  <div
+    class="curve"
+    data-testid="vault"
+    role="dialog"
+    aria-label="Caixote: pule por cima para cortar caminho"
+    (pointerdown)="pointer($event)"
+    (pointerup)="pointer($event)"
+  >
+    <div class="curve-head">
+      <span class="curve-kicker">Caixote!</span>
+      <span class="curve-text">pule por cima ou dê a volta</span>
+      <span class="curve-timer" aria-hidden="true"
+        ><i [style.animation-duration.s]="vt.seconds"></i
+      ></span>
+    </div>
+    <button type="button" class="curve-btn vault" data-testid="vault-jump" aria-label="Pular o caixote" (click)="vaultPress.emit()">
+      ↑
     </button>
   </div>
 }
