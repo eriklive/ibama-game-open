@@ -73,6 +73,12 @@ const AURAS = {
 const STREAM_BUDGET_MS = 4;
 /** Salto do quadro da sombra do sol, em unidades do mundo. */
 const SHADOW_STEP = 8;
+/** Opacidade das paredes que tapam um personagem na vista normal. */
+const WALL_FADE_ALPHA = 0.25;
+/** Altura acima da qual a linha câmera–personagem já passou das copas (topo da mata, ~9,4 m). */
+const TREE_FADE_TOP = 12.5;
+/** Distância (centro do hexágono vizinho até a linha) em que a copa ainda tapa a visão. */
+const TREE_FADE_REACH = 1.7;
 
 /** Índice estável (0..2) para sortear um dos três tons de um chão (vale para coordenadas negativas). */
 const tone = (h: HexCoord): number => (((h.col * 31 + h.row * 17) % 3) + 3) % 3;
@@ -304,6 +310,9 @@ export class HexBoard {
   private farGround?: THREE.Mesh;
   /** Cenário esmaecido por estar entre a câmera e o close-up (ver `hideOccluders`). */
   private readonly occluders = new Map<THREE.Object3D, OccluderFade>();
+  /** Paredes das estruturas (sem telhado nem interior), candidatas a esmaecer na vista normal. */
+  private readonly wallMeshes: THREE.Object3D[] = [];
+  private treeFadeClock = 0;
   private occlusionClock = 0;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
   private readonly scenery: { object: THREE.Object3D; center: THREE.Vector3; radius: number }[] = [];
@@ -1534,6 +1543,12 @@ export class HexBoard {
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
       this.structures.push({ rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
+      for (const child of built.children) {
+        if (child === roof || child === lamps) continue;
+        child.traverse((o) => {
+          if ((o as THREE.Mesh).isMesh) this.wallMeshes.push(o);
+        });
+      }
       this.addScenery(built);
     }
     const common = commonDoors(this.map.doors ?? []);
@@ -2373,31 +2388,12 @@ export class HexBoard {
    */
   private updateOccluders(dt: number): void {
     const v = this.inspect;
-    if (v?.hideOccluders && this.inspectBlend >= 0.3) {
+    const closeUp = !!v?.hideOccluders && this.inspectBlend >= 0.3;
+    if (closeUp || !v) {
       this.occlusionClock -= dt;
       if (this.occlusionClock <= 0) {
         this.occlusionClock = 0.1;
-        const origin = this.camera.position;
-        const blockers = new Set<THREE.Object3D>();
-        for (const sc of this.scenery) {
-          if (v.rooms.has(sc.object)) continue;
-          if (!sc.object.visible && !this.occluders.has(sc.object)) continue;
-          for (const p of v.subjects) {
-            const dir = p.clone().sub(origin);
-            const len = dir.length();
-            // o que está colado em quem está em foco (o móvel inspecionado) não conta
-            if (len < 1) continue;
-            this.raycaster.set(origin, dir.divideScalar(len));
-            this.raycaster.near = 0;
-            this.raycaster.far = len - 0.8;
-            const hits = this.raycaster.intersectObject(sc.object, true);
-            if (hits.some((h) => this.shownUnder(h.object, sc.object))) {
-              blockers.add(sc.object);
-              break;
-            }
-          }
-        }
-        this.raycaster.far = Infinity;
+        const blockers = closeUp ? this.sceneryBlockers(v!) : this.wallBlockers();
         for (const o of blockers) {
           if (!this.occluders.has(o)) this.occluders.set(o, this.fadeEntry(o));
         }
@@ -2408,10 +2404,12 @@ export class HexBoard {
     }
     if (!this.occluders.size) return;
 
+    // no close-up o que tapa some de vez; na vista normal a parede fica translúcida
+    const floor = closeUp ? 0 : WALL_FADE_ALPHA;
     const k = 1 - Math.exp(-dt * 9);
     for (const [o, e] of this.occluders) {
-      e.alpha += ((e.hide ? 0 : 1) - e.alpha) * k;
-      if (e.hide && e.alpha < 0.03) e.alpha = 0;
+      e.alpha += ((e.hide ? floor : 1) - e.alpha) * k;
+      if (e.hide && Math.abs(e.alpha - floor) < 0.02) e.alpha = floor;
       if (!e.hide && e.alpha > 0.97) e.alpha = 1;
       if (e.alpha === 1) {
         this.releaseFade(o);
@@ -2420,6 +2418,118 @@ export class HexBoard {
       o.visible = e.alpha > 0;
       for (const m of e.meshes) for (const c of m.clones) c.opacity = (m.base.get(c) ?? 1) * e.alpha;
     }
+  }
+
+  /**
+   * Vista normal: paredes das estruturas (hangar, casa) que cruzam a linha entre a câmera e
+   * um personagem (agente ou inimigo à vista). O telhado tem regra própria (`structureView`).
+   */
+  private wallBlockers(): Set<THREE.Object3D> {
+    const blockers = new Set<THREE.Object3D>();
+    if (!this.wallMeshes.length) return blockers;
+    const origin = this.camera.position;
+    for (const p of this.characterPoints(true)) {
+      const dir = p.clone().sub(origin);
+      const len = dir.length();
+      this.raycaster.set(origin, dir.divideScalar(len));
+      this.raycaster.near = 0;
+      this.raycaster.far = len - 0.4;
+      for (const hit of this.raycaster.intersectObjects(this.wallMeshes, false)) blockers.add(hit.object);
+    }
+    this.raycaster.far = Infinity;
+    return blockers;
+  }
+
+  /**
+   * Peito de cada personagem à vista (agentes e inimigos que não sumiram). Para as paredes
+   * (`walls`), o inimigo dentro de uma estrutura ainda fechada (telhado no lugar) não conta:
+   * esmaecer a parede entregaria quem está escondido lá dentro.
+   */
+  private characterPoints(walls = false): THREE.Vector3[] {
+    const points: THREE.Vector3[] = [];
+    for (const u of this.units.values()) points.push(u.group.position.clone().setY(1.3));
+    for (const e of this.enemies.values()) {
+      if (e.presence <= 0.05) continue;
+      if (walls && this.structures.some((st) => st.roof?.visible && inStructure(e.hex, st.rect))) continue;
+      points.push(e.group.position.clone().setY(1.3));
+    }
+    return points;
+  }
+
+  /**
+   * Árvores que esmaecem: as que cruzam a linha entre a câmera e um personagem (na vista
+   * normal e no close-up) e as que tapariam o alcance de movimento de quem está na vez.
+   * A linha sai do chão e do peito de cada um e vai até a câmera; para quando passa da
+   * altura das copas. Confere umas dez vezes por segundo.
+   */
+  private updateTreeFade(dt: number): void {
+    this.treeFadeClock -= dt;
+    if (this.treeFadeClock > 0) return;
+    this.treeFadeClock = 0.1;
+    const cam = this.camera.position;
+    const faded = new Set<string>();
+    const reach = TREE_FADE_REACH;
+    const near = new THREE.Vector3();
+    const walk = (from: THREE.Vector3): void => {
+      const dir = cam.clone().sub(from);
+      const len = dir.length();
+      if (len < 1e-3) return;
+      dir.divideScalar(len);
+      for (let d = 0; d <= len; d += 0.6) {
+        near.copy(from).addScaledVector(dir, d);
+        if (near.y > TREE_FADE_TOP) break;
+        const h = worldToHex(near.x, near.z, HEX_SIZE);
+        faded.add(hexKey(h));
+        // copas largas: o vizinho cujo centro passa perto da linha também tapa
+        for (const n of hexNeighbors(h)) {
+          const c = this.worldOf(n);
+          if (Math.hypot(c.x - near.x, c.z - near.z) < reach) faded.add(hexKey(n));
+        }
+      }
+    };
+    const v = this.inspect;
+    if (v && this.inspectBlend >= 0.3) {
+      for (const p of v.subjects) {
+        walk(p);
+        walk(p.clone().setY(0.1));
+      }
+    } else {
+      for (const p of this.characterPoints()) {
+        walk(p);
+        walk(p.clone().setY(0.1));
+      }
+      for (const k of this.reachable) {
+        const [col, row] = k.split(',').map(Number);
+        walk(this.worldOf({ col, row }).setY(0.05));
+      }
+    }
+    this.stream.setFadedTrees(faded);
+  }
+
+  /** Close-up: cenário inteiro (o avião, uma estrutura) entre a câmera e quem está em foco. */
+  private sceneryBlockers(v: NonNullable<HexBoard['inspect']>): Set<THREE.Object3D> {
+    const origin = this.camera.position;
+    const blockers = new Set<THREE.Object3D>();
+    for (const sc of this.scenery) {
+      if (v.rooms.has(sc.object)) continue;
+      if (!sc.object.visible && !this.occluders.has(sc.object)) continue;
+      for (const p of v.subjects) {
+        const dir = p.clone().sub(origin);
+        const len = dir.length();
+        // o que está colado em quem está em foco (o móvel inspecionado) não conta
+        if (len < 1) continue;
+        this.raycaster.set(origin, dir.divideScalar(len));
+        this.raycaster.near = 0;
+        this.raycaster.far = len - 0.8;
+        const hits = this.raycaster.intersectObject(sc.object, true);
+        if (hits.some((h) => this.shownUnder(h.object, sc.object))) {
+          blockers.add(sc.object);
+          break;
+        }
+      }
+    }
+    this.raycaster.far = Infinity;
+    return blockers;
   }
 
   /**
@@ -2671,6 +2781,7 @@ export class HexBoard {
     }
 
     this.updateCamera(dt);
+    this.updateTreeFade(dt);
     const shadow = this.shadowDue();
     // a mata que só faz sombra (fora da tela) entra apenas no quadro que redesenha a sombra
     this.stream.cull(this.camera, shadow ? this.sun : undefined);

@@ -6,11 +6,10 @@ import { castsMovingShadow } from './static-shadow';
 import { METER } from './character-model';
 
 /**
- * Altura da folha da porta e do vão: 1,8 m (2,4 unidades), acima dos personagens (1,68–1,78 m).
- * É o máximo que cabe nas paredes de hoje (casa 2,4 e hangar 2,6): a verga, fina, fica logo
- * acima da folha.
+ * Altura da folha da porta e do vão: 2,1 m, a porta comum, acima dos personagens (1,68–1,78 m).
+ * A verga fica logo acima da folha, abaixo do topo das paredes (casa 2,7 m, hangar 5 m).
  */
-const LEAF_HEIGHT = 1.8 * METER;
+const LEAF_HEIGHT = 2.1 * METER;
 /** Altura da verga sobre o vão. */
 const LINTEL_HEIGHT = 0.2;
 const LEAF_THICKNESS = 0.08;

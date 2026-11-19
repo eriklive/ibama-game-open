@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { HEX_STEP, HexCoord, hexToWorld } from './hex';
+import { HEX_STEP, HexCoord, hexKey, hexToWorld } from './hex';
 import { hashHex, Terrain } from './world';
 
 /** Lado de um bloco, em hexágonos (colunas × fileiras do offset). */
@@ -132,6 +132,11 @@ export class WorldStream {
       n = 2;
     }
     this.forest.cull(this.frusta, n);
+  }
+
+  /** Esmaece as árvores destes hexágonos (`hexKey`); as outras voltam ao normal. */
+  setFadedTrees(keys: ReadonlySet<string>): void {
+    this.forest.setFaded(keys);
   }
 
   stats(): { chunks: number; pending: number; loadRadius: number; viewRadius: number } {
@@ -332,8 +337,17 @@ const rnd = (h: HexCoord, i: number): number => hashHex(h.col, h.row, i);
 /** Cor do chão de um hexágono com árvores (estável pela posição). */
 export const forestFloor = (h: HexCoord): number => FOREST_FLOOR[Math.floor(rnd(h, 0) * 3)];
 
+/**
+ * Escala das árvores sobre o desenho base de `ARRANGEMENTS`: na altura, a copa típica fica com
+ * uns 4,5 m e as maiores com uns 8 m (mata estilizada, na mesma régua dos personagens de
+ * 1,70 m); na largura, a copa ocupa mais ou menos o hexágono.
+ */
+const TREE_HEIGHT = 4.8;
+const TREE_WIDTH = 1.6;
 /** Altura máxima de uma árvore (topo da caixa de recorte dos blocos de mata). */
-const FOREST_TOP = 2.6;
+const FOREST_TOP = 2.6 * TREE_HEIGHT;
+/** Opacidade das árvores esmaecidas (as que tapariam um personagem ou o alcance de movimento). */
+const FADED_OPACITY = 0.2;
 
 /** Instâncias de um tipo de peça (troncos, copas ou pinheiros) num bloco. */
 interface Part {
@@ -342,6 +356,8 @@ interface Part {
   m: Float32Array;
   /** Cores (r, g, b por instância), se a peça tem cor própria. */
   c: Float32Array | null;
+  /** Hexágono (`hexKey`) de cada instância, para esmaecer a árvore inteira. */
+  keys: string[];
 }
 
 /**
@@ -353,6 +369,10 @@ interface Part {
  * (mais três no passe de sombras). Cada bloco guarda as suas instâncias; a cada quadro
  * `cull` escolhe os blocos que a câmera vê ou que fazem sombra no quadro do sol e, só se
  * essa lista mudou, copia as instâncias deles, em sequência, para as três malhas.
+ *
+ * As árvores dos hexágonos em `setFaded` vão para outras três malhas, iguais mas
+ * semitransparentes: é assim que a mata esmaece onde taparia um personagem. As duas
+ * levas fazem sombra, então trocar uma árvore de leva não muda a sombra guardada.
  */
 class Forest {
   readonly root = new THREE.Group();
@@ -367,7 +387,17 @@ class Forest {
     new THREE.MeshStandardMaterial({ roughness: 0.95, flatShading: true }),
   ];
   private readonly colored = [false, true, true];
+  private readonly fadedMats = this.mats.map((m) => {
+    const c = m.clone();
+    c.transparent = true;
+    c.opacity = FADED_OPACITY;
+    c.depthWrite = false;
+    return c;
+  });
   private meshes: (THREE.InstancedMesh | null)[] = [null, null, null];
+  private fadedMeshes: (THREE.InstancedMesh | null)[] = [null, null, null];
+  /** Hexágonos cujas árvores aparecem esmaecidas. */
+  private faded: ReadonlySet<string> = new Set();
   private readonly chunks = new Map<string, { parts: Part[]; box: THREE.Box3 }>();
   /** Blocos copiados para as malhas no último `cull`, na ordem. */
   private shown: string[] = [];
@@ -391,6 +421,13 @@ class Forest {
     if (this.chunks.delete(key)) this.dirty = true;
   }
 
+  /** Esmaece as árvores destes hexágonos (e traz de volta as que saíram da lista). */
+  setFaded(keys: ReadonlySet<string>): void {
+    if (keys.size === this.faded.size && [...keys].every((k) => this.faded.has(k))) return;
+    this.faded = keys;
+    this.dirty = true;
+  }
+
   cull(frusta: THREE.Frustum[], count: number): void {
     const visible: string[] = [];
     for (const [key, c] of this.chunks) {
@@ -406,47 +443,67 @@ class Forest {
     this.dirty = false;
     for (let k = 0; k < 3; k++) {
       let total = 0;
-      for (const key of visible) total += this.chunks.get(key)!.parts[k].n;
-      const mesh = this.reserve(k, total);
-      const mArr = mesh.instanceMatrix.array as Float32Array;
-      const cArr = mesh.instanceColor?.array as Float32Array | undefined;
-      let at = 0;
+      let fadedTotal = 0;
+      for (const key of visible) {
+        const p = this.chunks.get(key)!.parts[k];
+        total += p.n;
+        if (this.faded.size) for (const hk of p.keys) if (this.faded.has(hk)) fadedTotal++;
+      }
+      const out = [this.reserve(k, total - fadedTotal, false), this.reserve(k, fadedTotal, true)].map((mesh) => ({
+        mesh,
+        m: mesh.instanceMatrix.array as Float32Array,
+        c: mesh.instanceColor?.array as Float32Array | undefined,
+        at: 0,
+      }));
       for (const key of visible) {
         const p = this.chunks.get(key)!.parts[k];
         if (!p.n) continue;
-        mArr.set(p.m, at * 16);
-        if (cArr && p.c) cArr.set(p.c, at * 3);
-        at += p.n;
+        if (!fadedTotal) {
+          // nada esmaecido: copia o bloco inteiro de uma vez
+          out[0].m.set(p.m, out[0].at * 16);
+          if (out[0].c && p.c) out[0].c.set(p.c, out[0].at * 3);
+          out[0].at += p.n;
+          continue;
+        }
+        for (let i = 0; i < p.n; i++) {
+          const o = out[this.faded.has(p.keys[i]) ? 1 : 0];
+          o.m.set(p.m.subarray(i * 16, i * 16 + 16), o.at * 16);
+          if (o.c && p.c) o.c.set(p.c.subarray(i * 3, i * 3 + 3), o.at * 3);
+          o.at++;
+        }
       }
-      mesh.count = total;
-      mesh.visible = total > 0;
-      // só o trecho usado sobe para a placa de vídeo
-      mesh.instanceMatrix.clearUpdateRanges();
-      mesh.instanceMatrix.addUpdateRange(0, total * 16);
-      mesh.instanceMatrix.needsUpdate = true;
-      if (mesh.instanceColor) {
-        mesh.instanceColor.clearUpdateRanges();
-        mesh.instanceColor.addUpdateRange(0, total * 3);
-        mesh.instanceColor.needsUpdate = true;
+      for (const { mesh, at } of out) {
+        mesh.count = at;
+        mesh.visible = at > 0;
+        // só o trecho usado sobe para a placa de vídeo
+        mesh.instanceMatrix.clearUpdateRanges();
+        mesh.instanceMatrix.addUpdateRange(0, at * 16);
+        mesh.instanceMatrix.needsUpdate = true;
+        if (mesh.instanceColor) {
+          mesh.instanceColor.clearUpdateRanges();
+          mesh.instanceColor.addUpdateRange(0, at * 3);
+          mesh.instanceColor.needsUpdate = true;
+        }
       }
     }
   }
 
   dispose(): void {
-    for (const m of this.meshes) m?.dispose();
+    for (const m of [...this.meshes, ...this.fadedMeshes]) m?.dispose();
     for (const g of this.geos) g.dispose();
-    for (const m of this.mats) m.dispose();
+    for (const m of [...this.mats, ...this.fadedMats]) m.dispose();
     this.chunks.clear();
     this.root.removeFromParent();
   }
 
-  /** Malha do tipo `k` com espaço para `n` instâncias (cresce em potências de 2). */
-  private reserve(k: number, n: number): THREE.InstancedMesh {
-    const cur = this.meshes[k];
+  /** Malha do tipo `k` (a normal ou a esmaecida) com espaço para `n` instâncias (cresce em potências de 2). */
+  private reserve(k: number, n: number, faded: boolean): THREE.InstancedMesh {
+    const list = faded ? this.fadedMeshes : this.meshes;
+    const cur = list[k];
     if (cur && cur.instanceMatrix.count >= n) return cur;
     let cap = 1024;
     while (cap < n) cap *= 2;
-    const mesh = new THREE.InstancedMesh(this.geos[k], this.mats[k], cap);
+    const mesh = new THREE.InstancedMesh(this.geos[k], (faded ? this.fadedMats : this.mats)[k], cap);
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     if (this.colored[k]) {
       mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(cap * 3), 3);
@@ -456,29 +513,31 @@ class Forest {
     mesh.receiveShadow = true;
     // o recorte é feito por bloco em `cull`
     mesh.frustumCulled = false;
-    mesh.name = ['forest trunks', 'forest crowns', 'forest pines'][k];
+    mesh.name = ['forest trunks', 'forest crowns', 'forest pines'][k] + (faded ? ' (faded)' : '');
     if (cur) {
       cur.removeFromParent();
       cur.dispose();
     }
-    this.meshes[k] = mesh;
+    list[k] = mesh;
     this.root.add(mesh);
     return mesh;
   }
 
   private build(trees: HexCoord[], size: number): Part[] {
-    const lists: { m: THREE.Matrix4; color?: number }[][] = [[], [], []];
+    const lists: { m: THREE.Matrix4; color?: number; key: string }[][] = [[], [], []];
     const [trunks, blobs, cones] = lists;
     const dummy = new THREE.Object3D();
+    // a posição no chão fica; altura e largura levam a escala das árvores
     const place = (x: number, y: number, z: number, sx: number, sy: number, sz: number, rot = 0): THREE.Matrix4 => {
-      dummy.position.set(x, y, z);
-      dummy.scale.set(sx, sy, sz);
+      dummy.position.set(x, y * TREE_HEIGHT, z);
+      dummy.scale.set(sx * TREE_WIDTH, sy * TREE_HEIGHT, sz * TREE_WIDTH);
       dummy.rotation.set(0, rot, 0);
       dummy.updateMatrix();
       return dummy.matrix.clone();
     };
     for (const h of trees) {
       const c = hexToWorld(h, size);
+      const key = hexKey(h);
       const turn = Math.floor(rnd(h, 1) * 6) * (Math.PI / 3);
       const arrangement = ARRANGEMENTS[Math.floor(rnd(h, 2) * ARRANGEMENTS.length)];
       arrangement.forEach(({ kind, r, a, s: base }, i) => {
@@ -488,18 +547,18 @@ class Forest {
         const rot = rnd(h, 20 + i) * Math.PI * 2;
         const leaf = LEAVES[Math.floor(rnd(h, 30 + i) * LEAVES.length)];
         if (kind === 'bush') {
-          blobs.push({ m: place(x, 0.16 * s, z, 0.55 * s, 0.4 * s, 0.55 * s, rot), color: leaf });
+          blobs.push({ m: place(x, 0.16 * s, z, 0.55 * s, 0.4 * s, 0.55 * s, rot), color: leaf, key });
         } else if (kind === 'round') {
-          trunks.push({ m: place(x, 0, z, s, 0.6 * s, s) });
-          blobs.push({ m: place(x, 0.9 * s, z, s, 0.85 * s, s, rot), color: leaf });
+          trunks.push({ m: place(x, 0, z, s, 0.6 * s, s), key });
+          blobs.push({ m: place(x, 0.9 * s, z, s, 0.85 * s, s, rot), color: leaf, key });
         } else if (kind === 'tall') {
-          trunks.push({ m: place(x, 0, z, 0.7 * s, 1.25 * s, 0.7 * s) });
-          blobs.push({ m: place(x, 1.4 * s, z, 0.72 * s, 0.5 * s, 0.72 * s, rot), color: leaf });
+          trunks.push({ m: place(x, 0, z, 0.7 * s, 1.25 * s, 0.7 * s), key });
+          blobs.push({ m: place(x, 1.4 * s, z, 0.72 * s, 0.5 * s, 0.72 * s, rot), color: leaf, key });
         } else {
-          trunks.push({ m: place(x, 0, z, 0.8 * s, 0.35 * s, 0.8 * s) });
+          trunks.push({ m: place(x, 0, z, 0.8 * s, 0.35 * s, 0.8 * s), key });
           const color = NEEDLES[Math.floor(rnd(h, 30 + i) * NEEDLES.length)];
-          cones.push({ m: place(x, 0.3 * s, z, s, s, s, rot), color });
-          cones.push({ m: place(x, 0.85 * s, z, 0.7 * s, 0.75 * s, 0.7 * s, rot), color });
+          cones.push({ m: place(x, 0.3 * s, z, s, s, s, rot), color, key });
+          cones.push({ m: place(x, 0.85 * s, z, 0.7 * s, 0.75 * s, 0.7 * s, rot), color, key });
         }
       });
     }
@@ -511,7 +570,7 @@ class Forest {
         it.m.toArray(m, i * 16);
         if (c) color.set(it.color ?? 0xffffff).toArray(c, i * 3);
       });
-      return { n: items.length, m, c };
+      return { n: items.length, m, c, keys: items.map((it) => it.key) };
     });
   }
 }

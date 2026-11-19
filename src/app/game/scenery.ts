@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { HexCoord, hexKey, hexToWorld } from './hex';
+import { METER } from './character-model';
 
 /**
  * Cenário montado por código: o hangar (paredes retas de chapa ondulada, portão,
@@ -8,10 +9,15 @@ import { HexCoord, hexKey, hexToWorld } from './hex';
  */
 
 /**
- * Altura das paredes do hangar. O telhado em arco nasce no topo delas: o agente mais alto
- * (Bruno, 1,78 m ≈ 2,37 unidades) tem que caber debaixo dele já na primeira coluna de dentro.
+ * Altura das paredes do hangar: 5 m, pé-direito de galpão de avião. O telhado em arco nasce
+ * no topo delas e sobe mais `ROOF_RISE` no meio (9 m no ponto mais alto).
  */
-const WALL_HEIGHT = 2.6;
+const WALL_HEIGHT = 5 * METER;
+const ROOF_RISE = 4 * METER;
+/** Altura das lâmpadas pendentes do hangar (bem acima da cabeça, abaixo do topo da parede). */
+const LAMP_HEIGHT = 4.2 * METER;
+/** Altura dos postes de luz do lado de fora do portão. */
+const POLE_HEIGHT = 7 * METER;
 const WALL_THICKNESS = 0.18;
 
 /** Nome do grupo do telhado (chapa, oitões e arcos) dentro do hangar. */
@@ -154,7 +160,7 @@ export function buildHangar(
   roof.name = HANGAR_ROOF;
   group.add(roof);
   const steel = new THREE.MeshStandardMaterial({ color: 0x2c363c, roughness: 0.6, metalness: 0.4 });
-  const rise = 2.4;
+  const rise = ROOF_RISE;
   const arcY = (t: number) => WALL_HEIGHT + Math.sin(Math.PI * t) * rise;
   const count = Math.max(2, Math.round((zFront - zBack) / 3.2) + 1);
   for (let i = 0; i < count; i++) {
@@ -231,7 +237,7 @@ export function buildHangar(
     group.add(light);
   };
   // poste: encostado na face de fora da parede da frente (não ocupa hexágono livre)
-  const poleHeight = 3.6;
+  const poleHeight = POLE_HEIGHT;
   const poleZ = zFront + 0.55 * size;
   for (const [x, dir] of [[x0 + 1.5 * size, 1], [x1 - 1.5 * size, -1]] as const) {
     const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.11, poleHeight, 8), steel);
@@ -247,7 +253,7 @@ export function buildHangar(
     const lens = new THREE.Mesh(new THREE.BoxGeometry(0.4, 0.05, 0.18), bulb);
     lens.position.copy(tip).setY(tip.y - 0.07);
     group.add(pole, foot, arm, head, lens);
-    glow(tip.x, tip.y - 0.3, tip.z, 14);
+    glow(tip.x, tip.y - 0.3, tip.z, 24);
   }
   // lâmpada pendente: fio, cúpula e bulbo
   const lampZ = zBack + (zFront - zBack) / 3;
@@ -261,7 +267,7 @@ export function buildHangar(
   for (const t of [0.2, 0.8]) {
     const x = x0 + (x1 - x0) * t;
     const top = arcY(t);
-    const y = WALL_HEIGHT + 0.75;
+    const y = LAMP_HEIGHT;
     interior.add(beam(new THREE.Vector3(x, top, archZ), new THREE.Vector3(x, y + 0.2, archZ), 0.03, steel));
     const cone = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.3, 12, 1, true), shade);
     cone.position.set(x, y + 0.1, archZ);
@@ -269,15 +275,15 @@ export function buildHangar(
     const globe = new THREE.Mesh(new THREE.SphereGeometry(0.14, 10, 8), bulb);
     globe.position.set(x, y - 0.02, archZ);
     interior.add(cone, globe);
-    glow(x, y - 0.15, archZ, 12);
+    glow(x, y - 0.15, archZ, 16);
   }
   return group;
 }
 
 /** Nome do grupo do telhado da casa (some quando um agente entra). */
 export const HOUSE_ROOF = 'house-roof';
-/** Altura das paredes da casa: o telhado de duas águas passa por cima da cabeça já rente à parede. */
-const HOUSE_WALL_HEIGHT = 2.4;
+/** Altura das paredes da casa: 2,7 m (a porta de 2,1 m e a verga cabem embaixo). */
+const HOUSE_WALL_HEIGHT = 2.7 * METER;
 
 /** Textura de tábuas corridas na horizontal, com frestas escuras e veios. */
 function plankTexture(): THREE.Texture {
