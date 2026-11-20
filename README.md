@@ -475,33 +475,36 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    dentro das construções ou pela mata a atravessar a pista à vista. Passa por portas que ele
    consegue usar (bloqueada é parede). Chegou à borda: some do mapa e a perseguição acaba.
 4. **Tempo e distância** (`ChaseRace`, em `chase-race.ts`). Os dois correm juntos pela pista, cada
-   um no **seu próprio relógio**, na velocidade padrão (0,225 s por hexágono). O dado ou a parada
-   de um **nunca** segura o outro. Curvas não param nem rolam. A distância é quanto da pista ele
-   está à frente (menos o hexágono de encostar); começa no número de hexágonos entre eles.
-   **Porta.** Fechada na rota dele: ele para na frente dela **1 s** e rola o d20 (≥ 3 encostada,
-   ≥ 12 trancada); o dado e a animação de arrombar (recua e tromba) cabem nesse segundo. Passou: a
-   porta fica arrombada e ele segue correndo. Falhou: tenta de novo, mais 1 s parado. O agente não
-   para em nenhum momento: se chegar nele na porta, agarra.
+   um no **seu próprio relógio**, na velocidade padrão (0,225 s por hexágono), e **ninguém para**
+   (só o garimpeiro, na porta). O dado ou a escolha de um nunca segura o outro. Curvas não param nem
+   rolam. A distância é quanto da pista ele está à frente (menos o hexágono de encostar); começa no
+   número de hexágonos entre eles.
+   **Slow-mo.** Decisões e dados acontecem num **pulso fixo de 1,6 s** (`SLOWMO_PULSE`, em
+   `chase-slowmo.ts`): o tempo desacelera até parar em 300 ms (a câmera abre), fica parado 1 s (a
+   escolha, o dado) e volta em 300 ms (a câmera fecha). Pega os dois juntos, então a distância não
+   muda; depois tudo segue de onde estava.
    **Caixote.** Onde a pista contorna um caixote de meia altura, ele sempre **dá a volta**, que leva
-   **1 s** (freia, inclina e escorrega na curva). Quando o agente chega no caixote, **tudo congela**
-   e o jogador tem **1 s** (relógio com tique-taque) para escolher: o mundo fica cinza, menos o
-   caixote e uma faixa amarela com setas em volta dele (o caminho do garimpeiro). Toque no caixote
-   ou em **Pular** (↑/W, ✕) para **pular** (0,5 s; d20 + agilidade ≥ 8, e o dado rola com ele já no
-   ar; tropeçou, fica 1 s no chão do outro lado) ou na faixa ou em **Dar a volta** (↓/S, ○) para
-   ir atrás dele (1 s, como ele). Sem escolha no prazo, dá a volta. A cena fica em `vault-scene.ts`.
+   **x = 1 s** (freia, inclina e escorrega na curva). O agente decide **antes** de chegar: a 1 s de
+   corrida do caixote entra o pulso, o mundo fica cinza, menos o caixote e uma faixa amarela com
+   setas em volta dele (o caminho do garimpeiro), e um relógio corre. Toque no caixote ou em
+   **Pular** (↑/W, ✕) para **pular**: d20 + agilidade ≥ 8 na hora; passou, pula em **x/2**; falhou,
+   pula mal, em **x**. Toque na faixa ou em **Dar a volta** (↓/S, ○), ou não escolha: volta em **x**.
+   A cena fica em `vault-scene.ts`.
+   **Porta.** Fechada na rota dele: ele emenda a corrida na animação de arrombar (0,6 s; recua e
+   tromba) e o pulso entra; o d20 dele (≥ 3 encostada, ≥ 12 trancada) cai no tempo parado. Passou: a
+   porta fica arrombada e ele sai correndo. Falhou: **se rende** ali (abalado, como agarrado).
    **Corrida.** Uma vez por perseguição, **Correr!** (C, □): d20 + vigor vira o bônus de velocidade
    (%) por 5 s. Só o agente acelera.
-   Só o **slow** e o **congelamento** mexem no relógio, e nos dois juntos. Os tempos ficam em
-   `CHASE_RULES` (`hexSeconds`, `doorTrySeconds`, `aroundSeconds`, `jumpSeconds`,
-   `stumbleSeconds`, `vaultChoiceSeconds`).
+   Os tempos ficam em `CHASE_RULES` (`hexSeconds`, `doorBreakSeconds`, `aroundSeconds`,
+   `vaultLeadSeconds`).
 5. **Grito.** Oculto por enquanto (`resolveShout`).
 6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
 
 **Música.** A faixa da perseguição (`public/assets/sounds/perseguicao.mp3`, 11,9 s em loop) entra
-quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. Na escolha do
-caixote a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
+quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. No pulso de
+slow-mo (caixote e porta) a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
 mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
 `CHASE_MUSIC` (`sound.service.ts`).
 

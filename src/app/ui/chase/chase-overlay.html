@@ -55,8 +55,9 @@
   }
 }
 
-<!-- Perseguição: escolha no caixote de meia altura. Tudo congela e fica cinza, menos o caixote e
-     a faixa da volta (o caminho dele); o relógio corre 1 s. Sem escolha, o agente dá a volta. -->
+<!-- Perseguição: escolha no caixote de meia altura, antes de chegar nele. O slow-mo para o tempo e
+     tudo fica cinza, menos o caixote e a faixa da volta (o caminho dele); o relógio corre até o
+     tempo voltar. Sem escolha, o agente dá a volta. -->
 @if (vault(); as vt) {
   <div class="vault-scene" data-testid="vault" role="dialog" aria-label="Caixote: pular por cima ou dar a volta">
     <div class="curve-head vault-head">

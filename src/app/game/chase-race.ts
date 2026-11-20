@@ -1,45 +1,45 @@
 /**
  * A corrida da perseguição em **tempo e distância** (regras puras, testadas em
- * `chase-race.spec.ts`). Cada um corre no seu próprio relógio: o dado ou a parada de um nunca
- * segura o outro. O garimpeiro parado 1 s tentando arrombar uma porta não para o agente; o
- * agente tropeçando no caixote não para o garimpeiro.
+ * `chase-race.spec.ts`). Cada um corre no seu próprio relógio e **ninguém para**: o dado ou a
+ * escolha de um nunca segura o outro. O único que para é o garimpeiro, na porta.
  *
  * - Os dois correm pela mesma **pista** (`track`: do agente até ele e, dali, a rota de fuga
  *   travada), na velocidade padrão (`CHASE_RULES.hexSeconds` por hexágono).
- * - **Porta** fechada na rota dele: ele para na frente dela e tenta arrombar, `doorTrySeconds` por
- *   tentativa (d20 + animação no mesmo segundo). Passou: segue correndo. Falhou: tenta de novo,
- *   mais um segundo parado. O agente continua correndo o tempo todo.
- * - **Caixote** que a pista contorna: a volta leva sempre `aroundSeconds`, para quem der a volta
- *   (ele sempre dá; o agente escolhe). Pular por cima leva `jumpSeconds`. Tropeçou no pulo: fica
- *   `stumbleSeconds` no chão do outro lado.
- * - Só o **congelamento** (a escolha no caixote, ver `pending`) e o slow mexem no relógio, e nos
- *   dois juntos: quem chama `step` é quem decide o `dt` (com o slow) e não chama durante a escolha.
+ * - **Caixote** que a pista contorna: a volta leva sempre `aroundSeconds` (x). Ele sempre dá a
+ *   volta. O agente decide **antes** de chegar: a `vaultLeadSeconds` de corrida do caixote sai o aviso
+ *   (`caixote-perto`) e quem chama abre o slow-mo e a escolha (`decide`). Pular e passar no teste:
+ *   x/2. Pular e falhar: x (pula, mas mal). Dar a volta, ou não decidir: x.
+ * - **Porta** fechada na rota dele: ele emenda a corrida na animação de arrombar
+ *   (`doorBreakSeconds`), com o d20 já rolado (`porta-tenta`; quem chama abre o slow-mo). Passou: a
+ *   porta fica arrombada e ele sai correndo. Falhou: ele se rende ali (`rendeu`).
+ * - O slow-mo não é daqui: quem chama `step` multiplica o `dt` pela velocidade do tempo, e o
+ *   tempo é o mesmo para os dois.
  * - **Distância**: quanto da pista ele está à frente do agente, menos o hexágono de encostar.
  *   Chegou a 0: agarrou. Ele chegou ao fim da pista: fugiu.
  */
 import { CHASE_RULES, ChaseStop, VaultSpot, fleeDoorNeed } from './chase';
-import { HexCoord, hexKey } from './hex';
+import { HexCoord } from './hex';
 
 export type RaceWho = 'agente' | 'garimpeiro';
 
 /** O que o corredor está fazendo no trecho. */
-export type LegKind = 'corre' | 'volta' | 'pulo' | 'porta' | 'tropeco';
+export type LegKind = 'corre' | 'volta' | 'pulo' | 'porta';
 
 /** Um trecho de um corredor: um caminho (com a origem) percorrido em `seconds`, por igual. */
 export interface Leg {
   kind: LegKind;
-  /** Hexágonos do trecho, com a origem; parado (porta, tropeço): um só. */
+  /** Hexágonos do trecho, com a origem; na porta, um só (onde ele arromba). */
   path: HexCoord[];
   /** Onde o trecho começa e acaba na pista (índices de `track`; o pulo corta caminho). */
   from: number;
   to: number;
   seconds: number;
-  /** Porta que ele tenta arrombar (`porta`) e o d20 desta tentativa. */
+  /** Porta que ele arromba (`porta`) e o d20 dele. */
   stop?: ChaseStop;
   roll?: number;
-  /** Caixote do trecho (`volta`, `pulo`, `tropeco`). */
+  /** Caixote do trecho (`volta`, `pulo`). */
   spot?: VaultSpot;
-  /** Pulo em que o d20 falhou: cai do outro lado (vem um `tropeco`). */
+  /** Pulo em que o teste falhou: pula, mas leva o tempo da volta. */
   failed?: boolean;
 }
 
@@ -55,12 +55,14 @@ export interface RacePose {
 export type RaceEvent =
   | { type: 'trecho'; who: RaceWho; leg: Leg }
   | { type: 'passo'; who: RaceWho; hex: HexCoord }
-  | { type: 'porta-tenta'; stop: ChaseStop; roll: number; need: number; attempt: number }
-  | { type: 'porta-abre'; stop: ChaseStop; attempt: number }
-  | { type: 'porta-falha'; stop: ChaseStop; attempt: number }
-  | { type: 'caixote'; spot: VaultSpot }
+  | { type: 'caixote-perto'; spot: VaultSpot }
+  | { type: 'porta-tenta'; stop: ChaseStop; roll: number; need: number }
+  | { type: 'porta-abre'; stop: ChaseStop }
+  | { type: 'rendeu'; stop: ChaseStop }
   | { type: 'agarrou' }
   | { type: 'fugiu' };
+
+export type RaceEnd = 'agarrou' | 'rendeu' | 'fugiu';
 
 export interface RaceSetup {
   /** A pista: do agente (índice 0) até ele (`n`) e a rota de fuga até o fim. */
@@ -71,7 +73,7 @@ export interface RaceSetup {
   doors?: readonly ChaseStop[];
   /** Caixotes que a pista contorna (ver `agentVaults`). */
   vaults?: readonly VaultSpot[];
-  /** O d20 de cada tentativa na porta. */
+  /** O d20 dele na porta. */
   rollDoor: () => number;
   /** O que ele precisa tirar nesta porta agora (alguém pode tê-la aberto); padrão: `fleeDoorNeed`. */
   doorNeed?: (stop: ChaseStop) => number;
@@ -109,6 +111,14 @@ class Runner {
   }
 }
 
+interface AgentVault {
+  spot: VaultSpot;
+  /** O aviso (`caixote-perto`) já saiu. */
+  warned: boolean;
+  /** A escolha: pular (e se o teste passou); sem ela, dá a volta. */
+  jump?: { pass: boolean };
+}
+
 export class ChaseRace {
   readonly hexSeconds: number;
   private readonly track: readonly HexCoord[];
@@ -116,14 +126,12 @@ export class ChaseRace {
   private readonly end: number;
   private readonly agent: Runner;
   private readonly enemy: Runner;
-  /** Portas: onde ele para (índice da pista) e quantas tentativas já fez. */
-  private readonly doors: { stop: ChaseStop; at: number; tries: number; open: boolean }[];
-  /** Caixotes: os que o agente ainda vai decidir, e os que ele (garimpeiro) contorna. */
-  private readonly agentVaults: VaultSpot[];
+  /** Portas: onde ele arromba (índice da pista). */
+  private readonly doors: { stop: ChaseStop; at: number; open: boolean }[];
+  private readonly agentVaults: AgentVault[];
+  /** Caixotes que ele contorna. */
   private readonly enemyVaults: VaultSpot[];
-  /** O agente chegou num caixote: tudo congela até `decide`. */
-  pending: VaultSpot | null = null;
-  over: 'agarrou' | 'fugiu' | null = null;
+  over: RaceEnd | null = null;
 
   constructor(private readonly setup: RaceSetup) {
     this.hexSeconds = setup.hexSeconds ?? CHASE_RULES.hexSeconds;
@@ -132,9 +140,9 @@ export class ChaseRace {
     this.end = setup.track.length - 1;
     this.agent = new Runner(0);
     this.enemy = new Runner(setup.n);
-    this.doors = (setup.doors ?? []).map((stop) => ({ stop, at: setup.n + stop.index - 1, tries: 0, open: false }));
+    this.doors = (setup.doors ?? []).map((stop) => ({ stop, at: setup.n + stop.index - 1, open: false }));
     const vaults = [...(setup.vaults ?? [])].filter((v) => v.land <= this.end).sort((a, b) => a.index - b.index);
-    this.agentVaults = vaults;
+    this.agentVaults = vaults.map((spot) => ({ spot, warned: false }));
     // ele contorna os caixotes da rota dele, menos onde a volta passaria por uma porta
     this.enemyVaults = vaults.filter(
       (v) => v.index >= setup.n && !this.doors.some((d) => d.at >= v.index && d.at < v.land),
@@ -161,34 +169,41 @@ export class ChaseRace {
     if (this.distance() <= 0) return this.finish('agarrou', ev);
     this.nextLeg('garimpeiro', ev);
     this.nextLeg('agente', ev);
+    this.warnVaults(ev);
     return ev;
   }
 
   /**
-   * Avança o relógio `dt` segundos (já com o slow). `agentRate` é a corrida do agente (1 =
-   * normal): só ele fica mais rápido. Não anda enquanto a escolha do caixote está aberta.
+   * Avança o relógio `dt` segundos (já com o slow-mo, igual para os dois). `agentRate` é a
+   * corrida do agente (1 = normal): só ele fica mais rápido.
    */
   step(dt: number, agentRate = 1): RaceEvent[] {
     const ev: RaceEvent[] = [];
-    if (this.over || this.pending || dt <= 0) return ev;
+    if (this.over || dt <= 0) return ev;
     this.advance('garimpeiro', dt, ev);
     if (!this.over) this.advance('agente', dt * agentRate, ev);
     if (!this.over && this.distance() <= 0) this.finish('agarrou', ev);
+    if (!this.over) this.warnVaults(ev);
     return ev;
   }
 
-  /** A escolha no caixote: pular (`pass`: o d20 do pulo passou) ou dar a volta. */
-  decide(jump: boolean, pass = true): RaceEvent[] {
-    const v = this.pending;
-    const ev: RaceEvent[] = [];
-    if (!v || this.over) return ev;
-    this.pending = null;
-    this.agentVaults.shift();
-    if (jump) {
-      const path = [this.track[v.index], ...v.path];
-      this.begin('agente', { kind: 'pulo', path, from: v.index, to: v.land, seconds: CHASE_RULES.jumpSeconds, spot: v, failed: !pass }, ev);
-    } else this.begin('agente', this.around(v), ev);
-    return ev;
+  /**
+   * A escolha no caixote `spot`, antes de o agente chegar nele: pular (`pass`: o teste passou)
+   * ou dar a volta. Sem escolha, ele dá a volta. Depois que ele chegou no caixote, não muda mais.
+   */
+  decide(spot: VaultSpot, jump: boolean, pass = true): void {
+    const v = this.agentVaults.find((x) => x.spot === spot);
+    if (v) v.jump = jump ? { pass } : undefined;
+  }
+
+  /** O agente chegou a `vaultLeadSeconds` de um caixote: o aviso para decidir (uma vez por caixote). */
+  private warnVaults(ev: RaceEvent[]): void {
+    const at = this.agent.trackPos();
+    for (const v of this.agentVaults) {
+      if (v.warned || at < v.spot.index - CHASE_RULES.vaultLeadSeconds / this.hexSeconds) continue;
+      v.warned = true;
+      ev.push({ type: 'caixote-perto', spot: v.spot });
+    }
   }
 
   private runner(who: RaceWho): Runner {
@@ -218,12 +233,11 @@ export class ChaseRace {
     // vários trechos curtos podem caber num quadro só
     for (let guard = 0; guard < 64 && r.leg && left > 0; guard++) {
       const l = r.leg;
-      const room = l.seconds - r.t;
-      const used = Math.min(room, left);
+      const used = Math.min(l.seconds - r.t, left);
       r.t += used;
       left -= used;
       this.tellSteps(who, r, ev);
-      // agarrou no meio do trecho: os dois param ali
+      // agarrou no meio do trecho
       if (this.distance() <= 0) {
         this.finish('agarrou', ev);
         return;
@@ -231,9 +245,10 @@ export class ChaseRace {
       if (r.t < l.seconds) return;
       r.pos = l.to;
       r.leg = null;
-      this.endLeg(who, l, ev);
+      this.endLeg(l, ev);
+      if (this.over) return;
       this.nextLeg(who, ev);
-      if (this.pending || this.over) return;
+      if (this.over) return;
     }
   }
 
@@ -247,46 +262,42 @@ export class ChaseRace {
     }
   }
 
-  private endLeg(who: RaceWho, l: Leg, ev: RaceEvent[]): void {
-    if (l.kind === 'porta') {
-      const d = this.doors.find((x) => x.stop === l.stop)!;
-      const need = this.need(d.stop);
-      if ((l.roll ?? 0) >= need) {
-        d.open = true;
-        ev.push({ type: 'porta-abre', stop: d.stop, attempt: d.tries });
-      } else ev.push({ type: 'porta-falha', stop: d.stop, attempt: d.tries });
-    } else if (who === 'agente' && l.kind === 'pulo' && l.failed) {
-      // tropeçou: cai do outro lado e levanta antes de seguir
-      this.queued = { kind: 'tropeco', path: [this.track[l.to]], from: l.to, to: l.to, seconds: CHASE_RULES.stumbleSeconds, spot: l.spot };
+  /** Fim da animação de arrombar: passou, a porta abre; falhou, ele se rende ali. */
+  private endLeg(l: Leg, ev: RaceEvent[]): void {
+    if (l.kind !== 'porta') return;
+    const d = this.doors.find((x) => x.stop === l.stop)!;
+    if ((l.roll ?? 0) >= this.need(d.stop)) {
+      d.open = true;
+      ev.push({ type: 'porta-abre', stop: d.stop });
+    } else {
+      this.over = 'rendeu';
+      ev.push({ type: 'rendeu', stop: d.stop });
     }
   }
-
-  /** O próximo trecho do agente, já decidido (o tropeço depois do pulo que falhou). */
-  private queued?: Leg;
 
   private need(stop: ChaseStop): number {
     return (this.setup.doorNeed ?? ((s: ChaseStop) => fleeDoorNeed(s.door)))(stop);
   }
 
   private nextLeg(who: RaceWho, ev: RaceEvent[]): void {
-    const r = this.runner(who);
-    const p = r.pos;
+    const p = this.runner(who).pos;
     if (who === 'agente') {
-      if (this.queued) {
-        const q = this.queued;
-        this.queued = undefined;
-        this.begin(who, q, ev);
-        return;
-      }
-      // os caixotes que ficaram para trás (o pulo ou a volta já passou deles) saem da lista
-      while (this.agentVaults.length && this.agentVaults[0].index < p) this.agentVaults.shift();
+      // os caixotes que ficaram para trás saem da lista
+      while (this.agentVaults.length && this.agentVaults[0].spot.index < p) this.agentVaults.shift();
       const v = this.agentVaults[0];
-      if (v && v.index === p) {
-        this.pending = v;
-        ev.push({ type: 'caixote', spot: v });
+      if (v && v.spot.index === p) {
+        this.agentVaults.shift();
+        const s = v.spot;
+        if (!v.jump) this.begin(who, this.around(s), ev);
+        else {
+          // passou: metade do tempo da volta; falhou: pula mal, no tempo da volta
+          const seconds = v.jump.pass ? CHASE_RULES.aroundSeconds / 2 : CHASE_RULES.aroundSeconds;
+          const path = [this.track[s.index], ...s.path];
+          this.begin(who, { kind: 'pulo', path, from: s.index, to: s.land, seconds, spot: s, failed: !v.jump.pass }, ev);
+        }
         return;
       }
-      const to = Math.min(v ? v.index : this.end, this.end);
+      const to = Math.min(v ? v.spot.index : this.end, this.end);
       if (to > p) this.begin(who, this.run(p, to), ev);
       return;
     }
@@ -296,12 +307,14 @@ export class ChaseRace {
     }
     const door = this.doors.find((d) => !d.open && d.at >= p);
     if (door && door.at === p) {
-      if (this.need(door.stop) <= 0) door.open = true;
+      const need = this.need(door.stop);
+      if (need <= 0) door.open = true;
       else {
-        door.tries++;
+        // emenda a corrida na animação de arrombar; o dado já sai aqui
         const roll = this.setup.rollDoor();
-        this.begin(who, { kind: 'porta', path: [this.track[p]], from: p, to: p, seconds: CHASE_RULES.doorTrySeconds, stop: door.stop, roll }, ev);
-        ev.push({ type: 'porta-tenta', stop: door.stop, roll, need: this.need(door.stop), attempt: door.tries });
+        const leg: Leg = { kind: 'porta', path: [this.track[p]], from: p, to: p, seconds: CHASE_RULES.doorBreakSeconds, stop: door.stop, roll };
+        this.begin(who, leg, ev);
+        ev.push({ type: 'porta-tenta', stop: door.stop, roll, need });
         return;
       }
     }
@@ -320,7 +333,6 @@ export class ChaseRace {
   private finish(how: 'agarrou' | 'fugiu', ev: RaceEvent[]): RaceEvent[] {
     if (this.over) return ev;
     this.over = how;
-    this.pending = null;
     ev.push({ type: how });
     return ev;
   }

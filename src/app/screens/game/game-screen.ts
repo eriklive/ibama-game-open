@@ -34,6 +34,7 @@ import {
   sprintTotalMs,
 } from '../../game/chase';
 import { ChaseRace, RaceEvent } from '../../game/chase-race';
+import { pulseHoldEndMs, pulseRate, pulseRestart, pulseTotalMs } from '../../game/chase-slowmo';
 import { ChaseHud, ChaseOverlay, SPRINT_DIE_MS, SprintView, TargetPrompt, VaultPrompt } from '../../ui/chase/chase-overlay';
 import type { VaultPick } from '../../game/vault-scene';
 import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
@@ -1697,6 +1698,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       );
     };
 
+    /**
+     * Pulso de slow-mo (`SLOWMO_PULSE`): o tempo da corrida desacelera até parar, fica parado 1 s
+     * (a escolha, o dado) e volta, para os dois juntos. Um pulso novo no meio de outro emenda.
+     */
+    let pulse = null as { at: number; slow: boolean } | null;
+    const timeRate = (now: number) => (pulse ? pulseRate(now - pulse.at) : 1);
+    const startPulse = () => {
+      const now = performance.now();
+      pulse = { at: now - pulseRestart(timeRate(now)), slow: true };
+      this.sound.chaseSlow(true);
+      return pulse;
+    };
+    /** Quanto falta (ms) para o tempo parado do pulso acabar: a decisão fecha aí. */
+    const holdLeft = (p: { at: number }) => Math.max(0, pulseHoldEndMs() - (performance.now() - p.at));
+
     /** O que a corrida avisou: passos, portas e o caixote. */
     const handle = (events: readonly RaceEvent[]) => {
       for (const ev of events) {
@@ -1713,16 +1729,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
             this.updateEnemy(enemyId, { hex: ev.hex, facing: facingBetween(prev, ev.hex) });
             this.enemySteps(ev.hex, 1.6);
           }
-        } else if (ev.type === 'porta-tenta') this.chaseDoorTry(enemyId, ev.need, ev.roll, ev.attempt);
-        else if (ev.type === 'porta-abre') this.chaseDoorOpen(ev.stop.door, enemyId);
-        else if (ev.type === 'porta-falha') this.chaseDoorFail(ev.stop.door, enemyId);
-        else if (ev.type === 'caixote') void this.chaseVault(race, ev.spot, agentId, enemyId, track, alive);
+        } else if (ev.type === 'porta-tenta') {
+          // a trombada entra no slow-mo e o d20 dele cai no tempo parado
+          this.chaseDoorTry(enemyId, ev.need, ev.roll, holdLeft(startPulse()));
+        } else if (ev.type === 'porta-abre') this.chaseDoorOpen(ev.stop.door, enemyId);
+        else if (ev.type === 'caixote-perto') {
+          // antes de chegar no caixote: slow-mo, escolha e teste, tudo no tempo parado
+          void this.chaseVault(race, ev.spot, agentId, enemyId, track, alive, holdLeft(startPulse()));
+        }
       }
     };
 
     board.startChaseRun(agentId, enemyId, boost);
-    // os dois correm juntos, cada um no seu relógio; só o slow e o congelamento (escolha no
-    // caixote) mexem no tempo, e nos dois ao mesmo tempo
+    // os dois correm juntos, cada um no seu relógio, e ninguém para (só ele, na porta); o pulso de
+    // slow-mo é a única coisa que mexe no tempo, e nos dois ao mesmo tempo
     await new Promise<void>((done) => {
       handle(race.start());
       let last = performance.now();
@@ -1730,7 +1750,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         if (!alive()) return done();
         const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
         last = now;
-        if (!race.pending) handle(race.step(dt * board.chaseTimeScale(), boost()));
+        const rate = timeRate(now);
+        if (pulse) {
+          const ms = now - pulse.at;
+          // a fita volta junto com o tempo; o pulso acaba
+          if (pulse.slow && ms >= pulseHoldEndMs()) {
+            pulse.slow = false;
+            this.sound.chaseSlow(false);
+          }
+          if (ms >= pulseTotalMs()) pulse = null;
+        }
+        board.setChaseTime(rate);
+        handle(race.step(dt * rate, boost()));
         board.poseChaser('unit', agentId, race.pose('agente'));
         board.poseChaser('enemy', enemyId, race.pose('garimpeiro'));
         hud();
@@ -1739,6 +1770,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       };
       requestAnimationFrame(frame);
     });
+    // agarrou ou acabou no meio do pulso: a fita volta
+    if ((pulse as { slow: boolean } | null)?.slow) this.sound.chaseSlow(false);
     if (!alive()) return;
     // os dois param onde estão (encaixam no hexágono)
     board.endChaseRun(agentId, this.positions().get(agentId)!, enemyId, this.enemy(enemyId)!.hex);
@@ -1746,7 +1779,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeVaultPrompt();
     board.setSelected(null);
 
-    if (race.over === 'agarrou') {
+    if (race.over === 'agarrou' || race.over === 'rendeu') {
       const e = this.enemy(enemyId)!;
       const facing = facingBetween(e.hex, this.positions().get(agentId)!);
       this.updateEnemy(enemyId, { status: 'surrendered', shaken: true, facing });
@@ -1756,7 +1789,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       caught.add(enemyId);
       this.sound.play('ini.rende', { at: e.hex });
       this.gamepad.rumble(0.8, 0.5, 300);
-      this.say(`${who} agarrou ${e.name}! Rendido e abalado: +${CHASE_RULES.shakenBonus} no interrogatório.`, 'alert');
+      this.say(
+        race.over === 'rendeu'
+          ? `${e.name} não arrombou a porta e se rendeu! Abalado: +${CHASE_RULES.shakenBonus} no interrogatório.`
+          : `${who} agarrou ${e.name}! Rendido e abalado: +${CHASE_RULES.shakenBonus} no interrogatório.`,
+        'alert',
+      );
     } else if (route.escapes) {
       const e = this.enemy(enemyId)!;
       this.updateEnemy(enemyId, { status: 'fled' });
@@ -1782,9 +1820,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Caixote de meia altura na pista do agente: tudo congela (a `ChaseRace` não anda) e o jogador
-   * tem `vaultChoiceSeconds` para escolher (ver `chooseVault`). Sem escolha, dá a volta. Pulou:
-   * d20 + agilidade ≥ `vaultDC`; o dado rola enquanto ele já pula (falhou: tropeça do outro lado).
+   * Caixote de meia altura à frente do agente (`vaultLeadSeconds` antes de chegar): o pulso de
+   * slow-mo já começou e o jogador tem até o fim do tempo parado (`ms`) para escolher (ver
+   * `chooseVault`). Pular: d20 + agilidade ≥ `vaultDC` na hora (passou: metade da volta; falhou:
+   * pula mal, no tempo da volta). Dar a volta, ou não escolher: o tempo da volta.
    */
   private async chaseVault(
     race: ChaseRace,
@@ -1793,67 +1832,61 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     enemyId: string,
     track: readonly HexCoord[],
     alive: () => boolean,
+    ms: number,
   ): Promise<void> {
-    const release = this.holdSlow();
-    try {
-      const who = this.nameOf(agentId);
-      const jump = await this.chooseVault(vault, agentId, enemyId, track);
-      if (!alive() || race.pending !== vault) return;
-      if (!jump) {
-        race.decide(false);
-        this.say(`${who} dá a volta no caixote.`, 'info');
-        return;
-      }
-      const agi = this.chaseStats(agentId).agilidade ?? 0;
-      const roll = rollDie(CHASE_RULES.die);
-      const pass = vaultPasses(roll, { agilidade: agi });
-      race.decide(true, pass);
-      // o dado aparece com ele já no ar (não segura nada)
-      void this.rollD20Sheet(
-        {
-          kicker: 'Pulo · agilidade',
-          who,
-          need: `precisa de ${CHASE_RULES.vaultDC - agi} ou mais`,
-          passText: 'Pulou o caixote',
-          failText: 'Tropeçou',
-          value: roll,
-          duration: CHASE_RULES.jumpSeconds * 1000,
-        },
-        () => pass,
-        350,
-      ).then((r) => {
-        if (!r || !alive()) return;
-        if (pass) this.say(`${who} pulou o caixote!`, 'alert');
-        else {
-          this.sound.play('ui.invalido');
-          this.gamepad.rumble(0.9, 0.6, 260);
-          this.say(`${who} tropeçou no caixote!`, 'alert');
-        }
-      });
-    } finally {
-      release();
+    const who = this.nameOf(agentId);
+    const jump = await this.chooseVault(vault, agentId, enemyId, track, ms);
+    if (!alive() || race.over) return;
+    if (!jump) {
+      this.say(`${who} vai dar a volta no caixote.`, 'info');
+      return;
     }
+    const agi = this.chaseStats(agentId).agilidade ?? 0;
+    const roll = rollDie(CHASE_RULES.die);
+    const pass = vaultPasses(roll, { agilidade: agi });
+    race.decide(vault, true, pass);
+    // o dado cai ainda no slow-mo; o pulo vem quando ele chegar no caixote
+    void this.rollD20Sheet(
+      {
+        kicker: 'Pulo · agilidade',
+        who,
+        need: `precisa de ${CHASE_RULES.vaultDC - agi} ou mais`,
+        passText: 'Pula rápido',
+        failText: 'Pula mal',
+        value: roll,
+        duration: 500,
+      },
+      () => pass,
+      600,
+    ).then((r) => {
+      if (!r || !alive()) return;
+      if (pass) this.say(`${who} vai pular o caixote!`, 'alert');
+      else {
+        this.sound.play('ui.invalido');
+        this.gamepad.rumble(0.6, 0.4, 200);
+        this.say(`${who} vai pular mal o caixote: leva o tempo da volta.`, 'alert');
+      }
+    });
   }
 
   /**
-   * Cena de escolha no caixote: o mundo para, a câmera abre e tudo fica cinza menos o caixote e a
-   * faixa da volta (a pista dele). O jogador toca num dos dois (ou ↑/↓, ✕/○) antes de o relógio
-   * de `vaultChoiceSeconds` acabar (`true`: pular). Sem escolha, dá a volta (`false`).
+   * Cena de escolha no caixote, no tempo parado do slow-mo: a câmera abre (~300 ms) e tudo fica
+   * cinza menos o caixote e a faixa da volta (a pista dele). O jogador toca num dos dois (ou ↑/↓,
+   * ✕/○) em até `ms` (`true`: pular). Sem escolha, dá a volta (`false`); a câmera fecha.
    */
-  private chooseVault(vault: VaultSpot, agentId: string, enemyId: string, track: readonly HexCoord[]): Promise<boolean> {
+  private chooseVault(vault: VaultSpot, agentId: string, enemyId: string, track: readonly HexCoord[], ms: number): Promise<boolean> {
     const board = this.board;
     // a volta é a pista dele até onde o atalho volta
     const around = track.slice(vault.index, vault.land + 1);
     const jump = [track[vault.index], ...vault.path];
     const agi = this.chaseStats(agentId).agilidade ?? 0;
-    const ms = CHASE_RULES.vaultChoiceSeconds * 1000;
     return new Promise((done) => {
       const id = ++this.vaultSeq;
       this.vaultDone = done;
       board?.showVaultChoice(agentId, enemyId, vault.over, around, jump);
       this.vaultPrompt.set({ id, ms, saves: vault.saves, need: CHASE_RULES.vaultDC - agi });
       this.sound.play('ui.relogio');
-      // o relógio acabou: dá a volta
+      // o tempo parado acabou: dá a volta
       this.timers.push(setTimeout(() => this.vaultPrompt()?.id === id && this.vaultPick('volta'), ms));
     });
   }
@@ -1921,32 +1954,29 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Uma tentativa dele de arrombar a porta: 1 s parado (`doorTrySeconds`), com o d20 (já
-   * sorteado pela `ChaseRace`) caindo no meio da trombada. Só mostra: não segura ninguém.
+   * Ele emendou a corrida na trombada e o slow-mo entrou: o d20 dele (já sorteado pela
+   * `ChaseRace`) cai no tempo parado (`ms`). Só mostra: o resultado vale no fim da trombada.
    */
-  private chaseDoorTry(enemyId: string, need: number, roll: number, attempt: number): void {
+  private chaseDoorTry(enemyId: string, need: number, roll: number, ms: number): void {
     const name = this.enemy(enemyId)!.name;
-    if (attempt === 1) this.say(`${name} vai arrombar a porta!`, 'info');
-    else this.say(`${name} tenta de novo (${attempt}ª vez)!`, 'info');
-    const ms = CHASE_RULES.doorTrySeconds * 1000;
+    this.say(`${name} vai arrombar a porta!`, 'info');
     void this.rollD20Sheet(
       {
-        kicker: attempt === 1 ? 'Arrombar' : `Arrombar · ${attempt}ª`,
+        kicker: 'Arrombar',
         who: name,
         need: `precisa de ${need} ou mais`,
         passText: 'Arrombou',
-        failText: 'Não abriu',
+        failText: 'Não abriu: se rende',
         side: 'enemy',
         value: roll,
-        // o dado cai na hora da trombada (3/4 do segundo)
-        duration: ms * 0.7,
+        duration: Math.max(300, ms * 0.6),
       },
       (r) => r >= need,
-      ms * 0.3,
+      Math.max(300, ms * 0.4) + 400,
     );
   }
 
-  /** A trombada passou: a porta fica arrombada e ele segue correndo. */
+  /** A trombada passou: a porta fica arrombada e ele sai correndo. */
   private chaseDoorOpen(door: Door, enemyId: string): void {
     const name = this.enemy(enemyId)!.name;
     const res = resolveFleeDoor(this.doors().get(hexKey(door.hex)) ?? door, CHASE_RULES.die);
@@ -1957,14 +1987,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.doors.update((m) => new Map(m).set(hexKey(door.hex), res.door));
     this.board?.setDoors(this.doors());
     this.say(`${name} arrombou a porta e passou!`, 'alert');
-  }
-
-  /** A trombada não abriu: ele fica mais 1 s na porta (o agente continua correndo). */
-  private chaseDoorFail(door: Door, enemyId: string): void {
-    const name = this.enemy(enemyId)!.name;
-    this.sound.play('porta.chute-falha', { at: door.hex });
-    this.gamepad.rumble(0.5, 0.3, 160);
-    this.say(`${name} bateu na porta e não abriu!`, 'alert');
   }
 
   /**

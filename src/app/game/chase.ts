@@ -20,17 +20,16 @@
  *    que consegue usar (abertas, encostadas, trancadas e portões; bloqueada é parede). A rota
  *    vira a "pista" e não muda mais. Curvas não param nada nem rolam dados.
  * 4. **Tempo e distância** (`ChaseRace`, em `chase-race.ts`). Os dois correm ao mesmo tempo, cada
- *    um no seu relógio, na velocidade padrão (`hexSeconds` por hexágono). O dado ou a parada de um
- *    **nunca** segura o outro:
- *    - **porta** fechada na rota dele: ele para na frente dela `doorTrySeconds` (1 s) e rola o d20
- *      (`fleeDoorNeed`); dado e animação de arrombar cabem nesse segundo. Passou: a porta fica
- *      arrombada e ele segue correndo. Falhou: tenta de novo, mais 1 s parado. O agente não para.
- *    - **caixote** que a pista contorna (`agentVaults`): ele sempre dá a volta, em `aroundSeconds`.
- *      Quando o agente chega nele, **tudo congela** e o jogador tem `vaultChoiceSeconds` (1 s, com
- *      relógio) para escolher: pular (`jumpSeconds`, d20 + agilidade ≥ `vaultDC`; tropeçou, fica
- *      `stumbleSeconds` no chão do outro lado) ou dar a volta (`aroundSeconds`, como ele). Sem
- *      escolha no prazo, dá a volta.
- *    - Só o slow e o congelamento mexem no relógio, e nos dois juntos.
+ *    um no seu relógio, na velocidade padrão (`hexSeconds` por hexágono). **Ninguém para** (só ele,
+ *    na porta): o dado ou a escolha de um nunca segura o outro. Decisões e dados acontecem num
+ *    **pulso de slow-mo** (`SLOWMO_PULSE`, 1,6 s fixos): o tempo desacelera até parar, fica parado
+ *    1 s e volta, para os dois juntos.
+ *    - **caixote** que a pista contorna (`agentVaults`): ele sempre dá a volta, em `aroundSeconds`
+ *      (x). A `vaultLeadSeconds` do caixote, o agente decide (no pulso): pular, d20 + agilidade ≥
+ *      `vaultDC` (passou: x/2; falhou: pula mal, x), ou dar a volta (x). Sem escolha, dá a volta.
+ *    - **porta** fechada na rota dele: ele emenda a corrida na animação de arrombar
+ *      (`doorBreakSeconds`), o pulso entra e o d20 rola (`fleeDoorNeed`). Passou: arromba e sai
+ *      correndo. Falhou: se rende ali.
  *    A distância é quanto da pista ele está à frente (menos o hexágono de encostar). Chegou a 0:
  *    **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório). Ele chegou à
  *    borda: **foge** do mapa e a perseguição acaba.
@@ -76,16 +75,18 @@ export const CHASE_RULES = {
    * 1,6× a corrida do tabuleiro).
    */
   hexSeconds: 0.225,
-  /** Cada tentativa de arrombar a porta: parado, d20 e animação, tudo neste tempo (s). */
-  doorTrySeconds: 1,
-  /** Dar a volta no caixote: sempre este tempo (s), para quem der a volta. */
+  /**
+   * Animação de arrombar a porta (s, no relógio da corrida): ele emenda a corrida nela, o slow-mo
+   * entra no meio e o d20 decide. Passou: arromba e sai correndo; falhou: se rende ali.
+   */
+  doorBreakSeconds: 0.6,
+  /** Dar a volta no caixote (x, em s): para quem der a volta. Pular: x/2 se passar, x se falhar. */
   aroundSeconds: 1,
-  /** Pular por cima do caixote (s). */
-  jumpSeconds: 0.5,
-  /** Tropeçou no pulo: tempo (s) no chão do outro lado, levantando. */
-  stumbleSeconds: 1,
-  /** Escolha no caixote: tudo congela e o jogador tem este tempo (s, relógio real). */
-  vaultChoiceSeconds: 1,
+  /**
+   * A quanto tempo do caixote (s de corrida) o agente decide: ali entra o slow-mo, a escolha e o
+   * teste, antes de ele chegar.
+   */
+  vaultLeadSeconds: 1,
   /** Grito ("Parado, Ibama!"): ganhou a disputa, ele olha para trás e a distância cai isto. */
   shoutDelta: -1,
   /** Corrida (gás): teste de vigor, d20 + vigor; o total vira o bônus de velocidade (%). */
@@ -431,7 +432,7 @@ export interface FleeDoorResult {
   door: Door;
 }
 
-/** Uma tentativa do garimpeiro de arrombar uma porta fechada da rota (falhou: tenta de novo). */
+/** O garimpeiro arromba uma porta fechada da rota: o d20 resolve (falhou: se rende ali). */
 export function resolveFleeDoor(door: Door, d20: number): FleeDoorResult {
   const need = fleeDoorNeed(door);
   const pass = need !== Infinity && d20 >= need;

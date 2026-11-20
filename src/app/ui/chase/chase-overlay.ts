@@ -13,13 +13,13 @@ export interface ChaseHud {
 }
 
 /**
- * Escolha no caixote de meia altura (`id` muda a cada caixote): tudo congela e o relógio corre
- * `ms`; o toque no caixote (ou Pular) pula, na faixa (ou Dar a volta) vai atrás dele. O relógio
- * acabou: dá a volta.
+ * Escolha no caixote de meia altura (`id` muda a cada caixote), antes de o agente chegar nele: o
+ * slow-mo para o tempo e o relógio corre `ms`; o toque no caixote (ou Pular) pula, na faixa (ou
+ * Dar a volta) vai atrás dele. O relógio acabou: dá a volta.
  */
 export interface VaultPrompt {
   id: number;
-  /** Prazo da escolha (ms). */
+  /** Prazo da escolha (ms): até o fim do tempo parado do slow-mo. */
   ms: number;
   /** Passos que o pulo corta. */
   saves: number;

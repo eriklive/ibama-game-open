@@ -368,6 +368,8 @@ export class HexBoard {
   /** Corrida por tempo (ver `poseChaser`): o trecho de cada um, para trocar o clipe só na virada. */
   private readonly chaseLegs = new Map<string, Leg>();
   private chaseRunEnemy?: string;
+  /** Velocidade do tempo da corrida (ver `setChaseTime`). */
+  private chaseTime = 1;
   private chaseBlend = 0;
   /**
    * Slow da curva (ver `setChaseSlowmo`): 0 normal, 1 no fundo. Anda em rampa linear, com os
@@ -1362,12 +1364,11 @@ export class HexBoard {
   }
 
   /**
-   * Relógio da perseguição agora (1 = normal): o slow desacelera os dois juntos; na escolha do
-   * caixote o mundo para (0). A tela multiplica o `dt` da `ChaseRace` por isto.
+   * Velocidade do tempo da corrida (1 = normal, 0 = parado), do pulso de slow-mo da tela (ver
+   * `SLOWMO_PULSE`): a animação de quem corre e o zoom acompanham, para os dois juntos.
    */
-  chaseTimeScale(): number {
-    if (this.vaultScene?.active) return 0;
-    return slowmoRate(this.slowmo);
+  setChaseTime(rate: number): void {
+    this.chaseTime = Math.min(1, Math.max(0, rate));
   }
 
   /**
@@ -1385,6 +1386,7 @@ export class HexBoard {
   /** A corrida parou no meio (a partida recomeçou): solta a corrida sem mexer em ninguém. */
   stopChaseRun(): void {
     this.unitBoost = null;
+    this.chaseTime = 1;
     this.chaseLegs.clear();
     const e = this.chaseRunEnemy ? this.enemies.get(this.chaseRunEnemy) : undefined;
     if (e) e.running = false;
@@ -1454,26 +1456,30 @@ export class HexBoard {
           m.rig?.matchSpeed('run', leg.seconds > 0 ? (steps * hexLen) / leg.seconds : RUN_SPEED);
           m.rig?.play('run', 0.12);
         }
-        if (leg.kind === 'pulo') m.hop = Math.sin(Math.PI * t) * VAULT_HOP;
+        if (leg.kind === 'pulo') {
+          // falhou no teste: pula baixo e desajeitado (leva o tempo da volta)
+          m.hop = Math.sin(Math.PI * t) * VAULT_HOP * (leg.failed ? 0.7 : 1);
+          if (leg.failed) m.group.rotation.z = Math.sin(3 * Math.PI * t) * 0.18;
+        }
         // escorregadinha: inclina para dentro da curva no meio da volta
         if (leg.kind === 'volta') m.group.rotation.z = Math.sin(Math.PI * t) * 0.2 * this.turnSign(leg.path);
         break;
       }
       case 'porta': {
-        if (fresh) m.rig?.play('idle', 0.1);
-        // recua (0–0,5), tromba na porta (0,5–0,75) e volta (0,75–1)
+        // emenda a corrida na trombada: ainda correndo até 0,25, encolhe o ombro (o slow-mo
+        // para o tempo por aqui) e tromba na porta (0,35–0,6); depois, de volta ao lugar
+        if (fresh) m.rig?.play('run', 0.08);
+        if (t > 0.25) m.rig?.play('idle', 0.15);
         const door = leg.stop ? this.worldOf(leg.stop.hex) : at.pos;
         const dir = door.clone().sub(at.pos).setY(0);
         if (dir.lengthSq() > 1e-6) dir.normalize();
-        const shove = t < 0.5 ? -0.14 * Math.sin((Math.PI * t) / 0.5) : 0.42 * Math.sin((Math.PI * (t - 0.5)) / 0.5);
-        at.pos.addScaledVector(dir, Math.max(-0.14, shove));
-        m.hop = t > 0.45 && t < 0.75 ? 0.08 * Math.sin((Math.PI * (t - 0.45)) / 0.3) : 0;
+        const shove =
+          t < 0.35 ? -0.14 * Math.sin((Math.PI / 2) * (t / 0.35))
+          : t < 0.6 ? -0.14 + 0.56 * Math.sin((Math.PI / 2) * ((t - 0.35) / 0.25))
+          : 0.42 * (1 - (t - 0.6) / 0.4);
+        at.pos.addScaledVector(dir, shove);
+        m.hop = t > 0.35 && t < 0.6 ? 0.08 * Math.sin((Math.PI * (t - 0.35)) / 0.25) : 0;
         face = dir.lengthSq() > 0 ? dir : null;
-        break;
-      }
-      case 'tropeco': {
-        if (fresh) m.rig?.play('crouch', 0.08);
-        face = null;
         break;
       }
     }
@@ -1515,8 +1521,8 @@ export class HexBoard {
     const c = this.chaseLast;
     const boost = this.unitBoost?.id === id ? this.unitBoost.rate() : 1;
     if (!c || (c.unitId !== id && c.enemyId !== id)) return boost;
-    // na escolha do caixote o mundo para: só o fantasma se mexe
-    return (this.vaultScene?.active ? 0 : slowmoRate(this.slowmo)) * boost;
+    // o slow-mo pega os dois juntos (e o pulso da corrida chega a parar o tempo)
+    return slowmoRate(this.slowmo) * this.chaseTime * boost;
   }
 
   /** Vira o agente para o inimigo (a "cabeça" da escolha de alvo). */
@@ -1579,7 +1585,8 @@ export class HexBoard {
   /** Mistura a câmera com a da escolha do caixote (aberta, ou de perto na prévia). */
   private blendVault(dt: number, look: THREE.Vector3, dist: number): number {
     const goal = this.vaultScene?.cameraGoal();
-    this.vaultBlend += ((goal ? 1 : 0) - this.vaultBlend) * (1 - Math.exp(-dt * 2.6));
+    // ~300 ms para abrir e para fechar (cabe na descida e na volta do pulso de slow-mo)
+    this.vaultBlend += ((goal ? 1 : 0) - this.vaultBlend) * (1 - Math.exp(-dt * 12));
     if (this.vaultBlend < 0.002 && !goal) this.vaultBlend = 0;
     if (this.vaultBlend <= 0) return dist;
     const c = this.vaultCam;
@@ -1604,7 +1611,7 @@ export class HexBoard {
     if (Math.abs(goal - this.chaseBlend) < 0.002) this.chaseBlend = goal;
     const c = this.chase ?? this.chaseLast;
     // o zoom do slow acompanha a fita: mesma rampa, mesma proporção (sem ele em "menos movimento")
-    const zoomRate = reducedMotionQuery() ? 1 : slowmoRate(this.slowmo);
+    const zoomRate = reducedMotionQuery() ? 1 : slowmoRate(this.slowmo) * this.chaseTime;
     const fov = slowmoFov(40 + CHASE_CAMERA.fovBoost * this.chaseBlend, zoomRate);
     if (Math.abs(this.camera.fov - fov) > 0.05) {
       this.camera.fov = fov;

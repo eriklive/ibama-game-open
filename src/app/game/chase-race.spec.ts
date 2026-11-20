@@ -12,10 +12,14 @@ const straight = (len: number) => Array.from({ length: len }, (_, i) => h(0, i))
 const lockedDoor = (hex: HexCoord): Door => ({ hex, state: 'trancada', lock: DOOR_RULES.lock, broken: false });
 
 /** Roda o relógio em quadros de 1/60 s até `seconds` (ou até acabar), juntando os eventos. */
-function run(race: ChaseRace, seconds: number, agentRate = 1): RaceEvent[] {
+function run(race: ChaseRace, seconds: number, agentRate = 1, on?: (e: RaceEvent) => void): RaceEvent[] {
   const ev: RaceEvent[] = [];
   const dt = 1 / 60;
-  for (let t = 0; t < seconds - 1e-9 && !race.over && !race.pending; t += dt) ev.push(...race.step(dt, agentRate));
+  for (let t = 0; t < seconds - 1e-9 && !race.over; t += dt) {
+    const got = race.step(dt, agentRate);
+    got.forEach((e) => on?.(e));
+    ev.push(...got);
+  }
   return ev;
 }
 const types = (ev: RaceEvent[]) => ev.map((e) => e.type).filter((t) => t !== 'passo' && t !== 'trecho');
@@ -32,41 +36,16 @@ describe('ChaseRace: tempo e distância', () => {
     expect(types(ev)).toContain('fugiu');
   });
 
-  it('encurralado: ele fica parado e o agente vai até ele', () => {
-    const race = new ChaseRace({ track: straight(6), n: 5, rollDoor: () => 20, cornered: true });
-    race.start();
-    run(race, 10);
-    expect(race.over).toBe('agarrou');
-  });
-
   it('colado na largada: agarra', () => {
     const race = new ChaseRace({ track: straight(10), n: 1, rollDoor: () => 20 });
     expect(types(race.start())).toEqual(['agarrou']);
   });
 
-  it('porta: ele para 1 s por tentativa; o agente não para e encosta um segundo inteiro', () => {
-    // ele começa em 12; a porta está em 15 (índice 3 da rota dele), ele para em 14
-    const track = straight(40);
-    const stop: ChaseStop = { kind: 'porta', index: 3, hex: track[15], door: lockedDoor(track[15]) };
-    const rolls = [5, 15];
-    const race = new ChaseRace({ track, n: 12, doors: [stop], rollDoor: () => rolls.shift()! });
+  it('encurralado: ele fica parado e o agente vai até ele', () => {
+    const race = new ChaseRace({ track: straight(6), n: 5, rollDoor: () => 20, cornered: true });
     race.start();
-    const before = race.distance();
-    // até a porta: 2 hexágonos; e mais 2 tentativas de 1 s (a primeira falha)
-    const ev = run(race, 2 * hs + 2 * R.doorTrySeconds + 1e-6);
-    expect(types(ev)).toEqual(['porta-tenta', 'porta-falha', 'porta-tenta', 'porta-abre']);
-    // ele ficou 2 s parado e o agente correu esses 2 s
-    expect(before - race.distance()).toBeCloseTo((2 * R.doorTrySeconds) / hs, 0);
-  });
-
-  it('porta: falhando sempre, o agente chega nele e agarra ali', () => {
-    const track = straight(30);
-    const stop: ChaseStop = { kind: 'porta', index: 2, hex: track[6], door: lockedDoor(track[6]) };
-    const race = new ChaseRace({ track, n: 4, doors: [stop], rollDoor: () => 1 });
-    race.start();
-    const ev = run(race, 10);
+    run(race, 10);
     expect(race.over).toBe('agarrou');
-    expect(types(ev).filter((t) => t === 'porta-tenta').length).toBeGreaterThan(0);
   });
 
   it('a corrida só acelera o agente', () => {
@@ -78,9 +57,34 @@ describe('ChaseRace: tempo e distância', () => {
   });
 });
 
-describe('ChaseRace: caixote', () => {
-  // pista que dá a volta num caixote entre os índices 8 e 12 (o atalho por cima tem 3 passos)
+describe('ChaseRace: porta', () => {
+  // ele começa em 12; a porta está em 15 (índice 3 da rota dele), ele arromba de 14
   const track = straight(40);
+  const stop: ChaseStop = { kind: 'porta', index: 3, hex: track[15], door: lockedDoor(track[15]) };
+
+  it('passou: ele emenda na animação de arrombar (o agente encosta esse tempo) e sai correndo', () => {
+    const race = new ChaseRace({ track, n: 12, doors: [stop], rollDoor: () => 15 });
+    race.start();
+    const before = race.distance();
+    const ev = run(race, 2 * hs + R.doorBreakSeconds + 1e-6);
+    expect(types(ev)).toEqual(['porta-tenta', 'porta-abre']);
+    expect(before - race.distance()).toBeCloseTo(R.doorBreakSeconds / hs, 0);
+    run(race, 1);
+    expect(race.pose('garimpeiro')!.leg.kind).toBe('corre');
+  });
+
+  it('falhou: ele se rende na porta', () => {
+    const race = new ChaseRace({ track, n: 12, doors: [stop], rollDoor: () => 11 });
+    race.start();
+    const ev = run(race, 10);
+    expect(types(ev)).toEqual(['porta-tenta', 'rendeu']);
+    expect(race.over).toBe('rendeu');
+  });
+});
+
+describe('ChaseRace: caixote', () => {
+  // pista que dá a volta num caixote entre os índices i e i + 4 (o atalho por cima tem 3 passos)
+  const track = straight(60);
   const spot = (index: number): VaultSpot => ({
     index,
     over: h(1, index + 2),
@@ -88,54 +92,58 @@ describe('ChaseRace: caixote', () => {
     path: [h(1, index + 1), h(1, index + 2), track[index + 4]],
     saves: 1,
   });
+  const lead = R.vaultLeadSeconds / hs;
 
-  it('o agente chega no caixote: tudo congela até a escolha', () => {
-    const race = new ChaseRace({ track, n: 6, vaults: [spot(3)], rollDoor: () => 20 });
+  it('o aviso sai antes de chegar no caixote, e ninguém para', () => {
+    const v = spot(12);
+    const race = new ChaseRace({ track, n: 30, vaults: [v], rollDoor: () => 20 });
     race.start();
-    const ev = run(race, 5);
-    expect(types(ev)).toEqual(['caixote']);
-    expect(race.pending?.index).toBe(3);
-    const d = race.distance();
-    expect(race.step(1)).toEqual([]);
-    expect(race.distance()).toBe(d);
+    // o agente anda 1 hexágono a cada `hs` segundos: onde ele estava quando o aviso saiu
+    let warnedAt = -1;
+    let steps = 0;
+    run(race, 12 * hs - 0.05, 1, (e) => {
+      if (e.type === 'passo' && e.who === 'agente') steps++;
+      if (e.type === 'caixote-perto') warnedAt = steps;
+    });
+    expect(warnedAt).toBeGreaterThanOrEqual(Math.floor(v.index - lead));
+    expect(warnedAt).toBeLessThanOrEqual(Math.ceil(v.index - lead));
+    expect(warnedAt).toBeLessThan(v.index);
+    // a distância não mudou: ninguém parou
+    expect(race.distance()).toBeCloseTo(29);
   });
 
-  it('dar a volta leva aroundSeconds; pular leva jumpSeconds', () => {
-    const around = new ChaseRace({ track, n: 6, vaults: [spot(3)], rollDoor: () => 20 });
-    const jump = new ChaseRace({ track, n: 6, vaults: [spot(3)], rollDoor: () => 20 });
-    for (const r of [around, jump]) {
-      r.start();
-      run(r, 5);
-    }
-    // ele já passou do caixote (está à frente), então só o agente faz a escolha
-    around.decide(false);
-    jump.decide(true, true);
-    expect(around.pose('agente')!.leg.kind).toBe('volta');
-    expect(around.pose('agente')!.leg.seconds).toBe(R.aroundSeconds);
-    expect(jump.pose('agente')!.leg.kind).toBe('pulo');
-    expect(jump.pose('agente')!.leg.seconds).toBe(R.jumpSeconds);
-    run(around, R.aroundSeconds);
-    run(jump, R.aroundSeconds);
-    // pular ganha a diferença de tempo, em hexágonos que ele corre
-    expect(around.distance() - jump.distance()).toBeCloseTo((R.aroundSeconds - R.jumpSeconds) / hs, 0);
+  it('sem escolha, dá a volta em x; pulou e passou: x/2; pulou e falhou: x', () => {
+    const v = spot(12);
+    const make = (pick?: { pass: boolean }) => {
+      const race = new ChaseRace({ track, n: 40, vaults: [v], rollDoor: () => 20 });
+      race.start();
+      run(race, 12 * hs - 0.05);
+      if (pick) race.decide(v, true, pick.pass);
+      run(race, 0.1);
+      return race.pose('agente')!.leg;
+    };
+    expect(make()).toMatchObject({ kind: 'volta', seconds: R.aroundSeconds });
+    expect(make({ pass: true })).toMatchObject({ kind: 'pulo', seconds: R.aroundSeconds / 2 });
+    expect(make({ pass: false })).toMatchObject({ kind: 'pulo', seconds: R.aroundSeconds, failed: true });
   });
 
-  it('tropeçou no pulo: fica stumbleSeconds no chão do outro lado', () => {
-    const race = new ChaseRace({ track, n: 6, vaults: [spot(3)], rollDoor: () => 20 });
-    race.start();
-    run(race, 5);
-    race.decide(true, false);
-    run(race, R.jumpSeconds + 0.01);
-    expect(race.pose('agente')!.leg.kind).toBe('tropeco');
-    expect(race.pose('agente')!.leg.seconds).toBe(R.stumbleSeconds);
+  it('pular e passar ganha metade da volta em distância', () => {
+    const v = spot(12);
+    const go = (jump: boolean) => {
+      const race = new ChaseRace({ track, n: 40, vaults: [v], rollDoor: () => 20 });
+      race.start();
+      run(race, 1);
+      race.decide(v, jump, true);
+      run(race, 4);
+      return race.distance();
+    };
+    expect(go(false) - go(true)).toBeCloseTo(R.aroundSeconds / 2 / hs, 0);
   });
 
-  it('ele também dá a volta no caixote da rota dele, em aroundSeconds', () => {
+  it('ele também dá a volta no caixote da rota dele, em x', () => {
     const race = new ChaseRace({ track, n: 6, vaults: [spot(10)], rollDoor: () => 20 });
     race.start();
-    const ev = run(race, 4 * hs + 0.01);
-    expect(race.pose('garimpeiro')!.leg.kind).toBe('volta');
-    expect(race.pose('garimpeiro')!.leg.seconds).toBe(R.aroundSeconds);
-    expect(ev.some((e) => e.type === 'caixote')).toBe(false);
+    run(race, 4 * hs + 0.01);
+    expect(race.pose('garimpeiro')!.leg).toMatchObject({ kind: 'volta', seconds: R.aroundSeconds });
   });
 });
