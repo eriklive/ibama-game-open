@@ -486,7 +486,9 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    **Caixote.** Onde a pista contorna um caixote de meia altura, ele sempre **dá a volta**, que leva
    **x = 1 s** (freia, inclina e escorrega na curva). O agente decide **antes** de chegar: a 1 s de
    corrida do caixote entra o pulso, o mundo fica cinza, menos o caixote e uma faixa amarela com
-   setas em volta dele (o caminho do garimpeiro), e um relógio corre. Toque no caixote ou em
+   setas em volta dele (o caminho do garimpeiro), e um relógio corre. Aqui o tempo fica parado
+   até o jogador escolher, por **até 10 s** (`SLOWMO_PULSE.vaultHoldMs`), com os dois congelados na
+   pose de corrida; escolheu, o tempo volta na hora (no pulo, depois do dado). Toque no caixote ou em
    **Pular** (↑/W, ✕) para **pular**: d20 + agilidade ≥ 8 na hora; passou, pula em **x/2**; falhou,
    pula mal, em **x**. Toque na faixa ou em **Dar a volta** (↓/S, ○), ou não escolha: volta em **x**.
    A cena fica em `vault-scene.ts`.

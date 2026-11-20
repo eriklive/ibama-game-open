@@ -31,24 +31,30 @@ export function slowmoFov(fov: number, rate: number): number {
 
 /**
  * Pulso de slow-mo da corrida (caixote e porta): o tempo desacelera até parar (`downMs`), fica
- * parado (`holdMs`: a decisão e o dado) e volta (`upMs`). Total fixo, 1,6 s. Pega os dois
- * corredores juntos: ninguém para, o tempo é que para.
+ * parado (`holdMs`: o dado da porta) e volta (`upMs`). Pega os dois corredores juntos: ninguém
+ * para, o tempo é que para (e quem corre fica congelado na pose em que estava, sem trocar para a
+ * animação de parado).
+ *
+ * No caixote o tempo parado é a escolha do jogador: até `vaultHoldMs` (10 s) se ele não tocar em
+ * nada; escolheu, o tempo volta na hora.
  */
 export const SLOWMO_PULSE = {
   downMs: 300,
   holdMs: 1000,
+  vaultHoldMs: 10000,
   upMs: 300,
 } as const;
 
-/** Duração total do pulso (ms). */
-export const pulseTotalMs = (): number => SLOWMO_PULSE.downMs + SLOWMO_PULSE.holdMs + SLOWMO_PULSE.upMs;
+/** Duração total do pulso (ms), com `holdMs` de tempo parado. */
+export const pulseTotalMs = (holdMs: number = SLOWMO_PULSE.holdMs): number =>
+  SLOWMO_PULSE.downMs + holdMs + SLOWMO_PULSE.upMs;
 
 /** Fim do tempo parado (ms desde o começo do pulso): a decisão fecha aqui. */
-export const pulseHoldEndMs = (): number => SLOWMO_PULSE.downMs + SLOWMO_PULSE.holdMs;
+export const pulseHoldEndMs = (holdMs: number = SLOWMO_PULSE.holdMs): number => SLOWMO_PULSE.downMs + holdMs;
 
 /** Velocidade do tempo `ms` depois de começar o pulso (1 normal, 0 parado). */
-export function pulseRate(ms: number): number {
-  const { downMs, holdMs, upMs } = SLOWMO_PULSE;
+export function pulseRate(ms: number, holdMs: number = SLOWMO_PULSE.holdMs): number {
+  const { downMs, upMs } = SLOWMO_PULSE;
   if (ms <= 0) return 1;
   if (ms < downMs) return 1 - ms / downMs;
   if (ms < downMs + holdMs) return 0;
