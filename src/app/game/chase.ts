@@ -32,8 +32,9 @@
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
  *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
  *    - **grito** (`resolveShout`): uma vez por trecho (entre paradas), o jogador pode gritar,
- *      sem parar a corrida. Um teste só: o agente rola d20 + intimidação ≥ `shoutDC` (16);
- *      passou, ele olha para trás e a distância cai 1.
+ *      sem parar a corrida (mas com slow). Disputa: o agente rola d20 + intimidação, ele rola
+ *      d20. Agente maior ou empate: ele olha para trás, fica mais lento e a distância cai 1;
+ *      ele maior: nada acontece.
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
  *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
@@ -70,11 +71,8 @@ export const CHASE_RULES = {
   doorOpenMax: 2,
   /** O que ele precisa tirar no d20 em cada caso. Trancada + abrir usa a fechadura da porta. */
   doorNeed: { abrirEncostada: 3, arrombarEncostada: 3, arrombarTrancada: 12 },
-  /**
-   * Grito ("Parado, Ibama!"): uma vez por trecho (entre paradas). O agente rola
-   * d20 + intimidação e precisa disto para ele olhar para trás.
-   */
-  shoutDC: 16,
+  /** Grito ("Parado, Ibama!"): ganhou a disputa, ele olha para trás e a distância cai isto. */
+  shoutDelta: -1,
   /** Caixote de meia altura: tempo (s, relógio real) para escolher pular. */
   vaultSeconds: 2,
   /** Pulo por cima do caixote: d20 + agilidade, pelo menos isto. */
@@ -446,19 +444,19 @@ export function resolveFleeDoor(door: Door, d4: number, d20: number): FleeDoorRe
 export interface ShoutResult {
   /** d20 + intimidação do agente. */
   total: number;
-  /** Ele olhou para trás: a distância cai 1. */
+  /** Ele olhou para trás (o agente ganhou ou empatou): fica mais lento e a distância cai 1. */
   lookedBack: boolean;
   delta: number;
 }
 
 /**
- * Grito na perseguição: um teste só. O agente rola d20 + intimidação; pelo menos `shoutDC` (16),
- * ele olha para trás e o agente encosta (−1).
+ * Grito na perseguição: disputa. O agente rola d20 + intimidação, ele rola d20. Agente maior ou
+ * empate: ele olha para trás e o agente encosta (−1). Ele maior: nada acontece.
  */
-export function resolveShout(roll: number, agent: ChaseStats = {}): ShoutResult {
-  const total = roll + (agent.intimidacao ?? 0);
-  const lookedBack = total >= CHASE_RULES.shoutDC;
-  return { total, lookedBack, delta: lookedBack ? -1 : 0 };
+export function resolveShout(agentRoll: number, agent: ChaseStats, enemyRoll: number): ShoutResult {
+  const total = agentRoll + (agent.intimidacao ?? 0);
+  const lookedBack = total >= enemyRoll;
+  return { total, lookedBack, delta: lookedBack ? CHASE_RULES.shoutDelta : 0 };
 }
 
 // ---------- fim ----------

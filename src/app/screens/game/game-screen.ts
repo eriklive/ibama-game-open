@@ -198,7 +198,7 @@ interface CheckView {
 type CheckSide = 'team' | 'enemy';
 
 /** O que quem rola informa (o resto da ficha é montado por `rollD20`). */
-type CheckAsk = Pick<CheckView, 'kicker' | 'who' | 'need' | 'passText' | 'failText'> & { side?: CheckSide };
+type CheckAsk = Pick<CheckView, 'kicker' | 'who' | 'need' | 'passText' | 'failText' | 'value'> & { side?: CheckSide };
 
 /** Uma linha do menu da porta (as fichas da direita). */
 interface DoorOption {
@@ -1839,21 +1839,42 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * O grito, com os dois correndo: um teste só, d20 + intimidação do agente ≥ `shoutDC`. Passou,
-   * ele olha para trás e o agente encosta. Devolve a mudança na distância (ver `resolveShout`).
+   * O grito, com os dois correndo e em slow: disputa. Os dois dados rolam juntos, o do agente
+   * (d20 + intimidação) e o dele (d20). Agente maior ou empate: ele olha para trás, fica mais
+   * lento e o agente encosta. Devolve a mudança na distância (ver `resolveShout`).
    */
   private async chaseShoutRoll(agentId: string, enemyId: string): Promise<number> {
+    const release = this.holdSlow();
+    try {
+      return await this.chaseShoutDuel(agentId, enemyId);
+    } finally {
+      release();
+    }
+  }
+
+  private async chaseShoutDuel(agentId: string, enemyId: string): Promise<number> {
     const enemy = this.enemy(enemyId)!;
     const agent = this.chaseStats(agentId);
     const who = this.nameOf(agentId);
     const int = agent.intimidacao ?? 0;
-    const r = await this.rollD20(
-      { kicker: 'Grito · intimidação', who, need: `precisa de ${CHASE_RULES.shoutDC - int} ou mais`, passText: 'Olhou para trás', failText: 'Nem olhou' },
-      (roll) => roll + int >= CHASE_RULES.shoutDC,
-      800,
-    );
-    if (!r) return 0;
-    const res = resolveShout(r.roll, agent);
+    // as faces já saem sorteadas: cada ficha precisa saber a outra para dizer quem ganhou
+    const mine = rollDie(CHASE_RULES.die);
+    const his = rollDie(CHASE_RULES.die);
+    const res = resolveShout(mine, agent, his);
+    const bonus = int ? ` ${int > 0 ? '+' : '−'} ${Math.abs(int)} de intimidação` : '';
+    const [ar, er] = await Promise.all([
+      this.rollD20(
+        { kicker: 'Grito · intimidação', who, need: `d20${bonus} contra o dele`, passText: 'Olhou para trás', failText: 'Nem olhou', value: mine },
+        () => res.lookedBack,
+        1100,
+      ),
+      this.rollD20(
+        { kicker: 'Grito · disputa', who: enemy.name, need: `ganha só se passar ${who}`, passText: 'Nem olhou', failText: 'Olhou para trás', side: 'enemy', value: his },
+        () => !res.lookedBack,
+        1100,
+      ),
+    ]);
+    if (!ar || !er) return 0;
     if (res.lookedBack) {
       const e = this.enemy(enemyId)!;
       const facing = facingBetween(e.hex, this.positions().get(agentId)!);
