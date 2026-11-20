@@ -25,8 +25,8 @@
   </div>
 }
 
-<!-- Perseguição: grito ("Parado, Ibama!"), uma vez por trecho reto -->
-@if (hud() && shout() && !curve() && !vault()) {
+<!-- Perseguição: grito ("Parado, Ibama!"), uma vez por trecho -->
+@if (hud() && shout() && !vault()) {
   <button
     type="button"
     class="shout-btn"
@@ -36,35 +36,8 @@
     [attr.aria-label]="shout() === 'used' ? 'Já gritou neste trecho' : 'Gritar: Parado, Ibama!'"
     (click)="shoutPress.emit()">
     <span class="shout-main">Gritar!</span>
-    <span class="shout-sub">{{ shout() === 'used' ? 'só na próxima reta' : 'Parado, Ibama!' }}</span>
+    <span class="shout-sub">{{ shout() === 'used' ? 'só no próximo trecho' : 'Parado, Ibama!' }}</span>
   </button>
-}
-
-<!-- Perseguição: curva (decisao:perseguicao). O meio da tela fica livre para ver a curva; as
-     setas ficam nas bordas e arrastar para um lado em qualquer ponto também vale. -->
-@if (curve(); as cv) {
-  <div
-    class="curve"
-    data-testid="curve"
-    role="dialog"
-    aria-label="Curva: deslize para o lado da curva"
-    (pointerdown)="pointer($event)"
-    (pointerup)="pointer($event)"
-  >
-    <div class="curve-head">
-      <span class="curve-kicker">Curva!</span>
-      <span class="curve-text">deslize para o lado</span>
-      <span class="curve-timer" aria-hidden="true"
-        ><i [style.animation-duration.s]="cv.seconds"></i
-      ></span>
-    </div>
-    <button type="button" class="curve-btn left" data-testid="curve-left" aria-label="Esquerda" (click)="swipe.emit('esquerda')">
-      ←
-    </button>
-    <button type="button" class="curve-btn right" data-testid="curve-right" aria-label="Direita" (click)="swipe.emit('direita')">
-      →
-    </button>
-  </div>
 }
 
 <!-- Perseguição: caixote de meia altura no caminho. Pular (botão, arrastar para cima) corta a
