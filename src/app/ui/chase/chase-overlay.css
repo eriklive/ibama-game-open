@@ -166,7 +166,7 @@
   to { transform: scaleX(0); }
 }
 
-/* o d4 sai do botão, sobe girando e mostra o bônus por cima (centrado no botão de 112 px) */
+/* o d20 sai do botão, sobe girando e mostra o bônus por cima (centrado no botão de 112 px) */
 .sprint-pop {
   position: absolute;
   right: calc(var(--safe-right, 0px) - 18px);

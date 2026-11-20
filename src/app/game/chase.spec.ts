@@ -383,12 +383,16 @@ describe('agilidade dos suspeitos do Aeroporto', () => {
   });
 });
 
-describe('corrida (d4: 1–2 → +10%, 3–4 → +20%)', () => {
-  it('1 ou 2 dá +10%; 3 ou 4 dá +20%', () => {
-    expect(resolveSprint(1)).toEqual({ total: 1, percent: 10 });
-    expect(resolveSprint(2)).toEqual({ total: 2, percent: 10 });
-    expect(resolveSprint(3)).toEqual({ total: 3, percent: 20 });
-    expect(resolveSprint(4)).toEqual({ total: 4, percent: 20 });
+describe('corrida (teste de vigor: d20 + vigor = % de velocidade)', () => {
+  it('o d20 vira o bônus em %', () => {
+    expect(resolveSprint(1, {})).toEqual({ total: 1, percent: 1 });
+    expect(resolveSprint(12, {})).toEqual({ total: 12, percent: 12 });
+    expect(resolveSprint(20, {})).toEqual({ total: 20, percent: 20 });
+  });
+  it('o vigor soma no teste, e o bônus nunca fica abaixo de 1%', () => {
+    expect(resolveSprint(12, { vigor: 2 })).toEqual({ total: 14, percent: 14 });
+    expect(resolveSprint(20, { vigor: 1 }).percent).toBe(21);
+    expect(resolveSprint(1, { vigor: -2 })).toEqual({ total: -1, percent: 1 });
   });
   it('encosta (rate − 1)/rate por hexágono corrido mais rápido', () => {
     expect(sprintGain(1)).toBe(0);

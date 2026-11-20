@@ -1,7 +1,7 @@
 import { Component, input, output } from '@angular/core';
 import type { Side } from '../../game/chase';
 import type { VaultPick } from '../../game/vault-scene';
-import { D4 } from '../dice/d4';
+import { D20 } from '../dice/d20';
 
 /** Placar da perseguição: distância até ele e quanto da rota travada já foi. */
 export interface ChaseHud {
@@ -27,14 +27,16 @@ export interface VaultPrompt {
 }
 
 /**
- * Corrida da perseguição (uma vez por perseguição): `ready` pode correr; `rolling` o d4 está no
+ * Corrida da perseguição (uma vez por perseguição): `ready` pode correr; `rolling` o d20 está no
  * ar; `active` a velocidade maior vale (`percent`, por `ms`); `used` já correu.
  */
 export interface SprintView {
   state: 'ready' | 'rolling' | 'active' | 'used';
-  /** Face do d4 (já sorteada); `null` antes de rolar. */
+  /** Face do d20 (já sorteada); `null` antes de rolar. */
   roll: number | null;
-  /** 1–2 no d4 → 10%; 3–4 → 20%. */
+  /** Modificador de vigor do agente, somado ao d20. */
+  vigor: number;
+  /** d20 + vigor: quanto (%) o agente fica mais rápido. */
   percent: number;
   /** Quanto tempo (ms) a velocidade maior ainda dura, para a barrinha do botão. */
   ms: number;
@@ -47,7 +49,7 @@ export interface TargetPrompt {
   picked: string | null;
 }
 
-/** Quanto o d4 da corrida gira (ms): o resultado sai rapidinho. */
+/** Quanto o d20 da corrida gira (ms): o resultado sai rapidinho. */
 export const SPRINT_DIE_MS = 650;
 
 /**
@@ -57,7 +59,7 @@ export const SPRINT_DIE_MS = 650;
  */
 @Component({
   selector: 'app-chase-overlay',
-  imports: [D4],
+  imports: [D20],
   templateUrl: './chase-overlay.html',
   styleUrl: './chase-overlay.css',
 })
@@ -77,18 +79,26 @@ export class ChaseOverlay {
   protected sprintSub(sp: SprintView): string {
     switch (sp.state) {
       case 'ready':
-        return 'rola o d4';
+        return 'teste de vigor';
       case 'rolling':
         return 'rolando…';
       case 'active':
-        return `+${sp.percent}% de velocidade`;
+        return `+${sp.percent}% de velocidade (${this.sprintRoll(sp)})`;
       default:
         return 'já deu o gás';
     }
   }
 
+  /** "d20 13 + 1 vigor" (ou só "d20 13", sem vigor). */
+  protected sprintRoll(sp: SprintView): string {
+    if (!sp.vigor) return `d20 ${sp.roll}`;
+    return `d20 ${sp.roll} ${sp.vigor > 0 ? '+' : '−'} ${Math.abs(sp.vigor)} vigor`;
+  }
+
   protected sprintLabel(sp: SprintView): string {
-    return sp.state === 'ready' ? 'Correr: rola o d4, 10% ou 20% mais rápido por 5 segundos' : `Correr: ${this.sprintSub(sp)}`;
+    return sp.state === 'ready'
+      ? 'Correr: teste de vigor, d20 + vigor, o total vira o bônus de velocidade por 5 segundos'
+      : `Correr: ${this.sprintSub(sp)}`;
   }
 
   /** Escolha de alvo: tocou num lado (metade da tela ou seta), confirmou ou desistiu. */
