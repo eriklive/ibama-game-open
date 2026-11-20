@@ -473,34 +473,35 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    evita o que os agentes enxergam (até 20 hexágonos em linha reta, sem parede, árvore ou porta
    fechada no meio): cada hexágono à vista custa 6 passos a mais, então ele prefere correr por
    dentro das construções ou pela mata a atravessar a pista à vista. Passa por portas que ele
-   consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
-   número de hexágonos entre eles. Chegou à borda: some do mapa e a perseguição acaba.
-4. **Curvas não rolam.** O agente vai atrás dele direto, sem parar e sem dado (nem ele, nem o
-   garimpeiro). Dados só nos testes de verdade: **caixote** e **porta**.
-   **Caixote.** Onde a pista do agente contorna um caixote de meia altura, entra a **escolha de
-   ação no cenário**, sem prazo: o mundo para, a câmera abre (agente, caixote e a pista dele) e
-   tudo fica cinza, menos o caixote e uma faixa amarela com setas em volta dele (o caminho do
-   garimpeiro). Toque no caixote para **pular** ou na faixa para **dar a volta** (↑/W ou ✕ pula,
-   ↓/S ou ○ dá a volta). A câmera fecha e um **fantasma** do agente faz a ação: pula por cima e se
-   vira para o garimpeiro, ou corre a volta atrás dele. Depois, **Confirmar** (Enter/✕) ou
-   **Trocar** (Esc/○). Pulou: d20 + agilidade ≥ 8 corta a volta; tropeçou, +1. Deu a volta: segue
-   como ele, sem rolar. A cena fica em `vault-scene.ts`.
-5. **Porta.** O garimpeiro sempre tenta arrombar, sem parar: o d20 sai 3 hexágonos antes da
-   porta (≥ 3 encostada, ≥ 12 trancada) e a 2 hexágonos entra o **slow**. Passou, ele dá uma
-   trombada, a porta fica arrombada e ele segue correndo. Falhou, bate na porta e é agarrado ali,
-   sem tentar de novo.
-   **Grito.** Em cada trecho (entre paradas) o jogador pode gritar uma vez: botão **Gritar!** (G no
-   teclado, □ no controle). Ninguém para, mas entra o **slow**. **Disputa:** os dois dados rolam
-   juntos, o do agente (d20 + intimidação) e o do suspeito (d20). Agente maior **ou empate**: ele
-   olha para trás, fica mais lento e a distância cai 1 (o agente encosta ali mesmo). Suspeito
-   maior: nada acontece. Antes do caixote ou porta seguinte, o grito termina de rolar.
+   consegue usar (bloqueada é parede). Chegou à borda: some do mapa e a perseguição acaba.
+4. **Tempo e distância** (`ChaseRace`, em `chase-race.ts`). Os dois correm juntos pela pista, cada
+   um no **seu próprio relógio**, na velocidade padrão (0,225 s por hexágono). O dado ou a parada
+   de um **nunca** segura o outro. Curvas não param nem rolam. A distância é quanto da pista ele
+   está à frente (menos o hexágono de encostar); começa no número de hexágonos entre eles.
+   **Porta.** Fechada na rota dele: ele para na frente dela **1 s** e rola o d20 (≥ 3 encostada,
+   ≥ 12 trancada); o dado e a animação de arrombar (recua e tromba) cabem nesse segundo. Passou: a
+   porta fica arrombada e ele segue correndo. Falhou: tenta de novo, mais 1 s parado. O agente não
+   para em nenhum momento: se chegar nele na porta, agarra.
+   **Caixote.** Onde a pista contorna um caixote de meia altura, ele sempre **dá a volta**, que leva
+   **1 s** (freia, inclina e escorrega na curva). Quando o agente chega no caixote, **tudo congela**
+   e o jogador tem **1 s** (relógio com tique-taque) para escolher: o mundo fica cinza, menos o
+   caixote e uma faixa amarela com setas em volta dele (o caminho do garimpeiro). Toque no caixote
+   ou em **Pular** (↑/W, ✕) para **pular** (0,5 s; d20 + agilidade ≥ 8, e o dado rola com ele já no
+   ar; tropeçou, fica 1 s no chão do outro lado) ou na faixa ou em **Dar a volta** (↓/S, ○) para
+   ir atrás dele (1 s, como ele). Sem escolha no prazo, dá a volta. A cena fica em `vault-scene.ts`.
+   **Corrida.** Uma vez por perseguição, **Correr!** (C, □): d20 + vigor vira o bônus de velocidade
+   (%) por 5 s. Só o agente acelera.
+   Só o **slow** e o **congelamento** mexem no relógio, e nos dois juntos. Os tempos ficam em
+   `CHASE_RULES` (`hexSeconds`, `doorTrySeconds`, `aroundSeconds`, `jumpSeconds`,
+   `stumbleSeconds`, `vaultChoiceSeconds`).
+5. **Grito.** Oculto por enquanto (`resolveShout`).
 6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
 
 **Música.** A faixa da perseguição (`public/assets/sounds/perseguicao.mp3`, 11,9 s em loop) entra
-quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. No caixote e na
-porta a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
+quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. Na escolha do
+caixote a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
 mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
 `CHASE_MUSIC` (`sound.service.ts`).
 
@@ -508,7 +509,7 @@ mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os núme
 direita, olhando para o suspeito (atrás 4,4 · altura 2,5 · mira 7 à frente; em retrato, atrás 6,2 ·
 altura 3,6). O FOV abre um pouco e a névoa fecha mais perto. A HUD de papel some (fica o placar
 embaixo); no caixote, a câmera abre para a escolha (inclinada 56°, enquadrando o agente, o caixote e
-a pista) e fecha 3/4 de lado na prévia do fantasma (`VAULT_SCENE`, em `vault-scene.ts`). No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
+a pista; `VAULT_SCENE`, em `vault-scene.ts`). No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
 
 **Dois fugindo (`decisao:alvo`).** No começo do turno inimigo, se um agente está no raio de dois ou
 mais suspeitos em alerta, ele escolhe qual perseguir: a câmera desce atrás dele olhando para o meio

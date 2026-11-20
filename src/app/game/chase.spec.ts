@@ -18,11 +18,10 @@ import {
   resolveFleeDoor,
   resolveShout,
   resolveSprint,
-  sprintGain,
   sprintRate,
   sprintTotalMs,
   agentVaults,
-  resolveVault,
+  vaultPasses,
   routeStops,
   targetChoices,
 } from './chase';
@@ -258,17 +257,17 @@ describe('porta na fuga', () => {
     expect(fleeDoorNeed(door(h(0, 0), 'aberta'))).toBe(0);
     expect(fleeDoorNeed(door(h(0, 0), 'bloqueada'))).toBe(Infinity);
   });
-  it('passou: trombada arromba a porta; falhou: agarrado, porta igual', () => {
+  it('passou: arromba a porta; falhou: porta igual (ele tenta de novo)', () => {
     const d = door(h(0, 0), 'trancada');
-    expect(resolveFleeDoor(d, 12)).toMatchObject({ pass: true, caught: false });
+    expect(resolveFleeDoor(d, 12)).toMatchObject({ pass: true });
     expect(resolveFleeDoor(d, 12).door.broken).toBe(true);
     const fail = resolveFleeDoor(d, 11);
-    expect(fail).toMatchObject({ pass: false, caught: true });
+    expect(fail).toMatchObject({ pass: false });
     expect(fail.door).toBe(d);
   });
   it('porta já aberta: passa sem quebrar', () => {
     const d = door(h(0, 0), 'aberta');
-    expect(resolveFleeDoor(d, 1)).toMatchObject({ pass: true, caught: false });
+    expect(resolveFleeDoor(d, 1)).toMatchObject({ pass: true });
     expect(resolveFleeDoor(d, 1).door).toBe(d);
   });
 });
@@ -344,11 +343,11 @@ describe('pulo do caixote de meia altura', () => {
     // pista reta, sem caixote no caminho: nada a pular
     expect(agentVaults(line(h(2, 8), 8, 0, -1), new Set([hexKey(crate)]), area)).toEqual([]);
   });
-  it('pulou: corta o que a volta custaria; tropeçou: +1', () => {
+  it('pulo: d20 + agilidade, pelo menos vaultDC', () => {
     const need = CHASE_RULES.vaultDC;
-    expect(resolveVault(need, {}, 2)).toEqual({ pass: true, delta: -2 });
-    expect(resolveVault(need - 1, {}, 2)).toEqual({ pass: false, delta: CHASE_RULES.vaultFailDelta });
-    expect(resolveVault(need - 2, { agilidade: 2 }, 1)).toEqual({ pass: true, delta: -1 });
+    expect(vaultPasses(need)).toBe(true);
+    expect(vaultPasses(need - 1)).toBe(false);
+    expect(vaultPasses(need - 2, { agilidade: 2 })).toBe(true);
   });
   it('aeroporto: na fuga pela porta dos fundos do oeste, ele contorna o caixote e o agente pode pular', () => {
     const m = findMap('aeroporto')!;
@@ -393,12 +392,6 @@ describe('corrida (teste de vigor: d20 + vigor = % de velocidade)', () => {
     expect(resolveSprint(12, { vigor: 2 })).toEqual({ total: 14, percent: 14 });
     expect(resolveSprint(20, { vigor: 1 }).percent).toBe(21);
     expect(resolveSprint(1, { vigor: -2 })).toEqual({ total: -1, percent: 1 });
-  });
-  it('encosta (rate − 1)/rate por hexágono corrido mais rápido', () => {
-    expect(sprintGain(1)).toBe(0);
-    expect(sprintGain(0.5)).toBe(0);
-    expect(sprintGain(1.25)).toBeCloseTo(0.2);
-    expect(sprintGain(2)).toBe(0.5);
   });
   it('entra suave, segura 5 s e sai suave', () => {
     const ramp = CHASE_RULES.sprintRampMs;

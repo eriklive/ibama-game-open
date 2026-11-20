@@ -28,13 +28,12 @@ import {
   initiativeCheck,
   lockRoute,
   resolveFleeDoor,
-  type FleeDoorResult,
   resolveSprint,
-  resolveVault,
-  sprintGain,
+  vaultPasses,
   sprintRate,
   sprintTotalMs,
 } from '../../game/chase';
+import { ChaseRace, RaceEvent } from '../../game/chase-race';
 import { ChaseHud, ChaseOverlay, SPRINT_DIE_MS, SprintView, TargetPrompt, VaultPrompt } from '../../ui/chase/chase-overlay';
 import type { VaultPick } from '../../game/vault-scene';
 import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
@@ -202,7 +201,7 @@ interface CheckView {
 type CheckSide = 'team' | 'enemy';
 
 /** O que quem rola informa (o resto da ficha é montado por `rollD20`). */
-type CheckAsk = Pick<CheckView, 'kicker' | 'who' | 'need' | 'passText' | 'failText' | 'value'> & { side?: CheckSide };
+type CheckAsk = Pick<CheckView, 'kicker' | 'who' | 'need' | 'passText' | 'failText' | 'value' | 'duration'> & { side?: CheckSide };
 
 /** Uma linha do menu da porta (as fichas da direita). */
 interface DoorOption {
@@ -1297,10 +1296,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     const vp = this.vaultPrompt();
     if (vp) {
-      if (vp.stage === 'choice' && ['ArrowUp', 'w', 'W'].includes(ev.key)) this.vaultPick('pular');
-      else if (vp.stage === 'choice' && ['ArrowDown', 's', 'S'].includes(ev.key)) this.vaultPick('volta');
-      else if (vp.stage === 'confirm' && [' ', 'Enter'].includes(ev.key)) this.vaultConfirm();
-      else if (vp.stage !== 'choice' && ['Escape', 'Backspace'].includes(ev.key)) this.vaultBack();
+      if (['ArrowUp', 'w', 'W'].includes(ev.key)) this.vaultPick('pular');
+      else if (['ArrowDown', 's', 'S'].includes(ev.key)) this.vaultPick('volta');
       else return;
       ev.preventDefault();
       return;
@@ -1607,6 +1604,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     } finally {
       // terminou, ou a partida recomeçou no meio: a câmera sobe, a faixa some e o placar sai
       this.resetSlow();
+      this.closeVaultPrompt();
+      this.board?.stopChaseRun();
       this.board?.setChaseCamera(null);
       this.sound.chaseEnd();
       this.chaseHud.set(null);
@@ -1632,79 +1631,44 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // a pista: do agente até ele e, dali, a rota de fuga travada
     const track = [agentFrom, ...agentPath, ...route.flee];
     const n = agentPath.length;
-    let distance = Math.max(0, n - 1);
-    let a = 0;
-    let g = 0;
     const who = this.nameOf(agentId);
+    // caixotes de meia altura que a pista contorna: ele dá a volta; o agente escolhe (pular ou não)
+    const vaults = agentVaults(track, this.vaultable, this.area, blocked);
+    const race = new ChaseRace({
+      track,
+      n,
+      doors: route.stops,
+      vaults,
+      rollDoor: () => rollDie(CHASE_RULES.die),
+      // alguém pode ter aberto a porta no meio do caminho
+      doorNeed: (st) => fleeDoorNeed(this.doors().get(hexKey(st.door.hex)) ?? st.door),
+      // encurralado: ele fica onde está e o agente vai até ele
+      cornered: route.cornered,
+    });
     this.say(`${who} persegue ${enemy.name}!`, 'alert');
     board.setSelected(route.flee.at(-1) ?? null, route.flee);
+    let shown = -1;
     const hud = () => {
-      this.chaseHud.set({ agent: who, enemy: enemy.name, distance, step: g, total: route.flee.length });
-      this.sound.chaseDistance(distance);
+      const distance = Math.max(0, Math.ceil(race.distance() - 1e-6));
+      const { step, total } = race.progress();
+      const g = Math.floor(step);
+      const now = this.chaseHud();
+      if (now && now.distance === distance && now.step === g) return;
+      this.chaseHud.set({ agent: who, enemy: enemy.name, distance, step: g, total });
+      if (distance !== shown) this.sound.chaseDistance((shown = distance));
     };
     hud();
     // a câmera desce e encosta nas costas do agente; a faixa entra quando ela chega
     board.setChaseCamera(agentId, enemyId);
     await this.wait(800);
     if (!alive()) return;
-    void this.sound.chaseStart(distance);
-    // passos dados no trecho em curso (para saber onde os dois pararam se a corrida encostar)
-    const moved = { a: 0, g: 0 };
-    // portas da rota de fuga: o d20 dele sai `doorRollLead` hexágonos antes, correndo; a
-    // `doorSlowLead` entra o slow, que segura até ele chegar na porta e o dado decidir
-    const doorRuns = route.stops.map((st) => ({
-      st,
-      roll: undefined as Promise<FleeDoorResult | null> | undefined,
-      release: undefined as (() => void) | undefined,
-      done: false,
-    }));
-    /** Ele está no ponto `at` da rota: rola as portas que estão perto e segura o slow nelas. */
-    const doorAhead = (at: number) => {
-      for (const d of doorRuns) {
-        if (d.done || at >= d.st.index) continue;
-        if (!d.roll && at >= d.st.index - CHASE_RULES.doorRollLead) d.roll = this.chaseDoorRoll(d.st.door, enemyId);
-        if (!d.release && at >= d.st.index - CHASE_RULES.doorSlowLead) d.release = this.holdSlow();
-      }
-    };
-    const onStep = (w: 'unit' | 'enemy', hex: HexCoord) => {
-      if (!alive()) return;
-      moved[w === 'unit' ? 'a' : 'g']++;
-      if (w === 'unit') {
-        this.positions.update((m) => new Map(m).set(agentId, hex));
-        this.agentSteps(hex, false);
-        sprintStep();
-      } else {
-        const prev = this.enemy(enemyId)!.hex;
-        this.updateEnemy(enemyId, { hex, facing: facingBetween(prev, hex) });
-        this.enemySteps(hex, 1.6);
-        doorAhead(g + moved.g);
-      }
-    };
-    // o trecho em curso estica o caminho do agente quando a corrida encosta (ver `legTo`);
-    // devolve `false` se não deu para esticar (o caixote está logo ali)
-    let closer: (() => boolean) | undefined;
-    // corrida: quando começou (relógio real), o bônus (%) e o quanto já encostou (hexágonos)
+    void this.sound.chaseStart(Math.max(0, n - 1));
+
+    // corrida: quando começou (relógio real) e o bônus (%); só o agente acelera
     let sprintAt = 0;
     let sprintPct = 0;
-    let sprintAcc = 0;
     const boost = () => (sprintPct ? sprintRate(sprintPct, performance.now() - sprintAt) : 1);
-    /** O agente deu um passo: correndo mais rápido que ele, encosta; cada hexágono inteiro tira 1. */
-    const sprintStep = () => {
-      if (!closer) return;
-      sprintAcc += sprintGain(boost());
-      while (sprintAcc >= 1 && distance > 0) {
-        distance--;
-        if (!closer()) {
-          // o caixote segura o agente: o ganho espera o trecho seguinte
-          distance++;
-          sprintAcc = 1;
-          return;
-        }
-        sprintAcc -= 1;
-        hud();
-      }
-    };
-    // o d20 (teste de vigor) sai do botão, para rapidinho e a velocidade entra logo depois, sem parar a corrida
+    // o d20 (teste de vigor) sai do botão e a velocidade entra logo depois, sem parar a corrida
     this.chaseSprint.set({ state: 'ready', roll: null, vigor: 0, percent: 0, ms: 0 });
     this.sprintStart = () => {
       const roll = rollDie(CHASE_RULES.sprintDie);
@@ -1732,135 +1696,57 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         setTimeout(() => swap(active, { ...active, state: 'used' }), SPRINT_DIE_MS + 150 + ms),
       );
     };
-    /**
-     * Os dois correm até ele estar no ponto `s` da rota; o agente fica `distance` atrás, e as
-     * curvas não param ninguém. Com a corrida, o agente corre mais rápido e o caminho dele
-     * cresce no meio do trecho; se zerar a distância, os dois param ali (agarrou).
-     */
-    const legTo = async (s: number, agentCap = Infinity, hold = false) => {
-      if (g >= s) return;
-      // uma porta logo à frente já rola (e desacelera) antes do primeiro passo
-      doorAhead(g);
-      let aEnd = Math.max(a, Math.min(n + s - distance - 1, n + s - 1, agentCap));
-      const unitPath = track.slice(a + 1, aEnd + 1);
-      closer = () => {
-        // no caixote, o agente para nele mesmo que a corrida o tenha feito encostar
-        const want = Math.min(n + s - distance - 1, n + s - 1, agentCap);
-        if (aEnd >= want) return false;
-        while (aEnd < want) unitPath.push(track[++aEnd]);
-        return true;
-      };
-      moved.a = moved.g = 0;
-      await board.runPair(
-        agentId,
-        unitPath,
-        enemyId,
-        track.slice(n + g + 1, n + s + 1),
-        onStep,
-        undefined,
-        () => distance <= 0,
-        hold,
-        undefined,
-        boost,
-      );
-      closer = undefined;
-      a += moved.a;
-      g += moved.g;
-      hud();
+
+    /** O que a corrida avisou: passos, portas e o caixote. */
+    const handle = (events: readonly RaceEvent[]) => {
+      for (const ev of events) {
+        if (!alive()) return;
+        if (ev.type === 'passo') {
+          if (ev.who === 'agente') {
+            // por cima do caixote ele não "está" no caixote
+            const leg = race.pose('agente')?.leg;
+            if (leg?.kind === 'pulo' && leg.spot && hexKey(ev.hex) === hexKey(leg.spot.over)) continue;
+            this.positions.update((m) => new Map(m).set(agentId, ev.hex));
+            this.agentSteps(ev.hex, false);
+          } else {
+            const prev = this.enemy(enemyId)!.hex;
+            this.updateEnemy(enemyId, { hex: ev.hex, facing: facingBetween(prev, ev.hex) });
+            this.enemySteps(ev.hex, 1.6);
+          }
+        } else if (ev.type === 'porta-tenta') this.chaseDoorTry(enemyId, ev.need, ev.roll, ev.attempt);
+        else if (ev.type === 'porta-abre') this.chaseDoorOpen(ev.stop.door, enemyId);
+        else if (ev.type === 'porta-falha') this.chaseDoorFail(ev.stop.door, enemyId);
+        else if (ev.type === 'caixote') void this.chaseVault(race, ev.spot, agentId, enemyId, track, alive);
+      }
     };
 
-    // encurralado, ela chega nele; colada nele (distância 0), agarra na largada
-    if (route.cornered) distance = 0;
-    else if (distance > 0) {
-      // portas da rota de fuga são dele (o dado já rolou; ele chega colado nela e tromba); o
-      // caixote é do agente. Curvas não param nem rolam: o agente vai atrás direto.
-      const doorStops = route.stops;
-      // caixotes de meia altura que a pista dele contorna: o agente pode pular por cima
-      const vaults = agentVaults(track, this.vaultable, this.area, blocked);
-      let di = 0;
-      let vi = 0;
-      for (;;) {
-        while (vi < vaults.length && vaults[vi].index < a) vi++;
-        const door = doorStops[di];
-        const vault = vaults[vi];
-        const doorAt = door ? door.index - 1 : Infinity;
-        // ele fica `distance` à frente; ele corre enquanto o agente corta por cima, e o atalho
-        // não passa à frente dele (poupar mais do que a distância seria ultrapassá-lo)
-        const vaultAt = vault ? vault.index - n + distance + 1 : Infinity;
-        if (vault && (vaultAt + vault.path.length > route.flee.length || vault.saves > distance)) {
-          vi++;
-          continue;
-        }
-        const next = Math.min(doorAt, vaultAt);
-        if (next === Infinity) break;
-        const kind = next === vaultAt ? 'pulo' : 'porta';
-        // o agente nunca passa do próximo caixote sem decidir: os dois param na pose de corrida e
-        // congelam enquanto o jogador decide. Na porta também ficam na pose de corrida: o trecho
-        // seguinte emenda (só espera se o dado dele ainda rola)
-        await legTo(next, vault?.index ?? Infinity, true);
-        if (!alive()) return;
-        // a corrida no trecho já encostou nele: sai da pose de corrida
-        if (distance <= 0) {
-          board.restChase();
-          break;
-        }
-        // a distância só muda depois do dado (a corrida pode mexer nela enquanto o dele rola)
-        if (kind === 'pulo') {
-          vi++;
-          // ficou para trás (uma porta o parou antes): chega ao caixote antes de decidir
-          if (a < vault!.index) {
-            moved.a = 0;
-            await board.runPair(agentId, track.slice(a + 1, vault!.index + 1), enemyId, [], onStep, undefined, undefined, true);
-            a += moved.a;
-            if (!alive()) return;
-          }
-          const d = await this.chaseVault(vault!, agentId, enemyId, track);
-          if (!alive()) return;
-          if (d < 0) {
-            // o atalho por cima do caixote, enquanto ele corre o mesmo tanto de passos
-            const over = vault!.over;
-            moved.a = moved.g = 0;
-            await board.runPair(
-              agentId,
-              vault!.path,
-              enemyId,
-              route.flee.slice(g, g + vault!.path.length),
-              (w, hex) => (w === 'unit' && hexKey(hex) === hexKey(over) ? undefined : onStep(w, hex)),
-              undefined,
-              undefined,
-              true,
-              new Set([hexKey(over)]),
-            );
-            a = vault!.land;
-            g += moved.g;
-          }
-          distance += d;
-        } else {
-          const run = doorRuns[di++];
-          doorAhead(g);
-          const res = await run.roll;
-          run.done = true;
-          if (!alive() || !res) return;
-          this.chaseDoorHit(door.door, enemyId, res);
-          run.release?.();
-          if (res.caught) distance = 0;
-        }
-        if (!alive()) return;
-        distance = Math.max(0, distance);
+    board.startChaseRun(agentId, enemyId, boost);
+    // os dois correm juntos, cada um no seu relógio; só o slow e o congelamento (escolha no
+    // caixote) mexem no tempo, e nos dois ao mesmo tempo
+    await new Promise<void>((done) => {
+      handle(race.start());
+      let last = performance.now();
+      const frame = (now: number) => {
+        if (!alive()) return done();
+        const dt = Math.min(0.25, Math.max(0, (now - last) / 1000));
+        last = now;
+        if (!race.pending) handle(race.step(dt * board.chaseTimeScale(), boost()));
+        board.poseChaser('unit', agentId, race.pose('agente'));
+        board.poseChaser('enemy', enemyId, race.pose('garimpeiro'));
         hud();
-        if (distance <= 0) break;
-      }
-      if (distance > 0) await legTo(route.flee.length);
-    }
-    // parou na pose de corrida (agarrou no caixote, ou a rota acabou): repouso
-    board.restChase();
+        if (race.over) return done();
+        requestAnimationFrame(frame);
+      };
+      requestAnimationFrame(frame);
+    });
+    if (!alive()) return;
+    // os dois param onde estão (encaixam no hexágono)
+    board.endChaseRun(agentId, this.positions().get(agentId)!, enemyId, this.enemy(enemyId)!.hex);
+    // a escolha do caixote pode ter ficado aberta (agarrou ou acabou antes)
+    this.closeVaultPrompt();
     board.setSelected(null);
 
-    if (distance <= 0) {
-      // encosta nele (no hexágono de trás) e ele se rende
-      const aT = n + g - 1;
-      if (aT > a) await board.runPair(agentId, track.slice(a + 1, aT + 1), enemyId, [], onStep);
-      if (!alive()) return;
+    if (race.over === 'agarrou') {
       const e = this.enemy(enemyId)!;
       const facing = facingBetween(e.hex, this.positions().get(agentId)!);
       this.updateEnemy(enemyId, { status: 'surrendered', shaken: true, facing });
@@ -1896,34 +1782,54 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Caixote de meia altura na pista do agente: a cena de escolha (ver `chooseVault`). Pulou:
-   * d20 + agilidade ≥ `vaultDC` corta a volta (devolve −`saves`); tropeçou, dá a volta (+1). Deu
-   * a volta: segue como ele, sem rolar (0). Devolve a mudança na distância.
+   * Caixote de meia altura na pista do agente: tudo congela (a `ChaseRace` não anda) e o jogador
+   * tem `vaultChoiceSeconds` para escolher (ver `chooseVault`). Sem escolha, dá a volta. Pulou:
+   * d20 + agilidade ≥ `vaultDC`; o dado rola enquanto ele já pula (falhou: tropeça do outro lado).
    */
-  private async chaseVault(vault: VaultSpot, agentId: string, enemyId: string, track: readonly HexCoord[]): Promise<number> {
-    // decisão e rolagem num slow só, como na curva
+  private async chaseVault(
+    race: ChaseRace,
+    vault: VaultSpot,
+    agentId: string,
+    enemyId: string,
+    track: readonly HexCoord[],
+    alive: () => boolean,
+  ): Promise<void> {
     const release = this.holdSlow();
     try {
       const who = this.nameOf(agentId);
-      if (!(await this.chooseVault(vault, agentId, enemyId, track))) {
+      const jump = await this.chooseVault(vault, agentId, enemyId, track);
+      if (!alive() || race.pending !== vault) return;
+      if (!jump) {
+        race.decide(false);
         this.say(`${who} dá a volta no caixote.`, 'info');
-        return 0;
+        return;
       }
-      const agent = this.chaseStats(agentId);
-      const agi = agent.agilidade ?? 0;
-      const r = await this.rollD20(
-        { kicker: 'Pulo · agilidade', who, need: `precisa de ${CHASE_RULES.vaultDC - agi} ou mais`, passText: 'Pulou o caixote', failText: 'Tropeçou' },
-        (roll) => roll + agi >= CHASE_RULES.vaultDC,
-        800,
-      );
-      const res = resolveVault(r?.roll ?? 1, agent, vault.saves);
-      if (res.pass) this.say(`${who} pulou o caixote! Cortando caminho: ${signed(res.delta)} de distância`, 'alert');
-      else {
-        this.sound.play('ui.invalido');
-        this.gamepad.rumble(0.9, 0.6, 260);
-        this.say(`${who} tropeçou no caixote e deu a volta: ${signed(res.delta)}`, 'alert');
-      }
-      return res.delta;
+      const agi = this.chaseStats(agentId).agilidade ?? 0;
+      const roll = rollDie(CHASE_RULES.die);
+      const pass = vaultPasses(roll, { agilidade: agi });
+      race.decide(true, pass);
+      // o dado aparece com ele já no ar (não segura nada)
+      void this.rollD20Sheet(
+        {
+          kicker: 'Pulo · agilidade',
+          who,
+          need: `precisa de ${CHASE_RULES.vaultDC - agi} ou mais`,
+          passText: 'Pulou o caixote',
+          failText: 'Tropeçou',
+          value: roll,
+          duration: CHASE_RULES.jumpSeconds * 1000,
+        },
+        () => pass,
+        350,
+      ).then((r) => {
+        if (!r || !alive()) return;
+        if (pass) this.say(`${who} pulou o caixote!`, 'alert');
+        else {
+          this.sound.play('ui.invalido');
+          this.gamepad.rumble(0.9, 0.6, 260);
+          this.say(`${who} tropeçou no caixote!`, 'alert');
+        }
+      });
     } finally {
       release();
     }
@@ -1931,55 +1837,42 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Cena de escolha no caixote: o mundo para, a câmera abre e tudo fica cinza menos o caixote e a
-   * faixa da volta (a pista dele). O jogador toca num dos dois (ou ↑/↓, ✕/○); a câmera fecha e um
-   * fantasma do agente faz a ação. Depois, **Confirmar** (`true`: pular) ou **Trocar**. Sem prazo.
+   * faixa da volta (a pista dele). O jogador toca num dos dois (ou ↑/↓, ✕/○) antes de o relógio
+   * de `vaultChoiceSeconds` acabar (`true`: pular). Sem escolha, dá a volta (`false`).
    */
   private chooseVault(vault: VaultSpot, agentId: string, enemyId: string, track: readonly HexCoord[]): Promise<boolean> {
     const board = this.board;
-    // a volta é a pista dele até onde o atalho volta (o fantasma para antes de alcançá-lo)
+    // a volta é a pista dele até onde o atalho volta
     const around = track.slice(vault.index, vault.land + 1);
     const jump = [track[vault.index], ...vault.path];
     const agi = this.chaseStats(agentId).agilidade ?? 0;
+    const ms = CHASE_RULES.vaultChoiceSeconds * 1000;
     return new Promise((done) => {
       const id = ++this.vaultSeq;
       this.vaultDone = done;
       board?.showVaultChoice(agentId, enemyId, vault.over, around, jump);
-      this.vaultPrompt.set({ id, stage: 'choice', pick: null, saves: vault.saves, need: CHASE_RULES.vaultDC - agi });
-      this.sound.play('abo.modo');
+      this.vaultPrompt.set({ id, ms, saves: vault.saves, need: CHASE_RULES.vaultDC - agi });
+      this.sound.play('ui.relogio');
+      // o relógio acabou: dá a volta
+      this.timers.push(setTimeout(() => this.vaultPrompt()?.id === id && this.vaultPick('volta'), ms));
     });
   }
 
-  /** Tocou no caixote (pular) ou na faixa (dar a volta): a prévia com o fantasma. */
+  /** Tocou no caixote (pular) ou na faixa (dar a volta): o agente faz isso na hora. */
   protected vaultPick(pick: VaultPick): void {
-    const p = this.vaultPrompt();
-    if (!p || p.stage !== 'choice') return;
-    this.vaultPrompt.set({ ...p, stage: 'preview', pick });
-    this.sound.play('ui.hex');
-    const done = this.board?.previewVault(pick) ?? Promise.resolve();
-    void done.then(() => {
-      const now = this.vaultPrompt();
-      if (now?.id === p.id && now.stage === 'preview' && now.pick === pick) this.vaultPrompt.set({ ...now, stage: 'confirm' });
-    });
-  }
-
-  /** Trocar: da prévia de volta para a escolha. */
-  protected vaultBack(): void {
-    const p = this.vaultPrompt();
-    if (!p || p.stage === 'choice') return;
-    this.board?.backToVaultChoice();
-    this.vaultPrompt.set({ ...p, stage: 'choice', pick: null });
-  }
-
-  /** Confirmar: o agente faz o que o fantasma mostrou. */
-  protected vaultConfirm(): void {
-    const p = this.vaultPrompt();
     const done = this.vaultDone;
-    if (!p || p.stage !== 'confirm' || !done) return;
+    if (!this.vaultPrompt() || !done) return;
+    this.closeVaultPrompt();
+    this.sound.play('ui.hex');
+    done(pick === 'pular');
+  }
+
+  /** Fecha a escolha do caixote (escolheu, o relógio acabou ou a perseguição terminou). */
+  private closeVaultPrompt(): void {
     this.vaultDone = undefined;
+    if (!this.vaultPrompt()) return;
     this.vaultPrompt.set(null);
     this.board?.endVaultChoice();
-    this.sound.play('ui.hex');
-    done(p.pick === 'pular');
   }
 
   /**
@@ -2028,40 +1921,50 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * O d20 do garimpeiro numa porta fechada da rota, rolado antes de chegar nela (sem parar a
-   * corrida). Ele sempre arromba, numa tentativa só. `null` se a partida recomeçou.
+   * Uma tentativa dele de arrombar a porta: 1 s parado (`doorTrySeconds`), com o d20 (já
+   * sorteado pela `ChaseRace`) caindo no meio da trombada. Só mostra: não segura ninguém.
    */
-  private async chaseDoorRoll(door: Door, enemyId: string): Promise<FleeDoorResult | null> {
+  private chaseDoorTry(enemyId: string, need: number, roll: number, attempt: number): void {
     const name = this.enemy(enemyId)!.name;
-    const current = this.doors().get(hexKey(door.hex)) ?? door;
-    const need = fleeDoorNeed(current);
-    // alguém abriu no meio do caminho: passa direto
-    if (need <= 0) return resolveFleeDoor(current, CHASE_RULES.die);
-    this.say(`${name} vai arrombar a porta!`, 'info');
-    const r = await this.rollD20(
-      { kicker: 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: 'Arrombou', failText: 'Bateu na porta', side: 'enemy' },
-      (roll) => roll >= need,
-      800,
+    if (attempt === 1) this.say(`${name} vai arrombar a porta!`, 'info');
+    else this.say(`${name} tenta de novo (${attempt}ª vez)!`, 'info');
+    const ms = CHASE_RULES.doorTrySeconds * 1000;
+    void this.rollD20Sheet(
+      {
+        kicker: attempt === 1 ? 'Arrombar' : `Arrombar · ${attempt}ª`,
+        who: name,
+        need: `precisa de ${need} ou mais`,
+        passText: 'Arrombou',
+        failText: 'Não abriu',
+        side: 'enemy',
+        value: roll,
+        // o dado cai na hora da trombada (3/4 do segundo)
+        duration: ms * 0.7,
+      },
+      (r) => r >= need,
+      ms * 0.3,
     );
-    return r ? resolveFleeDoor(current, r.roll) : null;
   }
 
-  /** Ele chegou na porta com o dado já rolado: trombada (segue correndo) ou bateu (agarrado). */
-  private chaseDoorHit(door: Door, enemyId: string, res: FleeDoorResult): void {
+  /** A trombada passou: a porta fica arrombada e ele segue correndo. */
+  private chaseDoorOpen(door: Door, enemyId: string): void {
     const name = this.enemy(enemyId)!.name;
-    if (res.pass) {
-      // já estava aberta (ninguém trombou em nada)
-      if (this.doors().get(hexKey(door.hex)) === res.door) return;
-      this.sound.play('porta.chute-ok', { at: door.hex });
-      this.gamepad.rumble(0.7, 0.4, 200);
-      this.doors.update((m) => new Map(m).set(hexKey(door.hex), res.door));
-      this.board?.setDoors(this.doors());
-      this.say(`${name} trombou na porta e passou!`, 'alert');
-      return;
-    }
+    const res = resolveFleeDoor(this.doors().get(hexKey(door.hex)) ?? door, CHASE_RULES.die);
+    // já estava aberta (ninguém trombou em nada)
+    if (this.doors().get(hexKey(door.hex)) === res.door) return;
+    this.sound.play('porta.chute-ok', { at: door.hex });
+    this.gamepad.rumble(0.7, 0.4, 200);
+    this.doors.update((m) => new Map(m).set(hexKey(door.hex), res.door));
+    this.board?.setDoors(this.doors());
+    this.say(`${name} arrombou a porta e passou!`, 'alert');
+  }
+
+  /** A trombada não abriu: ele fica mais 1 s na porta (o agente continua correndo). */
+  private chaseDoorFail(door: Door, enemyId: string): void {
+    const name = this.enemy(enemyId)!.name;
     this.sound.play('porta.chute-falha', { at: door.hex });
-    this.gamepad.rumble(0.9, 0.6, 260);
-    this.say(`${name} bateu na porta e não passou!`, 'alert');
+    this.gamepad.rumble(0.5, 0.3, 160);
+    this.say(`${name} bateu na porta e não abriu!`, 'alert');
   }
 
   /**
@@ -3748,12 +3651,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     const vp = this.vaultPrompt();
     if (vp) {
-      // escolha: ✕ pula, ○ dá a volta; depois do fantasma: ✕ confirma, ○ troca
-      if (vp.stage === 'choice') {
-        if (b === 'cross') this.vaultPick('pular');
-        else if (b === 'circle') this.vaultPick('volta');
-      } else if (b === 'cross') this.vaultConfirm();
-      else if (b === 'circle') this.vaultBack();
+      // escolha (1 s): ✕ pula, ○ dá a volta
+      if (b === 'cross') this.vaultPick('pular');
+      else if (b === 'circle') this.vaultPick('volta');
       return;
     }
     // perseguição correndo: □ dá o gás
@@ -3878,7 +3778,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     // caixote da perseguição: para cima pula, para baixo dá a volta
     if (this.vaultPrompt()) {
-      if (this.vaultPrompt()?.stage === 'choice' && Math.abs(dir.y) >= Math.abs(dir.x)) this.vaultPick(dir.y < 0 ? 'pular' : 'volta');
+      if (this.vaultPrompt() && Math.abs(dir.y) >= Math.abs(dir.x)) this.vaultPick(dir.y < 0 ? 'pular' : 'volta');
       return;
     }
     if (this.chaseOffer()) return;

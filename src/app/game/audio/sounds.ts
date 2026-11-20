@@ -775,6 +775,7 @@ export type SoundId =
   | 'ui.vez-inimigo'
   | 'ui.passar'
   | 'ui.retrato'
+  | 'ui.relogio'
   | 'dado.2d4'
   | 'dado.d20'
   | 'teste.passou'
@@ -852,6 +853,12 @@ export const SOUNDS: Readonly<Record<SoundId, (e: AudioEngine, t: number) => voi
     e.noise({ t, type: 'bandpass', f: 3000, Q: 1, dur: 0.03, gain: 0.18, bus: 'ui' });
     e.tone({ t, f: 1000, dur: 0.03, gain: 0.03, bus: 'ui' });
   },
+  // relógio da escolha no caixote: tique-taque de 1 s (4 batidas, a última mais aguda)
+  'ui.relogio': (e, t) =>
+    [0, 0.25, 0.5, 0.75].forEach((dt, i) => {
+      e.noise({ t: t + dt, type: 'bandpass', f: i % 2 ? 2600 : 3400, Q: 6, dur: 0.025, gain: 0.22, bus: 'ui' });
+      e.tone({ t: t + dt, f: i === 3 ? 1760 : i % 2 ? 1100 : 1320, dur: 0.035, gain: 0.05, bus: 'ui' });
+    }),
   'dado.2d4': (e, t) => void diceRoll(e, t, 2, 4),
   'dado.d20': (e, t) => void diceRoll(e, t, 1, 20),
   'teste.passou': (e, t) => chimeUp(e, t),
