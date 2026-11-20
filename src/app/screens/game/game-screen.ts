@@ -22,7 +22,6 @@ import {
   agentSight,
   arrestQueue,
   chaseCandidates,
-  fleeDoorAction,
   targetChoices,
   fleeDoorNeed,
   initiativeChance,
@@ -1987,14 +1986,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Porta fechada na rota: o garimpeiro rola d4 (1–2 abre, 3–4 arromba) e d20. Falhou: perde
-   * tempo (−1, por `addDistance`) e tenta de novo. Passou: a porta fica aberta (ou arrombada).
+   * Porta fechada na rota: o garimpeiro sempre tenta arrombar, com um d20. Falhou: perde tempo
+   * (−1, por `addDistance`) e tenta de novo. Passou: a porta fica arrombada. Todas as tentativas
+   * ficam num slow só.
    */
   private async chaseDoor(door: Door, enemyId: string, distance: () => number, addDistance: (delta: number) => void): Promise<void> {
     const name = this.enemy(enemyId)!.name;
     const current = this.doors().get(hexKey(door.hex)) ?? door;
-    // o slow vale só durante o d20 dele (ver `fleeDoorTries`)
-    await this.fleeDoorTries(current, door, name, distance, addDistance);
+    const release = this.holdSlow();
+    try {
+      await this.fleeDoorTries(current, door, name, distance, addDistance);
+    } finally {
+      release();
+    }
   }
 
   /** As tentativas dele na porta, até passar (ou ela o alcançar). */
@@ -2007,33 +2011,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   ): Promise<void> {
     const board = this.board!;
     for (;;) {
-      const d4 = rollDie(CHASE_RULES.doorChoiceDie);
-      const action = fleeDoorAction(d4);
-      this.sound.play('dado.2d4');
-      this.say(`${name} tenta ${action === 'abrir' ? 'abrir' : 'arrombar'} a porta (d4: ${d4})`, 'info');
-      await this.wait(800);
-      const need = fleeDoorNeed(action, current);
-      // o teste dele segura o slow enquanto o dado rola (solta antes do som e da porta)
-      const release = this.holdSlow();
-      let r: { roll: number; pass: boolean } | null;
-      try {
-        r = await this.rollD20(
-          { kicker: action === 'abrir' ? 'Abrir' : 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: action === 'abrir' ? 'Abriu' : 'Arrombou', failText: 'Travou', side: 'enemy' },
-          (roll) => roll >= need,
-          800,
-        );
-      } finally {
-        release();
-      }
+      this.say(`${name} tenta arrombar a porta`, 'info');
+      const need = fleeDoorNeed(current);
+      const r = await this.rollD20(
+        { kicker: 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: 'Arrombou', failText: 'Travou', side: 'enemy' },
+        (roll) => roll >= need,
+        800,
+      );
       if (!r) return;
-      const res = resolveFleeDoor(current, d4, r.roll);
+      const res = resolveFleeDoor(current, r.roll);
       if (res.pass) {
-        this.sound.play(action === 'abrir' ? (current.state === 'trancada' ? 'porta.destrancou' : 'porta.abrir') : 'porta.chute-ok', { at: door.hex });
+        this.sound.play('porta.chute-ok', { at: door.hex });
         this.doors.update((m) => new Map(m).set(hexKey(door.hex), res.door));
         board.setDoors(this.doors());
         return;
       }
-      this.sound.play(action === 'abrir' ? 'porta.trancada' : 'porta.chute-falha', { at: door.hex });
+      this.sound.play('porta.chute-falha', { at: door.hex });
       addDistance(res.delta);
       if (distance() <= 0) return;
       current = res.door;
@@ -2515,7 +2508,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   ): Promise<{ roll: number; pass: boolean } | null> {
     // só as escolhas do jogador desaceleram: o dado da equipe que vem logo depois de uma (a
     // iniciativa depois da escolha de alvo) emenda no mesmo slow; os do garimpeiro só quando
-    // quem chama segura o slow (o teste dele na porta, ver `fleeDoorTries`)
+    // quem chama segura o slow (o arrombamento dele na porta, ver `chaseDoor`)
     const release = view.side !== 'enemy' && this.slowActive() ? this.holdSlow() : undefined;
     try {
       return await this.rollD20Sheet(view, passes, autoMs);

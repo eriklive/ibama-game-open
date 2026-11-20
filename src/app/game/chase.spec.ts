@@ -11,7 +11,6 @@ import {
   chaseCandidates,
   chaseEnd,
   chaseRadius,
-  fleeDoorAction,
   fleeDoorNeed,
   initiativeChance,
   initiativeCheck,
@@ -249,22 +248,16 @@ describe('lockRoute', () => {
 });
 
 describe('porta na fuga', () => {
-  it('d4 1–2 abre, 3–4 arromba', () => {
-    expect([1, 2, 3, 4].map(fleeDoorAction)).toEqual(['abrir', 'abrir', 'arrombar', 'arrombar']);
+  it('o que ele precisa tirar para arrombar', () => {
+    expect(fleeDoorNeed(door(h(0, 0), 'encostada'))).toBe(3);
+    expect(fleeDoorNeed(door(h(0, 0), 'trancada', { lock: 10 }))).toBe(12);
+    expect(fleeDoorNeed(door(h(0, 0), 'aberta'))).toBe(0);
+    expect(fleeDoorNeed(door(h(0, 0), 'bloqueada'))).toBe(Infinity);
   });
-  it('o que ele precisa tirar', () => {
-    expect(fleeDoorNeed('abrir', door(h(0, 0), 'encostada'))).toBe(3);
-    expect(fleeDoorNeed('arrombar', door(h(0, 0), 'encostada'))).toBe(3);
-    expect(fleeDoorNeed('abrir', door(h(0, 0), 'trancada', { lock: 10 }))).toBe(10);
-    expect(fleeDoorNeed('arrombar', door(h(0, 0), 'trancada'))).toBe(12);
-    expect(fleeDoorNeed('abrir', door(h(0, 0), 'aberta'))).toBe(0);
-    expect(fleeDoorNeed('arrombar', door(h(0, 0), 'bloqueada'))).toBe(Infinity);
-  });
-  it('passou: abrir deixa aberta, arrombar deixa quebrada; falhou: −1 e porta igual', () => {
+  it('passou: sempre arromba (porta quebrada); falhou: −1 e porta igual', () => {
     const d = door(h(0, 0), 'trancada');
-    expect(resolveFleeDoor(d, 1, 12).door.state).toBe('aberta');
-    expect(resolveFleeDoor(d, 4, 12).door.broken).toBe(true);
-    const fail = resolveFleeDoor(d, 4, 11);
+    expect(resolveFleeDoor(d, 12).door.broken).toBe(true);
+    const fail = resolveFleeDoor(d, 11);
     expect(fail).toMatchObject({ pass: false, delta: -1 });
     expect(fail.door).toBe(d);
   });
