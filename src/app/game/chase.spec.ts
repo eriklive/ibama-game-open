@@ -254,12 +254,18 @@ describe('porta na fuga', () => {
     expect(fleeDoorNeed(door(h(0, 0), 'aberta'))).toBe(0);
     expect(fleeDoorNeed(door(h(0, 0), 'bloqueada'))).toBe(Infinity);
   });
-  it('passou: sempre arromba (porta quebrada); falhou: −1 e porta igual', () => {
+  it('passou: trombada arromba a porta; falhou: agarrado, porta igual', () => {
     const d = door(h(0, 0), 'trancada');
+    expect(resolveFleeDoor(d, 12)).toMatchObject({ pass: true, caught: false });
     expect(resolveFleeDoor(d, 12).door.broken).toBe(true);
     const fail = resolveFleeDoor(d, 11);
-    expect(fail).toMatchObject({ pass: false, delta: -1 });
+    expect(fail).toMatchObject({ pass: false, caught: true });
     expect(fail.door).toBe(d);
+  });
+  it('porta já aberta: passa sem quebrar', () => {
+    const d = door(h(0, 0), 'aberta');
+    expect(resolveFleeDoor(d, 1)).toMatchObject({ pass: true, caught: false });
+    expect(resolveFleeDoor(d, 1).door).toBe(d);
   });
 });
 

@@ -28,6 +28,7 @@ import {
   initiativeCheck,
   lockRoute,
   resolveFleeDoor,
+  type FleeDoorResult,
   resolveShout,
   resolveVault,
 } from '../../game/chase';
@@ -1591,9 +1592,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * A perseguição: trava a rota de fuga e os dois correm por ela, parando em cada curva (o
-   * jogador desliza para o lado e rola) e em cada porta (o garimpeiro rola). Distância 0:
-   * agarrou, ele se rende abalado. Rota no fim: ele escapa (e foge do mapa, se chegou à borda).
+   * A perseguição: trava a rota de fuga e os dois correm por ela. Nas portas o garimpeiro rola
+   * antes de chegar e tromba nelas (passou: segue; falhou: agarrado). Distância 0: agarrou, ele
+   * se rende abalado. Rota no fim: ele escapa (e foge do mapa, se chegou à borda).
    */
   private async runChase(enemyId: string, agentId: string, agentPath: HexCoord[], epoch: number, caught: Set<string>): Promise<void> {
     try {
@@ -1648,6 +1649,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const settleRolls = async () => {
       while (this.shoutRoll) await this.shoutRoll;
     };
+    // portas da rota de fuga: o d20 dele sai `doorRollLead` hexágonos antes, correndo; a
+    // `doorSlowLead` entra o slow, que segura até ele chegar na porta e o dado decidir
+    const doorRuns = route.stops.map((st) => ({
+      st,
+      roll: undefined as Promise<FleeDoorResult | null> | undefined,
+      release: undefined as (() => void) | undefined,
+      done: false,
+    }));
+    /** Ele está no ponto `at` da rota: rola as portas que estão perto e segura o slow nelas. */
+    const doorAhead = (at: number) => {
+      for (const d of doorRuns) {
+        if (d.done || at >= d.st.index) continue;
+        if (!d.roll && at >= d.st.index - CHASE_RULES.doorRollLead) d.roll = this.chaseDoorRoll(d.st.door, enemyId);
+        if (!d.release && at >= d.st.index - CHASE_RULES.doorSlowLead) d.release = this.holdSlow();
+      }
+    };
     const onStep = (w: 'unit' | 'enemy', hex: HexCoord) => {
       if (!alive()) return;
       moved[w === 'unit' ? 'a' : 'g']++;
@@ -1658,6 +1675,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         const prev = this.enemy(enemyId)!.hex;
         this.updateEnemy(enemyId, { hex, facing: facingBetween(prev, hex) });
         this.enemySteps(hex, 1.6);
+        doorAhead(g + moved.g);
       }
     };
     // o trecho em curso estica o caminho do agente quando o grito encosta (ver `legTo`)
@@ -1678,6 +1696,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
      */
     const legTo = async (s: number, agentCap = Infinity, hold = false, waitShout = true) => {
       if (g >= s) return;
+      // uma porta logo à frente já rola (e desacelera) antes do primeiro passo
+      doorAhead(g);
       // o grito do trecho anterior ainda rolando vale por este também
       this.chaseShout.set(this.shoutRoll ? 'used' : 'ready');
       let aEnd = Math.max(a, Math.min(n + s - distance - 1, n + s - 1, agentCap));
@@ -1704,8 +1724,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // encurralado, ela chega nele; colada nele (distância 0), agarra na largada
     if (route.cornered) distance = 0;
     else if (distance > 0) {
-      // portas da rota de fuga são dele (ele para na porta, colado nela); o caixote é do agente.
-      // Curvas não param nem rolam: o agente vai atrás direto.
+      // portas da rota de fuga são dele (o dado já rolou; ele chega colado nela e tromba); o
+      // caixote é do agente. Curvas não param nem rolam: o agente vai atrás direto.
       const doorStops = route.stops;
       // caixotes de meia altura que a pista dele contorna: o agente pode pular por cima
       const vaults = agentVaults(track, this.vaultable, this.area, blocked);
@@ -1728,8 +1748,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         const kind = next === vaultAt ? 'pulo' : 'porta';
         const mine = kind === 'pulo';
         // o agente nunca passa do próximo caixote sem decidir: os dois param na pose de corrida e
-        // congelam enquanto o jogador decide
-        await legTo(next, vault?.index ?? Infinity, mine, mine);
+        // congelam enquanto o jogador decide. Na porta também ficam na pose de corrida: o trecho
+        // seguinte emenda (só espera se o dado dele ainda rola)
+        await legTo(next, vault?.index ?? Infinity, true, mine);
         if (!alive()) return;
         // o grito no trecho já encostou nele: sai da pose de corrida
         if (distance <= 0) {
@@ -1768,16 +1789,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
           }
           distance += d;
         } else {
-          di++;
-          await this.chaseDoor(
-            door.door,
-            enemyId,
-            () => distance,
-            (d) => {
-              distance = Math.max(0, distance + d);
-              hud();
-            },
-          );
+          const run = doorRuns[di++];
+          doorAhead(g);
+          const res = await run.roll;
+          run.done = true;
+          if (!alive() || !res) return;
+          this.chaseDoorHit(door.door, enemyId, res);
+          run.release?.();
+          if (res.caught) distance = 0;
         }
         if (!alive()) return;
         distance = Math.max(0, distance);
@@ -1986,51 +2005,40 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Porta fechada na rota: o garimpeiro sempre tenta arrombar, com um d20. Falhou: perde tempo
-   * (−1, por `addDistance`) e tenta de novo. Passou: a porta fica arrombada. Todas as tentativas
-   * ficam num slow só.
+   * O d20 do garimpeiro numa porta fechada da rota, rolado antes de chegar nela (sem parar a
+   * corrida). Ele sempre arromba, numa tentativa só. `null` se a partida recomeçou.
    */
-  private async chaseDoor(door: Door, enemyId: string, distance: () => number, addDistance: (delta: number) => void): Promise<void> {
+  private async chaseDoorRoll(door: Door, enemyId: string): Promise<FleeDoorResult | null> {
     const name = this.enemy(enemyId)!.name;
     const current = this.doors().get(hexKey(door.hex)) ?? door;
-    const release = this.holdSlow();
-    try {
-      await this.fleeDoorTries(current, door, name, distance, addDistance);
-    } finally {
-      release();
-    }
+    const need = fleeDoorNeed(current);
+    // alguém abriu no meio do caminho: passa direto
+    if (need <= 0) return resolveFleeDoor(current, CHASE_RULES.die);
+    this.say(`${name} vai arrombar a porta!`, 'info');
+    const r = await this.rollD20(
+      { kicker: 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: 'Arrombou', failText: 'Bateu na porta', side: 'enemy' },
+      (roll) => roll >= need,
+      800,
+    );
+    return r ? resolveFleeDoor(current, r.roll) : null;
   }
 
-  /** As tentativas dele na porta, até passar (ou ela o alcançar). */
-  private async fleeDoorTries(
-    current: Door,
-    door: Door,
-    name: string,
-    distance: () => number,
-    addDistance: (delta: number) => void,
-  ): Promise<void> {
-    const board = this.board!;
-    for (;;) {
-      this.say(`${name} tenta arrombar a porta`, 'info');
-      const need = fleeDoorNeed(current);
-      const r = await this.rollD20(
-        { kicker: 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: 'Arrombou', failText: 'Travou', side: 'enemy' },
-        (roll) => roll >= need,
-        800,
-      );
-      if (!r) return;
-      const res = resolveFleeDoor(current, r.roll);
-      if (res.pass) {
-        this.sound.play('porta.chute-ok', { at: door.hex });
-        this.doors.update((m) => new Map(m).set(hexKey(door.hex), res.door));
-        board.setDoors(this.doors());
-        return;
-      }
-      this.sound.play('porta.chute-falha', { at: door.hex });
-      addDistance(res.delta);
-      if (distance() <= 0) return;
-      current = res.door;
+  /** Ele chegou na porta com o dado já rolado: trombada (segue correndo) ou bateu (agarrado). */
+  private chaseDoorHit(door: Door, enemyId: string, res: FleeDoorResult): void {
+    const name = this.enemy(enemyId)!.name;
+    if (res.pass) {
+      // já estava aberta (ninguém trombou em nada)
+      if (this.doors().get(hexKey(door.hex)) === res.door) return;
+      this.sound.play('porta.chute-ok', { at: door.hex });
+      this.gamepad.rumble(0.7, 0.4, 200);
+      this.doors.update((m) => new Map(m).set(hexKey(door.hex), res.door));
+      this.board?.setDoors(this.doors());
+      this.say(`${name} trombou na porta e passou!`, 'alert');
+      return;
     }
+    this.sound.play('porta.chute-falha', { at: door.hex });
+    this.gamepad.rumble(0.9, 0.6, 260);
+    this.say(`${name} bateu na porta e não passou!`, 'alert');
   }
 
   /**
@@ -2508,7 +2516,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   ): Promise<{ roll: number; pass: boolean } | null> {
     // só as escolhas do jogador desaceleram: o dado da equipe que vem logo depois de uma (a
     // iniciativa depois da escolha de alvo) emenda no mesmo slow; os do garimpeiro só quando
-    // quem chama segura o slow (o arrombamento dele na porta, ver `chaseDoor`)
+    // quem chama segura o slow (a porta dele, ver `doorAhead` em `chaseSteps`)
     const release = view.side !== 'enemy' && this.slowActive() ? this.holdSlow() : undefined;
     try {
       return await this.rollD20Sheet(view, passes, autoMs);

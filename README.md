@@ -480,9 +480,10 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    **Caixote.** Onde a pista do agente contorna um caixote de meia altura, o jogador tem **2 s**
    para pular por cima (toque/arrasto para cima, ↑/W, ✕). Pulou: d20 + agilidade ≥ 8 corta a
    volta; tropeçou, +1. Sem pular, dá a volta como ele, sem rolar.
-5. **Porta.** O garimpeiro sempre tenta arrombar: d20 ≥ 3 (encostada) ou ≥ 12 (trancada), em
-   **slow**. Falhou, perde tempo (−1) e tenta de novo. Passou, a porta fica arrombada e o agente
-   passa direto.
+5. **Porta.** O garimpeiro sempre tenta arrombar, sem parar: o d20 sai 3 hexágonos antes da
+   porta (≥ 3 encostada, ≥ 12 trancada) e a 2 hexágonos entra o **slow**. Passou, ele dá uma
+   trombada, a porta fica arrombada e ele segue correndo. Falhou, bate na porta e é agarrado ali,
+   sem tentar de novo.
    **Grito.** Em cada trecho (entre paradas) o jogador pode gritar uma vez: botão **Gritar!** (G no
    teclado, □ no controle). Ninguém para, mas entra o **slow**. **Disputa:** os dois dados rolam
    juntos, o do agente (d20 + intimidação) e o do suspeito (d20). Agente maior **ou empate**: ele

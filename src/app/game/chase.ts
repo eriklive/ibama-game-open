@@ -21,8 +21,10 @@
  *    vira a "pista" e não muda mais. **Curvas não param nada nem rolam dados:** o agente vai
  *    atrás dele direto. Dados só nos testes de verdade, as **paradas**:
  *    - **porta** fechada no caminho: o garimpeiro sempre tenta arrombar, com um d20
- *      (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta fica
- *      arrombada e o agente passa direto.
+ *      (`resolveFleeDoor`), sem parar a corrida. O dado sai `doorRollLead` hexágonos antes da
+ *      porta e o slow entra a `doorSlowLead`. Passou: ele dá uma trombada, a porta fica
+ *      arrombada e ele segue correndo. Falhou: bate na porta e é agarrado ali, sem segunda
+ *      chance.
  *    - **pulo** (`agentVaults`): onde a pista do agente dá a volta num caixote de meia altura
  *      (o garimpeiro não pula, contorna), o agente tem `vaultSeconds` para pular por cima.
  *      Pulou: d20 + agilidade ≥ `vaultDC` (`resolveVault`) corta caminho (a distância cai o que
@@ -68,6 +70,10 @@ export const CHASE_RULES = {
   seenCost: 6,
   /** Garimpeiro numa porta fechada: sempre arromba; o que ele precisa tirar no d20. */
   doorNeed: { encostada: 3, trancada: 12 },
+  /** A quantos hexágonos da porta o d20 dele sai (correndo, sem parar). */
+  doorRollLead: 3,
+  /** A quantos hexágonos da porta entra o slow (até ele chegar nela e o dado decidir). */
+  doorSlowLead: 2,
   /** Grito ("Parado, Ibama!"): ganhou a disputa, ele olha para trás e a distância cai isto. */
   shoutDelta: -1,
   /** Caixote de meia altura: tempo (s, relógio real) para escolher pular. */
@@ -409,17 +415,18 @@ export function fleeDoorNeed(door: Door): number {
 export interface FleeDoorResult {
   need: number;
   pass: boolean;
-  /** A porta depois da tentativa (arrombada; igual se falhou). */
+  /** A porta depois da tentativa (arrombada; igual se falhou ou já estava aberta). */
   door: Door;
-  /** Falhou: perdeu tempo, a distância cai 1 e ele tenta de novo. */
-  delta: number;
+  /** Falhou: bateu na porta e é agarrado ali (sem tentar de novo). */
+  caught: boolean;
 }
 
-/** Uma tentativa do garimpeiro de arrombar uma porta fechada da rota: o d20 resolve. */
+/** A trombada do garimpeiro numa porta fechada da rota: o d20 resolve, numa tentativa só. */
 export function resolveFleeDoor(door: Door, d20: number): FleeDoorResult {
   const need = fleeDoorNeed(door);
   const pass = need !== Infinity && d20 >= need;
-  return { need, pass, door: pass ? { ...door, broken: true } : door, delta: pass ? 0 : -1 };
+  const after = pass && !isOpen(door) ? { ...door, broken: true } : door;
+  return { need, pass, door: after, caught: !pass };
 }
 
 // ---------- grito ----------
