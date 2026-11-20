@@ -69,9 +69,9 @@ const STAT_TEXT: Record<
   agilidade: {
     name: 'Agilidade',
     aria: 'agilidade',
-    on: 'nas curvas',
-    off: 'Curvas sem modificador',
-    field: 'Curvas',
+    on: 'no pulo',
+    off: 'Pulo sem modificador',
+    field: 'Pulo',
   },
 };
 

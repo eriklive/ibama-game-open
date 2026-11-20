@@ -5,7 +5,7 @@
  * - **Intimidação:** cada ponto vale +1 no raio de abordagem; a zona de rolagem e a de fuga
  *   se afastam junto (ver `approachRulesFor`). No interrogatório, a da ficha sobe a CD.
  * - **Iniciativa:** perseguição: soma no raio e no d20 para arrancar (ver `chase.ts`).
- * - **Agilidade:** perseguição: soma no d20 das curvas.
+ * - **Agilidade:** perseguição: soma no d20 do pulo por cima do caixote.
  *
  * A classe dá a base (Capitão +1 de iniciativa, Agente +1 de agilidade; ver
  * `CLASS_RULES.baseStats`) e o ponto livre pode ir em qualquer um dos quatro. Grupo e Liderança

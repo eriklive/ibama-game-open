@@ -18,7 +18,7 @@ export const CHASE_MUSIC = {
   level: 0.9,
   fadeIn: 0.3,
   fadeOut: 1.2,
-  /** Curva, porta, escolha: a fita cai para isto (tempo e tom juntos). */
+  /** Caixote, porta, escolha: a fita cai para isto (tempo e tom juntos). */
   slowRate: CHASE_SLOWMO.rate,
   slowRamp: CHASE_SLOWMO.slowRamp,
   /** Na decisão a fita volta rápido, no mesmo ponto da faixa. */
@@ -160,7 +160,7 @@ export class Sound {
     this.ambience.setApproach(true);
   }
 
-  /** Curva, porta ou escolha: a fita cai para o ultra slow (`true`) ou volta (`false`). */
+  /** Caixote, porta ou escolha: a fita cai para o ultra slow (`true`) ou volta (`false`). */
   chaseSlow(on: boolean): void {
     this.music?.setRate(on ? CHASE_MUSIC.slowRate : 1, on ? CHASE_MUSIC.slowRamp : CHASE_MUSIC.resumeRamp);
   }

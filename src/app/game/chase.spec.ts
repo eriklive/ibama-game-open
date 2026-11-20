@@ -16,15 +16,10 @@ import {
   initiativeChance,
   initiativeCheck,
   lockRoute,
-  resolveCurve,
-  resolveEnemyCurve,
   resolveFleeDoor,
   resolveShout,
-  shoutResistNeed,
-  agentCurves,
   agentVaults,
   resolveVault,
-  routeCurves,
   routeStops,
   targetChoices,
 } from './chase';
@@ -160,57 +155,18 @@ describe('initiativeCheck', () => {
   });
 });
 
-describe('routeCurves', () => {
-  it('reta para o sul ou para o oeste (zigue-zague do grid) não tem curva', () => {
-    expect(routeCurves(line(h(5, 1), 8, 0, 1))).toEqual([]);
-    expect(routeCurves(line(h(12, 5), 8, -1, 0))).toEqual([]);
-  });
-  it('L: desce e vira para o leste = curva à esquerda de quem corre', () => {
-    const pts = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
-    const curves = routeCurves(pts);
-    expect(curves.length).toBe(1);
-    expect(curves[0].side).toBe('esquerda');
-    expect(Math.abs(curves[0].index - 5)).toBeLessThanOrEqual(1);
-  });
-  it('desce e vira para o oeste = direita', () => {
-    const pts = [...line(h(10, 1), 6, 0, 1), ...line(h(9, 6), 5, -1, 0)];
-    expect(routeCurves(pts).map((c) => c.side)).toEqual(['direita']);
-  });
-});
-
 describe('routeStops', () => {
-  it('porta fechada vira parada e substitui a curva no mesmo hexágono', () => {
+  it('só portas fechadas param; curva não é parada', () => {
     const pts = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
-    const corner = routeCurves(pts)[0].index;
-    const d = door(pts[corner], 'encostada');
+    expect(routeStops(pts)).toEqual([]);
+    const d = door(pts[5], 'encostada');
     const stops = routeStops(pts, new Map([[hexKey(d.hex), d]]));
-    expect(stops.map((s) => s.kind)).toEqual(['porta']);
+    expect(stops).toMatchObject([{ kind: 'porta', index: 5 }]);
   });
   it('porta aberta não para', () => {
     const pts = line(h(5, 1), 6, 0, 1);
     const d = door(pts[3], 'aberta');
     expect(routeStops(pts, new Map([[hexKey(d.hex), d]]))).toEqual([]);
-  });
-});
-
-describe('agentCurves', () => {
-  it('a curva é do agente: índice na pista dele, inclusive no trecho até o garimpeiro', () => {
-    // o agente desce até o garimpeiro e a fuga segue reto; quem dobra é o agente
-    const track = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
-    const curves = agentCurves(track, 8);
-    expect(curves.map((c) => c.side)).toEqual(['esquerda']);
-    expect(curves[0].index).toBe(routeCurves(track)[0].index);
-  });
-  it('pista toda reta: nada de esquerda ou direita', () => {
-    expect(agentCurves(line(h(5, 1), 12, 0, 1), 4)).toEqual([]);
-  });
-  it('curva colada numa porta fechada da fuga não conta', () => {
-    const track = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
-    const corner = routeCurves(track)[0].index;
-    const fleeStart = 2;
-    const d = door(track[corner], 'encostada');
-    const stops = routeStops(track.slice(fleeStart), new Map([[hexKey(d.hex), d]]));
-    expect(agentCurves(track, fleeStart, stops)).toEqual([]);
   });
 });
 
@@ -292,33 +248,6 @@ describe('lockRoute', () => {
   });
 });
 
-describe('resolveCurve', () => {
-  const base = { side: 'direita' as const, agent: {} };
-  const cases: [string, 'direita' | 'esquerda' | null, number, number][] = [
-    ['bateu', 'esquerda', 20, 1],
-    ['não deslizou', null, 20, 1],
-    ['certo, falhou', 'direita', 3, 0],
-    ['certo, passou', 'direita', 6, -1],
-  ];
-  for (const [name, swiped, agentRoll, delta] of cases) {
-    it(name, () => expect(resolveCurve({ ...base, swiped, agentRoll }).delta).toBe(delta));
-  }
-  it('agilidade soma no d20 do agente', () => {
-    const r = resolveCurve({ ...base, swiped: 'direita', agentRoll: 4, agent: { agilidade: 2 } });
-    expect(r).toMatchObject({ agentPass: true, delta: -1 });
-  });
-});
-
-describe('resolveEnemyCurve', () => {
-  it('só ele rola: escorregou encosta 1, passou não muda', () => {
-    expect(resolveEnemyCurve(2, {})).toEqual({ pass: false, delta: -1 });
-    expect(resolveEnemyCurve(6, {})).toEqual({ pass: true, delta: 0 });
-  });
-  it('agilidade dele soma no d20', () => {
-    expect(resolveEnemyCurve(4, { agilidade: 2 }).pass).toBe(true);
-  });
-});
-
 describe('porta na fuga', () => {
   it('d4 1–2 abre, 3–4 arromba', () => {
     expect([1, 2, 3, 4].map(fleeDoorAction)).toEqual(['abrir', 'abrir', 'arrombar', 'arrombar']);
@@ -342,16 +271,15 @@ describe('porta na fuga', () => {
 });
 
 describe('grito', () => {
-  it('o agente precisa de d20 + vigor ≥ 8 para gritar', () => {
-    expect(resolveShout(7, {}, 1).shouted).toBe(false);
-    expect(resolveShout(7, {}, 1).delta).toBe(0);
-    expect(resolveShout(6, { vigor: 2 }, 1).shouted).toBe(true);
+  it('um teste só: d20 + intimidação ≥ 16, ele olha para trás (−1)', () => {
+    expect(CHASE_RULES.shoutDC).toBe(16);
+    expect(resolveShout(15, {})).toEqual({ total: 15, lookedBack: false, delta: 0 });
+    expect(resolveShout(16, {})).toEqual({ total: 16, lookedBack: true, delta: -1 });
+    expect(resolveShout(13, { intimidacao: 3 }).lookedBack).toBe(true);
+    expect(resolveShout(12, { intimidacao: 3 }).lookedBack).toBe(false);
   });
-  it('gritou: ele precisa de 4 + intimidação no d20, senão olha para trás (−1)', () => {
-    expect(shoutResistNeed({ intimidacao: 3 })).toBe(7);
-    expect(resolveShout(10, { intimidacao: 3 }, 6)).toEqual({ shouted: true, lookedBack: true, delta: -1 });
-    expect(resolveShout(10, { intimidacao: 3 }, 7)).toEqual({ shouted: true, lookedBack: false, delta: 0 });
-    expect(resolveShout(10, {}, 3).lookedBack).toBe(true);
+  it('vigor não conta no grito', () => {
+    expect(resolveShout(14, { vigor: 5 }).lookedBack).toBe(false);
   });
 });
 
@@ -384,15 +312,9 @@ describe('rotas no Aeroporto', () => {
     expect(r.flee.filter((p) => sight.has(hexKey(p))).length).toBeLessThan(r.flee.length / 3);
     expect(area.isEdge(r.flee.at(-1)!)).toBe(true);
   });
-  it('trilha na mata: o zigue-zague vira poucas curvas, espaçadas', () => {
+  it('trilha na mata: as curvas não viram paradas', () => {
     const r = route(h(11, 21), h(15, 21));
-    expect(r.stops.length).toBeGreaterThan(0);
-    expect(r.stops.length).toBeLessThanOrEqual(3);
-    r.stops
-      .slice(1)
-      .forEach((s, i) =>
-        expect(s.index - r.stops[i].index).toBeGreaterThanOrEqual(CHASE_RULES.curveSpacing),
-      );
+    expect(r.stops.every((s) => s.kind === 'porta')).toBe(true);
   });
   it('casa: sai pela porta encostada, que é a primeira parada', () => {
     const r = route(h(33, 28), h(31, 28));

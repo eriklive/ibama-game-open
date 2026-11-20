@@ -18,26 +18,22 @@
  *    de passos (`lockRoute`). Ele evita o que os agentes enxergam (`agentSight`): prefere correr
  *    por dentro das construções ou pela mata a atravessar a pista à vista. Passa só por portas
  *    que consegue usar (abertas, encostadas, trancadas e portões; bloqueada é parede). A rota
- *    vira a "pista" e não muda mais. Nela ficam as **paradas**:
- *    - **curva** (mudança de direção na pista do agente, ver `agentCurves`): uma
- *      `decisao:perseguicao`, pedida quando o **agente** chega nela. O agente precisa deslizar
- *      para o lado da curva e rolar d20 + agilidade (`resolveCurve`). Nas curvas da rota de
- *      fuga quem rola é o garimpeiro, sozinho e sem lado a escolher (`resolveEnemyCurve`);
+ *    vira a "pista" e não muda mais. **Curvas não param nada nem rolam dados:** o agente vai
+ *    atrás dele direto. Dados só nos testes de verdade, as **paradas**:
  *    - **porta** fechada no caminho: o garimpeiro rola d4 para escolher abrir ou arrombar e d20
  *      para conseguir (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta
- *      fica aberta e o agente passa direto. A porta substitui a curva naquele hexágono.
+ *      fica aberta e o agente passa direto.
  *    - **pulo** (`agentVaults`): onde a pista do agente dá a volta num caixote de meia altura
  *      (o garimpeiro não pula, contorna), o agente tem `vaultSeconds` para pular por cima.
  *      Pulou: d20 + agilidade ≥ `vaultDC` (`resolveVault`) corta caminho (a distância cai o que
- *      a volta custaria) e pula as curvas da volta; falhou, tropeça (+1) e dá a volta. Sem
- *      pular, dá a volta como ele, sem rolar.
+ *      a volta custaria); falhou, tropeça (+1) e dá a volta. Sem pular, dá a volta como ele,
+ *      sem rolar.
  * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
  *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
- *    - **grito** (`resolveShout`): uma vez por trecho reto, o jogador pode gritar, sem parar a
- *      corrida (os dados rolam com os dois correndo). O agente rola
- *      d20 + vigor ≥ 8 para conseguir; gritou, ele rola d20 e precisa de 4 + intimidação do
- *      agente, senão olha para trás e a distância cai 1.
+ *    - **grito** (`resolveShout`): uma vez por trecho (entre paradas), o jogador pode gritar,
+ *      sem parar a corrida. Um teste só: o agente rola d20 + intimidação ≥ `shoutDC` (16);
+ *      passou, ele olha para trás e a distância cai 1.
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
  *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
@@ -69,31 +65,16 @@ export const CHASE_RULES = {
   sightRange: 20,
   /** Custo extra de cada hexágono que um agente enxerga: ele dá a volta pela mata ou por dentro. */
   seenCost: 6,
-  /** Curva: d20 + agilidade, pelo menos isto. Vale para agente e garimpeiro. */
-  curveDC: 6,
-  /**
-   * Hexágonos antes da curva dele em que o garimpeiro já rola o d20: o resultado está pronto
-   * quando ele pisa nela, e a corrida não para.
-   */
-  enemyCurveLead: 3,
-  /** Tempo (s, relógio real) para deslizar na curva antes de contar como "não deslizou". */
-  swipeSeconds: 2,
-  /** Ângulo mínimo (graus) entre dois trechos retos da rota para contar como curva. */
-  curveAngle: 40,
-  /** Passos mínimos entre duas curvas (e da largada à primeira): trilha sinuosa vira uma curva só. */
-  curveSpacing: 3,
   /** Garimpeiro numa porta fechada: d4 1–2 tenta abrir, 3–4 arromba. */
   doorChoiceDie: 4,
   doorOpenMax: 2,
   /** O que ele precisa tirar no d20 em cada caso. Trancada + abrir usa a fechadura da porta. */
   doorNeed: { abrirEncostada: 3, arrombarEncostada: 3, arrombarTrancada: 12 },
   /**
-   * Grito ("Parado, Ibama!"): uma vez por trecho reto (entre paradas). O agente rola d20 + vigor
-   * e precisa disto para conseguir gritar correndo (fôlego).
+   * Grito ("Parado, Ibama!"): uma vez por trecho (entre paradas). O agente rola
+   * d20 + intimidação e precisa disto para ele olhar para trás.
    */
-  shoutDC: 8,
-  /** Ele resiste ao grito tirando no d20 pelo menos isto + a intimidação do agente. */
-  shoutResistBase: 4,
+  shoutDC: 16,
   /** Caixote de meia altura: tempo (s, relógio real) para escolher pular. */
   vaultSeconds: 2,
   /** Pulo por cima do caixote: d20 + agilidade, pelo menos isto. */
@@ -111,7 +92,7 @@ export interface ChaseStats {
   vigor?: number;
   iniciativa?: number;
   agilidade?: number;
-  /** Só o do agente conta (no grito). */
+  /** Só o do agente conta (no grito: d20 + intimidação). */
   intimidacao?: number;
 }
 
@@ -223,9 +204,8 @@ export function initiativeChance(agent: ChaseStats = {}): number {
 
 // ---------- rota travada ----------
 
-export type ChaseStop =
-  | { kind: 'curva'; index: number; hex: HexCoord; side: Side }
-  | { kind: 'porta'; index: number; hex: HexCoord; door: Door };
+/** Parada da rota de fuga: só portas fechadas (curvas não param). */
+export type ChaseStop = { kind: 'porta'; index: number; hex: HexCoord; door: Door };
 
 export interface ChaseRoute {
   /** Fuga do garimpeiro (sem a origem), inteira até a borda. */
@@ -338,62 +318,7 @@ const worldDelta = (a: HexCoord, b: HexCoord): [number, number] => {
   return [q.x - p.x, q.z - p.z];
 };
 
-/**
- * Pontos onde a rota dobra. No grid de topo chato, andar "para o oeste" já é um zigue-zague de
- * vizinhos; por isso a rota é simplificada em trechos retos (Ramer–Douglas–Peucker no plano) e
- * só conta como curva o vértice em que a direção muda pelo menos `curveAngle` graus. Curvas a
- * menos de `curveSpacing` passos da anterior (ou da largada) não contam: numa trilha sinuosa,
- * um zigue-zague é uma curva só. `points` inclui a origem. Os índices devolvidos são de `points`.
- */
-export function routeCurves(points: readonly HexCoord[]): { index: number; side: Side }[] {
-  if (points.length < 3) return [];
-  const w = points.map((h) => hexToWorld(h, 1));
-  const keep = simplify(w, 0, w.length - 1, 0.75);
-  const idx = [0, ...keep, w.length - 1].sort((a, b) => a - b);
-  const out: { index: number; side: Side }[] = [];
-  const minCos = Math.cos((CHASE_RULES.curveAngle * Math.PI) / 180);
-  for (let i = 1; i < idx.length - 1; i++) {
-    const [a, b, c] = [w[idx[i - 1]], w[idx[i]], w[idx[i + 1]]];
-    const f = { x: b.x - a.x, z: b.z - a.z };
-    const g = { x: c.x - b.x, z: c.z - b.z };
-    const cos = (f.x * g.x + f.z * g.z) / (Math.hypot(f.x, f.z) * Math.hypot(g.x, g.z));
-    if (cos > minCos) continue;
-    if (idx[i] - (out.at(-1)?.index ?? 0) < CHASE_RULES.curveSpacing) continue;
-    // y para cima, x a leste, z ao sul: produto vetorial positivo = virou à direita
-    const cross = f.x * g.z - f.z * g.x;
-    out.push({ index: idx[i], side: cross > 0 ? 'direita' : 'esquerda' });
-  }
-  return out;
-}
-
-/** Índices (internos) que o Ramer–Douglas–Peucker mantém entre `i` e `j`. */
-function simplify(
-  w: readonly { x: number; z: number }[],
-  i: number,
-  j: number,
-  eps: number,
-): number[] {
-  let worst = -1;
-  let dist = eps;
-  const a = w[i];
-  const b = w[j];
-  const len = Math.hypot(b.x - a.x, b.z - a.z) || 1;
-  for (let k = i + 1; k < j; k++) {
-    const d = Math.abs((b.x - a.x) * (a.z - w[k].z) - (a.x - w[k].x) * (b.z - a.z)) / len;
-    if (d > dist) {
-      dist = d;
-      worst = k;
-    }
-  }
-  if (worst < 0) return [];
-  return [...simplify(w, i, worst, eps), worst, ...simplify(w, worst, j, eps)];
-}
-
-/**
- * Paradas da rota (`points` com a origem): curvas e portas fechadas, em ordem. Perto de uma
- * porta fechada (menos de `curveSpacing` passos) a parada é só a porta, mesmo que a rota dobre
- * ali. Índices são de `points`.
- */
+/** Paradas da rota (`points` com a origem): as portas fechadas, em ordem. Índices são de `points`. */
 export function routeStops(
   points: readonly HexCoord[],
   doors: ReadonlyMap<string, Door> = new Map(),
@@ -403,31 +328,7 @@ export function routeStops(
     const door = doors.get(hexKey(hex));
     if (index > 0 && door && !isOpen(door)) stops.push({ kind: 'porta', index, hex, door });
   });
-  // curva colada numa porta (antes ou depois) é a própria porta
-  const nearDoor = (i: number) =>
-    stops.some((d) => Math.abs(d.index - i) < CHASE_RULES.curveSpacing);
-  for (const { index, side } of routeCurves(points)) {
-    if (!nearDoor(index)) stops.push({ kind: 'curva', index, hex: points[index], side });
-  }
-  return stops.sort((a, b) => a.index - b.index);
-}
-
-/**
- * Curvas do **agente**: onde a pista dele (`track`: a origem dele, o caminho até o garimpeiro e,
- * a partir do índice `fleeStart`, a rota de fuga) dobra. A curva é dele, não do garimpeiro: o
- * lado só é pedido quando o agente chega nela. Curvas coladas numa porta fechada da rota de fuga
- * (`doorStops`, índices de `[origem do garimpeiro, ...fuga]`) não contam, como em `routeStops`.
- * Os índices devolvidos são de `track`.
- */
-export function agentCurves(
-  track: readonly HexCoord[],
-  fleeStart: number,
-  doorStops: readonly ChaseStop[] = [],
-): { index: number; side: Side }[] {
-  return routeCurves(track).filter(
-    ({ index }) =>
-      !doorStops.some((d) => d.kind === 'porta' && Math.abs(fleeStart + d.index - index) < CHASE_RULES.curveSpacing),
-  );
+  return stops;
 }
 
 /** Atalho do agente por cima de um caixote de meia altura (índices de `track`). */
@@ -492,50 +393,6 @@ export function agentVaults(
 
 // ---------- paradas ----------
 
-export interface CurveInput {
-  /** Lado da curva. */
-  side: Side;
-  /** Para onde o jogador deslizou (`null`: não deslizou a tempo). */
-  swiped: Side | null;
-  /** d20 do agente (ignorado se ele bateu). */
-  agentRoll: number;
-  agent: ChaseStats;
-}
-
-export interface CurveResult {
-  /** Deslizou errado ou não deslizou: bateu, voltou para a rota certa. */
-  crashed: boolean;
-  /** O agente fez a curva fechada (só se não bateu). */
-  agentPass: boolean;
-  /** Mudança na distância (negativo = o agente chegou mais perto). */
-  delta: number;
-}
-
-/**
- * Curva (só o agente rola): bater = +1; lado certo e d20 + agilidade ≥ 6 = −1; falhou = 0.
- */
-export function resolveCurve(i: CurveInput): CurveResult {
-  const crashed = i.swiped !== i.side;
-  const agentPass = !crashed && i.agentRoll + (i.agent.agilidade ?? 0) >= CHASE_RULES.curveDC;
-  const delta = crashed ? 1 : agentPass ? -1 : 0;
-  return { crashed, agentPass, delta };
-}
-
-/**
- * Curva **do garimpeiro** (na rota de fuga dele): só ele rola d20 + agilidade, sem lado para o
- * jogador escolher. Escorregou (< `curveDC`) = −1 na distância; passou = 0.
- */
-/** Resultado da curva do garimpeiro: passou, e a mudança na distância (−1 se escorregou). */
-export interface EnemyCurveResult {
-  pass: boolean;
-  delta: number;
-}
-
-export function resolveEnemyCurve(roll: number, enemy: ChaseStats): EnemyCurveResult {
-  const pass = roll + (enemy.agilidade ?? 0) >= CHASE_RULES.curveDC;
-  return { pass, delta: pass ? 0 : -1 };
-}
-
 /**
  * Pulo do caixote (só o agente rola): d20 + agilidade ≥ `vaultDC` corta caminho (a distância cai
  * `saves`); falhou, tropeça e dá a volta (+`vaultFailDelta`).
@@ -586,27 +443,22 @@ export function resolveFleeDoor(door: Door, d4: number, d20: number): FleeDoorRe
 
 // ---------- grito ----------
 
-/** O que ele precisa tirar no d20 para ignorar o grito: 4 + intimidação do agente. */
-export const shoutResistNeed = (agent: ChaseStats = {}): number =>
-  CHASE_RULES.shoutResistBase + (agent.intimidacao ?? 0);
-
 export interface ShoutResult {
-  /** O agente conseguiu gritar (d20 + vigor ≥ `shoutDC`). */
-  shouted: boolean;
-  /** Ele olhou para trás (não resistiu): a distância cai 1. */
+  /** d20 + intimidação do agente. */
+  total: number;
+  /** Ele olhou para trás: a distância cai 1. */
   lookedBack: boolean;
   delta: number;
 }
 
 /**
- * Grito na perseguição: o agente rola d20 + vigor (pelo menos `shoutDC`) para gritar. Gritou,
- * ele rola d20 e precisa de 4 + intimidação do agente para ignorar; não conseguiu, olha para
- * trás e o agente encosta (−1). `enemyRoll` é ignorado se o agente não gritou.
+ * Grito na perseguição: um teste só. O agente rola d20 + intimidação; pelo menos `shoutDC` (16),
+ * ele olha para trás e o agente encosta (−1).
  */
-export function resolveShout(agentRoll: number, agent: ChaseStats, enemyRoll: number): ShoutResult {
-  const shouted = agentRoll + (agent.vigor ?? 0) >= CHASE_RULES.shoutDC;
-  const lookedBack = shouted && enemyRoll < shoutResistNeed(agent);
-  return { shouted, lookedBack, delta: lookedBack ? -1 : 0 };
+export function resolveShout(roll: number, agent: ChaseStats = {}): ShoutResult {
+  const total = roll + (agent.intimidacao ?? 0);
+  const lookedBack = total >= CHASE_RULES.shoutDC;
+  return { total, lookedBack, delta: lookedBack ? -1 : 0 };
 }
 
 // ---------- fim ----------

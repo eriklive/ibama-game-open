@@ -134,7 +134,7 @@ export interface EnemySpawn {
   hidden?: boolean;
   /** Id do inimigo escondido que este suspeito pode entregar no interrogatório. */
   reveals?: string;
-  /** Agilidade na perseguição (curvas; ver `chase.ts`). Sem ela, 0. */
+  /** Agilidade na perseguição (sem uso por ora: as curvas não rolam mais; ver `chase.ts`). Sem ela, 0. */
   agilidade?: number;
 }
 

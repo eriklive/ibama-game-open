@@ -44,7 +44,7 @@ equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a 
   rolagem e a de fuga se afastam junto.
 - **Iniciativa** e **Agilidade** (Modo Perseguição, em construção; regras em `src/app/game/chase.ts`):
   a iniciativa soma no raio de perseguição e no d20 para arrancar (8 ou mais); a agilidade soma no
-  d20 das curvas (6 ou mais). A **classe dá a base**: Capitão começa com **+1 de iniciativa**,
+  d20 do pulo por cima do caixote (8 ou mais). A **classe dá a base**: Capitão começa com **+1 de iniciativa**,
   Agente com **+1 de agilidade**.
 - Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
   direita, negativo em vermelho para a esquerda; o tracejado mostra onde o ponto livre pode
@@ -475,22 +475,23 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    dentro das construções ou pela mata a atravessar a pista à vista. Passa por portas que ele
    consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
    número de hexágonos entre eles. Chegou à borda: some do mapa e a perseguição acaba.
-4. **Curva.** Em cada curva o jogo para: o jogador tem **2 s** para deslizar para o lado da curva
-   (toque/arrasto, setas ou A/D, direcional). Lado errado ou nada: **bate** (+1). Lado certo:
-   d20 + agilidade ≥ 6 fecha a curva (−1). O garimpeiro sempre rola a dele (escorregou: −1).
+4. **Curvas não rolam.** O agente vai atrás dele direto, sem parar e sem dado (nem ele, nem o
+   garimpeiro). Dados só nos testes de verdade: **caixote** e **porta**.
+   **Caixote.** Onde a pista do agente contorna um caixote de meia altura, o jogador tem **2 s**
+   para pular por cima (toque/arrasto para cima, ↑/W, ✕). Pulou: d20 + agilidade ≥ 8 corta a
+   volta; tropeçou, +1. Sem pular, dá a volta como ele, sem rolar.
 5. **Porta.** O garimpeiro rola d4 (1–2 abrir, 3–4 arrombar) e d20; falhou, perde tempo (−1) e
    tenta de novo. Passou, a porta fica aberta (ou arrombada) e o agente passa direto.
-   **Grito.** Em cada trecho reto (entre paradas) o jogador pode gritar uma vez: botão
-   **Gritar!** (G no teclado, □ no controle). Ninguém para: os dados rolam com os dois correndo.
-   O agente rola d20 + vigor ≥ 8 para conseguir gritar; gritou, o suspeito rola d20 e precisa de
-   **4 + intimidação do agente** para ignorar. Não conseguiu: olha para trás, a distância cai 1 e
-   o agente encosta ali mesmo, sem parar. Antes da curva ou porta seguinte, o grito termina de rolar.
+   **Grito.** Em cada trecho (entre paradas) o jogador pode gritar uma vez: botão **Gritar!** (G no
+   teclado, □ no controle). Ninguém para. Um teste só: **d20 + intimidação do agente ≥ 16**.
+   Passou: ele olha para trás, a distância cai 1 e o agente encosta ali mesmo. Antes do caixote ou
+   porta seguinte, o grito termina de rolar.
 6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
 
 **Música.** A faixa da perseguição (`public/assets/sounds/perseguicao.mp3`, 11,9 s em loop) entra
-quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. Na curva e na
+quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. No caixote e na
 porta a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
 mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
 `CHASE_MUSIC` (`sound.service.ts`).
@@ -498,8 +499,7 @@ mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os núme
 **Câmera.** Ao arrancar, a câmera desce (~0,8 s) e encosta nas costas do agente, um pouco à
 direita, olhando para o suspeito (atrás 4,4 · altura 2,5 · mira 7 à frente; em retrato, atrás 6,2 ·
 altura 3,6). O FOV abre um pouco e a névoa fecha mais perto. A HUD de papel some (fica o placar
-embaixo) e, na curva, as setas ficam nas bordas da tela, com o meio livre para ver a rota acesa
-dobrar. No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
+embaixo); no caixote, o botão de pular fica na borda, com o meio livre para ver a rota acesa. No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
 
 **Dois fugindo (`decisao:alvo`).** No começo do turno inimigo, se um agente está no raio de dois ou
 mais suspeitos em alerta, ele escolhe qual perseguir: a câmera desce atrás dele olhando para o meio
