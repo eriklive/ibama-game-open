@@ -20,9 +20,9 @@
  *    que consegue usar (abertas, encostadas, trancadas e portões; bloqueada é parede). A rota
  *    vira a "pista" e não muda mais. **Curvas não param nada nem rolam dados:** o agente vai
  *    atrás dele direto. Dados só nos testes de verdade, as **paradas**:
- *    - **porta** fechada no caminho: o garimpeiro rola d4 para escolher abrir ou arrombar e d20
- *      para conseguir (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta
- *      fica aberta e o agente passa direto.
+ *    - **porta** fechada no caminho: o garimpeiro sempre tenta arrombar, com um d20
+ *      (`resolveFleeDoor`). Falhou: perde tempo e tenta de novo. Passou: a porta fica
+ *      arrombada e o agente passa direto.
  *    - **pulo** (`agentVaults`): onde a pista do agente dá a volta num caixote de meia altura
  *      (o garimpeiro não pula, contorna), o agente tem `vaultSeconds` para pular por cima.
  *      Pulou: d20 + agilidade ≥ `vaultDC` (`resolveVault`) corta caminho (a distância cai o que
@@ -66,11 +66,8 @@ export const CHASE_RULES = {
   sightRange: 20,
   /** Custo extra de cada hexágono que um agente enxerga: ele dá a volta pela mata ou por dentro. */
   seenCost: 6,
-  /** Garimpeiro numa porta fechada: d4 1–2 tenta abrir, 3–4 arromba. */
-  doorChoiceDie: 4,
-  doorOpenMax: 2,
-  /** O que ele precisa tirar no d20 em cada caso. Trancada + abrir usa a fechadura da porta. */
-  doorNeed: { abrirEncostada: 3, arrombarEncostada: 3, arrombarTrancada: 12 },
+  /** Garimpeiro numa porta fechada: sempre arromba; o que ele precisa tirar no d20. */
+  doorNeed: { encostada: 3, trancada: 12 },
   /** Grito ("Parado, Ibama!"): ganhou a disputa, ele olha para trás e a distância cai isto. */
   shoutDelta: -1,
   /** Caixote de meia altura: tempo (s, relógio real) para escolher pular. */
@@ -400,43 +397,29 @@ export function resolveVault(roll: number, agent: ChaseStats, saves: number): { 
   return { pass, delta: pass ? -saves : CHASE_RULES.vaultFailDelta };
 }
 
-export type FleeDoorAction = 'abrir' | 'arrombar';
-
-/** O que o garimpeiro tenta na porta, pelo d4. */
-export const fleeDoorAction = (d4: number): FleeDoorAction =>
-  d4 <= CHASE_RULES.doorOpenMax ? 'abrir' : 'arrombar';
-
-/** O que ele precisa tirar no d20 (0 = passa direto; porta aberta ou arrombada). */
-export function fleeDoorNeed(action: FleeDoorAction, door: Door): number {
+/** O que ele precisa tirar no d20 para arrombar (0 = passa direto; porta aberta ou arrombada). */
+export function fleeDoorNeed(door: Door): number {
   if (isOpen(door)) return 0;
   const n = CHASE_RULES.doorNeed;
-  if (door.state === 'encostada')
-    return action === 'abrir' ? n.abrirEncostada : n.arrombarEncostada;
-  if (door.state === 'trancada') return action === 'abrir' ? door.lock : n.arrombarTrancada;
+  if (door.state === 'encostada') return n.encostada;
+  if (door.state === 'trancada') return n.trancada;
   return Infinity; // bloqueada: a rota nem passa por ela
 }
 
 export interface FleeDoorResult {
-  action: FleeDoorAction;
   need: number;
   pass: boolean;
-  /** A porta depois da tentativa (aberta ou arrombada; igual se falhou). */
+  /** A porta depois da tentativa (arrombada; igual se falhou). */
   door: Door;
   /** Falhou: perdeu tempo, a distância cai 1 e ele tenta de novo. */
   delta: number;
 }
 
-/** Uma tentativa do garimpeiro numa porta fechada da rota: d4 escolhe, d20 resolve. */
-export function resolveFleeDoor(door: Door, d4: number, d20: number): FleeDoorResult {
-  const action = fleeDoorAction(d4);
-  const need = fleeDoorNeed(action, door);
+/** Uma tentativa do garimpeiro de arrombar uma porta fechada da rota: o d20 resolve. */
+export function resolveFleeDoor(door: Door, d20: number): FleeDoorResult {
+  const need = fleeDoorNeed(door);
   const pass = need !== Infinity && d20 >= need;
-  const after: Door = !pass
-    ? door
-    : action === 'arrombar'
-      ? { ...door, broken: true }
-      : { ...door, state: 'aberta' };
-  return { action, need, pass, door: after, delta: pass ? 0 : -1 };
+  return { need, pass, door: pass ? { ...door, broken: true } : door, delta: pass ? 0 : -1 };
 }
 
 // ---------- grito ----------
