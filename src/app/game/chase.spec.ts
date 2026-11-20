@@ -271,15 +271,18 @@ describe('porta na fuga', () => {
 });
 
 describe('grito', () => {
-  it('um teste só: d20 + intimidação ≥ 16, ele olha para trás (−1)', () => {
-    expect(CHASE_RULES.shoutDC).toBe(16);
-    expect(resolveShout(15, {})).toEqual({ total: 15, lookedBack: false, delta: 0 });
-    expect(resolveShout(16, {})).toEqual({ total: 16, lookedBack: true, delta: -1 });
-    expect(resolveShout(13, { intimidacao: 3 }).lookedBack).toBe(true);
-    expect(resolveShout(12, { intimidacao: 3 }).lookedBack).toBe(false);
+  it('disputa: agente maior, ele olha para trás (−1)', () => {
+    expect(resolveShout(12, {}, 9)).toEqual({ total: 12, lookedBack: true, delta: -1 });
   });
-  it('vigor não conta no grito', () => {
-    expect(resolveShout(14, { vigor: 5 }).lookedBack).toBe(false);
+  it('empate também: ele olha para trás (−1)', () => {
+    expect(resolveShout(10, {}, 10)).toEqual({ total: 10, lookedBack: true, delta: -1 });
+  });
+  it('ele maior: nada acontece', () => {
+    expect(resolveShout(9, {}, 10)).toEqual({ total: 9, lookedBack: false, delta: 0 });
+  });
+  it('a intimidação do agente soma no d20 dele; vigor não conta', () => {
+    expect(resolveShout(8, { intimidacao: 2 }, 10).lookedBack).toBe(true);
+    expect(resolveShout(8, { vigor: 5 }, 10).lookedBack).toBe(false);
   });
 });
 
