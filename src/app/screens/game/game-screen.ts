@@ -1704,16 +1704,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         hud();
       }
     };
-    // o d4 sai do botão, para rapidinho e a velocidade entra logo depois, sem parar a corrida
-    this.chaseSprint.set({ state: 'ready', roll: null, percent: 0, ms: 0 });
+    // o d20 (teste de vigor) sai do botão, para rapidinho e a velocidade entra logo depois, sem parar a corrida
+    this.chaseSprint.set({ state: 'ready', roll: null, vigor: 0, percent: 0, ms: 0 });
     this.sprintStart = () => {
       const roll = rollDie(CHASE_RULES.sprintDie);
-      const { percent } = resolveSprint(roll, this.chaseStats(agentId));
+      const vigor = this.chaseStats(agentId).vigor ?? 0;
+      const { percent } = resolveSprint(roll, { vigor });
       const ms = sprintTotalMs();
-      const rolling: SprintView = { state: 'rolling', roll, percent, ms };
+      const rolling: SprintView = { state: 'rolling', roll, vigor, percent, ms };
       const active: SprintView = { ...rolling, state: 'active' };
       this.chaseSprint.set(rolling);
-      this.sound.play('dado.2d4');
+      this.sound.play('dado.d20');
       // só mexe no botão se ainda é esta perseguição (ela pode ter acabado no meio)
       const swap = (from: SprintView, to: SprintView) => {
         if (!alive() || this.chaseSprint() !== from) return false;

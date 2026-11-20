@@ -27,7 +27,7 @@
   }
 }
 
-<!-- Perseguição: corrida, uma vez por perseguição. O d4 pula do botão, mostra o bônus e some. -->
+<!-- Perseguição: corrida, uma vez por perseguição. O d20 (teste de vigor) pula do botão, mostra o bônus e some. -->
 @if (hud() && sprint(); as sp) {
   @if (!vault()) {
     <button
@@ -47,7 +47,7 @@
   }
   @if (sp.roll !== null && sp.state !== 'used') {
     <div class="sprint-pop" data-testid="sprint-pop" aria-hidden="true">
-      <app-d4 class="sprint-die" [value]="sp.roll" [duration]="dieMs" />
+      <app-d20 class="sprint-die" [value]="sp.roll" [duration]="dieMs" />
       @if (sp.state === 'active') {
         <span class="sprint-result" data-testid="sprint-result">+{{ sp.percent }}%</span>
       }
