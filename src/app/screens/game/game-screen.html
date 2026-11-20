@@ -446,13 +446,13 @@
     </aside>
   }
 
-  <!-- Perseguição: placar, grito e caixote -->
+  <!-- Perseguição: placar, corrida e caixote -->
   <app-chase-overlay
     [hud]="chaseHud()"
     [vault]="vaultPrompt()"
     [target]="targetView()"
-    [shout]="chaseShout()"
-    (shoutPress)="shout()"
+    [sprint]="chaseSprint()"
+    (sprintPress)="sprint()"
     (vaultPress)="vaultAnswer(true)"
     (targetSide)="targetSide($event)"
     (targetConfirm)="targetConfirm()"

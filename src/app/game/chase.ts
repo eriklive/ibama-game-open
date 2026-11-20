@@ -33,10 +33,11 @@
  * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
  *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
- *    - **grito** (`resolveShout`): uma vez por trecho (entre paradas), o jogador pode gritar,
- *      sem parar a corrida (mas com slow). Disputa: o agente rola d20 + intimidação, ele rola
- *      d20. Agente maior ou empate: ele olha para trás, fica mais lento e a distância cai 1;
- *      ele maior: nada acontece.
+ *    - **corrida** (`resolveSprint`): uma vez por perseguição, o jogador pode dar um gás. Rola
+ *      d4 + vigor e multiplica por 10: o agente fica até 40% mais rápido por `sprintSeconds`,
+ *      sem parar a corrida. Cada hexágono corrido mais rápido que ele vai encostando
+ *      (`sprintGain`); a cada hexágono inteiro ganho, a distância cai 1.
+ *    - **grito** (`resolveShout`): oculto por enquanto (era muita coisa junto com a porta).
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
  *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
@@ -76,6 +77,16 @@ export const CHASE_RULES = {
   doorSlowLead: 2,
   /** Grito ("Parado, Ibama!"): ganhou a disputa, ele olha para trás e a distância cai isto. */
   shoutDelta: -1,
+  /** Corrida (gás): o dado rolado; o resultado + vigor vale `sprintStep` % cada ponto. */
+  sprintDie: 4,
+  sprintStep: 10,
+  /** Corrida: o bônus nunca passa disto (%) nem fica abaixo de `sprintMin`. */
+  sprintMax: 40,
+  sprintMin: 10,
+  /** Corrida: quanto tempo (s, relógio real) a velocidade maior dura. */
+  sprintSeconds: 5,
+  /** Corrida: entrada e saída suaves da velocidade (ms), antes e depois dos `sprintSeconds`. */
+  sprintRampMs: 350,
   /** Caixote de meia altura: tempo (s, relógio real) para escolher pular. */
   vaultSeconds: 2,
   /** Pulo por cima do caixote: d20 + agilidade, pelo menos isto. */
@@ -448,6 +459,43 @@ export function resolveShout(agentRoll: number, agent: ChaseStats, enemyRoll: nu
   const lookedBack = total >= enemyRoll;
   return { total, lookedBack, delta: lookedBack ? CHASE_RULES.shoutDelta : 0 };
 }
+
+// ---------- corrida ----------
+
+export interface SprintResult {
+  /** d4 + vigor. */
+  total: number;
+  /** Quanto mais rápido o agente fica (%), entre `sprintMin` e `sprintMax`. */
+  percent: number;
+}
+
+/** Corrida: d4 + vigor, vezes 10, até 40% (e pelo menos 10%: dar o gás sempre ajuda um pouco). */
+export function resolveSprint(roll: number, agent: ChaseStats): SprintResult {
+  const total = roll + (agent.vigor ?? 0);
+  const percent = Math.min(CHASE_RULES.sprintMax, Math.max(CHASE_RULES.sprintMin, total * CHASE_RULES.sprintStep));
+  return { total, percent };
+}
+
+/**
+ * Corrida: quanto o agente encosta (em hexágonos) a cada hexágono que corre `rate` vezes mais
+ * rápido que ele. No tempo em que ele corre 1, o agente corre `rate`: ganha `rate − 1` em
+ * `rate` hexágonos.
+ */
+export const sprintGain = (rate: number): number => (rate > 1 ? (rate - 1) / rate : 0);
+
+/**
+ * Corrida: o multiplicador de velocidade `ms` depois de começar, com `percent` de bônus. Entra
+ * suave (`sprintRampMs`), segura `sprintSeconds` e sai suave; fora disso, 1.
+ */
+export function sprintRate(percent: number, ms: number): number {
+  const ramp = CHASE_RULES.sprintRampMs;
+  const end = CHASE_RULES.sprintSeconds * 1000 + 2 * ramp;
+  if (percent <= 0 || ms <= 0 || ms >= end) return 1;
+  return 1 + (percent / 100) * Math.min(1, ms / ramp, (end - ms) / ramp);
+}
+
+/** Corrida: quanto dura tudo (ms), com a entrada e a saída. */
+export const sprintTotalMs = (): number => CHASE_RULES.sprintSeconds * 1000 + 2 * CHASE_RULES.sprintRampMs;
 
 // ---------- fim ----------
 
