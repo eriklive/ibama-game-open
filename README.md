@@ -477,9 +477,14 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    número de hexágonos entre eles. Chegou à borda: some do mapa e a perseguição acaba.
 4. **Curvas não rolam.** O agente vai atrás dele direto, sem parar e sem dado (nem ele, nem o
    garimpeiro). Dados só nos testes de verdade: **caixote** e **porta**.
-   **Caixote.** Onde a pista do agente contorna um caixote de meia altura, o jogador tem **2 s**
-   para pular por cima (toque/arrasto para cima, ↑/W, ✕). Pulou: d20 + agilidade ≥ 8 corta a
-   volta; tropeçou, +1. Sem pular, dá a volta como ele, sem rolar.
+   **Caixote.** Onde a pista do agente contorna um caixote de meia altura, entra a **escolha de
+   ação no cenário**, sem prazo: o mundo para, a câmera abre (agente, caixote e a pista dele) e
+   tudo fica cinza, menos o caixote e uma faixa amarela com setas em volta dele (o caminho do
+   garimpeiro). Toque no caixote para **pular** ou na faixa para **dar a volta** (↑/W ou ✕ pula,
+   ↓/S ou ○ dá a volta). A câmera fecha e um **fantasma** do agente faz a ação: pula por cima e se
+   vira para o garimpeiro, ou corre a volta atrás dele. Depois, **Confirmar** (Enter/✕) ou
+   **Trocar** (Esc/○). Pulou: d20 + agilidade ≥ 8 corta a volta; tropeçou, +1. Deu a volta: segue
+   como ele, sem rolar. A cena fica em `vault-scene.ts`.
 5. **Porta.** O garimpeiro sempre tenta arrombar, sem parar: o d20 sai 3 hexágonos antes da
    porta (≥ 3 encostada, ≥ 12 trancada) e a 2 hexágonos entra o **slow**. Passou, ele dá uma
    trombada, a porta fica arrombada e ele segue correndo. Falhou, bate na porta e é agarrado ali,
@@ -502,7 +507,8 @@ mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os núme
 **Câmera.** Ao arrancar, a câmera desce (~0,8 s) e encosta nas costas do agente, um pouco à
 direita, olhando para o suspeito (atrás 4,4 · altura 2,5 · mira 7 à frente; em retrato, atrás 6,2 ·
 altura 3,6). O FOV abre um pouco e a névoa fecha mais perto. A HUD de papel some (fica o placar
-embaixo); no caixote, o botão de pular fica na borda, com o meio livre para ver a rota acesa. No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
+embaixo); no caixote, a câmera abre para a escolha (inclinada 56°, enquadrando o agente, o caixote e
+a pista) e fecha 3/4 de lado na prévia do fantasma (`VAULT_SCENE`, em `vault-scene.ts`). No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
 
 **Dois fugindo (`decisao:alvo`).** No começo do turno inimigo, se um agente está no raio de dois ou
 mais suspeitos em alerta, ele escolhe qual perseguir: a câmera desce atrás dele olhando para o meio

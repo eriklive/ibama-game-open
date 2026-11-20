@@ -7,8 +7,9 @@ import {
   inStructure,
   lowCoverHexes,
   playArea,
+  vaultHexes,
 } from './maps';
-import { agentSight, arrestQueue, lockRoute } from './chase';
+import { agentSight, agentVaults, arrestQueue, lockRoute } from './chase';
 import { isOpen, spawnDoors } from './door';
 import { hexKey } from './hex';
 import { TEST_CASES, findTestCase } from './test-cases';
@@ -75,5 +76,13 @@ describe('casos de teste', () => {
       fixed,
     );
     expect(chase[0].path.length - 1).toBeLessThanOrEqual(2);
+    // na frente da porta ele contorna o caixote de meia altura: a escolha de pular aparece, com
+    // um atalho que não passa à frente dele (o piloto, longe dali, não fecha o caminho)
+    const pilot = c.enemies!['piloto'].hex;
+    const blocked = new Set([...fixed, ...lowCoverHexes(map), hexKey(pilot)]);
+    const track = [clara, ...chase[0].path, ...route.flee];
+    const vaults = agentVaults(track, vaultHexes(map), area, blocked);
+    expect(vaults.map((v) => hexKey(v.over))).toEqual(['14,7']);
+    expect(vaults[0].saves).toBeLessThanOrEqual(chase[0].path.length - 1);
   });
 });

@@ -1,28 +1,30 @@
 <!-- Perseguição: placar (distância e rota dele) -->
 @if (hud(); as h) {
-  <div class="chase-hud" role="status" aria-live="polite" data-testid="chase-hud">
-    <span class="chase-hud-kicker">{{ h.agent }} × {{ h.enemy }}</span>
-    <span class="chase-hud-row">
-      <span class="chase-hud-label">Distância</span>
-      <span class="chase-hud-dots" aria-hidden="true">
-        @for (d of [0, 1, 2, 3, 4, 5, 6, 7]; track d) {
-          @if (d < h.distance) {
-            <i class="on"></i>
-          } @else if (d < 6) {
-            <i></i>
+  @if (!vault()) {
+    <div class="chase-hud" role="status" aria-live="polite" data-testid="chase-hud">
+      <span class="chase-hud-kicker">{{ h.agent }} × {{ h.enemy }}</span>
+      <span class="chase-hud-row">
+        <span class="chase-hud-label">Distância</span>
+        <span class="chase-hud-dots" aria-hidden="true">
+          @for (d of [0, 1, 2, 3, 4, 5, 6, 7]; track d) {
+            @if (d < h.distance) {
+              <i class="on"></i>
+            } @else if (d < 6) {
+              <i></i>
+            }
           }
-        }
+        </span>
+        <strong data-testid="chase-distance">{{ h.distance }}</strong>
       </span>
-      <strong data-testid="chase-distance">{{ h.distance }}</strong>
-    </span>
-    <span class="chase-hud-row">
-      <span class="chase-hud-label">Rota dele</span>
-      <span class="chase-hud-bar" aria-hidden="true"
-        ><i [style.width.%]="h.total ? (100 * h.step) / h.total : 100"></i
-      ></span>
-      <span>{{ h.step }}/{{ h.total }}</span>
-    </span>
-  </div>
+      <span class="chase-hud-row">
+        <span class="chase-hud-label">Rota dele</span>
+        <span class="chase-hud-bar" aria-hidden="true"
+          ><i [style.width.%]="h.total ? (100 * h.step) / h.total : 100"></i
+        ></span>
+        <span>{{ h.step }}/{{ h.total }}</span>
+      </span>
+    </div>
+  }
 }
 
 <!-- Perseguição: grito ("Parado, Ibama!"), uma vez por trecho -->
@@ -40,27 +42,46 @@
   </button>
 }
 
-<!-- Perseguição: caixote de meia altura no caminho. Pular (botão, arrastar para cima) corta a
-     volta; sem pular a tempo, o agente dá a volta como ele. -->
+<!-- Perseguição: escolha no caixote de meia altura. O mundo para e fica cinza, menos o caixote e a
+     faixa da volta (o caminho dele); tocar num dos dois mostra um fantasma do agente fazendo a ação. -->
 @if (vault(); as vt) {
-  <div
-    class="curve"
-    data-testid="vault"
-    role="dialog"
-    aria-label="Caixote: pule por cima para cortar caminho"
-    (pointerdown)="pointer($event)"
-    (pointerup)="pointer($event)"
-  >
-    <div class="curve-head">
-      <span class="curve-kicker">Caixote!</span>
-      <span class="curve-text">pule por cima ou dê a volta</span>
-      <span class="curve-timer" aria-hidden="true"
-        ><i [style.animation-duration.s]="vt.seconds"></i
-      ></span>
-    </div>
-    <button type="button" class="curve-btn vault" data-testid="vault-jump" aria-label="Pular o caixote" (click)="vaultPress.emit()">
-      ↑
-    </button>
+  <div class="vault-scene" data-testid="vault" role="dialog" aria-label="Caixote: pular por cima ou dar a volta">
+    @if (vt.stage === 'choice') {
+      <div class="curve-head vault-head">
+        <span class="curve-kicker">Decisão</span>
+        <span class="curve-text">Ele vai dar a volta no caixote.</span>
+        <span class="vault-hint">Toque no caixote para pular ou no caminho dele para ir atrás.</span>
+      </div>
+      <div class="vault-sr">
+        <button type="button" data-testid="vault-jump" (click)="vaultPick.emit('pular')">Pular o caixote</button>
+        <button type="button" data-testid="vault-around" (click)="vaultPick.emit('volta')">Dar a volta</button>
+      </div>
+    } @else {
+      <div class="vault-card" [class.waiting]="vt.stage === 'preview'" data-testid="vault-preview">
+        <span class="curve-kicker">{{ vt.pick === 'pular' ? 'Pular' : 'Dar a volta' }}</span>
+        <span class="vault-rule">
+          @if (vt.pick === 'pular') {
+            <i>corta {{ vt.saves }} {{ vt.saves === 1 ? 'hexágono' : 'hexágonos' }}</i>
+            <i>d20: {{ vt.need }} ou mais</i>
+            <i>tropeçou: +1</i>
+          } @else {
+            <i>sem teste</i>
+            <i>distância continua igual</i>
+          }
+        </span>
+        <span class="vault-actions">
+          <button type="button" class="vault-btn" data-testid="vault-back" (click)="vaultBack.emit()">Trocar</button>
+          <button
+            type="button"
+            class="vault-btn go"
+            data-testid="vault-confirm"
+            [disabled]="vt.stage !== 'confirm'"
+            (click)="vaultConfirm.emit()">
+            Confirmar
+          </button>
+        </span>
+      </div>
+    }
   </div>
 }
 

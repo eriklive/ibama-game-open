@@ -28,13 +28,15 @@ export const TEST_CASES: readonly TestCase[] = [
   {
     id: 'fuga-aeroporto',
     name: 'Fuga pelo aeroporto',
-    hint: 'Clara aborda o vigia, que foge por dentro do hangar e sai pelos fundos, pela esquerda. Começa na perseguição.',
+    hint: 'Clara aborda o vigia, que foge por dentro do hangar e sai pelos fundos, pela esquerda, contornando o caixote de meia altura (escolha: pular ou dar a volta). Começa na perseguição.',
     mapId: 'aeroporto',
     active: 'clara',
     // na frente do portão do hangar, na ponta da esquerda: ele entra correndo, cruza o hangar
     // por dentro, sai pela porta dos fundos do oeste (trancada) e some pela trilha da esquerda
     agents: { clara: { col: 15, row: 21 } },
-    enemies: { 'vigia-pista': { hex: { col: 16, row: 19 }, status: 'alert' } },
+    // o piloto, que vagueia por ali, fica longe da porta: parado atrás do caixote de meia
+    // altura, ele fecharia o atalho por cima dele (e a escolha de pular não apareceria)
+    enemies: { 'vigia-pista': { hex: { col: 16, row: 19 }, status: 'alert' }, piloto: { hex: { col: 20, row: 6 } } },
     start: { kind: 'chase', agent: 'clara', enemy: 'vigia-pista' },
   },
 ];

@@ -13,6 +13,7 @@ import { HexTile, TileField } from './tile-field';
 import { Door, commonDoors, seeThroughDoors } from './door';
 import { DoorPush, DoorViews } from './door-view';
 import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
+import { VaultPick, VaultScene } from './vault-scene';
 import { AuraLayer, AuraStyle, AuraTextures, createAuraTextures, splitHot } from './aura-layer';
 
 const HEX_SIZE = 1;
@@ -289,6 +290,8 @@ export interface HexBoardCallbacks {
   onUnitTap(id: string): void;
   /** Toque na lupa (ou no móvel debaixo dela). */
   onClueTap?(): void;
+  /** Na escolha do caixote (perseguição): tocou no caixote (`pular`) ou na faixa da volta. */
+  onVaultPick?(pick: VaultPick): void;
 }
 
 /**
@@ -365,6 +368,14 @@ export class HexBoard {
   private slowmo = 0;
   private slowmoGoal = 0;
   private readonly chaseDir = new THREE.Vector3(0, 0, 1);
+  /** Escolha no caixote de meia altura (ver `showVaultChoice`); criada na primeira vez. */
+  private vaultScene?: VaultScene;
+  private vaultBlend = 0;
+  private readonly vaultCam = { pos: new THREE.Vector3(), look: new THREE.Vector3(), dist: 10, fresh: true };
+  /** Rota acesa antes da escolha do caixote (a faixa da cena toma o lugar dela; volta no fim). */
+  private vaultRoute: { selected: HexCoord | null; path: string[] } | null = null;
+  /** Modelo de cada agente (o fantasma da escolha do caixote é uma cópia dele). */
+  private readonly unitModels = new Map<string, ModelDef>();
   /** Afastamento atual da cena (1 = padrão); acompanha `cine.zoom` devagar (ver `setCineZoom`). */
   private cineZoom = 1;
   /** Estado das portas comuns: fechadas, mantêm o telhado e escondem o interior. */
@@ -1438,7 +1449,9 @@ export class HexBoard {
   /** Velocidade da animação de `id` agora: só quem está na perseguição desacelera. */
   private animRate(id: string): number {
     const c = this.chaseLast;
-    return c && (c.unitId === id || c.enemyId === id) ? slowmoRate(this.slowmo) : 1;
+    if (!c || (c.unitId !== id && c.enemyId !== id)) return 1;
+    // na escolha do caixote o mundo para: só o fantasma se mexe
+    return this.vaultScene?.active ? 0 : slowmoRate(this.slowmo);
   }
 
   /** Vira o agente para o inimigo (a "cabeça" da escolha de alvo). */
@@ -1448,6 +1461,85 @@ export class HexBoard {
     if (!u || !e) return;
     const d = e.group.position.clone().sub(u.group.position);
     if (d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
+  }
+
+  /**
+   * Escolha de ação no caixote de meia altura (perseguição): a câmera abre sobre o agente, o
+   * caixote `over` e a pista; tudo fica cinza menos o caixote e a faixa da volta (`around`, a pista
+   * dele a partir do agente), e o mundo para. Tocar no caixote ou na faixa chama `onVaultPick`.
+   * `jump` é o atalho por cima do caixote (com a origem), que o fantasma faz na prévia.
+   */
+  showVaultChoice(unitId: string, enemyId: string, over: HexCoord, around: readonly HexCoord[], jump: readonly HexCoord[]): void {
+    const u = this.units.get(unitId);
+    const e = this.enemies.get(enemyId);
+    if (!u || !e) return;
+    if (!this.vaultScene) {
+      this.vaultScene = new VaultScene(this.scene);
+      this.labelScene.add(this.vaultScene.labels);
+    }
+    // a rota acesa (hexágonos erguidos) dá lugar à faixa da cena: os hexágonos voltam ao chão
+    if (!this.vaultRoute) this.vaultRoute = { selected: this.selected, path: this.path };
+    this.selected = null;
+    this.path = [];
+    this.paintTiles();
+    // altura de repouso de cada hexágono (para onde ele está indo, não onde está agora)
+    const top = (h: HexCoord) => this.worldOf(h).setY(this.tiles.get(hexKey(h))?.lift ?? 0);
+    this.vaultScene.show({
+      agent: top(u.hex),
+      enemy: top(e.hex),
+      crate: top(over),
+      crateModel: this.cargoModels.get(hexKey(over)),
+      around: around.map(top),
+      jump: jump.map(top),
+      model: this.unitModels.get(unitId),
+    });
+    this.vaultScene.refit(this.camera);
+    this.vaultCam.fresh = true;
+    this.spotlight.set(true);
+  }
+
+  /** Prévia da escolha: a câmera fecha e o fantasma do agente faz a ação (resolve no fim). */
+  previewVault(pick: VaultPick): Promise<void> {
+    return this.vaultScene?.preview(pick) ?? Promise.resolve();
+  }
+
+  /** Da prévia de volta para a escolha. */
+  backToVaultChoice(): void {
+    this.vaultScene?.back();
+  }
+
+  /** Fecha a escolha do caixote: a cor e a câmera da perseguição voltam. */
+  endVaultChoice(): void {
+    if (!this.vaultScene?.active) return;
+    this.vaultScene.hide();
+    if (!this.spot) this.spotlight.set(false);
+    if (this.vaultRoute) {
+      this.selected = this.vaultRoute.selected;
+      this.path = this.vaultRoute.path;
+      this.vaultRoute = null;
+      this.paintTiles();
+    }
+  }
+
+  /** Mistura a câmera com a da escolha do caixote (aberta, ou de perto na prévia). */
+  private blendVault(dt: number, look: THREE.Vector3, dist: number): number {
+    const goal = this.vaultScene?.cameraGoal();
+    this.vaultBlend += ((goal ? 1 : 0) - this.vaultBlend) * (1 - Math.exp(-dt * 2.6));
+    if (this.vaultBlend < 0.002 && !goal) this.vaultBlend = 0;
+    if (this.vaultBlend <= 0) return dist;
+    const c = this.vaultCam;
+    if (goal) {
+      // entre a aberta e a de perto a câmera desliza (sem pular)
+      const k = c.fresh ? 1 : 1 - Math.exp(-dt * 2.4);
+      c.fresh = false;
+      c.pos.lerp(goal.pos, k);
+      c.look.lerp(goal.look, k);
+      c.dist += (goal.dist - c.dist) * k;
+    }
+    const e = this.vaultBlend * this.vaultBlend * (3 - 2 * this.vaultBlend);
+    this.camera.position.lerp(c.pos, e);
+    look.lerp(c.look, e);
+    return THREE.MathUtils.lerp(dist, c.dist, e);
   }
 
   private blendChase(dt: number, look: THREE.Vector3, dist: number): number {
@@ -1535,6 +1627,7 @@ export class HexBoard {
     this.auraTextures.fade.dispose();
     this.setSpotlight(null);
     this.spotlight.dispose();
+    this.vaultScene?.dispose();
     this.warmLabel.material.map?.dispose();
     this.warmLabel.material.dispose();
     this.renderer.dispose();
@@ -2420,7 +2513,10 @@ export class HexBoard {
       pieceOnly: [dot, nub], yaw: 0,
     };
     this.units.set(unit.id, view);
-    if (unit.model) this.attachModel(view, unit.model);
+    if (unit.model) {
+      this.unitModels.set(unit.id, unit.model);
+      this.attachModel(view, unit.model);
+    }
   }
 
   /** Troca o miolo da peça pelo personagem animado, que fica de pé sobre o disco. */
@@ -2586,6 +2682,7 @@ export class HexBoard {
     dist = this.blendInspect(dt, look, dist);
     dist = this.blendCine(dt, look, dist);
     dist = this.blendChase(dt, look, dist);
+    dist = this.blendVault(dt, look, dist);
     this.camera.lookAt(look);
     this.updateOccluders(dt);
     // a cena da porta empurra a vista para a esquerda das fichas; o close-up, para cima da papelada
@@ -2597,7 +2694,7 @@ export class HexBoard {
     // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
     // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
     // na perseguição a câmera rasante enxergaria mata demais: a névoa fecha mais perto
-    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE * (1 - CHASE_CAMERA.viewCut * this.chaseBlend);
+    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE * (1 - CHASE_CAMERA.viewCut * this.chaseBlend * (1 - this.vaultBlend));
     const fog = this.scene.fog as THREE.Fog;
     fog.far = dist + view;
     fog.near = dist + view * 0.45;
@@ -3020,6 +3117,7 @@ export class HexBoard {
       this.clue.sprite.scale.setScalar(0.8 + Math.max(0, Math.sin(t * 4)) * 0.12);
     }
 
+    this.vaultScene?.update(dt, t, this.camera);
     this.updateCamera(dt);
     this.updateTreeFade(dt);
     const shadow = this.shadowDue();
@@ -3029,7 +3127,7 @@ export class HexBoard {
     this.updateSpotlight();
     if (this.spotWarmDue && !this.spot) this.warmSpotlight();
     this.spotlight.render(dt);
-    if (this.labels.size) {
+    if (this.labels.size || this.vaultScene?.active) {
       this.renderer.autoClear = false;
       this.renderer.render(this.labelScene, this.camera);
       this.renderer.autoClear = true;
@@ -3272,14 +3370,20 @@ export class HexBoard {
   }
 
   private handleTap(clientX: number, clientY: number): void {
-    // na vista de inspeção só a lupa (ou o móvel) responde, mesmo com o resto travado
-    if (this.moving || (!this.inputEnabled && !this.inspect)) return;
     const rect = this.canvas.getBoundingClientRect();
     const ndc = new THREE.Vector2(
       ((clientX - rect.left) / rect.width) * 2 - 1,
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(ndc, this.camera);
+    // escolha do caixote: só o caixote e a faixa da volta respondem (a perseguição trava o resto)
+    if (this.vaultScene?.choosing) {
+      const pick = this.vaultScene.pick(this.raycaster);
+      if (pick) this.callbacks.onVaultPick?.(pick);
+      return;
+    }
+    // na vista de inspeção só a lupa (ou o móvel) responde, mesmo com o resto travado
+    if (this.moving || (!this.inputEnabled && !this.inspect)) return;
 
     // a lupa (ou o móvel debaixo dela) vem antes de tudo
     if (this.clue?.sprite.visible && this.callbacks.onClueTap) {
