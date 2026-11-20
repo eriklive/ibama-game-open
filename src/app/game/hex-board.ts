@@ -360,6 +360,8 @@ export class HexBoard {
    */
   private chase: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
   private chaseLast: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
+  /** Corrida da perseguição: o agente do `runPair` em curso e o quanto ele corre mais rápido. */
+  private unitBoost: { id: string; rate: () => number } | null = null;
   private chaseBlend = 0;
   /**
    * Slow da curva (ver `setChaseSlowmo`): 0 normal, 1 no fundo. Anda em rampa linear, com os
@@ -934,19 +936,25 @@ export class HexBoard {
     hold = false,
     /** Hexágonos (caixote de meia altura) por cima dos quais o agente pula, num arco alto. */
     hopOver: ReadonlySet<string> = new Set(),
+    /** Multiplicador da velocidade do agente agora (a corrida da perseguição; 1 = normal). */
+    unitBoost: () => number = () => 1,
   ): Promise<void> {
     const u = this.units.get(unitId);
     const e = this.enemies.get(enemyId);
     if (!u || !e || this.moving || (!unitPath.length && !enemyPath.length)) return;
     this.moving = true;
+    // a corrida acelera o passo e as pernas do agente (ver `animRate`)
+    this.unitBoost = { id: unitId, rate: unitBoost };
     const longest = Math.max(unitPath.length, enemyPath.length);
     const pace = (n: number) => RUN_SPEED * speed * (n ? n / longest : 1);
     const runUnit = async () => {
       if (!unitPath.length) return;
       const epoch = u.epoch;
-      u.rig?.matchSpeed('run', pace(unitPath.length));
+      // o ritmo sai do caminho de agora; se ele crescer no meio (a corrida encosta), o agente
+      // segue nele no mesmo ritmo, só que mais rápido pelo `unitBoost`
+      const unitPace = pace(unitPath.length);
+      u.rig?.matchSpeed('run', unitPace);
       u.rig?.play('run', 0.15);
-      // `unitPath` pode crescer durante a corrida (o grito encosta): o agente segue e acelera
       for (let i = 0; i < unitPath.length; i++) {
         if (stop?.()) break;
         const step = unitPath[i];
@@ -959,7 +967,7 @@ export class HexBoard {
         const arc = up ? (t: number) => (u.hop = Math.sin((t * Math.PI) / 2) * VAULT_HOP)
           : down ? (t: number) => (u.hop = Math.cos((t * Math.PI) / 2) * VAULT_HOP)
           : undefined;
-        await this.runTo(u, step, pace(unitPath.length), false, () => this.animRate(unitId), arc);
+        await this.runTo(u, step, unitPace, false, () => this.animRate(unitId), arc);
         if (down) u.hop = 0;
         if (u.epoch !== epoch) return;
         u.hex = step;
@@ -987,6 +995,7 @@ export class HexBoard {
       if (!hold) e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
     };
     await Promise.all([runUnit(), runEnemy()]);
+    this.unitBoost = null;
     // parados (porta, fim): o agente encara quem persegue; na curva fica como corria
     const d = e.group.position.clone().sub(u.group.position);
     if (!hold && d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
@@ -1446,12 +1455,13 @@ export class HexBoard {
     if (e && !e.running) e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
   }
 
-  /** Velocidade da animação de `id` agora: só quem está na perseguição desacelera. */
+  /** Velocidade da animação de `id` agora: só quem está na perseguição desacelera (e o agente acelera na corrida). */
   private animRate(id: string): number {
     const c = this.chaseLast;
-    if (!c || (c.unitId !== id && c.enemyId !== id)) return 1;
+    const boost = this.unitBoost?.id === id ? this.unitBoost.rate() : 1;
+    if (!c || (c.unitId !== id && c.enemyId !== id)) return boost;
     // na escolha do caixote o mundo para: só o fantasma se mexe
-    return this.vaultScene?.active ? 0 : slowmoRate(this.slowmo);
+    return (this.vaultScene?.active ? 0 : slowmoRate(this.slowmo)) * boost;
   }
 
   /** Vira o agente para o inimigo (a "cabeça" da escolha de alvo). */
