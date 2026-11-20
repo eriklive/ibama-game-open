@@ -29,10 +29,13 @@ import {
   lockRoute,
   resolveFleeDoor,
   type FleeDoorResult,
-  resolveShout,
+  resolveSprint,
   resolveVault,
+  sprintGain,
+  sprintRate,
+  sprintTotalMs,
 } from '../../game/chase';
-import { ChaseHud, ChaseOverlay, TargetPrompt, VaultPrompt } from '../../ui/chase/chase-overlay';
+import { ChaseHud, ChaseOverlay, SPRINT_DIE_MS, SprintView, TargetPrompt, VaultPrompt } from '../../ui/chase/chase-overlay';
 import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
 import { Sound } from '../../game/sound.service';
 import { zoneAt } from '../../game/audio/ambience';
@@ -498,12 +501,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly caughtThisRound = new Set<string>();
   /** Placar da perseguição em curso: distância e quanto da rota dele já foi. */
   protected readonly chaseHud = signal<ChaseHud | null>(null);
-  /** Grito do trecho reto em curso (ver `shout`): `null` fora dos trechos. */
-  protected readonly chaseShout = signal<'ready' | 'used' | null>(null);
-  /** Rola o grito na perseguição em curso, sem parar a corrida (ver `chaseSteps`). */
-  private shoutStart?: () => Promise<void>;
-  /** O grito rolando agora (o trecho espera ele terminar antes da parada seguinte). */
-  private shoutRoll?: Promise<void>;
+  /** Corrida da perseguição em curso (ver `sprint`): `null` fora da perseguição. */
+  protected readonly chaseSprint = signal<SprintView | null>(null);
+  /** Dá o gás na perseguição em curso, sem parar a corrida (ver `chaseSteps`). */
+  private sprintStart?: () => void;
   /** Caixote de meia altura: o jogador tem `seconds` para pular (ver `askVault`). */
   protected readonly vaultPrompt = signal<VaultPrompt | null>(null);
   private vaultDone?: (jump: boolean) => void;
@@ -1300,9 +1301,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     if (this.chaseOffer() && ev.key === 'Escape') this.pickChase(null);
-    else if (this.chaseShout() === 'ready' && (ev.key === 'g' || ev.key === 'G')) {
+    else if (this.chaseSprint()?.state === 'ready' && (ev.key === 'c' || ev.key === 'C')) {
       ev.preventDefault();
-      this.shout();
+      this.sprint();
     }
   }
 
@@ -1310,8 +1311,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private chaseStats(id: string): ChaseStats {
     const loadout = this.roster.loadout(id);
     const { vigor, iniciativa, agilidade } = loadout.attributes;
-    // no grito, a intimidação toda dele (classe e itens), sem o grupo
-    return { vigor, iniciativa, agilidade, intimidacao: statBreakdown(loadout, 'intimidacao', false).total };
+    return { vigor, iniciativa, agilidade };
   }
 
   /**
@@ -1605,9 +1605,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.board?.setChaseCamera(null);
       this.sound.chaseEnd();
       this.chaseHud.set(null);
-      this.chaseShout.set(null);
-      this.shoutStart = undefined;
-      this.shoutRoll = undefined;
+      this.chaseSprint.set(null);
+      this.sprintStart = undefined;
     }
   }
 
@@ -1644,11 +1643,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     await this.wait(800);
     if (!alive()) return;
     void this.sound.chaseStart(distance);
-    // passos dados no trecho em curso (para saber onde os dois pararam se o grito interromper)
+    // passos dados no trecho em curso (para saber onde os dois pararam se a corrida encostar)
     const moved = { a: 0, g: 0 };
-    const settleRolls = async () => {
-      while (this.shoutRoll) await this.shoutRoll;
-    };
     // portas da rota de fuga: o d20 dele sai `doorRollLead` hexágonos antes, correndo; a
     // `doorSlowLead` entra o slow, que segura até ele chegar na porta e o dado decidir
     const doorRuns = route.stops.map((st) => ({
@@ -1671,6 +1667,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (w === 'unit') {
         this.positions.update((m) => new Map(m).set(agentId, hex));
         this.agentSteps(hex, false);
+        sprintStep();
       } else {
         const prev = this.enemy(enemyId)!.hex;
         this.updateEnemy(enemyId, { hex, facing: facingBetween(prev, hex) });
@@ -1678,46 +1675,91 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         doorAhead(g + moved.g);
       }
     };
-    // o trecho em curso estica o caminho do agente quando o grito encosta (ver `legTo`)
-    let closer: (() => void) | undefined;
-    // o grito rola com os dois correndo; olhou para trás, a distância cai e o agente encosta
-    this.shoutStart = async () => {
-      const delta = await this.chaseShoutRoll(agentId, enemyId);
-      if (!alive()) return;
-      distance = Math.max(0, distance + delta);
-      hud();
-      closer?.();
+    // o trecho em curso estica o caminho do agente quando a corrida encosta (ver `legTo`);
+    // devolve `false` se não deu para esticar (o caixote está logo ali)
+    let closer: (() => boolean) | undefined;
+    // corrida: quando começou (relógio real), o bônus (%) e o quanto já encostou (hexágonos)
+    let sprintAt = 0;
+    let sprintPct = 0;
+    let sprintAcc = 0;
+    const boost = () => (sprintPct ? sprintRate(sprintPct, performance.now() - sprintAt) : 1);
+    /** O agente deu um passo: correndo mais rápido que ele, encosta; cada hexágono inteiro tira 1. */
+    const sprintStep = () => {
+      if (!closer) return;
+      sprintAcc += sprintGain(boost());
+      while (sprintAcc >= 1 && distance > 0) {
+        distance--;
+        if (!closer()) {
+          // o caixote segura o agente: o ganho espera o trecho seguinte
+          distance++;
+          sprintAcc = 1;
+          return;
+        }
+        sprintAcc -= 1;
+        hud();
+      }
+    };
+    // o d4 sai do botão, para rapidinho e a velocidade entra logo depois, sem parar a corrida
+    this.chaseSprint.set({ state: 'ready', roll: null, percent: 0, ms: 0 });
+    this.sprintStart = () => {
+      const roll = rollDie(CHASE_RULES.sprintDie);
+      const { percent } = resolveSprint(roll, this.chaseStats(agentId));
+      const ms = sprintTotalMs();
+      const rolling: SprintView = { state: 'rolling', roll, percent, ms };
+      const active: SprintView = { ...rolling, state: 'active' };
+      this.chaseSprint.set(rolling);
+      this.sound.play('dado.2d4');
+      // só mexe no botão se ainda é esta perseguição (ela pode ter acabado no meio)
+      const swap = (from: SprintView, to: SprintView) => {
+        if (!alive() || this.chaseSprint() !== from) return false;
+        this.chaseSprint.set(to);
+        return true;
+      };
+      this.timers.push(
+        setTimeout(() => {
+          if (!swap(rolling, active)) return;
+          sprintAt = performance.now();
+          sprintPct = percent;
+          this.gamepad.rumble(0.4, 0.3, 200);
+          this.say(`${who} deu o gás: +${percent}% de velocidade por ${CHASE_RULES.sprintSeconds} s!`, 'alert');
+        }, SPRINT_DIE_MS + 150),
+        setTimeout(() => swap(active, { ...active, state: 'used' }), SPRINT_DIE_MS + 150 + ms),
+      );
     };
     /**
      * Os dois correm até ele estar no ponto `s` da rota; o agente fica `distance` atrás, e as
-     * curvas não param ninguém. Dá para gritar uma vez por trecho, sem parar. Se o grito
-     * encostar, o caminho do agente cresce no meio da corrida; se zerar a distância, os dois
-     * param ali (agarrou). Antes do caixote, o trecho espera o grito.
+     * curvas não param ninguém. Com a corrida, o agente corre mais rápido e o caminho dele
+     * cresce no meio do trecho; se zerar a distância, os dois param ali (agarrou).
      */
-    const legTo = async (s: number, agentCap = Infinity, hold = false, waitShout = true) => {
+    const legTo = async (s: number, agentCap = Infinity, hold = false) => {
       if (g >= s) return;
       // uma porta logo à frente já rola (e desacelera) antes do primeiro passo
       doorAhead(g);
-      // o grito do trecho anterior ainda rolando vale por este também
-      this.chaseShout.set(this.shoutRoll ? 'used' : 'ready');
       let aEnd = Math.max(a, Math.min(n + s - distance - 1, n + s - 1, agentCap));
       const unitPath = track.slice(a + 1, aEnd + 1);
       closer = () => {
-        // no caixote, o agente para nele mesmo que o grito o tenha feito encostar
+        // no caixote, o agente para nele mesmo que a corrida o tenha feito encostar
         const want = Math.min(n + s - distance - 1, n + s - 1, agentCap);
+        if (aEnd >= want) return false;
         while (aEnd < want) unitPath.push(track[++aEnd]);
+        return true;
       };
       moved.a = moved.g = 0;
-      await board.runPair(agentId, unitPath, enemyId, track.slice(n + g + 1, n + s + 1), onStep, undefined, () => distance <= 0, hold);
+      await board.runPair(
+        agentId,
+        unitPath,
+        enemyId,
+        track.slice(n + g + 1, n + s + 1),
+        onStep,
+        undefined,
+        () => distance <= 0,
+        hold,
+        undefined,
+        boost,
+      );
       closer = undefined;
-      this.chaseShout.set(null);
       a += moved.a;
       g += moved.g;
-      hud();
-      if (!waitShout) return;
-      // o grito decide antes do caixote
-      if (this.shoutRoll) await this.shoutRoll;
-      if (!alive()) return;
       hud();
     };
 
@@ -1746,21 +1788,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         const next = Math.min(doorAt, vaultAt);
         if (next === Infinity) break;
         const kind = next === vaultAt ? 'pulo' : 'porta';
-        const mine = kind === 'pulo';
         // o agente nunca passa do próximo caixote sem decidir: os dois param na pose de corrida e
         // congelam enquanto o jogador decide. Na porta também ficam na pose de corrida: o trecho
         // seguinte emenda (só espera se o dado dele ainda rola)
-        await legTo(next, vault?.index ?? Infinity, true, mine);
+        await legTo(next, vault?.index ?? Infinity, true);
         if (!alive()) return;
-        // o grito no trecho já encostou nele: sai da pose de corrida
+        // a corrida no trecho já encostou nele: sai da pose de corrida
         if (distance <= 0) {
           board.restChase();
           break;
         }
-        // a distância só muda depois do dado (o grito pode mexer nela enquanto o dele rola)
+        // a distância só muda depois do dado (a corrida pode mexer nela enquanto o dele rola)
         if (kind === 'pulo') {
           vi++;
-          // ficou para trás (o grito ou uma porta o pararam antes): chega ao caixote antes de decidir
+          // ficou para trás (uma porta o parou antes): chega ao caixote antes de decidir
           if (a < vault!.index) {
             moved.a = 0;
             await board.runPair(agentId, track.slice(a + 1, vault!.index + 1), enemyId, [], onStep, undefined, undefined, true);
@@ -1805,9 +1846,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       }
       if (distance > 0) await legTo(route.flee.length);
     }
-    // o grito que ainda rola decide antes do desfecho
-    await settleRolls();
-    if (!alive()) return;
     // parou na pose de corrida (agarrou no caixote, ou a rota acabou): repouso
     board.restChase();
     board.setSelected(null);
@@ -1843,64 +1881,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     await this.wait(800);
   }
 
-  /** Botão **Gritar!** (toque, G, □): vale uma vez por trecho reto, com os dois correndo. */
-  protected shout(): void {
-    const start = this.shoutStart;
-    if (this.chaseShout() !== 'ready' || this.vaultPrompt() || !start) return;
-    this.chaseShout.set('used');
-    this.sound.play('abo.carimbo');
-    this.say(`"Parado, Ibama!"`, 'alert');
-    const roll = start().finally(() => {
-      if (this.shoutRoll === roll) this.shoutRoll = undefined;
-    });
-    this.shoutRoll = roll;
-  }
-
-  /**
-   * O grito, com os dois correndo e em slow: disputa. Os dois dados rolam juntos, o do agente
-   * (d20 + intimidação) e o dele (d20). Agente maior ou empate: ele olha para trás, fica mais
-   * lento e o agente encosta. Devolve a mudança na distância (ver `resolveShout`).
-   */
-  private async chaseShoutRoll(agentId: string, enemyId: string): Promise<number> {
-    const release = this.holdSlow();
-    try {
-      return await this.chaseShoutDuel(agentId, enemyId);
-    } finally {
-      release();
-    }
-  }
-
-  private async chaseShoutDuel(agentId: string, enemyId: string): Promise<number> {
-    const enemy = this.enemy(enemyId)!;
-    const agent = this.chaseStats(agentId);
-    const who = this.nameOf(agentId);
-    const int = agent.intimidacao ?? 0;
-    // as faces já saem sorteadas: cada ficha precisa saber a outra para dizer quem ganhou
-    const mine = rollDie(CHASE_RULES.die);
-    const his = rollDie(CHASE_RULES.die);
-    const res = resolveShout(mine, agent, his);
-    const bonus = int ? ` ${int > 0 ? '+' : '−'} ${Math.abs(int)} de intimidação` : '';
-    const [ar, er] = await Promise.all([
-      this.rollD20(
-        { kicker: 'Grito · intimidação', who, need: `d20${bonus} contra o dele`, passText: 'Olhou para trás', failText: 'Nem olhou', value: mine },
-        () => res.lookedBack,
-        1100,
-      ),
-      this.rollD20(
-        { kicker: 'Grito · disputa', who: enemy.name, need: `ganha só se passar ${who}`, passText: 'Nem olhou', failText: 'Olhou para trás', side: 'enemy', value: his },
-        () => !res.lookedBack,
-        1100,
-      ),
-    ]);
-    if (!ar || !er) return 0;
-    if (res.lookedBack) {
-      const e = this.enemy(enemyId)!;
-      const facing = facingBetween(e.hex, this.positions().get(agentId)!);
-      this.board?.setEnemyFacing(enemyId, facing);
-      this.board?.startleEnemy(enemyId);
-      this.say(`${enemy.name} olhou para trás! Encostando: ${signed(res.delta)} de distância`, 'alert');
-    } else this.say(`${enemy.name} nem olhou.`, 'info');
-    return res.delta;
+  /** Botão **Correr!** (toque, C, □): uma vez por perseguição, com os dois correndo. */
+  protected sprint(): void {
+    const start = this.sprintStart;
+    if (this.chaseSprint()?.state !== 'ready' || this.vaultPrompt() || !start) return;
+    this.sprintStart = undefined;
+    start();
   }
 
   /**
@@ -3719,9 +3705,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (b === 'cross') this.vaultAnswer(true);
       return;
     }
-    // perseguição correndo: □ grita
+    // perseguição correndo: □ dá o gás
     if (this.chaseHud()) {
-      if (b === 'square') this.shout();
+      if (b === 'square') this.sprint();
       return;
     }
     const choosing = this.phase() === 'moving-choice';

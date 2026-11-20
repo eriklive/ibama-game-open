@@ -17,6 +17,10 @@ import {
   lockRoute,
   resolveFleeDoor,
   resolveShout,
+  resolveSprint,
+  sprintGain,
+  sprintRate,
+  sprintTotalMs,
   agentVaults,
   resolveVault,
   routeStops,
@@ -376,5 +380,33 @@ describe('agilidade dos suspeitos do Aeroporto', () => {
       findMap('aeroporto')!.enemies.map((e) => [e.id, spawnEnemy(e).agilidade ?? 0]),
     );
     expect(ag).toEqual({ garimpeiro: 0, piloto: 2, 'garimpeiro-pa': -1, 'vigia-pista': 2, jo: -2 });
+  });
+});
+
+describe('corrida (d4 + vigor, ×10, até 40%)', () => {
+  it('d4 vezes 10', () => {
+    expect(resolveSprint(1, {})).toEqual({ total: 1, percent: 10 });
+    expect(resolveSprint(3, {})).toEqual({ total: 3, percent: 30 });
+    expect(resolveSprint(4, {})).toEqual({ total: 4, percent: 40 });
+  });
+  it('o vigor soma na rolagem, sem passar de 40% nem ficar abaixo de 10%', () => {
+    expect(resolveSprint(2, { vigor: 1 }).percent).toBe(30);
+    expect(resolveSprint(4, { vigor: 2 }).percent).toBe(40);
+    expect(resolveSprint(1, { vigor: -2 }).percent).toBe(10);
+  });
+  it('encosta (rate − 1)/rate por hexágono corrido mais rápido', () => {
+    expect(sprintGain(1)).toBe(0);
+    expect(sprintGain(0.5)).toBe(0);
+    expect(sprintGain(1.25)).toBeCloseTo(0.2);
+    expect(sprintGain(2)).toBe(0.5);
+  });
+  it('entra suave, segura 5 s e sai suave', () => {
+    const ramp = CHASE_RULES.sprintRampMs;
+    expect(sprintRate(40, 0)).toBe(1);
+    expect(sprintRate(40, ramp / 2)).toBeCloseTo(1.2);
+    expect(sprintRate(40, ramp + 2500)).toBeCloseTo(1.4);
+    expect(sprintRate(40, ramp + CHASE_RULES.sprintSeconds * 1000)).toBeCloseTo(1.4);
+    expect(sprintRate(40, sprintTotalMs())).toBe(1);
+    expect(sprintRate(0, 1000)).toBe(1);
   });
 });

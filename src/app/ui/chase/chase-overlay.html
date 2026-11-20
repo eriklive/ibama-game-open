@@ -25,19 +25,32 @@
   </div>
 }
 
-<!-- Perseguição: grito ("Parado, Ibama!"), uma vez por trecho -->
-@if (hud() && shout() && !vault()) {
-  <button
-    type="button"
-    class="shout-btn"
-    [class.used]="shout() === 'used'"
-    [disabled]="shout() === 'used'"
-    data-testid="chase-shout"
-    [attr.aria-label]="shout() === 'used' ? 'Já gritou neste trecho' : 'Gritar: Parado, Ibama!'"
-    (click)="shoutPress.emit()">
-    <span class="shout-main">Gritar!</span>
-    <span class="shout-sub">{{ shout() === 'used' ? 'só no próximo trecho' : 'Parado, Ibama!' }}</span>
-  </button>
+<!-- Perseguição: corrida, uma vez por perseguição. O d4 pula do botão, mostra o bônus e some. -->
+@if (hud() && sprint(); as sp) {
+  @if (!vault()) {
+    <button
+      type="button"
+      class="sprint-btn"
+      [class.used]="sp.state === 'used'"
+      [disabled]="sp.state !== 'ready'"
+      data-testid="chase-sprint"
+      [attr.aria-label]="sprintLabel(sp)"
+      (click)="sprintPress.emit()">
+      <span class="sprint-main">Correr!</span>
+      <span class="sprint-sub">{{ sprintSub(sp) }}</span>
+      @if (sp.state === 'active') {
+        <span class="sprint-timer" aria-hidden="true"><i [style.animation-duration.ms]="sp.ms"></i></span>
+      }
+    </button>
+  }
+  @if (sp.roll !== null && sp.state !== 'used') {
+    <div class="sprint-pop" data-testid="sprint-pop" aria-hidden="true">
+      <app-d4 class="sprint-die" [value]="sp.roll" [duration]="dieMs" />
+      @if (sp.state === 'active') {
+        <span class="sprint-result" data-testid="sprint-result">+{{ sp.percent }}%</span>
+      }
+    </div>
+  }
 }
 
 <!-- Perseguição: caixote de meia altura no caminho. Pular (botão, arrastar para cima) corta a
