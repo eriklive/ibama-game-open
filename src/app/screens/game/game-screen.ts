@@ -3677,7 +3677,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const [id, hex] of Object.entries(testCase.agents ?? {})) positions.set(id, { ...hex });
     this.positions.set(positions);
     this.board?.placeUnits(positions);
-    const { agent, enemy: enemyId } = testCase.start;
+    const { agent } = testCase.start;
     const agentHex = positions.get(agent)!;
     for (const [id, { hex, status }] of Object.entries(testCase.enemies ?? {})) {
       // em fuga, de costas para quem abordou
@@ -3702,7 +3702,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setReachable([]);
     this.say(testCase.name, 'info');
 
+    // dois fugindo: o turno inimigo abre com a escolha de alvo (ver `resolveTargetChoices`)
+    if (testCase.start.kind === 'targets') {
+      await this.wait(600);
+      if (this.destroyed || this.epoch !== epoch) return;
+      void this.enemyTurn();
+      return;
+    }
     // a perseguição já em curso: sem carimbo nem iniciativa, o agente corre atrás dele
+    const enemyId = testCase.start.enemy;
     const enemy = this.enemy(enemyId);
     const path = enemy
       ? arrestQueue(enemy.hex, agent, this.chaseAgents(), this.area, this.enemyWalls()).find((c) => c.id === agent)?.path

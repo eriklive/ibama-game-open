@@ -1,7 +1,7 @@
 /**
  * Casos de teste: situações prontas para testar uma parte do jogo sem jogar até ela. Ficam no
  * menu da partida ("Casos de teste"). Cada caso diz o mapa, onde cada um está e o que começa
- * na hora (por enquanto, uma perseguição já em curso).
+ * na hora: uma perseguição já em curso, ou o turno inimigo com dois fugindo (a escolha de alvo).
  */
 import type { EnemyStatus } from './enemies';
 import type { HexCoord } from './hex';
@@ -20,8 +20,14 @@ export interface TestCase {
   agents?: Readonly<Record<string, HexCoord>>;
   /** Inimigos mexidos: posição e situação. Quem não aparece começa como no mapa. */
   enemies?: Readonly<Record<string, { hex: HexCoord; status?: EnemyStatus }>>;
-  /** O que começa ao carregar: `chase` é a perseguição já com o agente correndo atrás dele. */
-  start: { kind: 'chase'; agent: string; enemy: string };
+  /**
+   * O que começa ao carregar: `chase` é a perseguição já com o agente correndo atrás dele;
+   * `targets` abre o turno inimigo com o agente no raio de perseguição de `enemies` (em alerta),
+   * que vão correr: ele escolhe qual perseguir ou deixa os dois (`decisao:alvo`).
+   */
+  start:
+    | { kind: 'chase'; agent: string; enemy: string }
+    | { kind: 'targets'; agent: string; enemies: readonly string[] };
 }
 
 /**
@@ -68,6 +74,24 @@ export const TEST_CASES: readonly TestCase[] = [
     agents: { clara: { col: 28, row: 21 } },
     enemies: { garimpeiro: { hex: { col: 27, row: 19 }, status: 'alert' }, ...PILOTO_LONGE },
     start: { kind: 'chase', agent: 'clara', enemy: 'garimpeiro' },
+  },
+  {
+    id: 'dois-fugindo-aeroporto',
+    name: 'Dois fugindo',
+    hint: 'Os dois garimpeiros, em alerta, vão correr no turno inimigo, e Clara, no meio da pista, está no raio dos dois: escolha qual perseguir (o do portão foge para o leste, o da pá entra no hangar e sai pelos fundos) ou deixe os dois.',
+    mapId: 'aeroporto',
+    active: 'clara',
+    // Clara na pista, de frente para o portão; os dois a 4 hexágonos dela, à frente e pouco
+    // abertos (os dois cabem na câmera da escolha). Só ela alcança os dois (Ana e Bruno ficam na
+    // clareira). O vigia, que patrulha a pista, fica mais abaixo para não ficar entre eles
+    agents: { clara: { col: 20, row: 22 } },
+    enemies: {
+      garimpeiro: { hex: { col: 24, row: 20 }, status: 'alert' },
+      'garimpeiro-pa': { hex: { col: 22, row: 19 }, status: 'alert' },
+      'vigia-pista': { hex: { col: 21, row: 30 } },
+      ...PILOTO_LONGE,
+    },
+    start: { kind: 'targets', agent: 'clara', enemies: ['garimpeiro', 'garimpeiro-pa'] },
   },
 ];
 

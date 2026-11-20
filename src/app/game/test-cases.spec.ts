@@ -9,7 +9,7 @@ import {
   playArea,
   vaultHexes,
 } from './maps';
-import { agentSight, agentVaults, arrestQueue, lockRoute } from './chase';
+import { agentSight, agentVaults, arrestQueue, chaseCandidates, lockRoute, targetChoices } from './chase';
 import { isOpen, spawnDoors } from './door';
 import { HexCoord, hexKey } from './hex';
 import { TEST_CASES, findTestCase } from './test-cases';
@@ -24,7 +24,8 @@ describe('casos de teste', () => {
       expect(agents).toContain(c.start.agent);
       for (const id of Object.keys(c.agents ?? {})) expect(agents).toContain(id);
       const enemies = map!.enemies.map((e) => e.id);
-      expect(enemies).toContain(c.start.enemy);
+      const runners = c.start.kind === 'chase' ? [c.start.enemy] : c.start.enemies;
+      for (const id of runners) expect(enemies).toContain(id);
       for (const id of Object.keys(c.enemies ?? {})) expect(enemies).toContain(id);
       // ninguém começa dentro de parede
       const walls = blockedHexes(map!);
@@ -44,25 +45,27 @@ describe('casos de teste', () => {
    */
   const chaseOf = (id: string) => {
     const c = findTestCase(id)!;
+    if (c.start.kind !== 'chase') throw new Error(`${id} não começa numa perseguição`);
+    const start = c.start;
     const map = MAPS.find((m) => m.id === c.mapId)!;
     const area = playArea(map);
     const fixed = blockedHexes(map);
     const doors = spawnDoors(map.doors ?? [], map.doorStates);
     const closed = [...doors].filter(([, d]) => !isOpen(d)).map(([k]) => k);
     const positions = map.starts.map((h, i) => c.agents?.[CHARACTERS[i].id] ?? h);
-    const agent = c.agents![c.start.agent];
+    const agent = c.agents![start.agent];
     const others = positions.filter((h) => h !== agent);
     const sight = agentSight(positions, area, new Set([...fixed, ...closed]));
     const enemyAt = (e: { id: string; patrol: HexCoord[] }) => c.enemies?.[e.id]?.hex ?? e.patrol[0];
-    const runner = enemyAt(map.enemies.find((e) => e.id === c.start.enemy)!);
+    const runner = enemyAt(map.enemies.find((e) => e.id === start.enemy)!);
     const blocked = new Set([
       ...fixed,
       ...lowCoverHexes(map),
-      ...map.enemies.filter((e) => e.id !== c.start.enemy).map((e) => hexKey(enemyAt(e))),
+      ...map.enemies.filter((e) => e.id !== start.enemy).map((e) => hexKey(enemyAt(e))),
     ]);
     const route = lockRoute(runner, area, blocked, doors, others, sight);
     // acabou de abordar: começa colada nele (distância = passos até ele − 1)
-    const [first] = arrestQueue(runner, c.start.agent, [{ id: c.start.agent, hex: agent, stats: {} }], area, fixed);
+    const [first] = arrestQueue(runner, start.agent, [{ id: start.agent, hex: agent, stats: {} }], area, fixed);
     const track = [agent, ...first.path, ...route.flee];
     const vaults = agentVaults(track, vaultHexes(map), area, blocked);
     const hangar = map.structures!.find((s) => s.kind === 'hangar')!.rect;
@@ -119,5 +122,37 @@ describe('casos de teste', () => {
     expect(route.stops.some((s) => s.kind === 'porta')).toBe(true);
     const end = route.flee.at(-1)!;
     expect(end.row).toBeLessThan(0);
+  });
+
+  it('dois fugindo: só Clara alcança os dois garimpeiros, e eles fogem para lados diferentes', () => {
+    const c = findTestCase('dois-fugindo-aeroporto')!;
+    if (c.start.kind !== 'targets') throw new Error('o caso abre a escolha de alvo');
+    const map = MAPS.find((m) => m.id === c.mapId)!;
+    const area = playArea(map);
+    const fixed = blockedHexes(map);
+    const doors = spawnDoors(map.doors ?? [], map.doorStates);
+    const closed = [...doors].filter(([, d]) => !isOpen(d)).map(([k]) => k);
+    const positions = map.starts.map((h, i) => c.agents?.[CHARACTERS[i].id] ?? h);
+    const enemyAt = (e: { id: string; patrol: HexCoord[] }) => c.enemies?.[e.id]?.hex ?? e.patrol[0];
+    const all = map.enemies.map((e) => ({ id: e.id, hex: enemyAt(e) }));
+    // como o jogo: carga, portas fechadas e os outros inimigos fecham o caminho (raio sem atributos)
+    const walls = new Set([...fixed, ...lowCoverHexes(map), ...closed, ...all.map((e) => hexKey(e.hex))]);
+    const agents = positions.map((hex, i) => ({ id: CHARACTERS[i].id, hex, stats: {} }));
+    const hexOf = (id: string) => all.find((e) => e.id === id)!.hex;
+    const offers = new Map(c.start.enemies.map((id) => [id, chaseCandidates(hexOf(id), agents, area, walls)]));
+    const choices = targetChoices(offers);
+    expect([...choices.keys()]).toEqual(['clara']);
+    expect([...choices.get('clara')!].sort()).toEqual([...c.start.enemies].sort());
+    // cada um tem a sua rota de fuga, para lados diferentes
+    const sight = agentSight(positions, area, new Set([...fixed, ...closed]));
+    const others = positions.filter((h) => h !== c.agents!['clara']);
+    const ends = c.start.enemies.map((id) => {
+      const me = hexOf(id);
+      const blocked = new Set([...fixed, ...lowCoverHexes(map), ...all.filter((e) => e.id !== id).map((e) => hexKey(e.hex))]);
+      const route = lockRoute(me, area, blocked, doors, others, sight);
+      expect(route.escapes, id).toBe(true);
+      return route.flee.at(-1)!;
+    });
+    expect(hexKey(ends[0])).not.toBe(hexKey(ends[1]));
   });
 });
