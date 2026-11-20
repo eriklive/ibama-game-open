@@ -1993,7 +1993,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private async chaseDoor(door: Door, enemyId: string, distance: () => number, addDistance: (delta: number) => void): Promise<void> {
     const name = this.enemy(enemyId)!.name;
     const current = this.doors().get(hexKey(door.hex)) ?? door;
-    // a porta é dele: sem slow (só as escolhas do jogador desaceleram)
+    // o slow vale só durante o d20 dele (ver `fleeDoorTries`)
     await this.fleeDoorTries(current, door, name, distance, addDistance);
   }
 
@@ -2013,11 +2013,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.say(`${name} tenta ${action === 'abrir' ? 'abrir' : 'arrombar'} a porta (d4: ${d4})`, 'info');
       await this.wait(800);
       const need = fleeDoorNeed(action, current);
-      const r = await this.rollD20(
-        { kicker: action === 'abrir' ? 'Abrir' : 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: action === 'abrir' ? 'Abriu' : 'Arrombou', failText: 'Travou', side: 'enemy' },
-        (roll) => roll >= need,
-        800,
-      );
+      // o teste dele segura o slow enquanto o dado rola (solta antes do som e da porta)
+      const release = this.holdSlow();
+      let r: { roll: number; pass: boolean } | null;
+      try {
+        r = await this.rollD20(
+          { kicker: action === 'abrir' ? 'Abrir' : 'Arrombar', who: name, need: `precisa de ${need} ou mais`, passText: action === 'abrir' ? 'Abriu' : 'Arrombou', failText: 'Travou', side: 'enemy' },
+          (roll) => roll >= need,
+          800,
+        );
+      } finally {
+        release();
+      }
       if (!r) return;
       const res = resolveFleeDoor(current, d4, r.roll);
       if (res.pass) {
@@ -2507,7 +2514,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     autoMs?: number,
   ): Promise<{ roll: number; pass: boolean } | null> {
     // só as escolhas do jogador desaceleram: o dado da equipe que vem logo depois de uma (a
-    // iniciativa depois da escolha de alvo) emenda no mesmo slow; os do garimpeiro, nunca
+    // iniciativa depois da escolha de alvo) emenda no mesmo slow; os do garimpeiro só quando
+    // quem chama segura o slow (o teste dele na porta, ver `fleeDoorTries`)
     const release = view.side !== 'enemy' && this.slowActive() ? this.holdSlow() : undefined;
     try {
       return await this.rollD20Sheet(view, passes, autoMs);
