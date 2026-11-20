@@ -4,6 +4,7 @@ import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWo
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, METER, ModelDef } from './character-model';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
+import type { Leg, RacePose } from './chase-race';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
@@ -158,6 +159,8 @@ interface UnitView extends Mover {
   pieceOnly: THREE.Object3D[];
   /** Direção para onde o modelo olha (rad em torno de Y; 0 = +Z, de frente para a câmera). */
   yaw: number;
+  /** Altura do chão sob o modelo, suavizada (o pulo soma `hop` por cima). */
+  ground?: number;
 }
 
 interface EnemyView extends Mover {
@@ -360,8 +363,13 @@ export class HexBoard {
    */
   private chase: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
   private chaseLast: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
-  /** Corrida da perseguição: o agente do `runPair` em curso e o quanto ele corre mais rápido. */
+  /** Corrida da perseguição: o agente da corrida em curso (`startChaseRun`) e o quanto ele corre mais rápido. */
   private unitBoost: { id: string; rate: () => number } | null = null;
+  /** Corrida por tempo (ver `poseChaser`): o trecho de cada um, para trocar o clipe só na virada. */
+  private readonly chaseLegs = new Map<string, Leg>();
+  private chaseRunEnemy?: string;
+  /** Velocidade do tempo da corrida (ver `setChaseTime`). */
+  private chaseTime = 1;
   private chaseBlend = 0;
   /**
    * Slow da curva (ver `setChaseSlowmo`): 0 normal, 1 no fundo. Anda em rampa linear, com os
@@ -915,93 +923,6 @@ export class HexBoard {
    * Anda com o inimigo pelo caminho, virando para cada passo. `onStep` roda a cada
    * hexágono alcançado; se devolver `false` o inimigo para ali.
    */
-  /**
-   * Perseguição: o agente e o inimigo correm ao mesmo tempo, cada um pelo seu caminho (sem a
-   * origem), e chegam juntos (o mais curto corre mais devagar). A câmera segue o inimigo.
-   * Os passos de cada um avisam em `onStep` ("unit" ou "enemy").
-   */
-  async runPair(
-    unitId: string,
-    unitPath: HexCoord[],
-    enemyId: string,
-    enemyPath: HexCoord[],
-    onStep?: (who: 'unit' | 'enemy', hex: HexCoord) => void,
-    speed = 1.6,
-    /** Checado antes de cada passo: `true` para os dois no hexágono em que estão (agarrou no meio). */
-    stop?: () => boolean,
-    /**
-     * Para na pose de corrida (a curva vem a seguir, ver `setChaseSlowmo`): sem trocar para o
-     * clipe parado nem virar o agente. `setChaseSlowmo(false)` devolve os dois ao repouso.
-     */
-    hold = false,
-    /** Hexágonos (caixote de meia altura) por cima dos quais o agente pula, num arco alto. */
-    hopOver: ReadonlySet<string> = new Set(),
-    /** Multiplicador da velocidade do agente agora (a corrida da perseguição; 1 = normal). */
-    unitBoost: () => number = () => 1,
-  ): Promise<void> {
-    const u = this.units.get(unitId);
-    const e = this.enemies.get(enemyId);
-    if (!u || !e || this.moving || (!unitPath.length && !enemyPath.length)) return;
-    this.moving = true;
-    // a corrida acelera o passo e as pernas do agente (ver `animRate`)
-    this.unitBoost = { id: unitId, rate: unitBoost };
-    const longest = Math.max(unitPath.length, enemyPath.length);
-    const pace = (n: number) => RUN_SPEED * speed * (n ? n / longest : 1);
-    const runUnit = async () => {
-      if (!unitPath.length) return;
-      const epoch = u.epoch;
-      // o ritmo sai do caminho de agora; se ele crescer no meio (a corrida encosta), o agente
-      // segue nele no mesmo ritmo, só que mais rápido pelo `unitBoost`
-      const unitPace = pace(unitPath.length);
-      u.rig?.matchSpeed('run', unitPace);
-      u.rig?.play('run', 0.15);
-      for (let i = 0; i < unitPath.length; i++) {
-        if (stop?.()) break;
-        const step = unitPath[i];
-        const from = u.group.position;
-        const to = this.worldOf(step);
-        u.yaw = Math.atan2(to.x - from.x, to.z - from.z);
-        // pulo: sobe até o caixote (metade do arco) e desce do outro lado
-        const up = hopOver.has(hexKey(step));
-        const down = !up && hopOver.has(hexKey(u.hex));
-        const arc = up ? (t: number) => (u.hop = Math.sin((t * Math.PI) / 2) * VAULT_HOP)
-          : down ? (t: number) => (u.hop = Math.cos((t * Math.PI) / 2) * VAULT_HOP)
-          : undefined;
-        await this.runTo(u, step, unitPace, false, () => this.animRate(unitId), arc);
-        if (down) u.hop = 0;
-        if (u.epoch !== epoch) return;
-        u.hex = step;
-        onStep?.('unit', step);
-      }
-      if (!hold) u.rig?.play(this.restClip(u), 0.3);
-    };
-    const runEnemy = async () => {
-      if (!enemyPath.length) return;
-      const epoch = e.epoch;
-      e.running = true;
-      e.rig?.matchSpeed('run', pace(enemyPath.length));
-      e.rig?.play('run', 0.15);
-      for (const step of enemyPath) {
-        if (stop?.()) break;
-        const from = this.worldOf(e.hex);
-        const to = this.worldOf(step);
-        e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
-        await this.runTo(e, step, pace(enemyPath.length), true, () => this.animRate(enemyId));
-        if (e.epoch !== epoch) break;
-        e.hex = step;
-        onStep?.('enemy', step);
-      }
-      e.running = false;
-      if (!hold) e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
-    };
-    await Promise.all([runUnit(), runEnemy()]);
-    this.unitBoost = null;
-    // parados (porta, fim): o agente encara quem persegue; na curva fica como corria
-    const d = e.group.position.clone().sub(u.group.position);
-    if (!hold && d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
-    this.moving = false;
-  }
-
   async moveEnemy(id: string, path: HexCoord[], onStep?: (hex: HexCoord) => boolean | void, speed = 1): Promise<void> {
     const e = this.enemies.get(id);
     if (!e || this.moving || !path.length) return;
@@ -1443,16 +1364,156 @@ export class HexBoard {
   }
 
   /**
-   * Tira o agente e o inimigo da pose de corrida em que `runPair(..., hold = true)` os deixou.
-   * Não mexe em quem está correndo (o próximo trecho já começou).
+   * Velocidade do tempo da corrida (1 = normal, 0 = parado), do pulso de slow-mo da tela (ver
+   * `SLOWMO_PULSE`): a animação de quem corre e o zoom acompanham, para os dois juntos.
    */
-  restChase(): void {
-    if (this.moving) return;
-    const c = this.chaseLast;
-    const u = c && this.units.get(c.unitId);
-    const e = c?.enemyId ? this.enemies.get(c.enemyId) : undefined;
-    if (u) u.rig?.play(this.restClip(u), 0.3);
-    if (e && !e.running) e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+  setChaseTime(rate: number): void {
+    this.chaseTime = Math.min(1, Math.max(0, rate));
+  }
+
+  /**
+   * Começa a corrida por tempo (ver `ChaseRace`): daqui até `endChaseRun`, `poseChaser` põe os
+   * dois a cada quadro. `boost` é a corrida do agente (acelera o passo e as pernas).
+   */
+  startChaseRun(unitId: string, enemyId: string, boost: () => number): void {
+    this.unitBoost = { id: unitId, rate: boost };
+    const e = this.enemies.get(enemyId);
+    if (e) e.running = true;
+    this.chaseLegs.clear();
+    this.chaseRunEnemy = enemyId;
+  }
+
+  /** A corrida parou no meio (a partida recomeçou): solta a corrida sem mexer em ninguém. */
+  stopChaseRun(): void {
+    this.unitBoost = null;
+    this.chaseTime = 1;
+    this.chaseLegs.clear();
+    const e = this.chaseRunEnemy ? this.enemies.get(this.chaseRunEnemy) : undefined;
+    if (e) e.running = false;
+    this.chaseRunEnemy = undefined;
+  }
+
+  /**
+   * Fim da corrida: os dois param nos hexágonos dados (encaixam no centro), no repouso, e o
+   * agente encara quem perseguiu.
+   */
+  endChaseRun(unitId: string, unitHex: HexCoord, enemyId: string, enemyHex: HexCoord): void {
+    this.stopChaseRun();
+    const u = this.units.get(unitId);
+    const e = this.enemies.get(enemyId);
+    for (const m of [u, e]) {
+      if (!m) continue;
+      m.epoch++;
+      m.hop = 0;
+      m.group.rotation.z = m.group.rotation.x = 0;
+    }
+    if (u) {
+      u.hex = { ...unitHex };
+      const p = this.worldOf(unitHex);
+      u.group.position.x = p.x;
+      u.group.position.z = p.z;
+      u.rig?.play(this.restClip(u), 0.3);
+    }
+    if (e) {
+      e.hex = { ...enemyHex };
+      const p = this.worldOf(enemyHex);
+      e.group.position.x = p.x;
+      e.group.position.z = p.z;
+      e.running = false;
+      e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+    }
+    if (u && e) {
+      const d = e.group.position.clone().sub(u.group.position);
+      if (d.lengthSq() > 0.01) u.yaw = Math.atan2(d.x, d.z);
+    }
+  }
+
+  /**
+   * Põe o agente (`unit`) ou o garimpeiro (`enemy`) onde a `ChaseRace` diz, a cada quadro. O
+   * trecho dá a animação: correndo; dando a volta no caixote (freia, inclina e escorrega na
+   * curva); pulando (arco por cima); tentando arrombar a porta (recua e tromba, uma vez por
+   * tentativa); tropeçando (no chão). A câmera da perseguição segue sozinha.
+   */
+  poseChaser(who: 'unit' | 'enemy', id: string, pose: RacePose | null): void {
+    const m = who === 'unit' ? this.units.get(id) : this.enemies.get(id);
+    if (!m || !pose) return;
+    const { leg, t } = pose;
+    const fresh = this.chaseLegs.get(id) !== leg;
+    if (fresh) this.chaseLegs.set(id, leg);
+    const steps = leg.path.length - 1;
+    const hexLen = HEX_STEP * HEX_SIZE;
+    // a volta freia na entrada e solta na saída (a posição na pista não muda, só o desenho)
+    const tt = leg.kind === 'volta' ? t - 0.07 * Math.sin(2 * Math.PI * t) : t;
+    const at = this.alongPath(leg.path, tt);
+    let face: THREE.Vector3 | null = at.dir;
+    m.hop = 0;
+    m.group.rotation.z = 0;
+    switch (leg.kind) {
+      case 'corre':
+      case 'volta':
+      case 'pulo': {
+        if (fresh) {
+          m.rig?.matchSpeed('run', leg.seconds > 0 ? (steps * hexLen) / leg.seconds : RUN_SPEED);
+          m.rig?.play('run', 0.12);
+        }
+        if (leg.kind === 'pulo') {
+          // falhou no teste: pula baixo e desajeitado (leva o tempo da volta)
+          m.hop = Math.sin(Math.PI * t) * VAULT_HOP * (leg.failed ? 0.7 : 1);
+          if (leg.failed) m.group.rotation.z = Math.sin(3 * Math.PI * t) * 0.18;
+        }
+        // escorregadinha: inclina para dentro da curva no meio da volta
+        if (leg.kind === 'volta') m.group.rotation.z = Math.sin(Math.PI * t) * 0.2 * this.turnSign(leg.path);
+        break;
+      }
+      case 'porta': {
+        // emenda a corrida na trombada: ainda correndo até 0,25, encolhe o ombro (o slow-mo
+        // para o tempo por aqui) e tromba na porta (0,35–0,6); depois, de volta ao lugar
+        if (fresh) m.rig?.play('run', 0.08);
+        if (t > 0.25) m.rig?.play('idle', 0.15);
+        const door = leg.stop ? this.worldOf(leg.stop.hex) : at.pos;
+        const dir = door.clone().sub(at.pos).setY(0);
+        if (dir.lengthSq() > 1e-6) dir.normalize();
+        const shove =
+          t < 0.35 ? -0.14 * Math.sin((Math.PI / 2) * (t / 0.35))
+          : t < 0.6 ? -0.14 + 0.56 * Math.sin((Math.PI / 2) * ((t - 0.35) / 0.25))
+          : 0.42 * (1 - (t - 0.6) / 0.4);
+        at.pos.addScaledVector(dir, shove);
+        m.hop = t > 0.35 && t < 0.6 ? 0.08 * Math.sin((Math.PI * (t - 0.35)) / 0.25) : 0;
+        face = dir.lengthSq() > 0 ? dir : null;
+        break;
+      }
+    }
+    m.group.position.x = at.pos.x;
+    m.group.position.z = at.pos.z;
+    m.hex = pose.frac < 0.5 ? pose.a : pose.b;
+    if (face && face.lengthSq() > 1e-6) {
+      if (who === 'unit') (m as UnitView).yaw = Math.atan2(face.x, face.z);
+      else (m as EnemyView).facingGoal = Math.atan2(face.z, face.x);
+    }
+    if (who === 'enemy') {
+      this.camGoal.copy(m.group.position);
+      this.clampGoal();
+    }
+  }
+
+  /** Ponto e direção a `t` (0..1) do caminho, por igual entre os hexágonos. */
+  private alongPath(path: readonly HexCoord[], t: number): { pos: THREE.Vector3; dir: THREE.Vector3 | null } {
+    const steps = path.length - 1;
+    if (steps <= 0) return { pos: this.worldOf(path[0]), dir: null };
+    const s = Math.min(steps, Math.max(0, t * steps));
+    const i = Math.min(Math.floor(s), steps - 1);
+    const a = this.worldOf(path[i]);
+    const b = this.worldOf(path[i + 1]);
+    const dir = b.clone().sub(a).setY(0);
+    return { pos: a.lerp(b, s - i), dir: dir.lengthSq() > 1e-6 ? dir.normalize() : null };
+  }
+
+  /** Para que lado o caminho vira (+1 / −1), do primeiro trecho ao último. */
+  private turnSign(path: readonly HexCoord[]): number {
+    if (path.length < 3) return 0;
+    const a = this.worldOf(path[1]).sub(this.worldOf(path[0]));
+    const b = this.worldOf(path[path.length - 1]).sub(this.worldOf(path[path.length - 2]));
+    return Math.sign(a.x * b.z - a.z * b.x) || 1;
   }
 
   /** Velocidade da animação de `id` agora: só quem está na perseguição desacelera (e o agente acelera na corrida). */
@@ -1460,8 +1521,8 @@ export class HexBoard {
     const c = this.chaseLast;
     const boost = this.unitBoost?.id === id ? this.unitBoost.rate() : 1;
     if (!c || (c.unitId !== id && c.enemyId !== id)) return boost;
-    // na escolha do caixote o mundo para: só o fantasma se mexe
-    return (this.vaultScene?.active ? 0 : slowmoRate(this.slowmo)) * boost;
+    // o slow-mo pega os dois juntos (e o pulso da corrida chega a parar o tempo)
+    return slowmoRate(this.slowmo) * this.chaseTime * boost;
   }
 
   /** Vira o agente para o inimigo (a "cabeça" da escolha de alvo). */
@@ -1508,16 +1569,6 @@ export class HexBoard {
     this.spotlight.set(true);
   }
 
-  /** Prévia da escolha: a câmera fecha e o fantasma do agente faz a ação (resolve no fim). */
-  previewVault(pick: VaultPick): Promise<void> {
-    return this.vaultScene?.preview(pick) ?? Promise.resolve();
-  }
-
-  /** Da prévia de volta para a escolha. */
-  backToVaultChoice(): void {
-    this.vaultScene?.back();
-  }
-
   /** Fecha a escolha do caixote: a cor e a câmera da perseguição voltam. */
   endVaultChoice(): void {
     if (!this.vaultScene?.active) return;
@@ -1534,7 +1585,8 @@ export class HexBoard {
   /** Mistura a câmera com a da escolha do caixote (aberta, ou de perto na prévia). */
   private blendVault(dt: number, look: THREE.Vector3, dist: number): number {
     const goal = this.vaultScene?.cameraGoal();
-    this.vaultBlend += ((goal ? 1 : 0) - this.vaultBlend) * (1 - Math.exp(-dt * 2.6));
+    // ~300 ms para abrir e para fechar (cabe na descida e na volta do pulso de slow-mo)
+    this.vaultBlend += ((goal ? 1 : 0) - this.vaultBlend) * (1 - Math.exp(-dt * 12));
     if (this.vaultBlend < 0.002 && !goal) this.vaultBlend = 0;
     if (this.vaultBlend <= 0) return dist;
     const c = this.vaultCam;
@@ -1559,7 +1611,7 @@ export class HexBoard {
     if (Math.abs(goal - this.chaseBlend) < 0.002) this.chaseBlend = goal;
     const c = this.chase ?? this.chaseLast;
     // o zoom do slow acompanha a fita: mesma rampa, mesma proporção (sem ele em "menos movimento")
-    const zoomRate = reducedMotionQuery() ? 1 : slowmoRate(this.slowmo);
+    const zoomRate = reducedMotionQuery() ? 1 : slowmoRate(this.slowmo) * this.chaseTime;
     const fov = slowmoFov(40 + CHASE_CAMERA.fovBoost * this.chaseBlend, zoomRate);
     if (Math.abs(this.camera.fov - fov) > 0.05) {
       this.camera.fov = fov;
@@ -3021,11 +3073,12 @@ export class HexBoard {
         // personagem com modelo: fica de pé sobre o hexágono (acompanha a flutuação do caminho)
         // e vira suavemente para onde vai; quem está na vez é marcado só pelo anel
         u.rig.update(dt * this.animRate(u.id));
-        const ground = this.groundAt(u.group.position.x, u.group.position.z);
-        u.group.position.y += (ground + BASE_TOP - u.group.position.y) * (1 - Math.exp(-dt * 14));
+        const ground = this.groundAt(u.group.position.x, u.group.position.z) + BASE_TOP;
+        u.ground = u.ground === undefined ? ground : u.ground + (ground - u.ground) * (1 - Math.exp(-dt * 14));
+        u.group.position.y = u.ground + u.hop;
         const turn = Math.atan2(Math.sin(u.yaw - u.group.rotation.y), Math.cos(u.yaw - u.group.rotation.y));
         u.group.rotation.y += turn * (1 - Math.exp(-dt * 12));
-        u.shadow.position.set(u.group.position.x, u.group.position.y - BASE_TOP + 0.01, u.group.position.z);
+        u.shadow.position.set(u.group.position.x, u.ground - BASE_TOP + 0.01, u.group.position.z);
         u.shadow.scale.setScalar(1.1);
         continue;
       }

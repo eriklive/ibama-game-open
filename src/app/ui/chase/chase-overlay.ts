@@ -13,13 +13,14 @@ export interface ChaseHud {
 }
 
 /**
- * Escolha no caixote de meia altura (`id` muda a cada caixote): `choice` espera o toque no caixote
- * ou na faixa, `preview` mostra o fantasma fazendo `pick`, `confirm` pede Confirmar ou Trocar.
+ * Escolha no caixote de meia altura (`id` muda a cada caixote), antes de o agente chegar nele: o
+ * slow-mo para o tempo e o relógio corre `ms`; o toque no caixote (ou Pular) pula, na faixa (ou
+ * Dar a volta) vai atrás dele. O relógio acabou: dá a volta.
  */
 export interface VaultPrompt {
   id: number;
-  stage: 'choice' | 'preview' | 'confirm';
-  pick: VaultPick | null;
+  /** Prazo da escolha (ms): até o fim do tempo parado do slow-mo. */
+  ms: number;
   /** Passos que o pulo corta. */
   saves: number;
   /** Quanto o d20 precisa tirar para pular (já com a agilidade). */
@@ -54,8 +55,8 @@ export const SPRINT_DIE_MS = 650;
 
 /**
  * Por cima do tabuleiro durante a perseguição: o placar no topo e o botão de correr. No caixote
- * de meia altura, a cena de escolha: faixas de cinema, o cartão da decisão (o toque vai para o
- * caixote ou para a faixa da volta, no 3D) e, depois do fantasma, Confirmar ou Trocar. Na escolha de alvo (`decisao:alvo`), tocar numa metade da tela olha para aquele lado e tocar de novo confirma.
+ * de meia altura, a cena de escolha: faixas de cinema, o relógio de 1 s e o cartão da decisão (o
+ * toque vai para o caixote ou para a faixa da volta, no 3D, ou para os botões). Na escolha de alvo (`decisao:alvo`), tocar numa metade da tela olha para aquele lado e tocar de novo confirma.
  */
 @Component({
   selector: 'app-chase-overlay',
@@ -71,8 +72,6 @@ export class ChaseOverlay {
   readonly sprint = input<SprintView | null>(null);
   /** Escolha no caixote (botões de apoio para teclado e leitor de tela; o toque vai no 3D). */
   readonly vaultPick = output<VaultPick>();
-  readonly vaultConfirm = output<void>();
-  readonly vaultBack = output<void>();
   readonly sprintPress = output<void>();
   protected readonly dieMs = SPRINT_DIE_MS;
 

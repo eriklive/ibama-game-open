@@ -18,26 +18,24 @@
  *    de passos (`lockRoute`). Ele evita o que os agentes enxergam (`agentSight`): prefere correr
  *    por dentro das construções ou pela mata a atravessar a pista à vista. Passa só por portas
  *    que consegue usar (abertas, encostadas, trancadas e portões; bloqueada é parede). A rota
- *    vira a "pista" e não muda mais. **Curvas não param nada nem rolam dados:** o agente vai
- *    atrás dele direto. Dados só nos testes de verdade, as **paradas**:
- *    - **porta** fechada no caminho: o garimpeiro sempre tenta arrombar, com um d20
- *      (`resolveFleeDoor`), sem parar a corrida. O dado sai `doorRollLead` hexágonos antes da
- *      porta e o slow entra a `doorSlowLead`. Passou: ele dá uma trombada, a porta fica
- *      arrombada e ele segue correndo. Falhou: bate na porta e é agarrado ali, sem segunda
- *      chance.
- *    - **pulo** (`agentVaults`): onde a pista do agente dá a volta num caixote de meia altura
- *      (o garimpeiro não pula, contorna), o mundo para e o jogador escolhe, sem prazo: pular
- *      por cima ou dar a volta (a cena de escolha, ver `VaultScene`).
- *      Pulou: d20 + agilidade ≥ `vaultDC` (`resolveVault`) corta caminho (a distância cai o que
- *      a volta custaria); falhou, tropeça (+1) e dá a volta. Sem pular, dá a volta como ele,
- *      sem rolar.
- * 4. **Distância.** Começa no tamanho do trecho do agente até ele; só as paradas mexem nela.
- *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
- *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
+ *    vira a "pista" e não muda mais. Curvas não param nada nem rolam dados.
+ * 4. **Tempo e distância** (`ChaseRace`, em `chase-race.ts`). Os dois correm ao mesmo tempo, cada
+ *    um no seu relógio, na velocidade padrão (`hexSeconds` por hexágono). **Ninguém para** (só ele,
+ *    na porta): o dado ou a escolha de um nunca segura o outro. Decisões e dados acontecem num
+ *    **pulso de slow-mo** (`SLOWMO_PULSE`, 1,6 s fixos): o tempo desacelera até parar, fica parado
+ *    1 s e volta, para os dois juntos.
+ *    - **caixote** que a pista contorna (`agentVaults`): ele sempre dá a volta, em `aroundSeconds`
+ *      (x). A `vaultLeadSeconds` do caixote, o agente decide (no pulso): pular, d20 + agilidade ≥
+ *      `vaultDC` (passou: x/2; falhou: pula mal, x), ou dar a volta (x). Sem escolha, dá a volta.
+ *    - **porta** fechada na rota dele: ele emenda a corrida na animação de arrombar
+ *      (`doorBreakSeconds`), o pulso entra e o d20 rola (`fleeDoorNeed`). Passou: arromba e sai
+ *      correndo. Falhou: se rende ali.
+ *    A distância é quanto da pista ele está à frente (menos o hexágono de encostar). Chegou a 0:
+ *    **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório). Ele chegou à
+ *    borda: **foge** do mapa e a perseguição acaba.
  *    - **corrida** (`resolveSprint`): uma vez por perseguição, o jogador pode dar um gás. Rola
- *      teste de vigor, d20 + vigor: o total é quanto (%) o agente fica mais rápido por `sprintSeconds`,
- *      sem parar a corrida. Cada hexágono corrido mais rápido que ele vai encostando
- *      (`sprintGain`); a cada hexágono inteiro ganho, a distância cai 1.
+ *      teste de vigor, d20 + vigor: o total é quanto (%) o agente fica mais rápido por
+ *      `sprintSeconds`. Só ele acelera; o garimpeiro segue no ritmo dele.
  *    - **grito** (`resolveShout`): oculto por enquanto (era muita coisa junto com a porta).
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
@@ -72,10 +70,23 @@ export const CHASE_RULES = {
   seenCost: 6,
   /** Garimpeiro numa porta fechada: sempre arromba; o que ele precisa tirar no d20. */
   doorNeed: { encostada: 3, trancada: 12 },
-  /** A quantos hexágonos da porta o d20 dele sai (correndo, sem parar). */
-  doorRollLead: 3,
-  /** A quantos hexágonos da porta entra o slow (até ele chegar nela e o dado decidir). */
-  doorSlowLead: 2,
+  /**
+   * Segundos para correr um hexágono na velocidade padrão da perseguição (os dois correm nela;
+   * 1,6× a corrida do tabuleiro).
+   */
+  hexSeconds: 0.225,
+  /**
+   * Animação de arrombar a porta (s, no relógio da corrida): ele emenda a corrida nela, o slow-mo
+   * entra no meio e o d20 decide. Passou: arromba e sai correndo; falhou: se rende ali.
+   */
+  doorBreakSeconds: 0.6,
+  /** Dar a volta no caixote (x, em s): para quem der a volta. Pular: x/2 se passar, x se falhar. */
+  aroundSeconds: 1,
+  /**
+   * A quanto tempo do caixote (s de corrida) o agente decide: ali entra o slow-mo, a escolha e o
+   * teste, antes de ele chegar.
+   */
+  vaultLeadSeconds: 1,
   /** Grito ("Parado, Ibama!"): ganhou a disputa, ele olha para trás e a distância cai isto. */
   shoutDelta: -1,
   /** Corrida (gás): teste de vigor, d20 + vigor; o total vira o bônus de velocidade (%). */
@@ -88,8 +99,6 @@ export const CHASE_RULES = {
   sprintRampMs: 350,
   /** Pulo por cima do caixote: d20 + agilidade, pelo menos isto. */
   vaultDC: 8,
-  /** Tropeçou no pulo: a distância abre isto. */
-  vaultFailDelta: 1,
   /** Agarrou: bônus nas rolagens do próximo interrogatório do suspeito abalado. */
   shakenBonus: 2,
 } as const;
@@ -402,13 +411,9 @@ export function agentVaults(
 
 // ---------- paradas ----------
 
-/**
- * Pulo do caixote (só o agente rola): d20 + agilidade ≥ `vaultDC` corta caminho (a distância cai
- * `saves`); falhou, tropeça e dá a volta (+`vaultFailDelta`).
- */
-export function resolveVault(roll: number, agent: ChaseStats, saves: number): { pass: boolean; delta: number } {
-  const pass = roll + (agent.agilidade ?? 0) >= CHASE_RULES.vaultDC;
-  return { pass, delta: pass ? -saves : CHASE_RULES.vaultFailDelta };
+/** Pulo do caixote (só o agente rola): d20 + agilidade ≥ `vaultDC`. Falhou: tropeça. */
+export function vaultPasses(roll: number, agent: ChaseStats = {}): boolean {
+  return roll + (agent.agilidade ?? 0) >= CHASE_RULES.vaultDC;
 }
 
 /** O que ele precisa tirar no d20 para arrombar (0 = passa direto; porta aberta ou arrombada). */
@@ -425,16 +430,14 @@ export interface FleeDoorResult {
   pass: boolean;
   /** A porta depois da tentativa (arrombada; igual se falhou ou já estava aberta). */
   door: Door;
-  /** Falhou: bateu na porta e é agarrado ali (sem tentar de novo). */
-  caught: boolean;
 }
 
-/** A trombada do garimpeiro numa porta fechada da rota: o d20 resolve, numa tentativa só. */
+/** O garimpeiro arromba uma porta fechada da rota: o d20 resolve (falhou: se rende ali). */
 export function resolveFleeDoor(door: Door, d20: number): FleeDoorResult {
   const need = fleeDoorNeed(door);
   const pass = need !== Infinity && d20 >= need;
   const after = pass && !isOpen(door) ? { ...door, broken: true } : door;
-  return { need, pass, door: after, caught: !pass };
+  return { need, pass, door: after };
 }
 
 // ---------- grito ----------
@@ -471,13 +474,6 @@ export function resolveSprint(roll: number, agent: ChaseStats): SprintResult {
   const total = roll + (agent.vigor ?? 0);
   return { total, percent: Math.max(CHASE_RULES.sprintMin, total) };
 }
-
-/**
- * Corrida: quanto o agente encosta (em hexágonos) a cada hexágono que corre `rate` vezes mais
- * rápido que ele. No tempo em que ele corre 1, o agente corre `rate`: ganha `rate − 1` em
- * `rate` hexágonos.
- */
-export const sprintGain = (rate: number): number => (rate > 1 ? (rate - 1) / rate : 0);
 
 /**
  * Corrida: o multiplicador de velocidade `ms` depois de começar, com `percent` de bônus. Entra

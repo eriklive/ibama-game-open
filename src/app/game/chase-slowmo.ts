@@ -28,3 +28,38 @@ export function slowmoRate(progress: number): number {
 export function slowmoFov(fov: number, rate: number): number {
   return fov * (1 - (1 - rate) * CHASE_SLOWMO.zoom);
 }
+
+/**
+ * Pulso de slow-mo da corrida (caixote e porta): o tempo desacelera até parar (`downMs`), fica
+ * parado (`holdMs`: a decisão e o dado) e volta (`upMs`). Total fixo, 1,6 s. Pega os dois
+ * corredores juntos: ninguém para, o tempo é que para.
+ */
+export const SLOWMO_PULSE = {
+  downMs: 300,
+  holdMs: 1000,
+  upMs: 300,
+} as const;
+
+/** Duração total do pulso (ms). */
+export const pulseTotalMs = (): number => SLOWMO_PULSE.downMs + SLOWMO_PULSE.holdMs + SLOWMO_PULSE.upMs;
+
+/** Fim do tempo parado (ms desde o começo do pulso): a decisão fecha aqui. */
+export const pulseHoldEndMs = (): number => SLOWMO_PULSE.downMs + SLOWMO_PULSE.holdMs;
+
+/** Velocidade do tempo `ms` depois de começar o pulso (1 normal, 0 parado). */
+export function pulseRate(ms: number): number {
+  const { downMs, holdMs, upMs } = SLOWMO_PULSE;
+  if (ms <= 0) return 1;
+  if (ms < downMs) return 1 - ms / downMs;
+  if (ms < downMs + holdMs) return 0;
+  if (ms < downMs + holdMs + upMs) return (ms - downMs - holdMs) / upMs;
+  return 1;
+}
+
+/**
+ * Um pulso novo com outro ainda correndo: onde ele começa (ms atrás de agora) para emendar sem
+ * pulo na velocidade (entra na descida na velocidade de agora, ou já no tempo parado).
+ */
+export function pulseRestart(rateNow: number): number {
+  return SLOWMO_PULSE.downMs * (1 - Math.min(1, Math.max(0, rateNow)));
+}

@@ -473,34 +473,38 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    evita o que os agentes enxergam (até 20 hexágonos em linha reta, sem parede, árvore ou porta
    fechada no meio): cada hexágono à vista custa 6 passos a mais, então ele prefere correr por
    dentro das construções ou pela mata a atravessar a pista à vista. Passa por portas que ele
-   consegue usar (bloqueada é parede). Os dois correm juntos por ela; a distância começa no
-   número de hexágonos entre eles. Chegou à borda: some do mapa e a perseguição acaba.
-4. **Curvas não rolam.** O agente vai atrás dele direto, sem parar e sem dado (nem ele, nem o
-   garimpeiro). Dados só nos testes de verdade: **caixote** e **porta**.
-   **Caixote.** Onde a pista do agente contorna um caixote de meia altura, entra a **escolha de
-   ação no cenário**, sem prazo: o mundo para, a câmera abre (agente, caixote e a pista dele) e
-   tudo fica cinza, menos o caixote e uma faixa amarela com setas em volta dele (o caminho do
-   garimpeiro). Toque no caixote para **pular** ou na faixa para **dar a volta** (↑/W ou ✕ pula,
-   ↓/S ou ○ dá a volta). A câmera fecha e um **fantasma** do agente faz a ação: pula por cima e se
-   vira para o garimpeiro, ou corre a volta atrás dele. Depois, **Confirmar** (Enter/✕) ou
-   **Trocar** (Esc/○). Pulou: d20 + agilidade ≥ 8 corta a volta; tropeçou, +1. Deu a volta: segue
-   como ele, sem rolar. A cena fica em `vault-scene.ts`.
-5. **Porta.** O garimpeiro sempre tenta arrombar, sem parar: o d20 sai 3 hexágonos antes da
-   porta (≥ 3 encostada, ≥ 12 trancada) e a 2 hexágonos entra o **slow**. Passou, ele dá uma
-   trombada, a porta fica arrombada e ele segue correndo. Falhou, bate na porta e é agarrado ali,
-   sem tentar de novo.
-   **Grito.** Em cada trecho (entre paradas) o jogador pode gritar uma vez: botão **Gritar!** (G no
-   teclado, □ no controle). Ninguém para, mas entra o **slow**. **Disputa:** os dois dados rolam
-   juntos, o do agente (d20 + intimidação) e o do suspeito (d20). Agente maior **ou empate**: ele
-   olha para trás, fica mais lento e a distância cai 1 (o agente encosta ali mesmo). Suspeito
-   maior: nada acontece. Antes do caixote ou porta seguinte, o grito termina de rolar.
+   consegue usar (bloqueada é parede). Chegou à borda: some do mapa e a perseguição acaba.
+4. **Tempo e distância** (`ChaseRace`, em `chase-race.ts`). Os dois correm juntos pela pista, cada
+   um no **seu próprio relógio**, na velocidade padrão (0,225 s por hexágono), e **ninguém para**
+   (só o garimpeiro, na porta). O dado ou a escolha de um nunca segura o outro. Curvas não param nem
+   rolam. A distância é quanto da pista ele está à frente (menos o hexágono de encostar); começa no
+   número de hexágonos entre eles.
+   **Slow-mo.** Decisões e dados acontecem num **pulso fixo de 1,6 s** (`SLOWMO_PULSE`, em
+   `chase-slowmo.ts`): o tempo desacelera até parar em 300 ms (a câmera abre), fica parado 1 s (a
+   escolha, o dado) e volta em 300 ms (a câmera fecha). Pega os dois juntos, então a distância não
+   muda; depois tudo segue de onde estava.
+   **Caixote.** Onde a pista contorna um caixote de meia altura, ele sempre **dá a volta**, que leva
+   **x = 1 s** (freia, inclina e escorrega na curva). O agente decide **antes** de chegar: a 1 s de
+   corrida do caixote entra o pulso, o mundo fica cinza, menos o caixote e uma faixa amarela com
+   setas em volta dele (o caminho do garimpeiro), e um relógio corre. Toque no caixote ou em
+   **Pular** (↑/W, ✕) para **pular**: d20 + agilidade ≥ 8 na hora; passou, pula em **x/2**; falhou,
+   pula mal, em **x**. Toque na faixa ou em **Dar a volta** (↓/S, ○), ou não escolha: volta em **x**.
+   A cena fica em `vault-scene.ts`.
+   **Porta.** Fechada na rota dele: ele emenda a corrida na animação de arrombar (0,6 s; recua e
+   tromba) e o pulso entra; o d20 dele (≥ 3 encostada, ≥ 12 trancada) cai no tempo parado. Passou: a
+   porta fica arrombada e ele sai correndo. Falhou: **se rende** ali (abalado, como agarrado).
+   **Corrida.** Uma vez por perseguição, **Correr!** (C, □): d20 + vigor vira o bônus de velocidade
+   (%) por 5 s. Só o agente acelera.
+   Os tempos ficam em `CHASE_RULES` (`hexSeconds`, `doorBreakSeconds`, `aroundSeconds`,
+   `vaultLeadSeconds`).
+5. **Grito.** Oculto por enquanto (`resolveShout`).
 6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
 
 **Música.** A faixa da perseguição (`public/assets/sounds/perseguicao.mp3`, 11,9 s em loop) entra
-quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. No caixote e na
-porta a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
+quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. No pulso de
+slow-mo (caixote e porta) a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
 mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
 `CHASE_MUSIC` (`sound.service.ts`).
 
@@ -508,7 +512,7 @@ mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os núme
 direita, olhando para o suspeito (atrás 4,4 · altura 2,5 · mira 7 à frente; em retrato, atrás 6,2 ·
 altura 3,6). O FOV abre um pouco e a névoa fecha mais perto. A HUD de papel some (fica o placar
 embaixo); no caixote, a câmera abre para a escolha (inclinada 56°, enquadrando o agente, o caixote e
-a pista) e fecha 3/4 de lado na prévia do fantasma (`VAULT_SCENE`, em `vault-scene.ts`). No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
+a pista; `VAULT_SCENE`, em `vault-scene.ts`). No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
 
 **Dois fugindo (`decisao:alvo`).** No começo do turno inimigo, se um agente está no raio de dois ou
 mais suspeitos em alerta, ele escolhe qual perseguir: a câmera desce atrás dele olhando para o meio
