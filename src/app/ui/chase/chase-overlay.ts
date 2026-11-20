@@ -34,7 +34,7 @@ export interface SprintView {
   state: 'ready' | 'rolling' | 'active' | 'used';
   /** Face do d4 (já sorteada); `null` antes de rolar. */
   roll: number | null;
-  /** d4 + vigor, vezes 10 (até 40%). */
+  /** 1–2 no d4 → 10%; 3–4 → 20%. */
   percent: number;
   /** Quanto tempo (ms) a velocidade maior ainda dura, para a barrinha do botão. */
   ms: number;
@@ -77,7 +77,7 @@ export class ChaseOverlay {
   protected sprintSub(sp: SprintView): string {
     switch (sp.state) {
       case 'ready':
-        return 'd4 + vigor';
+        return 'rola o d4';
       case 'rolling':
         return 'rolando…';
       case 'active':
@@ -88,7 +88,7 @@ export class ChaseOverlay {
   }
 
   protected sprintLabel(sp: SprintView): string {
-    return sp.state === 'ready' ? 'Correr: d4 + vigor, até 40% mais rápido por 5 segundos' : `Correr: ${this.sprintSub(sp)}`;
+    return sp.state === 'ready' ? 'Correr: rola o d4, 10% ou 20% mais rápido por 5 segundos' : `Correr: ${this.sprintSub(sp)}`;
   }
 
   /** Escolha de alvo: tocou num lado (metade da tela ou seta), confirmou ou desistiu. */

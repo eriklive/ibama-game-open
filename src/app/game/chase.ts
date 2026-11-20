@@ -35,7 +35,7 @@
  *    Chegou a 0: **agarra** (rende na hora e fica **abalado**, +2 no próximo interrogatório).
  *    Chegou à borda: **foge** do mapa e a perseguição acaba (`chaseEnd`).
  *    - **corrida** (`resolveSprint`): uma vez por perseguição, o jogador pode dar um gás. Rola
- *      d4 + vigor e multiplica por 10: o agente fica até 40% mais rápido por `sprintSeconds`,
+ *      d4: 1 ou 2 deixa o agente 10% mais rápido, 3 ou 4 deixa 20%, por `sprintSeconds`,
  *      sem parar a corrida. Cada hexágono corrido mais rápido que ele vai encostando
  *      (`sprintGain`); a cada hexágono inteiro ganho, a distância cai 1.
  *    - **grito** (`resolveShout`): oculto por enquanto (era muita coisa junto com a porta).
@@ -78,12 +78,11 @@ export const CHASE_RULES = {
   doorSlowLead: 2,
   /** Grito ("Parado, Ibama!"): ganhou a disputa, ele olha para trás e a distância cai isto. */
   shoutDelta: -1,
-  /** Corrida (gás): o dado rolado; o resultado + vigor vale `sprintStep` % cada ponto. */
+  /** Corrida (gás): o dado rolado. Até `sprintHighFrom − 1` vale `sprintLow` %; dali para cima, `sprintHigh` %. */
   sprintDie: 4,
-  sprintStep: 10,
-  /** Corrida: o bônus nunca passa disto (%) nem fica abaixo de `sprintMin`. */
-  sprintMax: 40,
-  sprintMin: 10,
+  sprintHighFrom: 3,
+  sprintLow: 10,
+  sprintHigh: 20,
   /** Corrida: quanto tempo (s, relógio real) a velocidade maior dura. */
   sprintSeconds: 5,
   /** Corrida: entrada e saída suaves da velocidade (ms), antes e depois dos `sprintSeconds`. */
@@ -462,17 +461,16 @@ export function resolveShout(agentRoll: number, agent: ChaseStats, enemyRoll: nu
 // ---------- corrida ----------
 
 export interface SprintResult {
-  /** d4 + vigor. */
+  /** Face do d4. */
   total: number;
-  /** Quanto mais rápido o agente fica (%), entre `sprintMin` e `sprintMax`. */
+  /** Quanto mais rápido o agente fica (%): `sprintLow` ou `sprintHigh`. */
   percent: number;
 }
 
-/** Corrida: d4 + vigor, vezes 10, até 40% (e pelo menos 10%: dar o gás sempre ajuda um pouco). */
-export function resolveSprint(roll: number, agent: ChaseStats): SprintResult {
-  const total = roll + (agent.vigor ?? 0);
-  const percent = Math.min(CHASE_RULES.sprintMax, Math.max(CHASE_RULES.sprintMin, total * CHASE_RULES.sprintStep));
-  return { total, percent };
+/** Corrida: d4 puro. 1 ou 2 → +10%; 3 ou 4 → +20% (dar o gás sempre ajuda um pouco, sem desequilibrar a fuga). */
+export function resolveSprint(roll: number): SprintResult {
+  const percent = roll >= CHASE_RULES.sprintHighFrom ? CHASE_RULES.sprintHigh : CHASE_RULES.sprintLow;
+  return { total: roll, percent };
 }
 
 /**

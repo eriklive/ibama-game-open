@@ -1708,7 +1708,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.chaseSprint.set({ state: 'ready', roll: null, percent: 0, ms: 0 });
     this.sprintStart = () => {
       const roll = rollDie(CHASE_RULES.sprintDie);
-      const { percent } = resolveSprint(roll, this.chaseStats(agentId));
+      const { percent } = resolveSprint(roll);
       const ms = sprintTotalMs();
       const rolling: SprintView = { state: 'rolling', roll, percent, ms };
       const active: SprintView = { ...rolling, state: 'active' };
