@@ -91,13 +91,6 @@
   transition: width 0.3s;
 }
 
-.curve {
-  position: absolute;
-  inset: 0;
-  background: linear-gradient(90deg, rgba(13, 26, 42, 0.45), rgba(13, 26, 42, 0) 22%, rgba(13, 26, 42, 0) 78%, rgba(13, 26, 42, 0.45));
-  touch-action: none;
-  z-index: 6;
-}
 .curve-head {
   position: absolute;
   top: calc(14px + var(--safe-top, 0px));
@@ -123,18 +116,6 @@
   text-transform: uppercase;
 }
 .curve-text { font-family: var(--marker); font-size: 15px; line-height: 1.1; }
-.curve-timer { width: 100%; height: 6px; background: rgba(0, 0, 0, 0.12); }
-.curve-timer i {
-  display: block;
-  height: 100%;
-  background: #ff8a1f;
-  animation: curve-timer linear both;
-  transform-origin: left;
-}
-@keyframes curve-timer {
-  from { transform: scaleX(1); }
-  to { transform: scaleX(0); }
-}
 .curve-btn {
   position: absolute;
   top: 50%;
@@ -152,17 +133,7 @@
 }
 .curve-btn.left { left: calc(16px + var(--safe-left, 0px)); }
 .curve-btn.right { right: calc(16px + var(--safe-right, 0px)); }
-.curve-btn.vault {
-  top: auto;
-  bottom: calc(24px + var(--safe-bottom, 0px));
-  left: 50%;
-  margin-top: 0;
-  margin-left: calc(clamp(64px, 12vw, 96px) / -2);
-}
 .curve-btn:active { translate: 2px 3px; box-shadow: none; }
-@media (prefers-reduced-motion: reduce) {
-  .curve-timer i { animation: none; }
-}
 
 .sprint-btn {
   position: absolute;
@@ -291,11 +262,104 @@
   }
   .curve-kicker { font-size: 20px; }
   .curve-text { font-size: 13px; }
-  .curve-timer { width: 70px; }
   .target-actions { bottom: calc(6px + var(--safe-bottom, 0px)); }
   .target-go,
   .target-skip { padding: 5px 10px; font-size: 13px; }
   .sprint-btn { bottom: calc(6px + var(--safe-bottom, 0px)); padding: 5px 10px; }
   .sprint-pop { bottom: calc(6px + var(--safe-bottom, 0px)); }
   .sprint-main { font-size: 16px; }
+}
+
+/* Escolha no caixote (ver `chase-overlay.html`): faixas de cinema e vinheta, sem cobrir o toque
+   (o toque vai para o caixote ou para a faixa da volta, no 3D). */
+.vault-scene {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(0, 0, 0, 0) 50%, rgba(0, 0, 0, 0.5) 100%);
+  animation: vault-in 0.6s ease-out both;
+}
+.vault-scene::before,
+.vault-scene::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 7vh;
+  background: #000;
+  animation: vault-bar 0.6s cubic-bezier(0.2, 0.8, 0.2, 1) both;
+}
+.vault-scene::before { top: 0; transform-origin: top; }
+.vault-scene::after { bottom: 0; transform-origin: bottom; }
+@keyframes vault-in { from { opacity: 0; } to { opacity: 1; } }
+@keyframes vault-bar { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+.vault-head { top: calc(7vh + 10px + var(--safe-top, 0px)); z-index: 1; }
+.vault-hint { font: 12px/1.25 var(--typed); color: var(--muted-paper); text-wrap: balance; }
+.vault-card {
+  position: absolute;
+  left: 50%;
+  bottom: calc(7vh + 10px + var(--safe-bottom, 0px));
+  transform: translateX(-50%) rotate(1deg);
+  z-index: 1;
+  width: min(320px, calc(100% - 32px));
+  padding: 8px 14px 10px;
+  background: var(--paper-light);
+  color: var(--ink-paper);
+  box-shadow: 4px 6px 0 rgba(0, 0, 0, 0.4);
+  display: grid;
+  gap: 5px;
+  justify-items: center;
+  text-align: center;
+  pointer-events: auto;
+  animation: slap 0.2s ease-out both;
+}
+.vault-rule { display: flex; flex-wrap: wrap; gap: 4px 8px; justify-content: center; font: 12px/1.2 var(--typed); }
+.vault-rule i { font-style: normal; border: 1.5px solid var(--ink-paper); padding: 1px 6px; }
+.vault-actions { display: flex; gap: 10px; margin-top: 4px; }
+.vault-btn {
+  padding: 7px 14px 6px;
+  font: 700 16px/1 var(--stencil);
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--ink-paper);
+  background: transparent;
+  border: 2px solid var(--ink-paper);
+  cursor: pointer;
+}
+.vault-btn.go { background: var(--ink-paper); color: var(--paper-light); }
+.vault-btn:disabled { opacity: 0.35; cursor: default; }
+.vault-btn:focus-visible { outline: 3px solid #8fe3ff; outline-offset: 2px; }
+.vault-card.waiting .curve-kicker { opacity: 0.85; }
+/* só para teclado e leitor de tela: o toque vai no caixote e na faixa, no 3D */
+.vault-sr button {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  pointer-events: auto;
+}
+.vault-sr button:focus-visible {
+  width: auto;
+  height: auto;
+  clip-path: none;
+  left: 50%;
+  bottom: calc(7vh + 14px + var(--safe-bottom, 0px));
+  transform: translateX(-50%);
+  padding: 6px 12px;
+  font: 700 15px/1 var(--stencil);
+  background: var(--postit);
+  color: var(--ink-paper);
+  border: 2px solid var(--ink-paper);
+}
+@media (prefers-reduced-motion: reduce) {
+  .vault-scene, .vault-scene::before, .vault-scene::after { animation: none; }
+}
+@media (max-height: 500px) {
+  .vault-scene::before, .vault-scene::after { height: 4vh; }
+  .vault-head { top: calc(4vh + 6px + var(--safe-top, 0px)); }
+  .vault-hint { display: none; }
+  .vault-card { bottom: calc(4vh + 6px + var(--safe-bottom, 0px)); padding: 5px 10px 7px; }
 }

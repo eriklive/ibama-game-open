@@ -453,7 +453,9 @@
     [target]="targetView()"
     [sprint]="chaseSprint()"
     (sprintPress)="sprint()"
-    (vaultPress)="vaultAnswer(true)"
+    (vaultPick)="vaultPick($event)"
+    (vaultConfirm)="vaultConfirm()"
+    (vaultBack)="vaultBack()"
     (targetSide)="targetSide($event)"
     (targetConfirm)="targetConfirm()"
     (targetCancel)="targetCancel()" />

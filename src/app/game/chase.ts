@@ -26,7 +26,8 @@
  *      arrombada e ele segue correndo. Falhou: bate na porta e é agarrado ali, sem segunda
  *      chance.
  *    - **pulo** (`agentVaults`): onde a pista do agente dá a volta num caixote de meia altura
- *      (o garimpeiro não pula, contorna), o agente tem `vaultSeconds` para pular por cima.
+ *      (o garimpeiro não pula, contorna), o mundo para e o jogador escolhe, sem prazo: pular
+ *      por cima ou dar a volta (a cena de escolha, ver `VaultScene`).
  *      Pulou: d20 + agilidade ≥ `vaultDC` (`resolveVault`) corta caminho (a distância cai o que
  *      a volta custaria); falhou, tropeça (+1) e dá a volta. Sem pular, dá a volta como ele,
  *      sem rolar.
@@ -87,8 +88,6 @@ export const CHASE_RULES = {
   sprintSeconds: 5,
   /** Corrida: entrada e saída suaves da velocidade (ms), antes e depois dos `sprintSeconds`. */
   sprintRampMs: 350,
-  /** Caixote de meia altura: tempo (s, relógio real) para escolher pular. */
-  vaultSeconds: 2,
   /** Pulo por cima do caixote: d20 + agilidade, pelo menos isto. */
   vaultDC: 8,
   /** Tropeçou no pulo: a distância abre isto. */

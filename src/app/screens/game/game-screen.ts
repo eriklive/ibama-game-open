@@ -36,6 +36,7 @@ import {
   sprintTotalMs,
 } from '../../game/chase';
 import { ChaseHud, ChaseOverlay, SPRINT_DIE_MS, SprintView, TargetPrompt, VaultPrompt } from '../../ui/chase/chase-overlay';
+import type { VaultPick } from '../../game/vault-scene';
 import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
 import { Sound } from '../../game/sound.service';
 import { zoneAt } from '../../game/audio/ambience';
@@ -505,7 +506,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly chaseSprint = signal<SprintView | null>(null);
   /** Dá o gás na perseguição em curso, sem parar a corrida (ver `chaseSteps`). */
   private sprintStart?: () => void;
-  /** Caixote de meia altura: o jogador tem `seconds` para pular (ver `askVault`). */
+  /** Escolha no caixote de meia altura (ver `chooseVault`): em que passo está e o que foi tocado. */
   protected readonly vaultPrompt = signal<VaultPrompt | null>(null);
   private vaultDone?: (jump: boolean) => void;
   private vaultSeq = 0;
@@ -1043,6 +1044,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.pickCharacter(id),
         onClueTap: () => this.tapClue(),
+        onVaultPick: (pick) => this.vaultPick(pick),
       },
       {
         profile: this.renderSettings.profile(),
@@ -1293,11 +1295,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ev.preventDefault();
       return;
     }
-    if (this.vaultPrompt()) {
-      if (['ArrowUp', 'w', 'W', ' ', 'Enter'].includes(ev.key)) {
-        ev.preventDefault();
-        this.vaultAnswer(true);
-      }
+    const vp = this.vaultPrompt();
+    if (vp) {
+      if (vp.stage === 'choice' && ['ArrowUp', 'w', 'W'].includes(ev.key)) this.vaultPick('pular');
+      else if (vp.stage === 'choice' && ['ArrowDown', 's', 'S'].includes(ev.key)) this.vaultPick('volta');
+      else if (vp.stage === 'confirm' && [' ', 'Enter'].includes(ev.key)) this.vaultConfirm();
+      else if (vp.stage !== 'choice' && ['Escape', 'Backspace'].includes(ev.key)) this.vaultBack();
+      else return;
+      ev.preventDefault();
       return;
     }
     if (this.chaseOffer() && ev.key === 'Escape') this.pickChase(null);
@@ -1808,7 +1813,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
             a += moved.a;
             if (!alive()) return;
           }
-          const d = await this.chaseVault(vault!, agentId);
+          const d = await this.chaseVault(vault!, agentId, enemyId, track);
           if (!alive()) return;
           if (d < 0) {
             // o atalho por cima do caixote, enquanto ele corre o mesmo tanto de passos
@@ -1890,16 +1895,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Caixote de meia altura na pista do agente: o jogador tem `vaultSeconds` para pular. Pulou:
-   * d20 + agilidade ≥ `vaultDC` corta a volta (devolve −`saves`); tropeçou, dá a volta (+1). Não
-   * pulou a tempo: dá a volta como ele, sem rolar (0). Devolve a mudança na distância.
+   * Caixote de meia altura na pista do agente: a cena de escolha (ver `chooseVault`). Pulou:
+   * d20 + agilidade ≥ `vaultDC` corta a volta (devolve −`saves`); tropeçou, dá a volta (+1). Deu
+   * a volta: segue como ele, sem rolar (0). Devolve a mudança na distância.
    */
-  private async chaseVault(vault: VaultSpot, agentId: string): Promise<number> {
+  private async chaseVault(vault: VaultSpot, agentId: string, enemyId: string, track: readonly HexCoord[]): Promise<number> {
     // decisão e rolagem num slow só, como na curva
     const release = this.holdSlow();
     try {
       const who = this.nameOf(agentId);
-      if (!(await this.askVault())) {
+      if (!(await this.chooseVault(vault, agentId, enemyId, track))) {
         this.say(`${who} dá a volta no caixote.`, 'info');
         return 0;
       }
@@ -1923,26 +1928,57 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
   }
 
-  /** Espera o pulo por `vaultSeconds`; `false` se não veio a tempo (dá a volta). */
-  private askVault(): Promise<boolean> {
+  /**
+   * Cena de escolha no caixote: o mundo para, a câmera abre e tudo fica cinza menos o caixote e a
+   * faixa da volta (a pista dele). O jogador toca num dos dois (ou ↑/↓, ✕/○); a câmera fecha e um
+   * fantasma do agente faz a ação. Depois, **Confirmar** (`true`: pular) ou **Trocar**. Sem prazo.
+   */
+  private chooseVault(vault: VaultSpot, agentId: string, enemyId: string, track: readonly HexCoord[]): Promise<boolean> {
+    const board = this.board;
+    // a volta é a pista dele até onde o atalho volta (o fantasma para antes de alcançá-lo)
+    const around = track.slice(vault.index, vault.land + 1);
+    const jump = [track[vault.index], ...vault.path];
+    const agi = this.chaseStats(agentId).agilidade ?? 0;
     return new Promise((done) => {
       const id = ++this.vaultSeq;
       this.vaultDone = done;
-      this.vaultPrompt.set({ id, seconds: CHASE_RULES.vaultSeconds });
+      board?.showVaultChoice(agentId, enemyId, vault.over, around, jump);
+      this.vaultPrompt.set({ id, stage: 'choice', pick: null, saves: vault.saves, need: CHASE_RULES.vaultDC - agi });
       this.sound.play('abo.modo');
-      // tempo real: é o prazo do jogador
-      this.timers.push(setTimeout(() => this.vaultPrompt()?.id === id && this.vaultAnswer(false), CHASE_RULES.vaultSeconds * 1000));
     });
   }
 
-  /** Pulo do caixote: toque, teclado ou controle (`false`: o prazo acabou). */
-  protected vaultAnswer(jump: boolean): void {
+  /** Tocou no caixote (pular) ou na faixa (dar a volta): a prévia com o fantasma. */
+  protected vaultPick(pick: VaultPick): void {
+    const p = this.vaultPrompt();
+    if (!p || p.stage !== 'choice') return;
+    this.vaultPrompt.set({ ...p, stage: 'preview', pick });
+    this.sound.play('ui.hex');
+    const done = this.board?.previewVault(pick) ?? Promise.resolve();
+    void done.then(() => {
+      const now = this.vaultPrompt();
+      if (now?.id === p.id && now.stage === 'preview' && now.pick === pick) this.vaultPrompt.set({ ...now, stage: 'confirm' });
+    });
+  }
+
+  /** Trocar: da prévia de volta para a escolha. */
+  protected vaultBack(): void {
+    const p = this.vaultPrompt();
+    if (!p || p.stage === 'choice') return;
+    this.board?.backToVaultChoice();
+    this.vaultPrompt.set({ ...p, stage: 'choice', pick: null });
+  }
+
+  /** Confirmar: o agente faz o que o fantasma mostrou. */
+  protected vaultConfirm(): void {
+    const p = this.vaultPrompt();
     const done = this.vaultDone;
-    if (!done) return;
+    if (!p || p.stage !== 'confirm' || !done) return;
     this.vaultDone = undefined;
     this.vaultPrompt.set(null);
-    if (jump) this.sound.play('ui.hex');
-    done(jump);
+    this.board?.endVaultChoice();
+    this.sound.play('ui.hex');
+    done(p.pick === 'pular');
   }
 
   /**
@@ -3627,7 +3663,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const [id, hex] of Object.entries(testCase.agents ?? {})) positions.set(id, { ...hex });
     this.positions.set(positions);
     this.board?.placeUnits(positions);
-    const { agent, enemy: enemyId } = testCase.start;
+    const { agent } = testCase.start;
     const agentHex = positions.get(agent)!;
     for (const [id, { hex, status }] of Object.entries(testCase.enemies ?? {})) {
       // em fuga, de costas para quem abordou
@@ -3652,7 +3688,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setReachable([]);
     this.say(testCase.name, 'info');
 
+    // dois fugindo: o turno inimigo abre com a escolha de alvo (ver `resolveTargetChoices`)
+    if (testCase.start.kind === 'targets') {
+      await this.wait(600);
+      if (this.destroyed || this.epoch !== epoch) return;
+      void this.enemyTurn();
+      return;
+    }
     // a perseguição já em curso: sem carimbo nem iniciativa, o agente corre atrás dele
+    const enemyId = testCase.start.enemy;
     const enemy = this.enemy(enemyId);
     const path = enemy
       ? arrestQueue(enemy.hex, agent, this.chaseAgents(), this.area, this.enemyWalls()).find((c) => c.id === agent)?.path
@@ -3701,8 +3745,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (b === 'circle') this.targetCancel();
       return;
     }
-    if (this.vaultPrompt()) {
-      if (b === 'cross') this.vaultAnswer(true);
+    const vp = this.vaultPrompt();
+    if (vp) {
+      // escolha: ✕ pula, ○ dá a volta; depois do fantasma: ✕ confirma, ○ troca
+      if (vp.stage === 'choice') {
+        if (b === 'cross') this.vaultPick('pular');
+        else if (b === 'circle') this.vaultPick('volta');
+      } else if (b === 'cross') this.vaultConfirm();
+      else if (b === 'circle') this.vaultBack();
       return;
     }
     // perseguição correndo: □ dá o gás
@@ -3825,9 +3875,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (Math.abs(dir.x) > Math.abs(dir.y)) this.targetSide(dir.x < 0 ? 'esquerda' : 'direita', false);
       return;
     }
-    // caixote da perseguição: para cima pula
+    // caixote da perseguição: para cima pula, para baixo dá a volta
     if (this.vaultPrompt()) {
-      if (dir.y < 0 && Math.abs(dir.y) >= Math.abs(dir.x)) this.vaultAnswer(true);
+      if (this.vaultPrompt()?.stage === 'choice' && Math.abs(dir.y) >= Math.abs(dir.x)) this.vaultPick(dir.y < 0 ? 'pular' : 'volta');
       return;
     }
     if (this.chaseOffer()) return;
