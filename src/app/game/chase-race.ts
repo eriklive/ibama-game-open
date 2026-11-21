@@ -23,7 +23,7 @@ import { HexCoord } from './hex';
 export type RaceWho = 'agente' | 'garimpeiro';
 
 /** O que o corredor está fazendo no trecho. */
-export type LegKind = 'corre' | 'volta' | 'pulo' | 'porta';
+export type LegKind = 'corre' | 'volta' | 'pulo' | 'porta' | 'espera';
 
 /** Um trecho de um corredor: um caminho (com a origem) percorrido em `seconds`, por igual. */
 export interface Leg {
@@ -151,7 +151,7 @@ export class ChaseRace {
 
   /** Distância (hexágonos): quanto ele está à frente, menos o hexágono de encostar. */
   distance(): number {
-    const d = this.enemy.trackPos() - this.agent.trackPos() - 1;
+    const d = Math.abs(this.enemy.trackPos() - this.agent.trackPos()) - 1;
     // no ar o agente não encosta em ninguém: nunca mostra 0 antes de pousar
     return this.airborne() ? Math.max(d, 1e-3) : d;
   }
@@ -167,9 +167,15 @@ export class ChaseRace {
     return l?.kind === 'pulo' && this.agent.frac < 1;
   }
 
-  /** Encostou: a distância chegou a 0 e o agente não está no ar. */
+  /**
+   * Encostou: a distância chegou a 0 e o agente não está no ar. Se o pulo o deixou na frente
+   * dele (ele ainda vem pela volta do caixote), não há agarrão: ele para e espera (`espera`) até
+   * ele chegar.
+   */
   private caught(): boolean {
-    return !this.airborne() && this.distance() <= 0;
+    if (this.airborne()) return false;
+    const gap = this.enemy.trackPos() - this.agent.trackPos();
+    return gap <= 1 && gap >= -1;
   }
 
   /** Quanto da rota dele já foi (hexágonos) e o total. */
@@ -313,6 +319,11 @@ export class ChaseRace {
           const path = [this.track[s.index], ...s.path];
           this.begin(who, { kind: 'pulo', path, from: s.index, to: s.land, seconds, spot: s, failed: !v.jump.pass }, ev);
         }
+        return;
+      }
+      // o pulo o deixou na frente dele: para e espera ele chegar
+      if (this.enemy.trackPos() < p - 1) {
+        this.begin(who, { kind: 'espera', path: [this.track[p]], from: p, to: p, seconds: Infinity }, ev);
         return;
       }
       const to = Math.min(v ? v.spot.index : this.end, this.end);

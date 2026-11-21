@@ -159,6 +159,31 @@ describe('ChaseRace: caixote', () => {
     expect(race.pose('agente')?.t ?? 1).toBe(1);
   });
 
+  it('o pulo o deixa na frente dele: ela para e espera, e só agarra quando ele chega', () => {
+    // o pouso é no 17; ele está parado na porta do 15 (arrombando) quando ela pousa
+    const v: VaultSpot = { index: 12, over: h(1, 14), land: 17, path: [h(1, 13), h(1, 14), h(1, 15), track[17]], saves: 1 };
+    const stop: ChaseStop = { kind: 'porta', index: 2, hex: track[16], door: lockedDoor(track[16]) };
+    const race = new ChaseRace({ track, n: 14, doors: [stop], vaults: [v], rollDoor: () => 15 });
+    race.start();
+    const rate = 6;
+    run(race, (12 * hs) / rate - 0.02, rate);
+    race.decide(v, true, true);
+    let caughtAt = '';
+    // o pulo acaba (0,5 s de corrida do agente) e ele ainda está na porta
+    run(race, R.aroundSeconds / 2 / rate + 0.04, rate, (e) => {
+      if (e.type === 'agarrou') caughtAt = 'cedo';
+    });
+    expect(race.over).toBeNull();
+    expect(caughtAt).toBe('');
+    expect(race.pose('agente')!.leg.kind).toBe('espera');
+    expect(race.pose('garimpeiro')!.leg.kind).toBe('porta');
+    expect(race.distance()).toBeGreaterThan(0);
+    // ele arromba, corre até ela e aí sim agarra
+    const ev = run(race, 3, rate);
+    expect(race.over).toBe('agarrou');
+    expect(types(ev)).toContain('agarrou');
+  });
+
   it('ele também dá a volta no caixote da rota dele, em x', () => {
     const race = new ChaseRace({ track, n: 6, vaults: [spot(10)], rollDoor: () => 20 });
     race.start();
