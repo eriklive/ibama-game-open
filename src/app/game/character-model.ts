@@ -172,6 +172,12 @@ export class CharacterRig {
     this.current = next;
   }
 
+  /** O clipe em loop agora é `name`. */
+  isPlaying(name: ClipName): boolean {
+    const action = this.actions.get(name);
+    return !!action && action === this.current;
+  }
+
   /** Velocidade de um clipe (negativa toca ao contrário: andar de costas). */
   setTimeScale(name: ClipName, scale: number): void {
     const action = this.actions.get(name);

@@ -11,7 +11,8 @@ import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
 import { StaticShadow, castsMovingShadow } from './static-shadow';
 import { HexTile, TileField } from './tile-field';
-import { Door, commonDoors, seeThroughDoors } from './door';
+import { Door, commonDoors, isOpen, seeThroughDoors } from './door';
+import { lineOfSight } from './enemies';
 import { DoorPush, DoorViews } from './door-view';
 import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
 import { VaultPick, VaultScene } from './vault-scene';
@@ -23,6 +24,8 @@ const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa um
 
 /** Peças com modelo 3D: velocidade da corrida entre hexágonos (3,6 m/s ≈ 2,8 hex/s). */
 const RUN_SPEED = 3.6 * METER;
+/** Raio (em hexágonos) em que um garimpeiro não rendido faz o agente se abrigar na carga baixa. */
+const COVER_THREAT_RANGE = 6;
 /** Altura do pulo por cima do caixote de meia altura (no meio, em cima dele). */
 const VAULT_HOP = 0.8;
 
@@ -317,6 +320,10 @@ export class HexBoard {
   private readonly units = new Map<string, UnitView>();
   /** Hexágonos colados em carga baixa: quem para ali fica agachado. */
   private readonly crouchSpots = new Set<string>();
+  /** Paredes fixas do mapa (cortam a linha de visão da ameaça para a cobertura). */
+  private sightWalls = new Set<string>();
+  /** Agentes agachados numa porta (pick lock): a reavaliação da cobertura não os levanta. */
+  private readonly doorCrouch = new Set<string>();
   private readonly enemies = new Map<string, EnemyView>();
   private readonly activeMarker: THREE.Mesh;
   private readonly focusMarker: THREE.Mesh;
@@ -500,6 +507,7 @@ export class HexBoard {
 
     this.setupLights();
     this.buildBoard();
+    this.sightWalls = new Set((extras.walls ?? []).map(hexKey));
     this.buildWalls(extras.walls ?? []);
     this.buildPlane(map.plane ?? []);
     this.buildCargo();
@@ -909,6 +917,7 @@ export class HexBoard {
     e.surrendered = surrendered;
     if (surrendered) e.alert = false;
     this.paintEnemy(e);
+    this.refreshCover();
   }
 
   private paintEnemy(e: EnemyView): void {
@@ -945,6 +954,7 @@ export class HexBoard {
     e.running = false;
     e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
     this.moving = false;
+    this.refreshCover();
   }
 
   /**
@@ -963,6 +973,7 @@ export class HexBoard {
     e.gone = false;
     if (reducedMotionQuery()) e.presence = 1;
     else e.startleAt = this.clock.elapsedTime;
+    this.refreshCover();
   }
 
   /** O inimigo sai do tabuleiro (fugiu). */
@@ -970,6 +981,7 @@ export class HexBoard {
     const e = this.enemies.get(id);
     if (!e) return;
     e.gone = true;
+    this.refreshCover();
     await new Promise((r) => setTimeout(r, 450));
   }
 
@@ -1053,6 +1065,7 @@ export class HexBoard {
   setDoors(doors: ReadonlyMap<string, Door>, instant = false): void {
     this.doorViews?.setStates(doors, instant);
     this.doorStates = doors;
+    this.refreshCover();
     // abrir ou fechar uma porta muda o que se vê da estrutura: reavalia no próximo quadro
     this.structureKey = '';
   }
@@ -1143,7 +1156,10 @@ export class HexBoard {
   /** Agacha (pick lock) ou levanta. */
   crouchAtDoor(unitId: string, down: boolean): void {
     const u = this.units.get(unitId);
-    u?.rig?.play(down ? 'crouch' : this.restClip(u), down ? 0.35 : 0.45);
+    if (!u) return;
+    if (down) this.doorCrouch.add(unitId);
+    else this.doorCrouch.delete(unitId);
+    u.rig?.play(down ? 'crouch' : this.restClip(u), down ? 0.35 : 0.45);
   }
 
   /**
@@ -1968,9 +1984,32 @@ export class HexBoard {
     }
   }
 
-  /** Parado ao lado de carga baixa, o agente fica agachado atrás dela. */
+  /**
+   * Parado ao lado de carga baixa, o agente fica agachado atrás dela — mas só se houver
+   * um garimpeiro não rendido a até `COVER_THREAT_RANGE` hexágonos, sem parede no meio.
+   */
   private restClip(u: UnitView): 'idle' | 'crouch' {
-    return this.crouchSpots.has(hexKey(u.hex)) ? 'crouch' : 'idle';
+    return this.crouchSpots.has(hexKey(u.hex)) && this.threatNear(u.hex) ? 'crouch' : 'idle';
+  }
+
+  /** Algum inimigo à vista (não rendido, no tabuleiro) a até `COVER_THREAT_RANGE` hexágonos. */
+  private threatNear(hex: HexCoord): boolean {
+    let walls: ReadonlySet<string> = this.sightWalls;
+    const closed = [...this.doorStates.values()].filter((d) => !isOpen(d)).map((d) => hexKey(d.hex));
+    if (closed.length) walls = new Set([...walls, ...closed]);
+    for (const e of this.enemies.values()) {
+      if (e.gone || e.surrendered) continue;
+      if (hexDistance(hex, e.hex) <= COVER_THREAT_RANGE && lineOfSight(hex, e.hex, walls)) return true;
+    }
+    return false;
+  }
+
+  /** Reavalia a pose de quem está parado (a ameaça mudou: rendeu, fugiu, andou, porta). */
+  private refreshCover(): void {
+    for (const u of this.units.values()) {
+      if (!u.rig || this.doorCrouch.has(u.id)) continue;
+      if (u.rig.isPlaying('idle') || u.rig.isPlaying('crouch')) u.rig.play(this.restClip(u), 0.35);
+    }
   }
 
   /** Avião estacionado: centrado nos hexágonos que ocupa, com o nariz para o sul (o portão). */
@@ -2022,6 +2061,7 @@ export class HexBoard {
     e.group.position.x = to.x;
     e.group.position.z = to.z;
     if (from.distanceToSquared(to) > 0) e.facing = e.facingGoal = Math.atan2(to.z - from.z, to.x - from.x);
+    this.refreshCover();
   }
 
   /** Teto e interior das estruturas conforme a posição dos agentes (ver `structureView`). */
