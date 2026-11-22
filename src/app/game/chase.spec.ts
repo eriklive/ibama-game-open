@@ -327,7 +327,7 @@ describe('rotas no Aeroporto', () => {
   });
 });
 
-describe('pulo do caixote de meia altura', () => {
+describe('pulo da carga baixa', () => {
   it('atalho por cima do caixote onde a pista dá a volta; só se poupar passos', () => {
     const area = rectArea(10, 10);
     const crate = h(4, 4);
@@ -349,26 +349,33 @@ describe('pulo do caixote de meia altura', () => {
     expect(vaultPasses(need - 1)).toBe(false);
     expect(vaultPasses(need - 2, { agilidade: 2 })).toBe(true);
   });
-  it('aeroporto: na fuga pela porta dos fundos do oeste, ele contorna o caixote e o agente pode pular', () => {
+  it('aeroporto: toda carga baixa é pulável (sacos, gaiolas, mesa); a alta, não', () => {
+    const m = findMap('aeroporto')!;
+    const vault = vaultHexes(m);
+    expect(vault).toEqual(lowCoverHexes(m));
+    const kinds = new Set((m.cover ?? []).filter((c) => vault.has(hexKey(c))).map((c) => c.kind));
+    expect(kinds).toEqual(new Set(['sacks', 'cages', 'table']));
+    for (const c of m.cover ?? []) {
+      // meia altura: ninguém anda por ela, mas não tapa a visão
+      if (vault.has(hexKey(c))) expect(blockedHexes(m).has(hexKey(c)), hexKey(c)).toBe(false);
+      else expect(blockedHexes(m).has(hexKey(c)), hexKey(c)).toBe(true);
+    }
+  });
+  it('aeroporto: no fundo do hangar ele contorna as gaiolas e o agente pode pular por cima', () => {
     const m = findMap('aeroporto')!;
     const area = playArea(m);
-    const crate = h(14, 7);
-    expect(vaultHexes(m)).toEqual(new Set([hexKey(crate)]));
-    // meia altura: ninguém anda por ele, mas não tapa a visão
-    expect(lowCoverHexes(m).has(hexKey(crate))).toBe(true);
-    expect(blockedHexes(m).has(hexKey(crate))).toBe(false);
     const blocked = new Set([...blockedHexes(m), ...lowCoverHexes(m)]);
-    const from = h(14, 9);
-    const agent = h(14, 12);
+    const from = h(20, 7);
+    const agent = h(24, 7);
     const r = lockRoute(from, area, blocked, spawnDoors(m.doors ?? [], m.doorStates), [agent]);
     expect(r.flee).toContainEqual(h(14, 4));
-    expect(r.flee).not.toContainEqual(crate);
     const free = new Set(blocked);
     free.delete(hexKey(from));
     const approach = pathTo(reachableHexes(agent, 10, area, free), from);
     const vaults = agentVaults([agent, ...approach, ...r.flee], vaultHexes(m), area, blocked);
-    expect(vaults).toHaveLength(1);
-    expect(vaults[0].over).toEqual(crate);
+    expect(vaults.length).toBeGreaterThanOrEqual(1);
+    const cover = new Map((m.cover ?? []).map((c) => [hexKey(c), c.kind]));
+    expect(cover.get(hexKey(vaults[0].over))).toBe('cages');
     expect(vaults[0].saves).toBeGreaterThanOrEqual(1);
   });
 });

@@ -120,8 +120,8 @@ export const CHARACTERS: Character[] = [
  *
  * Carga no piso (cobertura, ver `COVER_HEIGHT`): `B` caixotes de madeira e `M` caixas de
  * papelão (altas) · `S` sacos no palete e `G` gaiolas vazias (baixas) · `b` caixote de meia
- * altura (baixo; o agente pula por cima na perseguição, ver `vaultHexes`) · `f` galões e
- * botijão (só decoração, passa)
+ * altura (baixo) · `f` galões e botijão (só decoração, passa). Toda carga baixa (e a mesa) é
+ * pulável: na perseguição o agente pode pular por cima (ver `vaultHexes`).
  *
  * Móveis: `m` mesa (baixa, como os sacos) · `P` prateleira encostada na parede (alta)
  *
@@ -204,9 +204,11 @@ export const blockedHexes = (map: GameMap): Set<string> =>
 /** Carga baixa: ninguém entra, mas não bloqueia a visão (só esconde quem está colado nela). */
 export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map, 'low').map(hexKey));
 
-/** Carga que o agente pula por cima na perseguição (o garimpeiro dá a volta): o caixote de meia altura. */
-export const vaultHexes = (map: GameMap): Set<string> =>
-  new Set((map.cover ?? []).filter((c) => c.kind === 'lowCrate').map(hexKey));
+/**
+ * Carga que o agente pula por cima na perseguição (o garimpeiro dá a volta): toda cobertura
+ * **baixa** (sacos, gaiolas, mesa, caixote de meia altura…; ver `COVER_HEIGHT`).
+ */
+export const vaultHexes = lowCoverHexes;
 
 /**
  * Aeroporto clandestino: o hangar fica ao norte, com um portão largo (12 hexágonos) e duas
@@ -224,8 +226,8 @@ export const vaultHexes = (map: GameMap): Set<string> =>
  *
  * O avião fica **trancado**; a chave está no quadro de chaves (`K`), na parede do fundo.
  *
- * Bem em frente à porta dos fundos do oeste, entre dois caixotes altos, há um caixote de meia
- * altura (`b`): na fuga por essa porta o garimpeiro dá a volta, e o agente pode pular por cima.
+ * O caminho para os fundos do hangar é cheio de cobertura **baixa** (sacos, gaiolas): na fuga o
+ * garimpeiro dá a volta nelas, e o agente pode pular por cima de qualquer uma (ver `vaultHexes`).
  *
  * A missão principal é queimar o **avião** e a pilha de **suprimentos do garimpo** (`R`), no
  * fundo do hangar, à direita de quem entra pelo portão.
@@ -233,31 +235,31 @@ export const vaultHexes = (map: GameMap): Set<string> =>
 const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTTTTTT..TTTTTTTTTTTTTTT..TTTTTTTTTTTT',
   'TTTTTTTTTT.TTT.TTTTTTT..TTTTT...T.TTTTTTTTTT',
-  'TTTTTTTTT...........................TTTTTTTT',
+  'TTTTTTTTT........................G..TTTTTTTT',
   'TTTTTTTTT.T......................T..TTTTTTTT',
   'TTTTTTTTT..###D##############D###T..TTTTTTTT',
-  'TTTTTTTTT..#________K___________#T...T.TTTTT',
-  'TTTTTT.....#____________________#T......TTTT',
-  'TTTT....T..#_BbB_MB_____________#T.......TTT',
-  'TTTTT...T..#_S____S____RRR_____f#T..T...TTTT',
-  'TTTTT..TT..#____AAAAAAAA______B_#T...T..TTTT',
+  'TTTTTTTTT..#____GG__K___________#T...T.TTTTT',
+  'TTTTTT.....#____G_______________#T......TTTT',
+  'TTTT....T..#____GG______________#T.......TTT',
+  'TTTTT...T..#_S_________RRR_____f#T..T...TTTT',
+  'TTTTT..TT..#B_B_AAAAAAAA______B_#T...T..TTTT',
   'TTTTTT.....#____AAAAAAAA______M_#T..TT..T...',
   'TT....TTT..#____AAAAAAAA______Sf#T.TT.......',
-  'TTT.T.TT...#____AAAAAAAA______S_#T.......T.T',
-  'TTTT......TT____AAAAAAAAfSBMS___#T...T...TTT',
-  'TTTTT..T..TT_SS_AAAAAAAA________#T..TT.B..TT',
+  'TTT.T.TT...#____AAAAAAAA______S_#T...G.....T',
+  'TTTT......T#_SSSAAAAAAAAfMBSS___#T...T...TTT',
+  'TTTTT..T..T#__B_AAAAAAAA________#T..TT.B..TT',
   'TTTTTTTT...#____________________#T.....BB.TT',
-  '..T.T.TT..T#__________________GG#T........TT',
-  'T.....TT...#f_________________GG#T..TT....TT',
-  'TTTTT...T..##T##DDDDDDDDDDDD#####...TT...TTT',
-  'TTTT.........TT....~~~~~~..........BTT..TTTT',
-  'TTT................~~~~~~..........BB...T..T',
-  '...................~~~~~~..................T',
-  '.....TTT..TTTT..TT.~~~~~~..T..TTT.TT..TTTT.T',
+  'TTTTTTTT..T#__________________GG#T........TT',
+  'TTTTTTTT...#f_________________GG#T..TT....TT',
+  'TTTTT..TT..##T##DDDDDDDDDDDD#####...TT...TTT',
+  'TTTT....T....TT....~~~~~~..........BTT..TTTT',
+  'TTT..S.............~~~~~~..........BB...T..T',
+  '.....S.............~~~~~~..................T',
+  '.....STT..TTTT..TT.~~~~~~..T..TTT.TT..TTTT.T',
   'TT...TTT...TTTT.T..~~~~~~.TT.TTTT..TTT.TTTTT',
   'TT.T..TT..TTTTT..T.~~~~~~.TT..T...T.T...T.TT',
-  '.......T..TTTTT....~~~~~~...................',
-  'TT.TTTTT..TTTTTTT..~~~~~~....#############..',
+  'TT.....T..TTTTT....~~~~~~...................',
+  'TTTTTTTT..TTTTTTT..~~~~~~....#############..',
   'TTTTTTTT..TT..T....~~~~~~.TT.#_____#_____#..',
   'TTTT.............T.~~~~~~.T..#_____#_____#..',
   'TTTTT.T........TTT.~~~~~~....D___m_D____P#..',
