@@ -1481,6 +1481,13 @@ export class HexBoard {
         if (leg.kind === 'volta') m.group.rotation.z = Math.sin(Math.PI * t) * 0.2 * this.turnSign(leg.path);
         break;
       }
+      case 'espera': {
+        // o pulo o deixou na frente dele: para, de frente para onde ele vem, e espera
+        if (fresh) m.rig?.play('idle', 0.15);
+        const him = this.chaseRunEnemy ? this.enemies.get(this.chaseRunEnemy)?.group.position : undefined;
+        face = him ? him.clone().sub(at.pos).setY(0) : null;
+        break;
+      }
       case 'porta': {
         // emenda a corrida na trombada: ainda correndo até 0,25, encolhe o ombro (o slow-mo
         // para o tempo por aqui) e tromba na porta (0,35–0,6); depois, de volta ao lugar

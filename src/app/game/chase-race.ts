@@ -23,7 +23,7 @@ import { HexCoord } from './hex';
 export type RaceWho = 'agente' | 'garimpeiro';
 
 /** O que o corredor está fazendo no trecho. */
-export type LegKind = 'corre' | 'volta' | 'pulo' | 'porta';
+export type LegKind = 'corre' | 'volta' | 'pulo' | 'porta' | 'espera';
 
 /** Um trecho de um corredor: um caminho (com a origem) percorrido em `seconds`, por igual. */
 export interface Leg {
@@ -151,7 +151,31 @@ export class ChaseRace {
 
   /** Distância (hexágonos): quanto ele está à frente, menos o hexágono de encostar. */
   distance(): number {
-    return this.enemy.trackPos() - this.agent.trackPos() - 1;
+    const d = Math.abs(this.enemy.trackPos() - this.agent.trackPos()) - 1;
+    // no ar o agente não encosta em ninguém: nunca mostra 0 antes de pousar
+    return this.airborne() ? Math.max(d, 1e-3) : d;
+  }
+
+  /**
+   * O agente está no meio de um pulo. O pulo corta caminho e a posição dele na pista (`trackPos`)
+   * anda por igual de `from` a `to`, mas o corpo faz outro desenho (até o caixote, por cima e de
+   * volta): no ar a pista diz que ele está mais adiante do que ele está de fato. Por isso só se
+   * agarra quando ele pousa (aí `trackPos` e o corpo coincidem).
+   */
+  private airborne(): boolean {
+    const l = this.agent.leg;
+    return l?.kind === 'pulo' && this.agent.frac < 1;
+  }
+
+  /**
+   * Encostou: a distância chegou a 0 e o agente não está no ar. Se o pulo o deixou na frente
+   * dele (ele ainda vem pela volta do caixote), não há agarrão: ele para e espera (`espera`) até
+   * ele chegar.
+   */
+  private caught(): boolean {
+    if (this.airborne()) return false;
+    const gap = this.enemy.trackPos() - this.agent.trackPos();
+    return gap <= 1 && gap >= -1;
   }
 
   /** Quanto da rota dele já foi (hexágonos) e o total. */
@@ -166,7 +190,7 @@ export class ChaseRace {
   /** Começa a corrida: os primeiros trechos (e o agarrão na largada, se já está colado). */
   start(): RaceEvent[] {
     const ev: RaceEvent[] = [];
-    if (this.distance() <= 0) return this.finish('agarrou', ev);
+    if (this.caught()) return this.finish('agarrou', ev);
     this.nextLeg('garimpeiro', ev);
     this.nextLeg('agente', ev);
     this.warnVaults(ev);
@@ -182,7 +206,7 @@ export class ChaseRace {
     if (this.over || dt <= 0) return ev;
     this.advance('garimpeiro', dt, ev);
     if (!this.over) this.advance('agente', dt * agentRate, ev);
-    if (!this.over && this.distance() <= 0) this.finish('agarrou', ev);
+    if (!this.over && this.caught()) this.finish('agarrou', ev);
     if (!this.over) this.warnVaults(ev);
     return ev;
   }
@@ -238,7 +262,7 @@ export class ChaseRace {
       left -= used;
       this.tellSteps(who, r, ev);
       // agarrou no meio do trecho
-      if (this.distance() <= 0) {
+      if (this.caught()) {
         this.finish('agarrou', ev);
         return;
       }
@@ -295,6 +319,11 @@ export class ChaseRace {
           const path = [this.track[s.index], ...s.path];
           this.begin(who, { kind: 'pulo', path, from: s.index, to: s.land, seconds, spot: s, failed: !v.jump.pass }, ev);
         }
+        return;
+      }
+      // o pulo o deixou na frente dele: para e espera ele chegar
+      if (this.enemy.trackPos() < p - 1) {
+        this.begin(who, { kind: 'espera', path: [this.track[p]], from: p, to: p, seconds: Infinity }, ev);
         return;
       }
       const to = Math.min(v ? v.spot.index : this.end, this.end);
