@@ -31,9 +31,8 @@ export interface TestCase {
 }
 
 /**
- * O piloto vagueia pelo hangar e começa parado logo atrás do caixote de meia altura da porta dos
- * fundos do oeste (14,6): ali ele fecha o atalho por cima do caixote. Nos casos do aeroporto ele
- * fica longe, num canto do hangar.
+ * O piloto vagueia pelo hangar e começa perto da porta dos fundos do oeste, onde pode fechar os
+ * atalhos por cima da carga baixa. Nos casos do aeroporto ele fica longe, num canto do hangar.
  */
 const PILOTO_LONGE = { piloto: { hex: { col: 20, row: 6 } } } as const;
 
@@ -41,7 +40,7 @@ export const TEST_CASES: readonly TestCase[] = [
   {
     id: 'fuga-aeroporto',
     name: 'Fuga pelo aeroporto',
-    hint: 'Clara aborda o vigia na pista, que corre até o hangar, cruza por dentro e sai pelos fundos, pela esquerda, contornando o caixote de meia altura (escolha: pular ou dar a volta). Começa na perseguição.',
+    hint: 'Clara aborda o vigia na pista, que corre até o hangar, cruza por dentro e sai pelos fundos, pela esquerda, contornando os sacos (escolha: pular ou dar a volta). Começa na perseguição.',
     mapId: 'aeroporto',
     active: 'clara',
     // no meio do caminho entre a clareira da equipe e o portão do hangar, 4 hexágonos abaixo
@@ -70,8 +69,9 @@ export const TEST_CASES: readonly TestCase[] = [
     mapId: 'aeroporto',
     active: 'clara',
     // ele fica no posto de sempre (27,19); Clara chega pela direita e por baixo, então ele foge
-    // para dentro do hangar
-    agents: { clara: { col: 28, row: 21 } },
+    // para dentro do hangar (mais perto, ele pularia para a mata do leste: as gaiolas do fundo
+    // deixam a volta por dentro 2 passos mais longa)
+    agents: { clara: { col: 30, row: 21 } },
     enemies: { garimpeiro: { hex: { col: 27, row: 19 }, status: 'alert' }, ...PILOTO_LONGE },
     start: { kind: 'chase', agent: 'clara', enemy: 'garimpeiro' },
   },
@@ -83,11 +83,12 @@ export const TEST_CASES: readonly TestCase[] = [
     active: 'clara',
     // Clara na pista, de frente para o portão; os dois a 4 hexágonos dela, à frente e pouco
     // abertos (os dois cabem na câmera da escolha). Só ela alcança os dois (Ana e Bruno ficam na
-    // clareira). O vigia, que patrulha a pista, fica mais abaixo para não ficar entre eles
+    // clareira). O da pá fica na ponta do portão, já de cara para o hangar. O vigia, que patrulha
+    // a pista, fica mais abaixo para não ficar entre eles
     agents: { clara: { col: 20, row: 22 } },
     enemies: {
       garimpeiro: { hex: { col: 24, row: 20 }, status: 'alert' },
-      'garimpeiro-pa': { hex: { col: 22, row: 19 }, status: 'alert' },
+      'garimpeiro-pa': { hex: { col: 21, row: 18 }, status: 'alert' },
       'vigia-pista': { hex: { col: 21, row: 30 } },
       ...PILOTO_LONGE,
     },

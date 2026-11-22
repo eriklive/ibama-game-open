@@ -87,10 +87,10 @@ describe('casos de teste', () => {
     expect(inHangar).toBeGreaterThanOrEqual(10);
     expect(route.flee.some((h) => h.col === 14 && h.row === 4)).toBe(true);
     expect(route.stops.some((s) => s.kind === 'porta')).toBe(true);
-    // na frente da porta ele contorna o caixote de meia altura: a escolha de pular aparece, com
-    // um atalho que não passa à frente dele (o piloto, longe dali, não fecha o caminho)
-    expect(vaults.map((v) => hexKey(v.over))).toEqual(['14,7']);
-    expect(vaults[0].saves).toBeLessThanOrEqual(distance);
+    // no caminho para os fundos ele contorna os sacos: a escolha de pular aparece (o piloto, longe
+    // dali, não fecha o caminho). O atalho pode deixá-lo na frente dele: a corrida o faz esperar
+    expect(vaults.map((v) => hexKey(v.over))).toEqual(['15,13']);
+    expect(vaults[0].saves).toBeGreaterThanOrEqual(1);
   });
 
   it('fuga pela direita: o vigia cruza a pista e some na mata do leste, sem entrar no hangar', () => {

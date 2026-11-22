@@ -168,7 +168,8 @@ O hangar tem carga empilhada para os agentes se esconderem e planejarem a aproxi
 - **Cobertura baixa** (sacos no palete e gaiolas vazias): ninguém passa, mas o inimigo enxerga por
   cima. Só não vê o agente que está **colado nela, do lado de lá** (o último hexágono antes dele, na
   linha do olhar, é a carga). O cone vermelho já mostra essa "sombra" atrás da carga. Parado ao lado de
-  carga baixa, o agente fica agachado.
+  carga baixa, o agente fica agachado. Na perseguição, o garimpeiro dá a volta em qualquer carga baixa
+  (e na mesa) e o agente pode **pular por cima** (ver **Caixote**, na perseguição).
 - **Decoração** (galões de gasolina e botijão): não bloqueia nada.
 
 A carga é desenhada no texto do mapa (`B` caixotes, `M` papelão, `S` sacos, `G` gaiolas, `f` galões) e
@@ -483,7 +484,7 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    `chase-slowmo.ts`): o tempo desacelera até parar em 300 ms (a câmera abre), fica parado 1 s (a
    escolha, o dado) e volta em 300 ms (a câmera fecha). Pega os dois juntos, então a distância não
    muda; depois tudo segue de onde estava.
-   **Caixote.** Onde a pista contorna um caixote de meia altura, ele sempre **dá a volta**, que leva
+   **Caixote.** Onde a pista contorna carga baixa (sacos, gaiolas, mesa, caixote de meia altura), ele sempre **dá a volta**, que leva
    **x = 1 s** (freia, inclina e escorrega na curva). O agente decide **antes** de chegar: a 1 s de
    corrida do caixote entra o pulso, o mundo fica cinza, menos o caixote e uma faixa amarela com
    setas em volta dele (o caminho do garimpeiro), e um relógio corre. Aqui o tempo fica parado
