@@ -1,0 +1,149 @@
+<div
+  class="tablet"
+  [class.closing]="closing()"
+  role="dialog"
+  aria-labelledby="tablet-title"
+  data-testid="approach-report"
+>
+  <div class="shell" aria-hidden="true"></div>
+  <span class="bump tl" aria-hidden="true"></span><span class="bump tr" aria-hidden="true"></span>
+  <span class="bump bl" aria-hidden="true"></span><span class="bump br" aria-hidden="true"></span>
+  <span class="screw" style="left: 22px; top: 12px; --r: 20deg" aria-hidden="true"></span>
+  <span class="screw" style="right: 22px; top: 12px; --r: 70deg" aria-hidden="true"></span>
+  <span class="screw" style="left: 22px; bottom: 12px; --r: 110deg" aria-hidden="true"></span>
+  <span class="screw" style="right: 22px; bottom: 12px; --r: 150deg" aria-hidden="true"></span>
+  <div class="tab-top" aria-hidden="true">
+    <span class="emboss">IBAMA</span>
+    <span class="cam"></span>
+    <span class="tab-status"><span class="emboss">NAV-2</span><span class="led"></span></span>
+  </div>
+
+  <!-- A tela é uma lente: o próprio tabuleiro, atrás, filtrado de verde -->
+  <div class="screen" #screen>
+    <div class="lens"></div>
+    <div class="grid" aria-hidden="true"></div>
+    <div class="sweep" aria-hidden="true"></div>
+    @if (view(); as v) {
+      <svg class="ink" [attr.viewBox]="v.viewBox" preserveAspectRatio="none" aria-hidden="true">
+        @if (v.ring) {
+          <path class="ring" [attr.d]="v.ring" />
+          @if (v.ringLabel; as p) {
+            <text class="gps" [attr.x]="p.x - 22" [attr.y]="p.y - 6">R{{ report().radius }}</text>
+          }
+        }
+        @if (v.agent; as a) {
+          <path class="agent" [attr.d]="'M' + a.x + ' ' + (a.y - 16) + ' l-6 -10 h12 z'" />
+        }
+        @for (m of v.marks; track m.id; let i = $index) {
+          <g [class]="'mark ' + m.result">
+            <path class="ret" [style.--d]="1.05 + i * 0.12 + 's'" [attr.d]="m.reticle" />
+            @if (m.pointer) {
+              <path class="pointer" [style.--d]="1.05 + i * 0.12 + 's'" [attr.d]="m.pointer" />
+            }
+            <path
+              class="pen"
+              pathLength="1"
+              [style.--d]="1.55 + stagger(i) + 's'"
+              [attr.d]="m.circle"
+            />
+            @if (m.ghost) {
+              <path
+                class="pen ghost"
+                pathLength="1"
+                [style.--d]="1.9 + stagger(i) + 's'"
+                style="--dur: 0.3s"
+                [attr.d]="m.ghost"
+              />
+            }
+            @if (m.escape; as e) {
+              <path
+                class="pen"
+                pathLength="1"
+                [style.--d]="2.05 + stagger(i) + 's'"
+                style="--dur: 0.25s"
+                [attr.d]="e.shaft"
+              />
+              <path
+                class="pen"
+                pathLength="1"
+                [style.--d]="2.27 + stagger(i) + 's'"
+                style="--dur: 0.12s"
+                [attr.d]="e.head"
+              />
+            }
+            <text
+              class="tagn"
+              [style.--d]="1.2 + i * 0.12 + 's'"
+              [attr.x]="m.label.x"
+              [attr.y]="m.label.y"
+              text-anchor="middle"
+            >
+              {{ m.name.toUpperCase() }}
+            </text>
+            <text
+              class="scrawl"
+              [style.--d]="2 + stagger(i) + 's'"
+              [attr.x]="m.note.x"
+              [attr.y]="m.note.y"
+              [attr.text-anchor]="m.note.anchor"
+              [attr.transform]="
+                'rotate(' + (m.result === 'flee' ? 4 : -5) + ' ' + m.note.x + ' ' + m.note.y + ')'
+              "
+            >
+              {{ m.note.text }}
+              @if (m.roll) {
+                <tspan class="sub" [attr.x]="m.note.x" dy="12">{{ m.roll }}</tspan>
+              }
+            </text>
+          </g>
+        }
+      </svg>
+    }
+    <div class="scan" aria-hidden="true"></div>
+    <div class="s-top">
+      <div class="row title">
+        <span id="tablet-title">Auto de abordagem</span><span>T{{ report().round }}</span>
+      </div>
+      <div class="row dim">
+        <span>HEX {{ report().hex.col }}·{{ report().hex.row }} · {{ report().op }}</span
+        ><span>{{ clock }}</span>
+      </div>
+    </div>
+    <div class="s-bot" [style.--d]="readyAt() - 0.3 + 's'">
+      <span>{{ tally() }}</span><span class="dim">{{ report().agent }}</span>
+    </div>
+    <div class="crt" aria-hidden="true"><span class="crt-line"></span></div>
+    <div class="glare" aria-hidden="true"></div>
+  </div>
+
+  <div class="chin">
+    <span class="grip l" aria-hidden="true"></span><span class="grip r" aria-hidden="true"></span>
+    <button
+      #key
+      type="button"
+      class="key"
+      data-testid="report-close"
+      [class.pressed]="pressed()"
+      [style.--d]="readyAt() + 's'"
+      (click)="press()"
+    >
+      <svg class="chk" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10.5 L8 15 L17 5" /></svg>
+      <span class="lbl">Confirmar</span>
+      <span class="kled" aria-hidden="true"></span>
+      @if (pad()) {
+        <span class="pad-glyph" aria-hidden="true">{{ padGlyph() }}</span>
+      }
+    </button>
+  </div>
+
+  <!-- Para leitor de tela: o mesmo auto, em texto -->
+  <ul class="sr-only">
+    @for (m of report().marks; track m.id) {
+      <li>
+        {{ m.name }}: {{ m.result === 'surrender' ? 'rendido' : 'vai correr'
+        }}{{ m.roll ? ' (' + m.roll + ')' : '' }}
+      </li>
+    }
+    <li>{{ tally() }}. Vez encerrada.</li>
+  </ul>
+</div>

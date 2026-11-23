@@ -1,0 +1,719 @@
+/* Tablet de campo: carcaça de plástico grosso com cantos de borracha, uma tecla física e a tela
+   verde de GPS antigo, que é uma lente sobre o tabuleiro (backdrop-filter). */
+:host {
+  position: absolute;
+  inset: 0;
+  z-index: 8;
+  --ph: #7dff9a;
+  --ph-hi: #d8ffdf;
+  --ph-dim: #3a9a55;
+  --ph-bg: rgba(2, 16, 6, 0.86);
+  --pen-run: #ff4b3a;
+  --pen-ok: #f2fff0;
+  --shell-hi: #4d5443;
+  --shell: #353a2e;
+  --shell-lo: #1f231b;
+  --rubber: #d49f1d;
+  --rubber-lo: #8f6a0f;
+  --bz-side: 14px;
+  --bz-top: 30px;
+  --bz-bot: 84px;
+  --gps: 'VT323', 'Courier Prime', 'Courier New', monospace;
+  --stencil: 'Stardos Stencil', 'Arial Black', sans-serif;
+  --marker: 'Permanent Marker', 'Comic Sans MS', cursive;
+}
+
+.tablet {
+  position: absolute;
+  top: calc(env(safe-area-inset-top, 0px) + 26px);
+  bottom: calc(env(safe-area-inset-bottom, 0px) + 12px);
+  left: max(10px, env(safe-area-inset-left, 0px));
+  right: max(10px, env(safe-area-inset-right, 0px));
+  max-width: 860px;
+  margin-inline: auto;
+  border-radius: 22px;
+  /* a sombra larga escurece o jogo em volta (só fora do aparelho: a tela continua clara) */
+  box-shadow:
+    0 18px 28px rgba(0, 0, 0, 0.6),
+    0 4px 0 #11140e,
+    0 0 0 200vmax rgba(6, 10, 5, 0.5);
+  animation: tab-in 0.5s cubic-bezier(0.2, 1.1, 0.3, 1) both;
+}
+
+/* carcaça: o fundo do aparelho com um buraco onde fica a tela */
+.shell {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: var(--bz-top) var(--bz-side) var(--bz-bot);
+  background:
+    radial-gradient(rgba(255, 255, 255, 0.05) 0.6px, transparent 0.8px) 0 0 / 3px 3px,
+    linear-gradient(160deg, var(--shell-hi), var(--shell) 30%, var(--shell-lo));
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.18),
+    inset 0 -3px 0 rgba(0, 0, 0, 0.4);
+  -webkit-mask:
+    linear-gradient(#000 0 0) content-box,
+    linear-gradient(#000 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#000 0 0) content-box exclude,
+    linear-gradient(#000 0 0);
+}
+
+.bump {
+  position: absolute;
+  width: 42px;
+  height: 42px;
+  background: linear-gradient(145deg, #f0bf3a, var(--rubber) 45%, var(--rubber-lo));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.35),
+    0 2px 3px rgba(0, 0, 0, 0.5);
+}
+.bump::after {
+  content: '';
+  position: absolute;
+  inset: 7px;
+  border-radius: inherit;
+  background: repeating-linear-gradient(45deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 5px);
+}
+.bump.tl {
+  left: -4px;
+  top: -4px;
+  border-radius: 24px 6px 18px 6px;
+}
+.bump.tr {
+  right: -4px;
+  top: -4px;
+  border-radius: 6px 24px 6px 18px;
+}
+.bump.bl {
+  left: -4px;
+  bottom: -4px;
+  border-radius: 6px 18px 6px 24px;
+}
+.bump.br {
+  right: -4px;
+  bottom: -4px;
+  border-radius: 18px 6px 24px 6px;
+}
+
+.screw {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 30%, #c9ccc0, #6c7064 60%, #3b3e35);
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.15),
+    inset 0 -1px 1px rgba(0, 0, 0, 0.5);
+}
+.screw::after {
+  content: '';
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  top: 3.3px;
+  height: 1.4px;
+  background: #2a2c25;
+  transform: rotate(var(--r, 30deg));
+}
+
+.tab-top {
+  position: absolute;
+  left: 44px;
+  right: 44px;
+  top: calc(var(--bz-top) / 2 - 8px);
+  height: 16px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+.tab-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.emboss {
+  font: 700 10px var(--stencil);
+  letter-spacing: 0.16em;
+  color: #262a20;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.16),
+    0 -1px 0 rgba(0, 0, 0, 0.5);
+}
+.cam {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  background: radial-gradient(circle at 35% 35%, #4a5a6a 0 1.4px, #0b0d0a 2px);
+  box-shadow:
+    0 0 0 2px #23261e,
+    0 1px 0 2px rgba(255, 255, 255, 0.08);
+}
+.led {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #2bff6a;
+  box-shadow: 0 0 6px 2px rgba(43, 255, 106, 0.7);
+  animation: led 1.4s steps(1) infinite;
+}
+
+/* ---------- tela ---------- */
+.screen {
+  position: absolute;
+  left: var(--bz-side);
+  right: var(--bz-side);
+  top: var(--bz-top);
+  bottom: var(--bz-bot);
+  border-radius: 8px;
+  overflow: hidden;
+  /* sem fundo: a lente filtra o que está atrás (o tabuleiro) */
+  box-shadow:
+    0 0 0 3px #12150f,
+    0 0 0 4px rgba(255, 255, 255, 0.08),
+    inset 0 0 22px rgba(0, 0, 0, 0.85);
+  font-family: var(--gps);
+  color: var(--ph);
+}
+.lens {
+  position: absolute;
+  inset: 0;
+  background: rgba(30, 255, 100, 0.06);
+  -webkit-backdrop-filter: grayscale(1) contrast(1.4) brightness(0.6) sepia(1) hue-rotate(68deg)
+    saturate(3.4);
+  backdrop-filter: grayscale(1) contrast(1.4) brightness(0.6) sepia(1) hue-rotate(68deg)
+    saturate(3.4);
+  animation: wipe 0.55s 0.5s cubic-bezier(0.6, 0, 0.4, 1) both;
+}
+.grid {
+  position: absolute;
+  inset: 0;
+  background-image:
+    linear-gradient(rgba(125, 255, 154, 0.16) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(125, 255, 154, 0.16) 1px, transparent 1px);
+  background-size: 40px 40px;
+  background-position: 4px 12px;
+  animation: wipe 0.55s 0.5s cubic-bezier(0.6, 0, 0.4, 1) both;
+}
+.sweep {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 100%;
+  height: 3px;
+  background: var(--ph-hi);
+  box-shadow: 0 0 16px 5px rgba(125, 255, 154, 0.75);
+  opacity: 0;
+  animation: sweep 0.55s 0.5s cubic-bezier(0.6, 0, 0.4, 1) both;
+}
+.scan {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(0deg, rgba(0, 0, 0, 0.28) 0 1px, transparent 1px 3px),
+    radial-gradient(ellipse at 50% 48%, transparent 52%, rgba(0, 0, 0, 0.7) 100%);
+  animation:
+    wipe 0.55s 0.5s cubic-bezier(0.6, 0, 0.4, 1) both,
+    flicker 3.2s 1.5s steps(2) infinite;
+}
+.glare {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background:
+    linear-gradient(125deg, rgba(255, 255, 255, 0.1) 0 18%, transparent 18.5% 100%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.04), transparent 30%);
+}
+
+/* rabiscos */
+.ink {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+.ret {
+  fill: none;
+  stroke: var(--ph);
+  stroke-width: 1.6;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: lock 0.32s var(--d) cubic-bezier(0.2, 1.4, 0.4, 1) both;
+}
+.flee .ret {
+  stroke: var(--pen-run);
+}
+.pointer {
+  fill: var(--ph);
+  animation: fade 0.2s var(--d) both;
+}
+.flee .pointer {
+  fill: var(--pen-run);
+}
+.pen {
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  animation: draw var(--dur, 0.5s) var(--d) cubic-bezier(0.5, 0, 0.3, 1) both;
+}
+.surrender .pen {
+  stroke: var(--pen-ok);
+  stroke-width: 2.6;
+}
+.flee .pen {
+  stroke: var(--pen-run);
+  stroke-width: 3;
+}
+.pen.ghost {
+  stroke-width: 1.4;
+  opacity: 0.7;
+}
+.scrawl {
+  font-family: var(--marker);
+  font-size: 15px;
+  paint-order: stroke;
+  stroke: rgba(0, 10, 3, 0.85);
+  stroke-width: 4px;
+  animation: fade 0.25s var(--d) both;
+}
+.surrender .scrawl {
+  fill: var(--pen-ok);
+}
+.flee .scrawl {
+  fill: var(--pen-run);
+}
+.scrawl .sub {
+  font-size: 10px;
+}
+.tagn {
+  font-family: var(--gps);
+  font-size: 12px;
+  fill: var(--ph-hi);
+  paint-order: stroke;
+  stroke: rgba(0, 10, 3, 0.9);
+  stroke-width: 3px;
+  letter-spacing: 0.03em;
+  animation: fade 0.2s var(--d) both;
+}
+.ring {
+  fill: none;
+  stroke: var(--ph);
+  stroke-width: 1.2;
+  stroke-dasharray: 3 5;
+  opacity: 0.8;
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: ring 0.5s 0.85s ease-out both;
+}
+.gps {
+  font-family: var(--gps);
+  fill: var(--ph);
+  font-size: 14px;
+  animation: fade 0.3s 1s both;
+}
+.agent {
+  fill: var(--ph-hi);
+  animation: fade 0.3s 0.9s both;
+}
+
+/* faixas do aparelho */
+.s-top,
+.s-bot {
+  position: absolute;
+  left: 0;
+  right: 0;
+  background: var(--ph-bg);
+  padding: 4px 10px;
+  line-height: 1.05;
+  animation: fade 0.25s 1s both;
+}
+.s-top {
+  top: 0;
+  border-bottom: 1px solid var(--ph-dim);
+  display: grid;
+}
+.s-top .row {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  white-space: nowrap;
+  min-width: 0;
+}
+.s-top .row > span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.s-top .title {
+  color: var(--ph-hi);
+  font-size: 18px;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+}
+.s-top .dim {
+  color: var(--ph-dim);
+  font-size: 13px;
+  text-transform: uppercase;
+}
+.s-bot {
+  bottom: 0;
+  border-top: 1px solid var(--ph-dim);
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 16px;
+  color: var(--ph-hi);
+  white-space: nowrap;
+  text-transform: uppercase;
+  animation-delay: var(--d);
+}
+.s-bot .dim {
+  color: var(--ph-dim);
+  font-size: 14px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* desligar (tela de tubo): o preto fecha de cima e de baixo, sobra uma linha, a linha some */
+.crt {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.crt::before,
+.crt::after {
+  content: '';
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 50%;
+  background: #010603;
+  transform: scaleY(0);
+}
+.crt::before {
+  top: 0;
+  transform-origin: top;
+}
+.crt::after {
+  bottom: 0;
+  transform-origin: bottom;
+}
+.crt-line {
+  position: absolute;
+  left: 4%;
+  right: 4%;
+  top: calc(50% - 1px);
+  height: 2px;
+  background: var(--ph-hi);
+  box-shadow: 0 0 12px 3px rgba(125, 255, 154, 0.8);
+  opacity: 0;
+}
+.closing .crt::before,
+.closing .crt::after {
+  animation: crt-close 0.22s 0.05s ease-in both;
+}
+.closing .crt-line {
+  animation: crt-line 0.4s 0.15s ease-in both;
+}
+.tablet.closing {
+  animation: tab-out 0.4s 0.5s ease-in both;
+}
+
+/* ---------- queixo e tecla ---------- */
+.chin {
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: var(--bz-bot);
+  display: grid;
+  place-items: center;
+}
+.grip {
+  position: absolute;
+  top: 50%;
+  width: 5px;
+  height: 26px;
+  margin-top: -13px;
+  border-radius: 3px;
+  background: repeating-linear-gradient(180deg, #1b1e16 0 2px, transparent 2px 5px);
+  opacity: 0.8;
+}
+.grip.l {
+  left: 24px;
+}
+.grip.r {
+  right: 24px;
+}
+.key {
+  position: relative;
+  width: 178px;
+  height: 50px;
+  border: 0;
+  padding: 0;
+  border-radius: 14px;
+  cursor: pointer;
+  background: linear-gradient(180deg, #5a6150, #3e4436 55%, #33382c);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.22),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 5px 0 #171a13,
+    0 8px 10px rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 9px;
+  transition:
+    transform 0.08s,
+    box-shadow 0.08s;
+  -webkit-tap-highlight-color: transparent;
+}
+.key .lbl {
+  font: 700 16px var(--stencil);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: #1b1e16;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.2),
+    0 -1px 0 rgba(0, 0, 0, 0.35);
+}
+.key .chk {
+  width: 18px;
+  height: 18px;
+  fill: none;
+  stroke: #1b1e16;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  filter: drop-shadow(0 1px 0 rgba(255, 255, 255, 0.2));
+}
+.kled {
+  position: absolute;
+  right: 12px;
+  top: 8px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #1d3a22;
+  animation: kled 0.01s var(--d) both;
+}
+.key::after {
+  content: '';
+  position: absolute;
+  inset: -6px;
+  border-radius: 18px;
+  border: 2px solid transparent;
+  pointer-events: none;
+  animation: halo 1.6s var(--d) ease-out infinite;
+}
+.key:active,
+.key.pressed {
+  transform: translateY(4px);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    inset 0 2px 6px rgba(0, 0, 0, 0.5),
+    0 1px 0 #171a13,
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.key:focus-visible {
+  outline: 3px solid #f7e36a;
+  outline-offset: 5px;
+}
+.closing .key::after {
+  animation: none;
+}
+
+.pad-glyph {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 6px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: #23201a;
+  color: #f7f2e4;
+  border: 2px solid #f7f2e4;
+  font-size: 14px;
+  line-height: 1;
+  pointer-events: none;
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* telas baixas (celular deitado): bordas mais finas, tecla menor */
+@media (max-height: 520px) {
+  :host {
+    --bz-top: 22px;
+    --bz-bot: 60px;
+  }
+  .tablet {
+    top: calc(env(safe-area-inset-top, 0px) + 8px);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + 8px);
+  }
+  .key {
+    height: 40px;
+    width: 160px;
+  }
+  .bump {
+    width: 34px;
+    height: 34px;
+  }
+  .s-top .dim {
+    display: none;
+  }
+}
+
+@keyframes tab-in {
+  from {
+    transform: translateY(105vh) rotate(4deg);
+  }
+  to {
+    transform: none;
+  }
+}
+@keyframes tab-out {
+  from {
+    transform: none;
+  }
+  to {
+    transform: translateY(110vh) rotate(-3deg);
+  }
+}
+@keyframes wipe {
+  from {
+    clip-path: inset(0 0 100% 0);
+  }
+  to {
+    clip-path: inset(0 0 0 0);
+  }
+}
+@keyframes sweep {
+  0% {
+    top: 0;
+    opacity: 1;
+  }
+  88% {
+    opacity: 1;
+  }
+  100% {
+    top: 100%;
+    opacity: 0;
+  }
+}
+@keyframes draw {
+  from {
+    stroke-dashoffset: 1;
+  }
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+@keyframes lock {
+  from {
+    opacity: 0;
+    transform: scale(2.2) rotate(45deg);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+@keyframes ring {
+  from {
+    opacity: 0;
+    transform: scale(0.15);
+  }
+  to {
+    opacity: 0.8;
+    transform: none;
+  }
+}
+@keyframes flicker {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+@keyframes led {
+  50% {
+    opacity: 0.35;
+  }
+}
+@keyframes kled {
+  to {
+    background: #2bff6a;
+    box-shadow: 0 0 6px 2px rgba(43, 255, 106, 0.7);
+  }
+}
+@keyframes halo {
+  0% {
+    border-color: rgba(125, 255, 154, 0.55);
+    transform: scale(0.96);
+  }
+  100% {
+    border-color: rgba(125, 255, 154, 0);
+    transform: scale(1.12);
+  }
+}
+@keyframes crt-close {
+  to {
+    transform: scaleY(1);
+  }
+}
+@keyframes crt-line {
+  0% {
+    opacity: 1;
+    transform: none;
+  }
+  60% {
+    opacity: 1;
+    transform: scaleX(0.04);
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tablet,
+  .tablet *,
+  .tablet *::before,
+  .tablet *::after {
+    animation: none !important;
+  }
+  .pen {
+    stroke-dashoffset: 0;
+  }
+  .kled {
+    background: #2bff6a;
+  }
+}

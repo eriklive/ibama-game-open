@@ -193,3 +193,65 @@ export function suggestedRally(plans: ReadonlyMap<string, RallyPlan>, leaderId: 
   }
   return best?.plan;
 }
+
+/**
+ * **Fila do grupo** (da frente para trás). Andando junto, quem vem atrás perde passos: o
+ * agente da vez **vai para a frente** quando a vez dele começa e, quando a vez acaba, **vai para
+ * o fim** (os outros andam uma vaga para a frente). Os hexágonos ocupados pelo grupo não mudam:
+ * só quem está em cada um.
+ */
+
+/** O agente da vez troca de lugar com o primeiro da fila (se ainda não for ele). */
+export function toFront(line: readonly string[], active: string): string[] {
+  const i = line.indexOf(active);
+  if (i <= 0) return [...line];
+  const next = [...line];
+  [next[0], next[i]] = [next[i], next[0]];
+  return next;
+}
+
+/** O agente da vez vai para o fim da fila; os de trás dele andam uma vaga para a frente. */
+export function toBack(line: readonly string[], active: string): string[] {
+  if (!line.includes(active)) return [...line];
+  return [...line.filter((id) => id !== active), active];
+}
+
+/**
+ * Para onde cada um vai quando a fila muda de `line` para `next`: a vaga `i` (o hexágono de
+ * quem era o `i`-ésimo) passa a ser de `next[i]`. Só aparece quem muda de hexágono.
+ */
+export function lineMoves(
+  line: readonly string[],
+  next: readonly string[],
+  positions: ReadonlyMap<string, HexCoord>,
+): Map<string, HexCoord> {
+  const out = new Map<string, HexCoord>();
+  next.forEach((id, i) => {
+    const slot = positions.get(line[i]);
+    const from = positions.get(id);
+    if (slot && from && !sameHex(slot, from)) out.set(id, slot);
+  });
+  return out;
+}
+
+/**
+ * Caminho de cada um até a vaga nova (os agentes não se bloqueiam). Se alguém não alcança a
+ * vaga em até `range` passos (o grupo está espalhado), devolve `null` e a fila fica como está.
+ */
+export function lineSwapPaths(
+  moves: ReadonlyMap<string, HexCoord>,
+  positions: ReadonlyMap<string, HexCoord>,
+  area: HexArea,
+  blocked: ReadonlySet<string>,
+  range = 4,
+): Map<string, HexCoord[]> | null {
+  const paths = new Map<string, HexCoord[]>();
+  for (const [id, to] of moves) {
+    const from = positions.get(id);
+    if (!from) return null;
+    const reach = reachableHexes(from, range, area, blocked);
+    if (costTo(from, reach, to) === undefined) return null;
+    paths.set(id, routeTo(from, reach, to));
+  }
+  return paths;
+}

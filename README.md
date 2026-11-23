@@ -140,6 +140,9 @@ gasta movimento (o ponto ainda precisa estar ao alcance).
 - A partida **começa com a equipe agrupada** (os três saem juntos do ponto de partida).
 - Agrupados, os agentes **andam juntos**: quando um deles anda, os outros seguem o rastro logo
   atrás. Quem não consegue acompanhar (caminho bloqueado) sai do grupo.
+- **Fila do grupo:** quando a vez de um agente agrupado começa, ele **vai para a frente da fila**
+  (troca de lugar com o primeiro); quando a vez acaba, ele **vai para o fim** e os de trás andam uma vaga
+  para a frente. Assim ninguém começa a vez no fim da fila perdendo passos (`toFront` / `toBack`).
 - Juntos, cada agente ganha **+1 de movimento** na rolagem do seu turno e **+1 de intimidação**
   (alcance da abordagem); com o Capitão no grupo, **+1 a mais** em cada (Liderança). Desagrupou,
   perdeu tudo.
@@ -397,8 +400,9 @@ O avião do hangar está **trancado**; a chave fica no **quadro de chaves**, na 
 (cobertura alta, `K` no esboço). Regras em `game/plane.ts`:
 
 - **Avião:** colado nele, aparece **Inspecionar** (no lugar de Queimar). O menu (como o das portas) tem
-  **Olhar dentro** e **Queimar**. Sem a chave, olhar dentro só dá um leve zoom out e o aviso "O avião está
-  trancado", e libera, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave).
+  **Olhar dentro** e **Queimar**. Sem a chave, o menu já abre com o carimbo **Trancado**, e isso basta para
+  liberar, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave). Olhar
+  dentro só dá um leve zoom out e o aviso "O avião está trancado" (e a equipe passa a reconhecer a chave no quadro).
 - **Diálogos:** os dois ajudantes do hangar (garimpeiros) respondem "Não sei não.". O piloto pode mentir
   (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e, cedendo, diz
   **"No painel ali atrás."**, o que faz a equipe reconhecer a chave no quadro.

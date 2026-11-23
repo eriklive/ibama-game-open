@@ -26,6 +26,12 @@ export interface AuraStyle {
   wallOpacity?: number;
   /** Respiração: velocidade (rad/s) e quanto da opacidade oscila (0..1). */
   breathe?: { speed: number; amount: number };
+  /**
+   * Hexágono menor, centrado (fração do tamanho normal): cada hexágono ganha o próprio contorno,
+   * em vez de a região inteira ter um só. Serve para marcar um hexágono por cima de outra aura
+   * (o alcance dentro da brasa do avião) sem apagar a de baixo.
+   */
+  inset?: number;
 }
 
 /** Lado de um hexágono na fronteira da região: o centro do hexágono e a direção (rad, plano XZ) para fora. */
@@ -46,6 +52,8 @@ const FILL_Y = 0.02;
 const RIM_Y = 0.03;
 /** Tempo (s) para a cortina subir quando a região aparece ou muda. */
 const RISE_TIME = 0.35;
+/** Largura do contorno de um hexágono menor (`AuraStyle.inset`), em unidades do hexágono. */
+const INSET_RIM = 0.14;
 
 /**
  * Lados de fronteira da região `keys`: os lados cujo vizinho não está na região nem em `inside`
@@ -233,10 +241,14 @@ export class AuraLayer {
 
   private rebuild(): void {
     this.root.visible = this.keys.size > 0;
-    const sides = auraOutline(this.keys, this.inside);
-    replace(this.fill, fillGeometry(this.keys));
-    replace(this.rim, rimGeometry(sides));
-    if (this.wall) replace(this.wall, wallGeometry(sides));
+    const inset = this.style.inset;
+    // menor: cada hexágono tem o seu contorno (os vizinhos não se encostam)
+    const sides = inset ? [...this.keys].flatMap((k) => auraOutline([k])) : auraOutline(this.keys, this.inside);
+    const scale = inset ?? 1;
+    const rim = inset ? { outer: inset, inner: inset - INSET_RIM } : { outer: RIM_OUTER, inner: RIM_INNER };
+    replace(this.fill, fillGeometry(this.keys, FILL_RADIUS * scale));
+    replace(this.rim, rimGeometry(sides, rim.outer, rim.inner));
+    if (this.wall) replace(this.wall, wallGeometry(sides, WALL_RADIUS * scale));
   }
 }
 
@@ -250,7 +262,7 @@ function replace(mesh: THREE.Mesh, geometry: THREE.BufferGeometry): void {
 }
 
 /** Um leque de 6 triângulos por hexágono, com uv radial (centro em 0,5). */
-function fillGeometry(keys: ReadonlySet<string>): THREE.BufferGeometry {
+function fillGeometry(keys: ReadonlySet<string>, radius: number): THREE.BufferGeometry {
   const pos: number[] = [];
   const uv: number[] = [];
   const index: number[] = [];
@@ -261,7 +273,7 @@ function fillGeometry(keys: ReadonlySet<string>): THREE.BufferGeometry {
     uv.push(0.5, 0.5);
     for (let k = 0; k < 6; k++) {
       const a = (k * Math.PI) / 3;
-      pos.push(c.x + Math.cos(a) * FILL_RADIUS, FILL_Y, c.z + Math.sin(a) * FILL_RADIUS);
+      pos.push(c.x + Math.cos(a) * radius, FILL_Y, c.z + Math.sin(a) * radius);
       uv.push(0.5 + Math.cos(a) * 0.5, 0.5 + Math.sin(a) * 0.5);
       index.push(base, base + 1 + ((k + 1) % 6), base + 1 + k);
     }
@@ -270,14 +282,14 @@ function fillGeometry(keys: ReadonlySet<string>): THREE.BufferGeometry {
 }
 
 /** Uma faixa (trapézio) em cada lado de fronteira. */
-function rimGeometry(sides: readonly AuraSide[]): THREE.BufferGeometry {
+function rimGeometry(sides: readonly AuraSide[], outer: number, inner: number): THREE.BufferGeometry {
   const pos: number[] = [];
   const uv: number[] = [];
   const index: number[] = [];
   for (const { hex, angle } of sides) {
     const c = hexToWorld(hex, 1);
     const base = pos.length / 3;
-    for (const r of [RIM_OUTER, RIM_INNER]) {
+    for (const r of [outer, inner]) {
       for (const a of [angle - Math.PI / 6, angle + Math.PI / 6]) {
         pos.push(c.x + Math.cos(a) * r, RIM_Y, c.z + Math.sin(a) * r);
         uv.push(0, 0);
@@ -289,7 +301,7 @@ function rimGeometry(sides: readonly AuraSide[]): THREE.BufferGeometry {
 }
 
 /** Uma parede de altura 1 em cada lado de fronteira (a malha é esticada pela altura do estilo). */
-function wallGeometry(sides: readonly AuraSide[]): THREE.BufferGeometry {
+function wallGeometry(sides: readonly AuraSide[], radius: number): THREE.BufferGeometry {
   const pos: number[] = [];
   const uv: number[] = [];
   const index: number[] = [];
@@ -298,7 +310,7 @@ function wallGeometry(sides: readonly AuraSide[]): THREE.BufferGeometry {
     const base = pos.length / 3;
     for (const y of [0, 1]) {
       for (const a of [angle - Math.PI / 6, angle + Math.PI / 6]) {
-        pos.push(c.x + Math.cos(a) * WALL_RADIUS, y, c.z + Math.sin(a) * WALL_RADIUS);
+        pos.push(c.x + Math.cos(a) * radius, y, c.z + Math.sin(a) * radius);
         uv.push(0, y);
       }
     }

@@ -83,6 +83,15 @@ const COLORS = {
 const AURAS = {
   /** Até onde o agente da vez anda: azul-céu (o mesmo do cursor) com contorno claro. */
   reach: { color: 0xa9e4ff, edge: 0xe6f8ff, fill: 0.3, rim: 1, wall: 0.3, wallOpacity: 0.4, breathe: { speed: 3, amount: 0.12 } },
+  /**
+   * Alcance dentro de uma aura de ação (a brasa do avião, o âmbar de um rendido): um hexágono azul
+   * menor por cima, com contorno próprio e cortina baixa. A aura de baixo continua aparecendo em
+   * volta: o hexágono fica "dividido" — dá para andar até ele e, ali, interagir.
+   */
+  reachOver: {
+    color: 0xa9e4ff, edge: 0xffffff, fill: 0.75, rim: 1, wall: 0.35, wallOpacity: 0.75, inset: 0.58,
+    breathe: { speed: 3, amount: 0.2 },
+  },
   /** Hexágonos vistos pelos inimigos: véu vermelho, sem cortina e sem respirar (é aviso, não convite). */
   vision: { color: 0xe0503c, edge: 0xff8a70, fill: 0.5, rim: 0.9 },
   /** Em volta do que se pode queimar (o avião, os suprimentos): brasa. */
@@ -1358,6 +1367,44 @@ export class HexBoard {
     return { x: clamp(((p.x + 1) / 2) * w, 90, w - 90), y: clamp(((1 - p.y) / 2) * h, 70, h - 10) };
   }
 
+  /** Ponto do mundo na tela (px do canvas), sem prender à borda; `null` atrás da câmera. */
+  private worldOnScreen(x: number, y: number, z: number): { x: number; y: number } | null {
+    const p = new THREE.Vector3(x, y, z).project(this.camera);
+    if (p.z > 1) return null;
+    return { x: ((p.x + 1) / 2) * this.canvas.clientWidth, y: ((1 - p.y) / 2) * this.canvas.clientHeight };
+  }
+
+  /**
+   * Meio do corpo de uma peça (suspeito ou agente) na tela, em px do canvas, sem prender à borda
+   * (o tablet do auto de abordagem rabisca por cima dele); `null` se não há peça ou está atrás da câmera.
+   */
+  pieceOnScreen(id: string): { x: number; y: number } | null {
+    const e = this.enemies.get(id);
+    if (e) {
+      const p = e.group.position;
+      return this.worldOnScreen(p.x, p.y + Math.max(0.3, (e.signY - 0.45) * 0.5), p.z);
+    }
+    const u = this.units.get(id);
+    if (u) {
+      const p = u.group.position;
+      return this.worldOnScreen(p.x, p.y + 0.5, p.z);
+    }
+    return null;
+  }
+
+  /** Alcance da abordagem (`radius` hexágonos em volta de `center`), no chão, projetado na tela. */
+  groundRingOnScreen(center: HexCoord, radius: number, steps = 64): { x: number; y: number }[] {
+    const c = hexToWorld(center, HEX_SIZE);
+    const r = (radius + 0.5) * HEX_STEP * HEX_SIZE;
+    const pts: { x: number; y: number }[] = [];
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const p = this.worldOnScreen(c.x + Math.cos(a) * r, BASE_TOP, c.z + Math.sin(a) * r);
+      if (p) pts.push(p);
+    }
+    return pts;
+  }
+
   /**
    * Balão de fala sobre a cabeça do inimigo (bilhete de papel com letra de caneta, como a HUD),
    * desenhado na cena: acompanha a cabeça e fica por cima de tudo. Some depois de `ms`.
@@ -1978,7 +2025,7 @@ export class HexBoard {
 
   /** Camadas de luz das auras, na ordem em que se empilham (a de baixo primeiro). */
   private buildAuraLayers(): Record<keyof typeof AURAS, AuraLayer> {
-    const order: (keyof typeof AURAS)[] = ['reach', 'vision', 'talkMuted', 'burn', 'talk', 'burnHot', 'talkHot'];
+    const order: (keyof typeof AURAS)[] = ['reach', 'vision', 'talkMuted', 'burn', 'talk', 'burnHot', 'talkHot', 'reachOver'];
     const layers = {} as Record<keyof typeof AURAS, AuraLayer>;
     order.forEach((name, i) => {
       const layer = new AuraLayer(AURAS[name], this.auraTextures, 6 + i * 3);
@@ -1990,8 +2037,9 @@ export class HexBoard {
 
   /**
    * Redistribui os hexágonos entre as camadas de luz. As camadas somam: um hexágono do alcance
-   * que também está numa aura interativa fica só com o véu dela, mas o contorno azul continua
-   * passando por fora de tudo (e por fora dos aliados, em vez de abrir um buraco em volta deles).
+   * que também está numa aura interativa fica com o véu dela e, por cima, um hexágono azul menor
+   * (`reachOver`); o contorno azul continua passando por fora de tudo (e por fora dos aliados, em
+   * vez de abrir um buraco em volta deles).
    */
   private refreshAuras(): void {
     const known = (keys: Iterable<string>) => [...keys].filter((k) => this.tiles.has(k));
@@ -2004,6 +2052,8 @@ export class HexBoard {
       reach.filter((k) => !covered.has(k)),
       reach.length ? [...occupied, ...reach.filter((k) => covered.has(k))] : [],
     );
+    // o alcance que cai numa aura de ação não some: ganha o hexágono azul menor por cima dela
+    this.auras.reachOver.set(reach.filter((k) => covered.has(k)));
     this.auras.vision.set(known(this.vision));
     this.auras.talkMuted.set(known(this.interrogationMuted));
     this.auras.burn.set(burn.cold);

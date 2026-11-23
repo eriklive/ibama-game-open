@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { followLeader, rallyPoints, suggestedRally } from './group';
+import { followLeader, lineMoves, lineSwapPaths, rallyPoints, suggestedRally, toBack, toFront } from './group';
 import { HexCoord, hexDistance, hexKey, hexNeighbors, rectArea } from './hex';
 
 const AREA = rectArea(10, 10);
@@ -106,5 +106,66 @@ describe('suggestedRally', () => {
 
   it('sem pontos possíveis, não sugere nada', () => {
     expect(suggestedRally(new Map(), 'ana')).toBeUndefined();
+  });
+});
+
+describe('fila do grupo', () => {
+  // em fila, de cima para baixo: ana na frente
+  const line = ['ana', 'bruno', 'clara'];
+  const pos = units([
+    ['ana', { col: 4, row: 2 }],
+    ['bruno', { col: 4, row: 3 }],
+    ['clara', { col: 4, row: 4 }],
+  ]);
+
+  it('na vez dele, o agente vai para a frente e o primeiro vai para o lugar dele', () => {
+    expect(toFront(line, 'clara')).toEqual(['clara', 'bruno', 'ana']);
+    expect(toFront(line, 'bruno')).toEqual(['bruno', 'ana', 'clara']);
+    // já na frente (ou fora do grupo): nada muda
+    expect(toFront(line, 'ana')).toEqual(line);
+    expect(toFront(line, 'davi')).toEqual(line);
+  });
+
+  it('ao encerrar a vez, ele vai para o fim e os de trás andam para a frente', () => {
+    expect(toBack(line, 'ana')).toEqual(['bruno', 'clara', 'ana']);
+    expect(toBack(['bruno', 'ana'], 'bruno')).toEqual(['ana', 'bruno']);
+    expect(toBack(line, 'davi')).toEqual(line);
+  });
+
+  it('girando a fila, o próximo da vez já fica na frente', () => {
+    // ana, bruno e clara jogam nessa ordem: a frente vai passando de um para o outro
+    let l = line;
+    for (const who of ['ana', 'bruno', 'clara', 'ana']) {
+      l = toFront(l, who);
+      expect(l[0]).toBe(who);
+      l = toBack(l, who);
+    }
+  });
+
+  it('as vagas não mudam: cada um vai para o hexágono de quem ocupava a vaga nova', () => {
+    const moves = lineMoves(line, toBack(line, 'ana'), pos);
+    expect(moves.get('bruno')).toEqual(pos.get('ana'));
+    expect(moves.get('clara')).toEqual(pos.get('bruno'));
+    expect(moves.get('ana')).toEqual(pos.get('clara'));
+    // quem fica no lugar não anda
+    expect(lineMoves(line, toFront(line, 'bruno'), pos).has('clara')).toBe(false);
+    expect(lineMoves(line, line, pos).size).toBe(0);
+  });
+
+  it('cada um anda até a vaga nova, passando pelos colegas', () => {
+    const moves = lineMoves(line, toBack(line, 'ana'), pos);
+    const paths = lineSwapPaths(moves, pos, AREA, new Set())!;
+    expect(paths.get('ana')!.at(-1)).toEqual(pos.get('clara'));
+    expect(paths.get('ana')!.length).toBe(2);
+    expect(paths.get('bruno')!).toEqual([pos.get('ana')]);
+  });
+
+  it('grupo espalhado (vaga longe demais): a fila fica como está', () => {
+    const far = units([
+      ['ana', { col: 0, row: 0 }],
+      ['bruno', { col: 9, row: 9 }],
+    ]);
+    const moves = lineMoves(['ana', 'bruno'], ['bruno', 'ana'], far);
+    expect(lineSwapPaths(moves, far, AREA, new Set())).toBeNull();
   });
 });
