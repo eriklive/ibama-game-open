@@ -372,8 +372,9 @@ O avião do hangar está **trancado**; a chave fica no **quadro de chaves**, na 
 (cobertura alta, `K` no esboço). Regras em `game/plane.ts`:
 
 - **Avião:** colado nele, aparece **Inspecionar** (no lugar de Queimar). O menu (como o das portas) tem
-  **Olhar dentro** e **Queimar**. Sem a chave, olhar dentro só dá um leve zoom out e o aviso "O avião está
-  trancado", e libera, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave).
+  **Olhar dentro** e **Queimar**. Sem a chave, o menu já abre com o carimbo **Trancado**, e isso basta para
+  liberar, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave). Olhar
+  dentro só dá um leve zoom out e o aviso "O avião está trancado" (e a equipe passa a reconhecer a chave no quadro).
 - **Diálogos:** os dois ajudantes do hangar (garimpeiros) respondem "Não sei não.". O piloto pode mentir
   (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e, cedendo, diz
   **"No painel ali atrás."**, o que faz a equipe reconhecer a chave no quadro.

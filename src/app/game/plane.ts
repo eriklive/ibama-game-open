@@ -5,8 +5,11 @@ import { HexCoord, hexDistance } from './hex';
  *
  * - O avião não se queima direto: o agente colado nele abre o menu de **inspecionar** e escolhe
  *   `olhar dentro` ou `queimar` (como o menu das portas).
- * - `olhar dentro` sem a chave só mostra que está trancado (e libera as perguntas sobre a chave
- *   no interrogatório: `PLANE_LOCKED`). Com a chave, abre.
+ * - Abrir o menu já mostra o carimbo **Trancado** (sem a chave): a equipe sabe que o avião está
+ *   trancado e as perguntas sobre a chave passam a existir no interrogatório (`PLANE_LOCKED`,
+ *   ver `lockedClue`). Não precisa tocar em `olhar dentro`.
+ * - `olhar dentro` sem a chave confirma que está trancado (e a equipe passa a reconhecer a chave
+ *   no quadro: `tried`). Com a chave, abre.
  * - Mexer no quadro de chaves rola percepção — a não ser que a equipe já saiba qual é a chave
  *   (alguém tentou o avião, ou o piloto contou). Passando, o agente vê a chave do avião e escolhe
  *   pegar ou deixar; quem viu e deixou lembra disso (ver `witnessLine`).
@@ -58,6 +61,12 @@ export const seesKey = (s: PlaneState, passedRoll: boolean): boolean => !s.hasKe
 
 /** Quem viu a chave e deixou lá (o primeiro a ver), para comentar quando o avião estiver trancado. */
 export const witness = (s: PlaneState): string | null => (s.hasKey ? null : (s.seenBy[0] ?? null));
+
+/**
+ * Pista registrada ao inspecionar o avião (abrir o menu ou olhar dentro): sem a chave ele está
+ * trancado (`PLANE_LOCKED`, que libera "Onde está a chave?"); com a chave, nenhuma.
+ */
+export const lockedClue = (s: PlaneState): string | null => (s.hasKey ? null : PLANE_LOCKED);
 
 /** `olhar dentro`: com a chave abre; sem ela, está trancado. */
 export const lookInside = (s: PlaneState): 'open' | 'locked' => (s.hasKey ? 'open' : 'locked');
