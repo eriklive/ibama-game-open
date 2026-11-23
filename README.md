@@ -140,6 +140,9 @@ gasta movimento (o ponto ainda precisa estar ao alcance).
 - A partida **começa com a equipe agrupada** (os três saem juntos do ponto de partida).
 - Agrupados, os agentes **andam juntos**: quando um deles anda, os outros seguem o rastro logo
   atrás. Quem não consegue acompanhar (caminho bloqueado) sai do grupo.
+- **Fila do grupo:** quando a vez de um agente agrupado começa, ele **vai para a frente da fila**
+  (troca de lugar com o primeiro); quando a vez acaba, ele **vai para o fim** e os de trás andam uma vaga
+  para a frente. Assim ninguém começa a vez no fim da fila perdendo passos (`toFront` / `toBack`).
 - Juntos, cada agente ganha **+1 de movimento** na rolagem do seu turno e **+1 de intimidação**
   (alcance da abordagem); com o Capitão no grupo, **+1 a mais** em cada (Liderança). Desagrupou,
   perdeu tudo.

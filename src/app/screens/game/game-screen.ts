@@ -106,7 +106,17 @@ import {
 } from '../../game/plane';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
-import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
+import {
+  GROUP_RULES,
+  RallyPlan,
+  followLeader,
+  lineMoves,
+  lineSwapPaths,
+  rallyPoints,
+  suggestedRally,
+  toBack,
+  toFront,
+} from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
@@ -771,6 +781,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * A equipe chega junta: a partida começa com todos no grupo.
    */
   protected readonly group = signal<ReadonlySet<string>>(wholeTeam());
+  /**
+   * Ordem da fila do grupo, da frente para trás (ver `toFront` / `toBack`). Quem saiu do grupo
+   * não conta; quem falta entra no fim, na ordem da equipe.
+   */
+  private readonly groupLine = signal<readonly string[]>(CHARACTERS.map((c) => c.id));
+  /** A vez está passando (a fila do grupo se arrumando antes do próximo). */
+  private passing = false;
+  private readonly line = computed(() => {
+    const group = this.group();
+    const kept = this.groupLine().filter((id) => group.has(id));
+    return [...kept, ...CHARACTERS.map((c) => c.id).filter((id) => group.has(id) && !kept.includes(id))];
+  });
   protected readonly groupBonus = GROUP_RULES.moveBonus;
   protected readonly groupApproachBonus = GROUP_RULES.approachBonus;
   protected readonly leaderBonus = CLASS_RULES.leadership;
@@ -1104,7 +1126,30 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(null);
     this.board?.setReachable([]);
     this.sound.play('ui.vez-agente');
-    this.roll();
+    // agrupado: quem joga vai para a frente da fila antes de rolar o movimento
+    const epoch = this.epoch;
+    void this.reorderLine(toFront(this.line(), active.id)).then((ok) => {
+      if (ok && this.epoch === epoch && !this.destroyed) this.roll();
+    });
+  }
+
+  /**
+   * Troca os agentes do grupo de lugar para a fila ficar como `next` (as vagas são as mesmas: cada
+   * um anda até o hexágono de quem ocupava a vaga nova). Grupo espalhado: a fila fica como está.
+   * Devolve `false` se a partida recomeçou no meio.
+   */
+  private async reorderLine(next: readonly string[]): Promise<boolean> {
+    const line = this.line();
+    const epoch = this.epoch;
+    const moves = lineMoves(line, next, this.positions());
+    const paths = moves.size && this.board ? lineSwapPaths(moves, this.positions(), this.area, this.enemyWalls()) : null;
+    if (!paths) return true;
+    this.phase.set('walking');
+    await this.board!.moveUnits(next[0], paths);
+    if (this.destroyed || this.epoch !== epoch) return false;
+    this.positions.update((m) => new Map([...m, ...moves]));
+    this.groupLine.set(next);
+    return true;
   }
 
   /**
@@ -1156,11 +1201,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeApproach();
     this.closeGrouping();
     this.closeBurn();
-    if (this.activeIndex() === CHARACTERS.length - 1 && this.actingEnemies().length) {
-      void this.enemyTurn();
-      return;
-    }
-    this.nextCharacter();
+    // agrupado: quem jogou vai para o fim da fila e os de trás andam uma vaga para a frente
+    // (a vez só passa depois; um segundo "encerrar" no meio disso não conta)
+    if (this.passing) return;
+    this.passing = true;
+    const epoch = this.epoch;
+    void this.reorderLine(toBack(this.line(), this.active().id)).then((ok) => {
+      if (this.epoch !== epoch) return;
+      this.passing = false;
+      if (!ok || this.destroyed) return;
+      if (this.activeIndex() === CHARACTERS.length - 1 && this.actingEnemies().length) {
+        void this.enemyTurn();
+        return;
+      }
+      this.nextCharacter();
+    });
   }
 
   private nextCharacter(): void {
@@ -2160,6 +2215,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       left = plan.left;
     }
     if (!(await this.walkUnits(id, paths))) return;
+    // a fila segue o rastro: o líder na frente, depois quem ocupou a vaga logo atrás dele…
+    if (this.grouped()) this.groupLine.set([...paths.keys()]);
     if (left.length) this.leaveGroup(left, 'ficou para trás');
     this.movesLeft.update((n) => n - path.length);
     if (!(await this.perceive(paths))) return;
@@ -2255,6 +2312,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!(await this.walkUnits(id, plan.paths))) return;
     this.sound.play('eq.agrupar');
     this.group.set(wholeTeam());
+    // quem chamou o grupo fica na frente da fila
+    this.groupLine.set(toFront(this.line(), id));
     if (free) this.commandsUsed.update((n) => n + 1);
     this.movesLeft.update((n) => Math.max(0, n - cost));
     this.say(
@@ -3547,6 +3606,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.report.set(null);
     this.positions.set(this.initialPositions());
     this.group.set(wholeTeam());
+    this.groupLine.set(CHARACTERS.map((c) => c.id));
+    this.passing = false;
     this.closeGrouping();
     this.board?.placeUnits(this.positions());
     this.enemies.set(this.initialEnemies());
