@@ -1,13 +1,11 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { findMap } from './maps';
 import { visibleObjectives } from './mission';
 import {
   INTRO,
   easeInOutCubic,
-  introSeen,
   introTargets,
   introZoom,
-  markIntroSeen,
   penLoop,
   placeNote,
 } from './mission-intro';
@@ -41,17 +39,6 @@ describe('abertura da missão: o que circular', () => {
     const onlyPlane = (aeroporto.objectives ?? []).filter((o) => o.id === 'queimar-aviao');
     expect(introTargets(aeroporto, onlyPlane).map((t) => t.kind)).toEqual(['hangar']);
     expect(introTargets(aeroporto, [])).toEqual([]);
-  });
-});
-
-describe('abertura da missão: só na primeira vez', () => {
-  beforeEach(() => localStorage.clear());
-
-  it('marca o mapa como visto', () => {
-    expect(introSeen('aeroporto')).toBe(false);
-    markIntroSeen('aeroporto');
-    expect(introSeen('aeroporto')).toBe(true);
-    expect(introSeen('teste-12x12')).toBe(false);
   });
 });
 

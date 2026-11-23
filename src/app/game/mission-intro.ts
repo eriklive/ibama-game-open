@@ -4,8 +4,8 @@ import { Objective } from './mission';
 import { METER } from './character-model';
 
 /**
- * Abertura da missão (tutorial, passo 1): na primeira vez que o jogador abre um mapa, a
- * câmera começa alta e afastada sobre as estruturas que têm objetivo, o jogo escurece o
+ * Abertura da missão (tutorial, passo 1): no início de cada partida, antes da primeira
+ * rolagem, a câmera começa alta e afastada sobre as estruturas que têm objetivo, o jogo escurece o
  * resto, circula cada uma a caneta vermelha com o que há para fazer lá e espera o toque em
  * **Iniciar missão**. Aí a câmera desce em linha reta até a equipe, voltando à inclinação
  * de sempre no caminho.
@@ -74,26 +74,6 @@ export function introTargets(map: GameMap, objectives: readonly Objective[]): In
         .map((o) => o.text),
     }))
     .filter((t) => t.notes.length > 0);
-}
-
-// ---------- "já viu" (por mapa, no navegador) ----------
-
-const SEEN_KEY = 'ibama.intro.';
-
-export function introSeen(mapId: string): boolean {
-  try {
-    return localStorage.getItem(SEEN_KEY + mapId) === '1';
-  } catch {
-    return false;
-  }
-}
-
-export function markIntroSeen(mapId: string): void {
-  try {
-    localStorage.setItem(SEEN_KEY + mapId, '1');
-  } catch {
-    // sem armazenamento (aba privada): a abertura volta na próxima vez, sem problema
-  }
 }
 
 // ---------- câmera ----------
