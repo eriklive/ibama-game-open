@@ -102,6 +102,29 @@ function hangarDecor(): (HexCoord & { kind: CoverKind })[] {
   return d;
 }
 
+/**
+ * Dentro do hangar, a pista é um corredor: uma parede contínua de carga alta (caixotes e caixas de
+ * amido, em trechos de 2 a 4) colada em cada lado das três faixas (colunas 16 e 23), do portão até
+ * a parede do fundo. Do lado esquerdo ela abre só onde o avião está: ali o próprio corpo é a parede.
+ */
+function laneWalls(): (HexCoord & { kind: CoverKind })[] {
+  const d: (HexCoord & { kind: CoverKind })[] = [];
+  for (const col of [TO - 1, TO + 6]) {
+    let kind: CoverKind = col < TO ? 'crates' : 'boxes';
+    let left = 0;
+    for (let r = 85; r >= 47; r--) {
+      if (col < TO && r >= 61 && r <= 68) continue;
+      if (left <= 0) {
+        kind = kind === 'crates' ? 'boxes' : 'crates';
+        left = 2 + Math.floor(hash(col, r) * 3);
+      }
+      d.push({ col, row: r, kind });
+      left--;
+    }
+  }
+  return d;
+}
+
 /** Mapa A: pista de terra → portão → hangar (avião) → porta dos fundos → trilha na mata. */
 export function raceA(): RaceMap {
   const rows: Row[] = [];
@@ -158,7 +181,7 @@ export function raceA(): RaceMap {
     { col: L, row: 22, kind: 'branch', move: 'deslizar', span: 4 },
     { col: L + 4, row: 14, kind: 'log', move: 'pular', span: 2 },
   ];
-  const decor = hangarDecor();
+  const decor = [...hangarDecor(), ...laneWalls()];
   const map: GameMap = {
     id: 'corrida-a',
     name: 'Corrida A · pelo hangar',
