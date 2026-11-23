@@ -24,7 +24,15 @@ export interface TabletReport {
   /** Alcance da voz de prisão no chão, projetado na tela. */
   ring: readonly Pt[];
   marks: readonly TabletMarkIn[];
+  /**
+   * Prévia (antes de abordar): mostra quem se renderia, quem rolaria e quem correria, com as
+   * teclas Cancelar e Abordar; nada foi rolado ainda.
+   */
+  preview?: boolean;
 }
+
+/** Faixas da tela que o cabeçalho e o rodapé do aparelho ocupam (px). */
+const insetsFor = (h: number) => (h < 300 ? { top: 26, bottom: 24 } : { top: 40, bottom: 30 });
 
 /** Quanto dura o desligar (tela apaga e o tablet desce) antes de a vez passar (ms). */
 export const TABLET_CLOSE_MS = 900;
@@ -59,7 +67,13 @@ export class ApproachTablet {
   /** Controle conectado: mostra o botão do controle na tecla. */
   readonly pad = input(false);
   readonly padGlyph = input('');
+  readonly cancelGlyph = input('');
+  /** Tecla Confirmar (na prévia, Abordar): emite depois de o tablet descer. */
   readonly confirmed = output<void>();
+  /** Tecla Cancelar (só na prévia): emite depois de o tablet descer. */
+  readonly cancelled = output<void>();
+  /** Parte livre da tela do aparelho (px da página), sem cabeçalho e rodapé: onde o raio deve caber. */
+  readonly screenArea = output<Rect>();
 
   private readonly screen = viewChild.required<ElementRef<HTMLElement>>('screen');
   private readonly key = viewChild.required<ElementRef<HTMLButtonElement>>('key');
@@ -73,13 +87,7 @@ export class ApproachTablet {
     const r = this.rect();
     const rep = this.report();
     if (!r) return null;
-    const small = r.h < 300;
-    const marks = layoutTablet(
-      rep.marks,
-      rep.agentAt,
-      r,
-      small ? { top: 26, bottom: 24 } : { top: 40, bottom: 30 },
-    );
+    const marks = layoutTablet(rep.marks, rep.agentAt, r, insetsFor(r.h));
     const ringLabel = rep.ring.length ? rep.ring.reduce((a, b) => (b.x > a.x ? b : a)) : null;
     return {
       viewBox: `${r.x} ${r.y} ${r.w} ${r.h}`,
@@ -92,6 +100,17 @@ export class ApproachTablet {
 
   protected readonly tally = computed(() => {
     const ms = this.report().marks;
+    if (this.report().preview) {
+      const n = (r: string) => ms.filter((m) => m.result === r).length;
+      const [s, r, f] = [n('surrender'), n('roll'), n('flee')];
+      return [
+        s && `${s} ${s === 1 ? 'se rende' : 'se rendem'}`,
+        r && `${r} ${r === 1 ? 'rola' : 'rolam'}`,
+        f && `${f} ${f === 1 ? 'corre' : 'correm'}`,
+      ]
+        .filter(Boolean)
+        .join(' · ');
+    }
     const s = ms.filter((m) => m.result === 'surrender').length;
     const f = ms.length - s;
     return [
@@ -111,7 +130,12 @@ export class ApproachTablet {
     const destroy = inject(DestroyRef);
     afterNextRender(() => {
       const el = this.screen().nativeElement;
-      const measure = () => this.rect.set(layoutRect(el));
+      const measure = () => {
+        const r = layoutRect(el);
+        this.rect.set(r);
+        const ins = insetsFor(r.h);
+        this.screenArea.emit({ x: r.x, y: r.y + ins.top, w: r.w, h: r.h - ins.top - ins.bottom });
+      };
       measure();
       const ro = new ResizeObserver(measure);
       ro.observe(el);
@@ -129,12 +153,19 @@ export class ApproachTablet {
     return i * Math.max(0.14, 0.32 - Math.max(0, i - 3) * 0.03);
   }
 
-  /** Aperta a tecla Confirmar (toque, teclado ou ✕ do controle). */
+  /** Aperta a tecla Confirmar / Abordar (toque, teclado ou ✕ do controle). */
   press(): void {
     if (this.closing()) return;
     this.pressed.set(true);
     this.closing.set(true);
     setTimeout(() => this.pressed.set(false), 140);
     setTimeout(() => this.confirmed.emit(), reducedMotion() ? 0 : TABLET_CLOSE_MS);
+  }
+
+  /** Aperta a tecla Cancelar da prévia (toque, teclado ou ○ do controle). */
+  cancel(): void {
+    if (this.closing() || !this.report().preview) return;
+    this.closing.set(true);
+    setTimeout(() => this.cancelled.emit(), reducedMotion() ? 0 : TABLET_CLOSE_MS);
   }
 }

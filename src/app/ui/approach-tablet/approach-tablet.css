@@ -10,6 +10,7 @@
   --ph-bg: rgba(2, 16, 6, 0.86);
   --pen-run: #ff4b3a;
   --pen-ok: #f2fff0;
+  --pen-roll: #ffd23a;
   --shell-hi: #4d5443;
   --shell: #353a2e;
   --shell-lo: #1f231b;
@@ -281,6 +282,21 @@
   stroke-width: 4px;
   animation: fade 0.25s var(--d) both;
 }
+.roll .ret {
+  stroke: var(--pen-roll);
+}
+.roll .pointer {
+  fill: var(--pen-roll);
+}
+.roll .pen {
+  stroke: var(--pen-roll);
+  stroke-width: 2.6;
+  stroke-dasharray: 0.04 0.03;
+  animation: fade 0.3s var(--d) both;
+}
+.roll .scrawl {
+  fill: var(--pen-roll);
+}
 .surrender .scrawl {
   fill: var(--pen-ok);
 }
@@ -430,8 +446,18 @@
   right: 0;
   bottom: 0;
   height: var(--bz-bot);
-  display: grid;
-  place-items: center;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+}
+/* prévia: tecla Cancelar, menor e vermelha, ao lado da Abordar */
+.key.cancel {
+  width: 64px;
+  background: linear-gradient(180deg, #8a3a2c, #6a2a20 55%, #5a231b);
+}
+.key.cancel::after {
+  animation: none;
 }
 .grip {
   position: absolute;
@@ -570,6 +596,9 @@
   .key {
     height: 40px;
     width: 160px;
+  }
+  .key.cancel {
+    width: 52px;
   }
   .bump {
     width: 34px;

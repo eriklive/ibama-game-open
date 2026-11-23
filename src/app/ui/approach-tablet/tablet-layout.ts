@@ -24,16 +24,21 @@ export type Anchor = 'start' | 'middle' | 'end';
 export interface TabletMarkIn {
   id: string;
   name: string;
-  result: 'surrender' | 'flee';
-  /** Conta do teste de fuga ("d20 16+1=17"), quando rolou. */
+  /** `roll`: só na prévia, quem ainda vai rolar o teste de fuga. */
+  result: TabletResult;
+  /** Conta do teste de fuga ("d20 16+1=17") ou, na prévia, a chance; linha de baixo da anotação. */
   roll: string | null;
   at: Pt | null;
+  /** Anotação de caneta no lugar da padrão ("rendido" / "CORRE!"). */
+  note?: string;
 }
+
+export type TabletResult = 'surrender' | 'roll' | 'flee';
 
 export interface TabletMark {
   id: string;
   name: string;
-  result: 'surrender' | 'flee';
+  result: TabletResult;
   roll: string | null;
   /** Centro dos rabiscos (preso dentro da tela). */
   at: Pt;
@@ -260,7 +265,7 @@ export function layoutTablet(
     placed.push(nc.box);
 
     // anotação de caneta ("rendido" / "CORRE!" e a conta do d20)
-    const text = flee ? 'CORRE!' : 'rendido';
+    const text = m.note ?? (flee ? 'CORRE!' : 'rendido');
     const ww = Math.max(text.length * TEXT.marker, m.roll ? m.roll.length * TEXT.small : 0);
     const hh = m.roll ? 28 : 16;
     const near: readonly (readonly [number, number, Anchor])[] = [
