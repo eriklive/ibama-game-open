@@ -415,6 +415,10 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .burn-slip { background: #f6cf9a; }
 /* segurar para abordar: o contorno do papel vira um anel que se fecha */
 
+/* ---------- abordagem: o tablet é a tela de confirmação; a HUD sai de trás da lente dele ---------- */
+.approach-mode .corner, .approach-mode .goal, .approach-mode .left, .approach-mode .suspects,
+.approach-mode .actions, .approach-mode .telegram, .approach-mode .end-op { visibility: hidden; }
+
 /* ---------- inspeção em close-up: só o agente, o móvel e o d20 ---------- */
 .focus-mode .corner, .focus-mode .goal, .focus-mode .left, .focus-mode .suspects, .focus-mode .actions,
 .focus-mode .telegram, .focus-mode .check, .focus-mode .end-op { visibility: hidden; }
@@ -454,36 +458,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .inspect.keyboard-only:not(:focus-visible) { opacity: 0; }
 .inspect.keyboard-only:not(:focus) { pointer-events: none; }
 
-/* ---------- modo de abordagem: o resto da HUD apaga e a decisão fica em dois botões ---------- */
-.corner, .goal, .suspects, .end-op { transition: filter .25s ease; }
-.approach-mode .corner, .approach-mode .goal, .approach-mode .end-op { filter: grayscale(1) brightness(.75); }
-/* retratos e suspeitos saem da frente: as etiquetas no tabuleiro já dizem quem reage */
-.approach-mode .left, .approach-mode .suspects { visibility: hidden; }
-.slip.approach-slip { right: 128px; bottom: 4px; width: max-content; max-width: 290px; transform: rotate(-1.5deg); }
-.slip .approach-tally { display: flex; flex-wrap: wrap; gap: 2px 8px; align-items: baseline; }
-.approach-tally .surrender { color: var(--green-ok); }
-.approach-tally .roll { color: #8a6d0f; }
-.approach-tally .flee { color: #b4520f; }
-.approach-confirm { width: 112px; height: 112px; border-radius: 56px; }
-.approach-confirm .stamp-ring { width: 96px; height: 96px; border-radius: 48px; }
-.approach-confirm .stamp-text { font-size: 19px; }
-.approach-cancel {
-  position: absolute;
-  left: calc(14px + var(--safe-left));
-  top: 50%;
-  width: 84px; height: 84px; border-radius: 42px;
-  border: 4px solid #fff;
-  background: #e3121b;
-  color: #fff;
-  box-shadow: 3px 5px 0 rgba(0, 0, 0, 0.4), inset 0 -5px 0 rgba(0, 0, 0, 0.18);
-  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px;
-  font-family: var(--stencil); font-weight: 700; font-size: 12px; text-transform: uppercase; letter-spacing: .5px;
-  transform: translateY(-50%);
-  animation: slap .25s ease-out both;
-  z-index: 3;
-}
-.approach-cancel svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 3.4; stroke-linecap: round; }
-.approach-cancel:active { transform: translateY(calc(-50% + 3px)); box-shadow: 1px 2px 0 rgba(0, 0, 0, 0.4); }
 
 /* bilhete da abordagem: quem se rende e quem corre */
 .slip {
@@ -654,7 +628,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
 
 @media (prefers-reduced-motion: reduce) {
-  .roll-calc, .roll-sum-n, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .approach-cancel, .focus-stage, .check-close, .slip, .suspect, .check, .check-result, .inspect, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
+  .roll-calc, .roll-sum-n, .roll-head, .roll-confirm, .roll-total.rolling, .telegram, .stamp-turn, .stamp.confirm, .approach, .focus-stage, .check-close, .slip, .suspect, .check, .check-result, .inspect, .burn, .end-op, .debrief, .debrief-verdict, .debrief-stage { animation: none; }
 }
 
 /* telas médias (tablet): a papelada cresce junto */
@@ -669,7 +643,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @media (min-width: 700px) and (min-height: 600px) {
   /* o zoom de 1,25 também alarga o bilhete: descontar para não passar por cima da coluna da esquerda */
   .goal { width: clamp(190px, calc((100vw - 440px) / 1.25), 340px); }
-  .corner, .goal, .left, .suspects, .actions, .telegram, .check, .end-op, .approach-cancel, .aim-actions { zoom: 1.25; }
+  .corner, .goal, .left, .suspects, .actions, .telegram, .check, .end-op, .aim-actions { zoom: 1.25; }
 }
 
 /* ---------- controle (DualShock 4) ---------- */

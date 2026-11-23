@@ -53,7 +53,6 @@ import { RENDER_PROFILES, RenderMode, RenderSettings } from '../../game/render-s
 import {
   APPROACH_RULES,
   ENEMY_RULES,
-  EscapeRoll,
   EnemyState,
   canAct,
   facingBetween,
@@ -467,48 +466,66 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Pré-visualizando a abordagem (zonas pintadas, aguardando confirmação). */
   protected readonly approaching = signal(false);
-  protected readonly approachRules = APPROACH_RULES;
-  /** Auto de abordagem na tela: quem se rendeu e quem vai tentar correr. */
-  protected readonly report = signal<{
-    agent: string;
-    agentId: string;
-    /** De onde a voz de prisão saiu e até onde foi (hexágonos). */
-    from: HexCoord;
-    radius: number;
-    surrender: EnemyState[];
-    flee: EnemyState[];
-    /** Testes de fuga rolados na zona de rolagem (por id do inimigo). */
-    rolls: ReadonlyMap<string, EscapeRoll>;
-  } | null>(null);
-  /** Muda quando a tela muda de tamanho: refaz as posições dos rabiscos do tablet. */
+  /** Muda quando a tela muda de tamanho ou a câmera anda: refaz as posições dos rabiscos do tablet. */
   private readonly viewTick = signal(0);
-  /** O auto no tablet de campo: cada suspeito com o resultado e onde está na tela. */
+  /**
+   * Prévia da abordagem no tablet de campo (antes de rolar): cada suspeito no raio com o que
+   * aconteceria (se rende, rola o d20 com a chance, corre) e onde está na tela.
+   */
   protected readonly tabletReport = computed((): TabletReport | null => {
     this.viewTick();
-    const r = this.report();
-    if (!r) return null;
-    const roll = (id: string): string | null => {
-      const t = r.rolls.get(id);
-      return t ? `d20 ${t.roll}${this.modTerm(t.modifier).replace(/ /g, '')}=${t.total}` : null;
-    };
-    const mark = (e: EnemyState, result: 'surrender' | 'flee') => ({
-      id: e.id,
-      name: e.name,
-      result,
-      roll: roll(e.id),
-      at: this.board?.pieceOnScreen(e.id) ?? null,
-    });
+    if (!this.approaching()) return null;
+    const from = this.positions().get(this.active().id);
+    if (!from) return null;
+    const { surrender, roll, flee } = this.approachPlan();
+    const targets = this.missionTargets();
+    const at = (id: string) => this.board?.pieceOnScreen(id) ?? null;
+    const alvo = (id: string) => (targets.has(id) ? ' · alvo!' : '');
+    const radius = this.activeApproach().radius;
     return {
-      agent: r.agent,
+      agent: this.active().name,
       round: this.round(),
       op: this.map?.name ?? '',
-      hex: r.from,
-      radius: r.radius,
-      agentAt: this.board?.pieceOnScreen(r.agentId) ?? null,
-      ring: this.board?.groundRingOnScreen(r.from, r.radius) ?? [],
-      marks: [...r.surrender.map((e) => mark(e, 'surrender')), ...r.flee.map((e) => mark(e, 'flee'))],
+      hex: from,
+      radius,
+      agentAt: at(this.active().id),
+      ring: this.board?.groundRingOnScreen(from, radius) ?? [],
+      preview: true,
+      marks: [
+        ...surrender.map((e) => ({
+          id: e.id, name: e.name, result: 'surrender' as const, note: 'se rende', roll: null, at: at(e.id),
+        })),
+        ...roll.map((c) => ({
+          id: c.enemy.id,
+          name: c.enemy.name,
+          result: 'roll' as const,
+          note: 'rola d20',
+          roll: `${this.percent(c.chance)} de escapar${alvo(c.enemy.id)}`,
+          at: at(c.enemy.id),
+        })),
+        ...flee.map((e) => ({
+          id: e.id, name: e.name, result: 'flee' as const, note: 'vai correr', roll: alvo(e.id).slice(3) || null, at: at(e.id),
+        })),
+      ],
     };
   });
+
+  /**
+   * A tela do tablet foi medida: a câmera sobe e enquadra o raio inteiro dentro dela; enquanto
+   * a câmera anda, os rabiscos acompanham.
+   */
+  protected frameTablet(area: { x: number; y: number; w: number; h: number }): void {
+    const from = this.positions().get(this.active().id);
+    if (!this.approaching() || !from) return;
+    this.board?.frameRing(from, this.activeApproach().radius, area);
+    const t0 = performance.now();
+    const tick = (now: number) => {
+      if (!this.approaching() || this.destroyed) return;
+      this.viewTick.update((n) => n + 1);
+      if (now - t0 < 1800) requestAnimationFrame(tick);
+    };
+    requestAnimationFrame(tick);
+  }
   protected readonly statusLabel: Record<EnemyState['status'], string> = {
     patrol: 'vigiando',
     alert: 'em fuga!',
@@ -976,20 +993,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly speedTerm = computed(() => {
     const v = this.activeSpeed();
     return v ? ` ${v > 0 ? '+' : '−'} ${Math.abs(v)} (vigor)` : '';
-  });
-  /** Partes do raio de abordagem do agente da vez (base, intimidação e grupo) e as faixas. */
-  protected readonly approachParts = computed(() => {
-    const loadout = this.roster.loadout(this.active().id);
-    const grouped = this.grouped();
-    return {
-      base: APPROACH_RULES.surrenderRange,
-      int: statBreakdown(loadout, 'intimidacao', false).total,
-      group: grouped ? GROUP_RULES.approachBonus : 0,
-      leader: grouped && this.led() ? CLASS_RULES.leadership.intimidacao : 0,
-      door: this.breakInBoost(),
-      total: this.activeApproach().surrenderRange,
-      zones: this.activeApproach(),
-    };
   });
   /** Escolhendo o ponto de encontro do "Agrupar". */
   protected readonly grouping = signal(false);
@@ -3288,9 +3291,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   // ---------- abordagem ----------
 
   /**
-   * Primeiro passo (toque no **Abordar** ou □): entra no modo de abordagem. O tabuleiro fica
-   * em cinza, menos quem está na vez, os suspeitos no raio e o raio; nada acontece até o
-   * jogador confirmar (**Abordar!**, ✕) ou cancelar (botão vermelho, ○).
+   * Primeiro passo (toque no **Abordar** ou □): entra no modo de abordagem e o tablet de campo
+   * sobe com a prévia (a câmera sobe e enquadra o raio na tela dele); nada é rolado até o
+   * jogador confirmar (**Abordar!**, ✕) ou cancelar (tecla vermelha, ○). As duas teclas
+   * guardam o tablet antes.
    */
   protected startApproach(): void {
     if (this.phase() !== 'moving-choice' || !this.canApproach()) return;
@@ -3299,26 +3303,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.clearBoardForApproach();
     this.approaching.set(true);
     this.sound.play('abo.modo');
-    const zones = this.paintApproachZones();
-    // só ficam em cor quem está na vez, os suspeitos no raio e o próprio raio
-    const { surrender, roll, flee } = this.approachPlan();
-    const from = this.positions().get(this.active().id)!;
-    const targets = this.missionTargets();
-    const alvo = (id: string) => (targets.has(id) ? ' · alvo!' : '');
-    this.board?.frameHexes([from, ...[...surrender, ...roll.map((c) => c.enemy), ...flee].map((e) => e.hex)]);
-    this.board?.setSpotlight({
-      units: [this.active().id],
-      labels: [
-        ...surrender.map((e) => ({ id: e.id, text: `${e.name} · se rende`, tone: 'surrender' as const })),
-        ...roll.map((c) => ({
-          id: c.enemy.id,
-          text: `${c.enemy.name} · ${this.percent(c.chance)} de escapar${alvo(c.enemy.id)}`,
-          tone: 'roll' as const,
-        })),
-        ...flee.map((e) => ({ id: e.id, text: `${e.name} · vai correr${alvo(e.id)}`, tone: 'flee' as const })),
-      ],
-      hexes: zones ? [...zones.surrender, ...zones.roll, ...zones.flee] : [],
-    });
+    // o tablet sobe com a prévia (ver `tabletReport`): é a tela de confirmação; as zonas
+    // pintadas aparecem pela lente dele
+    this.paintApproachZones();
   }
 
   /** Pinta as zonas da abordagem (rendição, rolagem e fuga) em volta de quem está na vez. */
@@ -3374,11 +3361,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const plan = this.approachPlan();
     if (!from || this.approachCount() === 0) return;
     const rolled = plan.roll.map((c) => rollEscape(c, () => rollDie(APPROACH_RULES.escapeDie)));
-    const rolls = new Map(rolled.map((r) => [r.enemy.id, r]));
     const surrender = [...plan.surrender, ...rolled.filter((r) => !r.passed).map((r) => r.enemy)];
     const flee = [...rolled.filter((r) => r.passed).map((r) => r.enemy), ...plan.flee];
     this.approaching.set(false);
-    this.board?.setSpotlight(null);
+    this.board?.frameRing(null);
     this.paintApproachZones();
     this.phase.set('ending');
     const motion = !reducedMotion();
@@ -3413,30 +3399,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     this.later(motion ? waveDuration(radius) * 1000 : 300, () => {
       this.board?.setApproachZones(null);
-      // o auto fica na tela até o jogador fechar (com as rolagens de quem tentou escapar)
-      this.report.set({ agent: this.active().name, agentId: this.active().id, from, radius, surrender, flee, rolls });
-      // a câmera pode ainda estar assentando: refaz as posições dos rabiscos algumas vezes
-      for (const ms of [150, 400, 800, 1300]) this.later(ms, () => this.viewTick.update((n) => n + 1));
+      // voz de prisão: quem não se rendeu corre agora (depois passa a vez)
+      void this.approachFlight();
     });
   }
 
-  /** Fecha o auto de abordagem (tecla Confirmar do tablet ou ✕, depois de o tablet descer) e passa a vez. */
   /** A tela mudou de tamanho: o tabuleiro reajusta a câmera no próximo quadro, então refaz as posições. */
   protected onViewResize(): void {
     requestAnimationFrame(() => this.viewTick.update((n) => n + 1));
   }
 
-  protected closeReport(): void {
-    if (!this.report()) return;
-    this.report.set(null);
-    void this.approachFlight();
-  }
-
   private closeApproach(): void {
     if (!this.approaching()) return;
     this.approaching.set(false);
+    this.board?.frameRing(null);
     this.board?.setApproachZones(null);
-    this.board?.setSpotlight(null);
   }
 
   // ---------- queimar ----------
@@ -3747,7 +3724,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.epoch++;
     this.clearTimers();
     this.resetSlow();
-    this.report.set(null);
+    this.closeApproach();
     this.positions.set(this.initialPositions());
     this.group.set(wholeTeam());
     this.groupLine.set(CHARACTERS.map((c) => c.id));
@@ -3962,9 +3939,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else if (this.search()) this.closeSearch();
         else if (this.waitingCheck()) this.closeCheck();
         else if (this.aiming()) void this.inspect();
-        else if (this.report()) this.tablet()?.press();
         else if (this.phase() === 'rolling') this.confirmRoll();
-        else if (this.approaching()) this.confirmApproach();
+        else if (this.approaching()) { const t = this.tablet(); if (t) t.press(); else this.confirmApproach(); }
         else if (this.burning()) this.confirmBurn();
         else if (this.grouping()) void this.confirmGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
@@ -3975,7 +3951,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         if (this.keyPrompt()) this.leaveKey();
         else if (this.search()) this.closeSearch();
         else if (this.aiming()) this.cancelInspect();
-        else if (this.approaching()) this.cancelApproach();
+        else if (this.approaching()) { const t = this.tablet(); if (t) t.cancel(); else this.cancelApproach(); }
         else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) this.cancelGrouping();
         else if (this.viewingOther()) this.focusCharacter(this.active().id);
@@ -3989,7 +3965,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         // sem ninguém no raio, queima o alvo ou inspeciona o móvel percebido ao lado
         if (this.search()?.pass === false) this.retryInspect();
         else if (this.aiming()) { if (!this.search()) void this.inspect(); }
-        else if (this.approaching()) this.cancelApproach();
+        else if (this.approaching()) { const t = this.tablet(); if (t) t.cancel(); else this.cancelApproach(); }
         else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) break;
         else if (this.canApproach()) this.startApproach();
