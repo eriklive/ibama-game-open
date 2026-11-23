@@ -134,8 +134,8 @@ export class RaceLab implements AfterViewInit, OnDestroy {
       race = m === 'B' ? raceB() : raceA();
       map = race.map;
     }
-    const ana = q.get('ana')?.split(',').map(Number) ?? [12, 124];
-    const vig = q.get('vig')?.split(',').map(Number) ?? [12, 117];
+    const ana = q.get('ana')?.split(',').map(Number) ?? [19, 124];
+    const vig = q.get('vig')?.split(',').map(Number) ?? [20, 117];
     const extraUnits = q.get('team') === '1';
     const units = [{ id: 'ana', color: CHARACTERS[0].color, model: MODELS.ana, start: { col: ana[0], row: ana[1] } }];
     if (extraUnits) {
@@ -164,13 +164,14 @@ export class RaceLab implements AfterViewInit, OnDestroy {
       const p0 = hexToWorld(o, 1);
       const p1 = hexToWorld({ col: o.col + span - 1, row: o.row }, 1);
       const x = (p0.x + p1.x) / 2;
-      const z = hexToWorld({ col: 12, row: o.row }, 1).z;
+      const z = hexToWorld({ col: 18, row: o.row }, 1).z;
       const len = Math.abs(p1.x - p0.x) + 1.6;
       let obj: THREE.Object3D | null = null;
       if (o.kind === 'log') obj = log(len);
       else if (o.kind === 'branch') obj = branch(len);
       else if (o.kind === 'tarp') obj = tarp(len);
       else if (o.kind === 'shutter') obj = shutter(len + 0.4);
+      else if (o.kind === 'plane') continue;
       else if (o.kind === 'fuel') {
         obj = buildFuelProps(o.col * 7 + o.row);
         obj.position.set(p0.x, 0, p0.z);
@@ -184,6 +185,16 @@ export class RaceLab implements AfterViewInit, OnDestroy {
       extras.push(obj);
     }
 
+    // avião adernado: corpo colado na pista, asa direita baixa por cima da faixa esquerda e do meio
+    const pl: THREE.Object3D | undefined = b['planeModel'];
+    if (pl && race?.plane) {
+      pl.updateWorldMatrix(true, false);
+      const wp = new THREE.Vector3().setFromMatrixPosition(pl.matrixWorld);
+      pl.position.x += race.plane.x - wp.x;
+      pl.rotation.z = -race.plane.roll;
+      // a roda esquerda fica no chão (x local −0,8 × 2); a direita afunda (trem quebrado)
+      pl.position.y = -1.6 * Math.sin(race.plane.roll);
+    }
     const renderer: THREE.WebGLRenderer = b['renderer'];
     const camera: THREE.PerspectiveCamera = b['camera'];
     (window as any).__lab = {
