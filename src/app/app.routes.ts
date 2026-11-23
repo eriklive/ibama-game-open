@@ -4,6 +4,7 @@ import { StartScreen } from './screens/start/start-screen';
 import { GameScreen } from './screens/game/game-screen';
 import { RosterScreen } from './screens/roster/roster-screen';
 import { findMap } from './game/maps';
+import { RaceLab } from './lab/race-lab';
 
 /** Só entra na partida se o mapa existir e estiver disponível. */
 const mapAvailable: CanActivateFn = (route) =>
@@ -18,5 +19,6 @@ export const routes: Routes = [
     title: 'Jogo do Ibama · Ficha do agente',
   },
   { path: 'jogo/:mapId', component: GameScreen, canActivate: [mapAvailable], title: 'Jogo do Ibama · Partida' },
+  { path: 'lab', component: RaceLab },
   { path: '**', redirectTo: '' },
 ];
