@@ -1,5 +1,16 @@
-<div class="game" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
+<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
+
+  <!-- Abertura da missão (tutorial): objetivos circulados e "Iniciar missão" (ver game/mission-intro.ts) -->
+  @if (intro(); as it) {
+    <app-mission-intro
+      [marks]="it.marks"
+      [leaving]="it.leaving"
+      [width]="introSize().w"
+      [height]="introSize().h"
+      (begin)="beginMission()"
+      (skip)="skipMissionIntro()" />
+  }
 
   <!-- Topo: voltar e menu soltos; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
   <div class="corner">
@@ -143,6 +154,9 @@
           </ul>
         }
       </div>
+      @if (hasIntro()) {
+        <button type="button" class="menu-restart" (click)="replayIntro()" data-testid="menu-intro">Rever objetivos da missão</button>
+      }
       <button type="button" class="menu-restart" (click)="toggleMenu(); restart()" data-testid="menu-restart">Recomeçar a partida</button>
       <button type="button" class="menu-close" (click)="toggleMenu()">Fechar</button>
     </section>

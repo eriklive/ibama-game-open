@@ -17,6 +17,7 @@ import { DoorPush, DoorViews } from './door-view';
 import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
 import { VaultPick, VaultScene } from './vault-scene';
 import { AuraLayer, AuraStyle, AuraTextures, createAuraTextures, splitHot } from './aura-layer';
+import { BASE_PITCH, INTRO, ScreenEllipse, easeInOutCubic, introZoom } from './mission-intro';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -469,6 +470,25 @@ export class HexBoard {
   private readonly camTarget = new THREE.Vector3();
   private readonly camGoal = new THREE.Vector3();
   private zoom = 1;
+  /** Inclinação da câmera de jogo (graus acima do chão); a abertura da missão sobe para `INTRO.pitch`. */
+  private pitchDeg = BASE_PITCH;
+  /**
+   * Abertura da missão em curso (ver `frameIntro`): enquanto durar, arrastar, pinça, roda e
+   * controle não mexem na câmera. `move` é a câmera andando em linha reta (com zoom e
+   * inclinação juntos); sem ele, a câmera fica parada no enquadramento.
+   */
+  private intro: {
+    zoomBack: number;
+    move: {
+      from: THREE.Vector3;
+      to: THREE.Vector3;
+      zoom: [number, number];
+      pitch: [number, number];
+      ms: number;
+      t0: number;
+      done: () => void;
+    } | null;
+  } | null = null;
   /**
    * Close-up (ver `closeUp`): ponto mirado e direção (do ponto até a câmera, no chão).
    * `inspectBlend` vai de 0 (câmera de sempre) a 1 (close-up) e volta.
@@ -584,8 +604,8 @@ export class HexBoard {
   focus(id: string | null, moveCamera = true): void {
     this.focusId = id;
     const u = id ? this.units.get(id) : undefined;
-    // na vista de inspeção a câmera fica travada
-    if (u && moveCamera && !this.inspect) {
+    // na vista de inspeção (e na abertura da missão) a câmera fica travada
+    if (u && moveCamera && !this.inspect && !this.intro) {
       this.camGoal.copy(this.worldOf(u.hex));
       this.clampGoal();
     }
@@ -742,6 +762,7 @@ export class HexBoard {
 
   /** Leva a câmera até um hexágono. */
   focusHex(hex: HexCoord): void {
+    if (this.intro) return;
     this.camGoal.copy(this.worldOf(hex));
     this.clampGoal();
   }
@@ -859,7 +880,7 @@ export class HexBoard {
 
   /** Desloca a câmera só o necessário para o hexágono ficar longe das bordas da tela. */
   keepInView(hex: HexCoord): void {
-    if (this.inspect) return;
+    if (this.inspect || this.intro) return;
     const p = this.worldOf(hex);
     const portrait = this.camera.aspect < 1;
     const mx = (portrait ? 1.6 : 4) * this.zoom;
@@ -871,7 +892,7 @@ export class HexBoard {
 
   /** Arrasta a câmera (em unidades de tela: x direita, y baixo), proporcional ao zoom. */
   panBy(dx: number, dy: number): void {
-    if (this.inspect) return;
+    if (this.inspect || this.intro) return;
     this.camGoal.x += dx * this.zoom;
     this.camGoal.z += dy * this.zoom * 1.3;
     this.clampGoal();
@@ -879,8 +900,124 @@ export class HexBoard {
 
   /** Aproxima (< 1) ou afasta (> 1) a câmera. */
   zoomBy(factor: number): void {
-    if (this.inspect) return;
+    if (this.inspect || this.intro) return;
     this.setZoom(this.zoom * factor);
+  }
+
+  // ---------- abertura da missão (ver `mission-intro.ts`) ----------
+
+  /**
+   * Põe a câmera alta (`INTRO.pitch`) e afastada sobre os retângulos (as estruturas com
+   * objetivo), com folga, e chega devagar (`INTRO.settleMs`). O zoom passa do limite do
+   * jogador: só a abertura enxerga tanto. Resolve quando a câmera para.
+   */
+  frameIntro(rects: readonly HexRect[]): Promise<void> {
+    const corners = rects.flatMap((r) =>
+      [r.cols[0], r.cols[1]].flatMap((col) => [r.rows[0], r.rows[1]].map((row) => this.worldOf({ col, row }))),
+    );
+    const box = new THREE.Box3().setFromPoints(corners).expandByScalar(HEX_SIZE);
+    const center = box.getCenter(new THREE.Vector3()).setY(0);
+    const size = box.getSize(new THREE.Vector3());
+    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
+    const zoom = introZoom(size.x, size.z, this.camera.aspect, this.camera.fov, 11.5 * Math.min(portrait, 2.3));
+    const zoomBack = this.intro?.zoomBack ?? this.zoom;
+    this.intro = { zoomBack, move: null };
+    this.camGoal.copy(center);
+    this.camTarget.copy(center);
+    this.pitchDeg = INTRO.pitch;
+    const from = reducedMotionQuery() ? zoom : zoom * INTRO.settleFrom;
+    return this.introMove(center, from, zoom, INTRO.pitch, INTRO.settleMs);
+  }
+
+  /**
+   * Leva a câmera da abertura até o hexágono `to` (a equipe) em linha reta, sem passar de
+   * hexágono em hexágono, voltando ao zoom de antes e à inclinação de jogo no caminho.
+   * Com "menos movimento", corta direto.
+   */
+  async panFromIntro(to: HexCoord): Promise<void> {
+    if (!this.intro) return;
+    if (reducedMotionQuery()) return this.skipIntro(to);
+    await this.introMove(this.worldOf(to), this.zoom, this.intro.zoomBack, BASE_PITCH, INTRO.panMs);
+    this.intro = null;
+    this.clampGoal();
+  }
+
+  /** Encerra a abertura na hora, com a câmera de jogo sobre `to`. */
+  skipIntro(to: HexCoord): void {
+    const intro = this.intro;
+    if (!intro) return;
+    intro.move?.done();
+    this.intro = null;
+    this.zoom = intro.zoomBack;
+    this.pitchDeg = BASE_PITCH;
+    this.camGoal.copy(this.worldOf(to));
+    this.clampGoal();
+    this.camTarget.copy(this.camGoal);
+  }
+
+  /**
+   * Elipse em volta de cada retângulo na tela (px do canvas): os cantos do chão e do alto
+   * (`tops`, a altura de cada estrutura) projetados, com folga para o traço não encostar.
+   */
+  introEllipses(rects: readonly HexRect[], tops: readonly number[]): ScreenEllipse[] {
+    this.updateCamera(0);
+    this.camera.updateMatrixWorld();
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    return rects.map((r, i) => {
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const col of r.cols)
+        for (const row of r.rows)
+          for (const y of [0, tops[i] ?? 0]) {
+            const p = this.worldOf({ col, row });
+            p.y = y;
+            p.project(this.camera);
+            const sx = ((p.x + 1) / 2) * w;
+            const sy = ((1 - p.y) / 2) * h;
+            x0 = Math.min(x0, sx); x1 = Math.max(x1, sx);
+            y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+          }
+      // a elipse que passa pelos cantos de um retângulo tem semieixos √2 maiores; um pouco
+      // menos deixa o traço "abraçar" a estrutura sem sobrar tanto
+      return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, rx: ((x1 - x0) / 2) * 1.15, ry: ((y1 - y0) / 2) * 1.2 };
+    });
+  }
+
+  private introMove(to: THREE.Vector3, zoomFrom: number, zoomTo: number, pitchTo: number, ms: number): Promise<void> {
+    const intro = this.intro;
+    if (!intro) return Promise.resolve();
+    intro.move?.done();
+    return new Promise((resolve) => {
+      intro.move = {
+        from: this.camTarget.clone(),
+        to: to.clone(),
+        zoom: [zoomFrom, zoomTo],
+        pitch: [this.pitchDeg, pitchTo],
+        ms: Math.max(1, ms),
+        t0: performance.now(),
+        done: resolve,
+      };
+      this.zoom = zoomFrom;
+    });
+  }
+
+  /**
+   * Um passo da câmera da abertura: posição, zoom e inclinação juntos, na mesma curva. Conta
+   * pelo relógio (não pelo `dt` do quadro, que tem teto): dura o mesmo em aparelho lento.
+   */
+  private stepIntro(): void {
+    const m = this.intro?.move;
+    if (!m) return;
+    const t = Math.min(1, (performance.now() - m.t0) / m.ms);
+    const e = easeInOutCubic(t);
+    this.camTarget.lerpVectors(m.from, m.to, e);
+    this.camGoal.copy(this.camTarget);
+    this.zoom = THREE.MathUtils.lerp(m.zoom[0], m.zoom[1], e);
+    this.pitchDeg = THREE.MathUtils.lerp(m.pitch[0], m.pitch[1], e);
+    if (t >= 1) {
+      this.intro!.move = null;
+      m.done();
+    }
   }
 
   /** Recoloca os inimigos (sem animação): posição, direção, alerta e presença. */
@@ -3111,11 +3248,12 @@ export class HexBoard {
    */
   private updatePerspectiveCamera(dt: number, look: THREE.Vector3): number {
     const k = 1 - Math.exp(-dt * 6);
+    this.stepIntro();
     this.camTarget.lerp(this.camGoal, k);
     // Em retrato a câmera recua para enxergar o mesmo número de colunas.
     const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
     const dist = 11.5 * this.zoom * Math.min(portrait, 2.3);
-    const pitch = THREE.MathUtils.degToRad(55);
+    const pitch = THREE.MathUtils.degToRad(this.pitchDeg);
     this.camera.position.set(
       this.camTarget.x,
       this.camTarget.y + Math.sin(pitch) * dist,

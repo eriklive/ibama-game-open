@@ -30,6 +30,8 @@
   color: var(--ink-paper);
 }
 .board { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+/* abertura da missão: só o tabuleiro e a camada da abertura; a papelada volta no fim do pan */
+.game.intro > :not(.board):not(app-mission-intro) { visibility: hidden; }
 
 button { font-family: inherit; font-weight: 400; color: var(--ink-paper); border: 0; padding: 0; }
 button:focus-visible { outline: 3px solid var(--postit); outline-offset: 3px; }
