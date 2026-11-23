@@ -119,6 +119,7 @@ import {
 } from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
+import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-tablet';
 import { HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea, vaultHexes } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
@@ -256,10 +257,10 @@ const reducedMotion = (): boolean =>
 
 @Component({
   selector: 'app-game-screen',
-  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel, ChaseOverlay],
+  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel, ChaseOverlay, ApproachTablet],
   templateUrl: './game-screen.html',
   styleUrl: './game-screen.css',
-  host: { '(document:keydown)': 'onKey($event)' },
+  host: { '(document:keydown)': 'onKey($event)', '(window:resize)': 'onViewResize()' },
 })
 export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly router = inject(Router);
@@ -381,9 +382,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     effect(() => this.rollConfirmBtn()?.nativeElement.focus({ preventScroll: true }));
     // resultado da inspeção: o foco vai para "De novo!" (falhou) ou "Fechar"
     effect(() => this.searchCloseBtn()?.nativeElement.focus({ preventScroll: true }));
-    // ficha do d20 e auto de abordagem: o foco vai para "Continuar"/"Fechar"
+    // ficha do d20: o foco vai para "Continuar" (o tablet do auto de abordagem foca a própria tecla)
     effect(() => this.checkCloseBtn()?.nativeElement.focus({ preventScroll: true }));
-    effect(() => this.reportCloseBtn()?.nativeElement.focus({ preventScroll: true }));
     // troca de modo no menu: o tabuleiro remonta o mundo em segundo plano
     effect(() => {
       const mode = this.renderMode();
@@ -469,19 +469,43 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Auto de abordagem na tela: quem se rendeu e quem vai tentar correr. */
   protected readonly report = signal<{
     agent: string;
+    agentId: string;
+    /** De onde a voz de prisão saiu e até onde foi (hexágonos). */
+    from: HexCoord;
+    radius: number;
     surrender: EnemyState[];
     flee: EnemyState[];
     /** Testes de fuga rolados na zona de rolagem (por id do inimigo). */
     rolls: ReadonlyMap<string, EscapeRoll>;
   } | null>(null);
-  protected readonly reportTally = computed(() => {
+  /** Muda quando a tela muda de tamanho: refaz as posições dos rabiscos do tablet. */
+  private readonly viewTick = signal(0);
+  /** O auto no tablet de campo: cada suspeito com o resultado e onde está na tela. */
+  protected readonly tabletReport = computed((): TabletReport | null => {
+    this.viewTick();
     const r = this.report();
-    if (!r) return '';
-    const s = r.surrender.length;
-    const f = r.flee.length;
-    return [s && `${s} ${s === 1 ? 'rendido' : 'rendidos'}`, f && `${f} ${f === 1 ? 'alertado' : 'alertados'}`, 'vez encerrada']
-      .filter(Boolean)
-      .join(' · ');
+    if (!r) return null;
+    const roll = (id: string): string | null => {
+      const t = r.rolls.get(id);
+      return t ? `d20 ${t.roll}${this.modTerm(t.modifier).replace(/ /g, '')}=${t.total}` : null;
+    };
+    const mark = (e: EnemyState, result: 'surrender' | 'flee') => ({
+      id: e.id,
+      name: e.name,
+      result,
+      roll: roll(e.id),
+      at: this.board?.pieceOnScreen(e.id) ?? null,
+    });
+    return {
+      agent: r.agent,
+      round: this.round(),
+      op: this.map?.name ?? '',
+      hex: r.from,
+      radius: r.radius,
+      agentAt: this.board?.pieceOnScreen(r.agentId) ?? null,
+      ring: this.board?.groundRingOnScreen(r.from, r.radius) ?? [],
+      marks: [...r.surrender.map((e) => mark(e, 'surrender')), ...r.flee.map((e) => mark(e, 'flee'))],
+    };
   });
   protected readonly statusLabel: Record<EnemyState['status'], string> = {
     patrol: 'vigiando',
@@ -566,7 +590,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private searchThrows = 0;
   private readonly searchCloseBtn = viewChild('searchClose', { read: ElementRef<HTMLButtonElement> });
   private readonly checkCloseBtn = viewChild('checkClose', { read: ElementRef<HTMLButtonElement> });
-  private readonly reportCloseBtn = viewChild('reportClose', { read: ElementRef<HTMLButtonElement> });
+  private readonly tablet = viewChild(ApproachTablet);
   /** Esconderijos em que alguém reparou (o móvel ganha a lupa e pode ser inspecionado). */
   protected readonly noticed = signal<ReadonlySet<string>>(new Set());
   /** Esconderijos já achados (o que havia lá foi apreendido). */
@@ -3277,11 +3301,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.later(motion ? waveDuration(radius) * 1000 : 300, () => {
       this.board?.setApproachZones(null);
       // o auto fica na tela até o jogador fechar (com as rolagens de quem tentou escapar)
-      this.report.set({ agent: this.active().name, surrender, flee, rolls });
+      this.report.set({ agent: this.active().name, agentId: this.active().id, from, radius, surrender, flee, rolls });
+      // a câmera pode ainda estar assentando: refaz as posições dos rabiscos algumas vezes
+      for (const ms of [150, 400, 800, 1300]) this.later(ms, () => this.viewTick.update((n) => n + 1));
     });
   }
 
-  /** Fecha o auto de abordagem (**Fechar**, ✕ ou toque) e passa a vez. */
+  /** Fecha o auto de abordagem (tecla Confirmar do tablet ou ✕, depois de o tablet descer) e passa a vez. */
+  /** A tela mudou de tamanho: o tabuleiro reajusta a câmera no próximo quadro, então refaz as posições. */
+  protected onViewResize(): void {
+    requestAnimationFrame(() => this.viewTick.update((n) => n + 1));
+  }
+
   protected closeReport(): void {
     if (!this.report()) return;
     this.report.set(null);
@@ -3812,7 +3843,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else if (this.search()) this.closeSearch();
         else if (this.waitingCheck()) this.closeCheck();
         else if (this.aiming()) void this.inspect();
-        else if (this.report()) this.closeReport();
+        else if (this.report()) this.tablet()?.press();
         else if (this.phase() === 'rolling') this.confirmRoll();
         else if (this.approaching()) this.confirmApproach();
         else if (this.burning()) this.confirmBurn();
