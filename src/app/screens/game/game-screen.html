@@ -493,36 +493,6 @@
       <div class="stamp passive enemy-stamp">
         <span class="stamp-ring"><span class="stamp-text">Turno<br />inimigo</span></span>
       </div>
-    } @else if (approaching()) {
-      <div class="slip approach-slip" role="status" aria-live="polite" data-testid="hint">
-        <strong>Abordagem de {{ active().name }}</strong>
-        @let ap = approachParts();
-        <span class="small approach-range" data-testid="approach-range">
-          Abordagem {{ ap.total }}: base {{ ap.base }} · intimidação {{ signed(ap.int) }}@if (ap.group) { · grupo +{{ ap.group }}}@if (ap.leader) { · Capitão +{{ ap.leader }}}@if (ap.door) { · arrombamento +{{ ap.door }}}
-        </span>
-        <span class="small approach-range" data-testid="approach-bands">
-          Rolagem {{ ap.zones.surrenderRange + 1 }}–{{ ap.zones.rollRange }} (d20 ≥ {{ approachRules.escapeDC }} escapa) · fuga até {{ ap.zones.radius }}
-        </span>
-        @let plan = approachPlan();
-        <span class="approach-tally" aria-hidden="true">
-          @if (plan.surrender.length) { <span class="surrender">{{ plan.surrender.length }} se {{ plan.surrender.length === 1 ? 'rende' : 'rendem' }}</span> }
-          @if (plan.roll.length) { <span class="roll">{{ plan.roll.length }} {{ plan.roll.length === 1 ? 'rola' : 'rolam' }} d20</span> }
-          @if (plan.flee.length) { <span class="flee">{{ plan.flee.length }} {{ plan.flee.length === 1 ? 'vai' : 'vão' }} correr</span> }
-          <span class="small">· encerra a vez</span>
-        </span>
-        <!-- no tabuleiro cada suspeito tem a sua etiqueta; a lista fica para o leitor de tela -->
-        <ul class="sr-only" data-testid="approach-list">
-          @for (e of plan.surrender; track e.id) {
-            <li>{{ e.name }} se rende</li>
-          }
-          @for (c of plan.roll; track c.enemy.id) {
-            <li>{{ c.enemy.name }} rola d20{{ modTerm(c.modifier) }}: {{ percent(c.chance) }} de escapar@if (missionTargets().has(c.enemy.id)) { · alvo da missão}</li>
-          }
-          @for (e of plan.flee; track e.id) {
-            <li>{{ e.name }} vai correr@if (missionTargets().has(e.id)) { · alvo da missão}</li>
-          }
-        </ul>
-      </div>
     } @else if (burning() && burnable(); as target) {
       <div class="slip burn-slip" role="status" aria-live="polite" data-testid="burn-hint">
         <strong>Queimar {{ target.name }}?</strong>

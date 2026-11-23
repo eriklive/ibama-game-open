@@ -466,7 +466,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Pré-visualizando a abordagem (zonas pintadas, aguardando confirmação). */
   protected readonly approaching = signal(false);
-  protected readonly approachRules = APPROACH_RULES;
   /** Muda quando a tela muda de tamanho ou a câmera anda: refaz as posições dos rabiscos do tablet. */
   private readonly viewTick = signal(0);
   /**
@@ -994,20 +993,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly speedTerm = computed(() => {
     const v = this.activeSpeed();
     return v ? ` ${v > 0 ? '+' : '−'} ${Math.abs(v)} (vigor)` : '';
-  });
-  /** Partes do raio de abordagem do agente da vez (base, intimidação e grupo) e as faixas. */
-  protected readonly approachParts = computed(() => {
-    const loadout = this.roster.loadout(this.active().id);
-    const grouped = this.grouped();
-    return {
-      base: APPROACH_RULES.surrenderRange,
-      int: statBreakdown(loadout, 'intimidacao', false).total,
-      group: grouped ? GROUP_RULES.approachBonus : 0,
-      leader: grouped && this.led() ? CLASS_RULES.leadership.intimidacao : 0,
-      door: this.breakInBoost(),
-      total: this.activeApproach().surrenderRange,
-      zones: this.activeApproach(),
-    };
   });
   /** Escolhendo o ponto de encontro do "Agrupar". */
   protected readonly grouping = signal(false);
@@ -3318,14 +3303,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.clearBoardForApproach();
     this.approaching.set(true);
     this.sound.play('abo.modo');
-    const zones = this.paintApproachZones();
-    // só ficam em cor quem está na vez, os suspeitos no raio e o próprio raio
-    // o tablet sobe com a prévia (ver `tabletReport`); os rabiscos dele fazem as vezes das etiquetas
-    this.board?.setSpotlight({
-      units: [this.active().id],
-      labels: [],
-      hexes: zones ? [...zones.surrender, ...zones.roll, ...zones.flee] : [],
-    });
+    // o tablet sobe com a prévia (ver `tabletReport`): é a tela de confirmação; as zonas
+    // pintadas aparecem pela lente dele
+    this.paintApproachZones();
   }
 
   /** Pinta as zonas da abordagem (rendição, rolagem e fuga) em volta de quem está na vez. */
@@ -3385,7 +3365,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const flee = [...rolled.filter((r) => r.passed).map((r) => r.enemy), ...plan.flee];
     this.approaching.set(false);
     this.board?.frameRing(null);
-    this.board?.setSpotlight(null);
     this.paintApproachZones();
     this.phase.set('ending');
     const motion = !reducedMotion();
@@ -3435,7 +3414,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.approaching.set(false);
     this.board?.frameRing(null);
     this.board?.setApproachZones(null);
-    this.board?.setSpotlight(null);
   }
 
   // ---------- queimar ----------
