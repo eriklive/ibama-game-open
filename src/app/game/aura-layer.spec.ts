@@ -1,5 +1,6 @@
+import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
-import { auraOutline, splitHot } from './aura-layer';
+import { AuraLayer, auraOutline, splitHot } from './aura-layer';
 import { HexCoord, hexKey, hexNeighbors } from './hex';
 
 const key = (col: number, row: number) => hexKey({ col, row });
@@ -47,5 +48,38 @@ describe('aura acesa (agente dentro)', () => {
   it('sem agente dentro, nada acende', () => {
     const plane = ring({ col: 3, row: 3 });
     expect(splitHot(plane, [key(20, 20)])).toEqual({ hot: [], cold: plane });
+  });
+});
+
+describe('hexágono menor por cima (alcance dentro de uma aura de ação)', () => {
+  const textures = { fill: new THREE.Texture(), fade: new THREE.Texture() };
+  const style = { color: 0xa9e4ff, edge: 0xffffff, fill: 0.7, rim: 1 };
+  const meshes = (layer: AuraLayer) => layer.root.children as THREE.Mesh[];
+  const sideCount = (layer: AuraLayer) => (meshes(layer)[1].geometry.index?.count ?? 0) / 6;
+  /** Maior distância do véu ao centro do hexágono (0,0), que fica na origem do mundo. */
+  const maxRadius = (layer: AuraLayer) => {
+    const pos = meshes(layer)[0].geometry.getAttribute('position');
+    const c = new THREE.Vector3();
+    let max = 0;
+    for (let i = 0; i < pos.count; i++) max = Math.max(max, c.fromBufferAttribute(pos, i).setY(0).length());
+    return max;
+  };
+  const [n] = hexNeighbors({ col: 0, row: 0 });
+
+  it('cada hexágono tem o próprio contorno (os vizinhos não se juntam)', () => {
+    const normal = new AuraLayer(style, textures, 0);
+    const inset = new AuraLayer({ ...style, inset: 0.5 }, textures, 0);
+    normal.set([key(0, 0), hexKey(n)]);
+    inset.set([key(0, 0), hexKey(n)]);
+    expect(sideCount(normal)).toBe(10);
+    expect(sideCount(inset)).toBe(12);
+  });
+
+  it('o véu fica menor que o hexágono', () => {
+    const normal = new AuraLayer(style, textures, 0);
+    const inset = new AuraLayer({ ...style, inset: 0.5 }, textures, 0);
+    normal.set([key(0, 0)]);
+    inset.set([key(0, 0)]);
+    expect(maxRadius(inset)).toBeCloseTo(maxRadius(normal) * 0.5, 3);
   });
 });
