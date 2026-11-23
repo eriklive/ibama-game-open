@@ -28,7 +28,8 @@ export class RaceLab implements AfterViewInit, OnDestroy {
     let race: RaceMap | undefined;
     if (m === 'tatico') map = MAPS.find((x) => x.id === 'aeroporto')!;
     else {
-      race = m === 'B' ? raceB() : raceA();
+      const v = q.get('v') === 'esquerda' ? 'esquerda' : 'direita';
+      race = m === 'B' ? raceB(v) : raceA(v);
       map = race.map;
     }
     const ana = q.get('ana')?.split(',').map(Number) ?? [19, 124];
@@ -57,7 +58,7 @@ export class RaceLab implements AfterViewInit, OnDestroy {
     const scene: THREE.Scene = b['scene'];
     const extras = race ? buildRunnerProps(race) : [];
     board.addProps(extras);
-    if (race?.plane) board.posePlane(race.plane.x, race.plane.sink);
+    if (race?.plane) board.posePlane(race.plane.x, race.plane.z, race.plane.sink);
     const renderer: THREE.WebGLRenderer = b['renderer'];
     const camera: THREE.PerspectiveCamera = b['camera'];
     (window as any).__lab = {

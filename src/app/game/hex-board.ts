@@ -482,6 +482,8 @@ export class HexBoard {
   private disposed = false;
   /** Desenha a cada quadro (ver `setRendering`). */
   private rendering = true;
+  /** Câmera de perseguição segue a direção do agente (ver `setChaseFollow`). */
+  private chaseFollow = false;
 
   // câmera
   private readonly camTarget = new THREE.Vector3();
@@ -1855,6 +1857,16 @@ export class HexBoard {
   /** A câmera de perseguição já encostada (sem a descida): o mapa de corrida nasce assim. */
   snapChaseCamera(): void {
     if (this.chase) this.chaseBlend = 1;
+    const u = this.chase && this.units.get(this.chase.unitId);
+    if (u && this.chaseFollow) this.chaseDir.set(Math.sin(u.yaw), 0, Math.cos(u.yaw));
+  }
+
+  /**
+   * A câmera de perseguição olha para onde o agente corre (e não para o inimigo): no Modo Corrida,
+   * com curvas, o inimigo some atrás da esquina e a câmera não pode olhar através da parede.
+   */
+  setChaseFollow(on: boolean): void {
+    this.chaseFollow = on;
   }
 
   /**
@@ -1862,7 +1874,7 @@ export class HexBoard {
    * com a altura do pulo (`hop`) e o clipe. `lean` inclina o corpo (tropeço). O agente leva a
    * câmera e o raio carregado junto.
    */
-  runnerPose(who: 'unit' | 'enemy', id: string, pose: { x: number; z: number; hop: number; clip: ClipName; lean?: number }): void {
+  runnerPose(who: 'unit' | 'enemy', id: string, pose: { x: number; z: number; yaw: number; hop: number; clip: ClipName; lean?: number }): void {
     const m = who === 'unit' ? this.units.get(id) : this.enemies.get(id);
     if (!m) return;
     m.group.position.x = pose.x;
@@ -1872,15 +1884,15 @@ export class HexBoard {
     m.rig?.play(pose.clip, 0.12);
     const hex = worldToHex(pose.x, pose.z, HEX_SIZE);
     m.hex = hex;
-    // na corrida, sempre de frente para o norte (sem girar até lá)
-    m.group.rotation.y = Math.PI;
+    // na corrida, de frente para onde o caminho vai (a curva já vem suave do caminho)
+    m.group.rotation.y = pose.yaw;
     if (who === 'unit') {
-      (m as UnitView).yaw = Math.PI;
+      (m as UnitView).yaw = pose.yaw;
       this.camGoal.set(pose.x, 0, pose.z);
       this.camTarget.copy(this.camGoal);
     } else {
       const e = m as EnemyView;
-      e.facing = e.facingGoal = Math.PI;
+      e.facing = e.facingGoal = -pose.yaw;
       e.running = pose.clip === 'run';
     }
   }
@@ -1894,12 +1906,13 @@ export class HexBoard {
    * O avião do mapa: centro em `x` (mundo) e afundado `sink` (pousado de barriga, nivelado: o
    * trem de pouso some sob o piso).
    */
-  posePlane(x: number, sink: number): void {
+  posePlane(x: number, z: number, sink: number): void {
     const pl = this.planeModel;
     if (!pl) return;
     pl.updateWorldMatrix(true, false);
     const wp = new THREE.Vector3().setFromMatrixPosition(pl.matrixWorld);
     pl.position.x += x - wp.x;
+    pl.position.z += z - wp.z;
     pl.rotation.z = 0;
     pl.position.y = -sink;
   }
@@ -2001,7 +2014,9 @@ export class HexBoard {
     const e = c.enemyId ? this.enemies.get(c.enemyId) : undefined;
     // olha para ele (ou para o ponto escolhido, ou para onde o agente corre); suave, para o
     // zigue-zague do grid não balançar
-    const want = e && !e.gone
+    const want = this.chaseFollow
+      ? new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw))
+      : e && !e.gone
       ? e.group.position.clone().sub(u.group.position).setY(0)
       : c.look
         ? c.look.clone().sub(u.group.position).setY(0)

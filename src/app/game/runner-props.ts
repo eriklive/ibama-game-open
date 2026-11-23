@@ -1,13 +1,12 @@
 /**
  * Modo Corrida — objetos que só existem nos mapas de corrida (ver `runner-maps.ts`): a tora no
- * chão (pular), o galho atravessado no peito e a lona azul (deslizar), a porta de enrolar meio
- * aberta dos fundos do hangar (deslizar) e os galões (pular). A carga, o hangar, o avião e as
+ * chão (pular), o galho atravessado no peito e a lona azul (deslizar) e os galões (pular). A carga, o hangar, o avião e as
  * árvores são os do jogo; estes são feitos de caixas e cilindros, no mesmo estilo.
  */
 import * as THREE from 'three';
-import { hexToWorld } from './hex';
 import { buildFuelProps } from './scenery';
-import type { RaceMap } from './runner-maps';
+import { RaceMap, obstacleAt } from './runner-maps';
+import { LANE_WIDTH, pathPose } from './runner-path';
 
 const M = 4 / 3; // 1 m em unidades do mundo
 
@@ -86,56 +85,23 @@ function tarp(len: number): THREE.Group {
   return g;
 }
 
-/** Porta de enrolar meio aberta (fundos do hangar): passa só deslizando. */
-function shutter(width: number): THREE.Group {
-  const g = new THREE.Group();
-  const metal = new THREE.MeshStandardMaterial({ color: 0x8b969c, roughness: 0.55, metalness: 0.35 });
-  const dark = new THREE.MeshStandardMaterial({ color: 0x3d4447, roughness: 0.8 });
-  const gap = 1.0 * M;
-  const top = 2.8 * M;
-  for (let i = 0; i < 14; i++) {
-    const y = gap + (i + 0.5) * ((top - gap) / 14);
-    const slat = new THREE.Mesh(new THREE.BoxGeometry(width, (top - gap) / 14 - 0.02, 0.08), metal);
-    slat.position.y = y;
-    slat.castShadow = true;
-    g.add(slat);
-  }
-  const bar = new THREE.Mesh(new THREE.BoxGeometry(width, 0.1, 0.16), dark);
-  bar.position.y = gap;
-  g.add(bar);
-  const stripes = new THREE.MeshStandardMaterial({ color: 0xffc21a, roughness: 0.6 });
-  for (let i = 0; i < 8; i++) {
-    const s = new THREE.Mesh(new THREE.BoxGeometry(width / 16, 0.1, 0.17), stripes);
-    s.position.set(-width / 2 + (i * 2 + 0.5) * (width / 16), gap, 0.005);
-    g.add(s);
-  }
-  return g;
-}
-
-
-/** Monta os objetos próprios da corrida de um mapa, já no lugar (coordenadas do mundo). */
+/** Monta os objetos próprios da corrida de um mapa, já no lugar e virados para o caminho. */
 export function buildRunnerProps(race: RaceMap): THREE.Object3D[] {
   const out: THREE.Object3D[] = [];
   for (const o of race.obstacles) {
-    const span = o.span ?? 1;
-    const p0 = hexToWorld(o, 1);
-    const p1 = hexToWorld({ col: o.col + span - 1, row: o.row }, 1);
-    // todos na mesma fileira, sem o meio-hexágono das colunas ímpares
-    const z = hexToWorld({ col: 0, row: o.row }, 1).z;
-    const len = Math.abs(p1.x - p0.x) + 1.6;
+    const at = obstacleAt(race, o);
+    const mid = (Math.min(...o.lanes) + Math.max(...o.lanes)) / 2;
+    const c = pathPose(race.path, at, mid);
+    const len = (Math.max(...o.lanes) - Math.min(...o.lanes)) * LANE_WIDTH + LANE_WIDTH + 0.6;
     let obj: THREE.Object3D | null = null;
     if (o.kind === 'log') obj = log(len);
     else if (o.kind === 'branch') obj = branch(len);
     else if (o.kind === 'tarp') obj = tarp(len);
-    else if (o.kind === 'shutter') obj = shutter(len + 0.4);
-    else if (o.kind === 'fuel') {
-      obj = buildFuelProps(o.col * 7 + o.row);
-      obj.position.set(p0.x, 0, p0.z);
-      out.push(obj);
-      continue;
-    }
+    else if (o.kind === 'fuel') obj = buildFuelProps(Math.round(at * 7));
     if (!obj) continue;
-    obj.position.set((p0.x + p1.x) / 2, 0, z);
+    obj.position.set(c.x, 0, c.z);
+    // feitos ao longo de x: atravessam a pista de quem corre para o norte; giram com ela
+    obj.rotation.y += c.yaw - Math.PI;
     out.push(obj);
   }
   return out;

@@ -15,11 +15,12 @@
 import { HexBoard } from './hex-board';
 import { GameMap } from './maps';
 import { ModelDef } from './character-model';
-import { HexCoord, hexToWorld } from './hex';
+import { HexCoord, hexToWorld, worldToHex } from './hex';
 import { RenderProfile } from './render-settings';
 import { spawnDoors } from './door';
 import { RUNNER_RULES, RunnerEnd, RunnerEvent, RunnerPose, RunnerRace, tacticalIndex } from './runner';
-import { RunnerStart, TO, laneObstacles, laneX } from './runner-maps';
+import { RunnerStart, laneObstacles } from './runner-maps';
+import { pathLength, pathPose, pathTurns } from './runner-path';
 import { buildRunnerProps } from './runner-props';
 
 /** Tempos da virada (ms) e até onde a onda vai (mundo: passa do fim da névoa da câmera rasante). */
@@ -28,7 +29,6 @@ export const RUNNER_TRANSITION = { enterMs: 1000, leaveMs: 900, reach: 46, from:
 /** Altura do pulo (mundo) e quanto o corpo inclina no tropeço (rad). */
 const JUMP_HEIGHT = 1.3;
 const STUMBLE_LEAN = 0.35;
-const S3 = Math.sqrt(3);
 
 export interface RunnerSessionOptions {
   canvas: HTMLCanvasElement;
@@ -70,25 +70,30 @@ export class RunnerSession {
     const len = Math.hypot(e.x - a.x, e.z - a.z) || 1;
     this.dir = { x: (e.x - a.x) / len, z: (e.z - a.z) / len };
     this.origin = a;
+    const path = start.race.path;
     this.race = new RunnerRace({
       obstacles: laneObstacles(start.race),
-      startRow: start.zone.start.row,
+      turns: pathTurns(path),
+      startAt: start.zone.at,
+      length: pathLength(path),
       hexes: o.n,
       agilidade: o.enemy.agilidade,
       rollEnemy: o.rollEnemy,
     });
     this.gap0 = this.race.gap();
     const map: GameMap = start.race.map;
-    const col = TO + 2;
-    const enemyRow = Math.round(this.race.pose('garimpeiro').row);
+    const hexAt = (at: number) => {
+      const p = pathPose(path, at);
+      return worldToHex(p.x, p.z, 1);
+    };
     this.board = new HexBoard(
       o.canvas,
       map,
-      [{ id: o.agent.id, color: o.agent.color, model: o.agent.model, start: { col, row: start.zone.start.row } }],
+      [{ id: o.agent.id, color: o.agent.color, model: o.agent.model, start: hexAt(start.zone.at) }],
       { onHexTap: () => {}, onUnitTap: () => {} },
       {
         walls: map.walls,
-        enemies: [{ id: o.enemy.id, start: { col, row: enemyRow }, facing: Math.PI, model: o.enemy.model }],
+        enemies: [{ id: o.enemy.id, start: hexAt(this.race.pose('garimpeiro').at), facing: Math.PI, model: o.enemy.model }],
         profile: o.profile,
         transparent: true,
       },
@@ -98,21 +103,29 @@ export class RunnerSession {
     b.setDoors(spawnDoors(map.doors ?? [], map.doorStates), true);
     b.setBurnTargets([]);
     b.addProps(buildRunnerProps(start.race));
-    if (start.race.plane) b.posePlane(start.race.plane.x, start.race.plane.sink);
+    if (start.race.plane) b.posePlane(start.race.plane.x, start.race.plane.z, start.race.plane.sink);
     this.pose();
     b.setActive(null);
+    // a câmera olha para onde o agente corre: nas curvas o garimpeiro some atrás da esquina
+    b.setChaseFollow(true);
     b.setChaseCamera(o.agent.id, o.enemy.id);
     b.snapChaseCamera();
     b.setBackdrop(false);
     // nada aparece até a onda passar
-    b.setFlip({ origin: this.raceOrigin(), dir: { x: 0, z: -1 }, front: RUNNER_TRANSITION.from, mode: 'entra' });
+    b.setFlip({ origin: this.raceOrigin(), dir: this.raceDir(), front: RUNNER_TRANSITION.from, mode: 'entra' });
     this.bindTouch();
   }
 
   /** Onde o agente está no mapa de corrida (mundo). */
   private raceOrigin(): { x: number; z: number } {
     const p = this.race.pose('agente');
-    return { x: laneX(p.lane), z: S3 * p.row };
+    return pathPose(this.o.start.race.path, p.at, p.lane);
+  }
+
+  /** Para onde o agente corre no mapa de corrida (no chão). */
+  private raceDir(): { x: number; z: number } {
+    const { yaw } = pathPose(this.o.start.race.path, this.race.pose('agente').at);
+    return { x: Math.sin(yaw), z: Math.cos(yaw) };
   }
 
   // ---------- ida e volta ----------
@@ -126,7 +139,7 @@ export class RunnerSession {
       this.pose();
       const front = R.from + (R.reach - R.from) * t;
       tactical.setFlip({ origin: this.origin, dir: this.dir, front, mode: 'sai' });
-      this.board.setFlip({ origin: this.raceOrigin(), dir: { x: 0, z: -1 }, front, mode: 'entra' });
+      this.board.setFlip({ origin: this.raceOrigin(), dir: this.raceDir(), front, mode: 'entra' });
     });
     this.board.setFlip(null);
     this.board.setBackdrop(true);
@@ -147,7 +160,7 @@ export class RunnerSession {
     const dir = len > 0.01 ? { x: (e.x - a.x) / len, z: (e.z - a.z) / len } : this.dir;
     const flip = (front: number) => {
       tactical.setFlip({ origin: a, dir, front, mode: 'sai' });
-      this.board.setFlip({ origin: this.raceOrigin(), dir: { x: 0, z: -1 }, front, mode: 'entra' });
+      this.board.setFlip({ origin: this.raceOrigin(), dir: this.raceDir(), front, mode: 'entra' });
     };
     flip(R.reach);
     tactical.setRendering(true);
@@ -201,7 +214,7 @@ export class RunnerSession {
     this.o.onHud(
       this.race.distance(),
       Math.floor(this.race.progress('garimpeiro') / per),
-      Math.floor(this.race.length / per),
+      Math.floor(this.race.span / per),
     );
   }
 
@@ -211,7 +224,8 @@ export class RunnerSession {
       const hop = p.action === 'pula' ? Math.sin(Math.PI * p.t) * JUMP_HEIGHT : 0;
       const clip = p.action === 'desliza' ? 'crouch' : p.action === 'tropeca' ? 'idle' : 'run';
       const lean = p.action === 'tropeca' ? Math.sin(Math.PI * p.t) * STUMBLE_LEAN : 0;
-      this.board.runnerPose(who, id, { x: laneX(p.lane), z: S3 * p.row, hop, clip, lean });
+      const at = pathPose(this.o.start.race.path, p.at, p.lane);
+      this.board.runnerPose(who, id, { x: at.x, z: at.z, yaw: at.yaw, hop, clip, lean });
     };
     draw('unit', this.o.agent.id, this.race.pose('agente'));
     draw('enemy', this.o.enemy.id, this.race.pose('garimpeiro'));
@@ -264,7 +278,7 @@ export class RunnerSession {
   tacticalResult(): { agent: HexCoord; enemy: HexCoord } {
     const { track, n } = this.o;
     const total = track.length - 1;
-    const len = this.race.length;
+    const len = this.race.span;
     const ia = tacticalIndex(this.race.progress('agente'), this.gap0, len, n, total);
     let ie = tacticalIndex(this.race.progress('garimpeiro'), this.gap0, len, n, total);
     if (this.race.over === 'fugiu') ie = total;

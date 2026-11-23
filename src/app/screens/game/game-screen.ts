@@ -2080,7 +2080,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sound.play('ui.hex');
       await session.enter();
       if (!alive()) return;
-      this.say('← → troca de faixa · ↑ pula · ↓ desliza (ou arraste na tela)', 'info');
+      this.say('← → troca de faixa (e vira nas curvas) · ↑ pula · ↓ desliza (ou arraste na tela)', 'info');
       this.chaseSprint.set({ state: 'ready', roll: null, vigor: 0, percent: 0, ms: 0 });
       this.sprintStart = () => {
         const roll = rollDie(CHASE_RULES.sprintDie);
@@ -2140,6 +2140,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sound.play('teste.falhou');
       const what: Record<string, string> = { aviao: 'no avião', asa: 'na asa do avião', parede: 'na parede', porta: 'na porta' };
       this.say(`${who} bateu ${what[ev.obstacle.kind] ?? 'no obstáculo'} e perdeu terreno!`, 'alert');
+    } else if (ev.type === 'curva-perto') {
+      this.say(ev.side === 'esquerda' ? '← Curva à esquerda!' : 'Curva à direita! →', 'info');
+      this.sound.play('ui.relogio');
+    } else if (ev.type === 'virou') {
+      this.sound.play('ui.confirmar');
+    } else if (ev.type === 'bateu-curva') {
+      this.gamepad.rumble(0.9, 0.5, 300);
+      this.haptics.vibrate(90);
+      this.sound.play('teste.falhou');
+      this.say(ev.wrong ? `${who} virou para o lado errado e bateu!` : `${who} passou da curva e bateu!`, 'alert');
     } else if (ev.type === 'tropecou') {
       this.sound.play('teste.passou');
       this.say(`${enemy} tropeçou (d20 ${ev.roll}, precisava de ${ev.need})!`, 'info');
