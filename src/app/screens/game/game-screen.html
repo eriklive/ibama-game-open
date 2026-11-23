@@ -1,5 +1,7 @@
 <div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
+  <!-- Modo Corrida: o mapa de corrida, por cima do tabuleiro (ver game/runner-session.ts) -->
+  <canvas #runner class="board runner" [class.on]="runnerOn()" aria-label="Corrida: arraste para os lados para trocar de faixa, para cima para pular e para baixo para deslizar."></canvas>
 
   <!-- Abertura da missão (tutorial): objetivos circulados e "Iniciar missão" (ver game/mission-intro.ts) -->
   @if (intro(); as it) {

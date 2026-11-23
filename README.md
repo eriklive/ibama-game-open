@@ -554,6 +554,51 @@ aquele suspeito; o 2º no mesmo lado (ou ✕, Enter, o botão "vai atrás") conf
 aos agentes que ainda não correram. A pose animada de indecisão (cabeça varrendo, tronco para trás)
 ainda não existe: por enquanto o agente só vira o corpo.
 
+### Modo Corrida (Aeroporto)
+
+No Aeroporto, a perseguição sai do tabuleiro e vira uma **corrida em três faixas**. Os outros mapas
+continuam com a corrida no tabuleiro descrita acima.
+
+1. **A virada.** A câmera desce nas costas do agente, como sempre. Uma onda sai dos pés dele
+   para a frente: os hexágonos do tático ficam de pé e somem, e os do **mapa de corrida** chegam
+   virando, como cartas. A onda leva 1 s e a corrida não para. São dois tabuleiros, um por cima do
+   outro, com a mesma câmera (`HexBoard.setFlip`, `setBackdrop`, `setRendering`).
+2. **Qual mapa** (`runnerStart`, em `src/app/game/runner-maps.ts`). A rota travada da fuga decide:
+   - se passa por dentro do hangar, **mapa A**: pista de terra → pátio → hangar → porta dos fundos →
+     mata norte;
+   - se contorna o hangar, **mapa B**: pista → pátio → por fora, colado na parede leste do hangar →
+     mata leste.
+3. **Onde começa.** A zona tática em que o suspeito estava escolhe a zona de largada: pista (com 2
+   hexágonos de beira), pátio, hangar, fundos ou mata. **Fora da pista é sempre o trecho de mata.**
+   Da casa, por enquanto, também vai para a mata.
+4. **Os mapas de corrida** são o Aeroporto esticado: o hangar tem 39 fileiras (15 no tático) e 32
+   colunas (22 no tático). A pista tem 6 colunas, ou seja, **3 faixas de 2**. Dentro do hangar, a
+   pista é um corredor entre duas paredes de caixas. O avião está **pousado de barriga**, com o corpo
+   fechando a faixa esquerda e a asa (a 1,57 m) cobrindo o meio. Na porta dos fundos, só o meio
+   passa, por baixo da porta de enrolar.
+5. **A corrida** (`RunnerRace`, em `src/app/game/runner.ts`). Os dois correm a 4 fileiras/s e o
+   agente corre sozinho. O jogador só faz os gestos:
+
+   | Gesto | Teclado | Toque | Controle | Para quê |
+   |---|---|---|---|---|
+   | Trocar de faixa | ←/→ ou A/D | arrastar para o lado | direcional ou analógico | desviar de carga alta, avião, parede |
+   | Pular | ↑, W ou espaço | arrastar para cima | ✕ | tora, galões, sacos, gaiolas, caixote baixo |
+   | Deslizar | ↓ ou S | arrastar para baixo | ○ | lona, galho, porta de enrolar, asa do avião |
+
+   - **Bater** (passar sem o gesto certo): o agente tropeça e perde **1 hexágono**.
+   - **O garimpeiro** sai sozinho da faixa com carga alta. Nos obstáculos de pular ou deslizar ele
+     rola **d20 + agilidade ≥ 8**; se falhar, tropeça e o agente ganha 1 hexágono.
+   - **Correr!** (C, □) continua igual.
+   - **Distância 0: agarrou.** Ele se rende, abalado.
+   - **Ele chegou ao fim do mapa: fugiu.**
+6. **A volta** (`tacticalIndex`). Onde cada um parou na corrida vira um hexágono da pista tática (o
+   caminho até ele e a rota de fuga). A onda volta, de longe até os pés, e o tabuleiro reaparece com
+   os dois ali.
+
+Os números ficam em `RUNNER_RULES` (`runner.ts`) e `RUNNER_TRANSITION` (`runner-session.ts`). Os
+objetos próprios da corrida (tora, galho, lona, porta de enrolar) ficam em `runner-props.ts`.
+O laboratório `#/lab?m=A|B|tatico` monta os mapas sozinhos para renders (`src/app/lab/`).
+
 ## Auras
 
 As auras do tabuleiro são **luz por cima do chão**, não tinta: o hexágono mantém a cor do terreno

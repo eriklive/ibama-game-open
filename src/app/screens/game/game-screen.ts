@@ -27,6 +27,7 @@ import {
   initiativeChance,
   initiativeCheck,
   lockRoute,
+  ChaseRoute,
   resolveFleeDoor,
   resolveSprint,
   vaultPasses,
@@ -34,6 +35,9 @@ import {
   sprintTotalMs,
 } from '../../game/chase';
 import { ChaseRace, RaceEvent } from '../../game/chase-race';
+import { RunnerEvent } from '../../game/runner';
+import { hasRunner, runnerStart } from '../../game/runner-maps';
+import { RunnerSession } from '../../game/runner-session';
 import { SLOWMO_PULSE, pulseHoldEndMs, pulseRate, pulseRestart, pulseTotalMs } from '../../game/chase-slowmo';
 import { ChaseHud, ChaseOverlay, SPRINT_DIE_MS, SprintView, TargetPrompt, VaultPrompt } from '../../ui/chase/chase-overlay';
 import type { VaultPick } from '../../game/vault-scene';
@@ -252,6 +256,14 @@ const namesOf = (es: readonly EnemyState[]): string => {
 
 /** A equipe inteira, junta (como a partida começa). */
 const wholeTeam = (): ReadonlySet<string> => new Set(CHARACTERS.map((c) => c.id));
+
+/** Teclas do Modo Corrida. */
+const RUNNER_KEYS: Record<string, 'left' | 'right' | 'up' | 'down'> = {
+  ArrowLeft: 'left', a: 'left', A: 'left',
+  ArrowRight: 'right', d: 'right', D: 'right',
+  ArrowUp: 'up', w: 'up', W: 'up', ' ': 'up',
+  ArrowDown: 'down', s: 'down', S: 'down',
+};
 
 const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -555,6 +567,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly caughtThisRound = new Set<string>();
   /** Placar da perseguição em curso: distância e quanto da rota dele já foi. */
   protected readonly chaseHud = signal<ChaseHud | null>(null);
+  /** Modo Corrida: o mapa de corrida está na tela (por cima do tabuleiro). */
+  protected readonly runnerOn = signal(false);
+  private readonly runnerRef = viewChild.required<ElementRef<HTMLCanvasElement>>('runner');
+  /** A corrida em curso (ver `runnerSteps`). */
+  private runner?: RunnerSession;
   /** Corrida da perseguição em curso (ver `sprint`): `null` fora da perseguição. */
   protected readonly chaseSprint = signal<SprintView | null>(null);
   /** Dá o gás na perseguição em curso, sem parar a corrida (ver `chaseSteps`). */
@@ -1472,6 +1489,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Teclado na perseguição: ↑ pula o caixote, G grita; Esc deixa fugir. */
   protected onKey(ev: KeyboardEvent): void {
+    // Modo Corrida: setas (ou WASD) trocam de faixa, pulam e deslizam
+    if (this.runner && this.runnerOn()) {
+      const cmd = RUNNER_KEYS[ev.key];
+      if (cmd) {
+        ev.preventDefault();
+        this.runner.input(cmd);
+        return;
+      }
+    }
     if (this.intro()) {
       if (ev.key === 'Enter') this.beginMission();
       else if (ev.key === 'Escape') this.skipMissionIntro();
@@ -1826,6 +1852,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const track = [agentFrom, ...agentPath, ...route.flee];
     const n = agentPath.length;
     const who = this.nameOf(agentId);
+    // Modo Corrida: a perseguição troca o tabuleiro pelo mapa de corrida (ver game/runner-session.ts)
+    if (hasRunner(this.map?.id)) return this.runnerSteps(enemyId, agentId, route, track, n, alive, caught);
     // caixotes de meia altura que a pista contorna: ele dá a volta; o agente escolhe (pular ou não)
     const vaults = agentVaults(track, this.vaultable, this.area, blocked);
     const race = new ChaseRace({
@@ -1985,34 +2013,180 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeVaultPrompt();
     board.setSelected(null);
 
-    if (race.over === 'agarrou' || race.over === 'rendeu') {
+    await this.chaseOutcome(race.over, route.escapes, enemyId, agentId, caught, alive);
+  }
+
+  /**
+   * Modo Corrida: a câmera desce nas costas do agente, as peças viram e a perseguição corre no mapa
+   * de corrida (três faixas, obstáculos). No fim, a onda volta e os dois aparecem no tabuleiro
+   * onde a corrida os deixou (ver `RunnerSession`).
+   */
+  private async runnerSteps(
+    enemyId: string,
+    agentId: string,
+    route: ChaseRoute,
+    track: HexCoord[],
+    n: number,
+    alive: () => boolean,
+    caught: Set<string>,
+  ): Promise<void> {
+    const board = this.board!;
+    const enemy = this.enemy(enemyId)!;
+    const who = this.nameOf(agentId);
+    const character = CHARACTERS.find((c) => c.id === agentId)!;
+    const start = runnerStart(enemy.hex, route.flee, this.map!);
+    this.say(`${who} persegue ${enemy.name}!`, 'alert');
+    board.setChaseCamera(agentId, enemyId);
+
+    // corrida (gás): o mesmo botão de sempre, uma vez por perseguição
+    let sprintAt = 0;
+    let sprintPct = 0;
+    const boost = () => (sprintPct ? sprintRate(sprintPct, performance.now() - sprintAt) : 1);
+    let shown = -1;
+    const session = new RunnerSession({
+      canvas: this.runnerRef().nativeElement,
+      tactical: board,
+      start,
+      agent: { id: agentId, color: character.color, model: character.model, hex: track[0] },
+      enemy: {
+        id: enemyId,
+        model: this.map!.enemies.find((e) => e.id === enemyId)?.model,
+        hex: enemy.hex,
+        agilidade: enemy.agilidade,
+      },
+      track,
+      n,
+      profile: this.renderSettings.profile(),
+      boost,
+      alive,
+      instant: reducedMotion(),
+      rollEnemy: () => rollDie(CHASE_RULES.die),
+      onEvent: (ev) => this.runnerEvent(ev, who, enemy.name),
+      onHud: (distance, step, total) => {
+        const now = this.chaseHud();
+        if (!now || now.distance !== distance || now.step !== step) this.chaseHud.set({ agent: who, enemy: enemy.name, distance, step, total });
+        if (distance !== shown) this.sound.chaseDistance((shown = distance));
+      },
+    });
+    this.runner = session;
+    // o placar entra já (a papelada sai) e a câmera desce
+    session.hud();
+    try {
+      // a câmera desce e encosta (como sempre); aí as peças viram
+      await this.wait(900);
+      if (!alive()) return;
+      this.runnerOn.set(true);
+      void this.sound.chaseStart(Math.max(0, n - 1));
+      this.sound.play('ui.hex');
+      await session.enter();
+      if (!alive()) return;
+      this.say('← → troca de faixa · ↑ pula · ↓ desliza (ou arraste na tela)', 'info');
+      this.chaseSprint.set({ state: 'ready', roll: null, vigor: 0, percent: 0, ms: 0 });
+      this.sprintStart = () => {
+        const roll = rollDie(CHASE_RULES.sprintDie);
+        const vigor = this.chaseStats(agentId).vigor ?? 0;
+        const { percent } = resolveSprint(roll, { vigor });
+        const ms = sprintTotalMs();
+        const rolling: SprintView = { state: 'rolling', roll, vigor, percent, ms };
+        const active: SprintView = { ...rolling, state: 'active' };
+        this.chaseSprint.set(rolling);
+        this.sound.play('dado.d20');
+        const swap = (from: SprintView, to: SprintView) => {
+          if (!alive() || this.chaseSprint() !== from) return false;
+          this.chaseSprint.set(to);
+          return true;
+        };
+        this.timers.push(
+          setTimeout(() => {
+            if (!swap(rolling, active)) return;
+            sprintAt = performance.now();
+            sprintPct = percent;
+            this.gamepad.rumble(0.4, 0.3, 200);
+            this.say(`${who} deu o gás: +${percent}% de velocidade por ${CHASE_RULES.sprintSeconds} s!`, 'alert');
+          }, SPRINT_DIE_MS + 150),
+          setTimeout(() => swap(active, { ...active, state: 'used' }), SPRINT_DIE_MS + 150 + ms),
+        );
+      };
+      const over = await session.run();
+      this.chaseSprint.set(null);
+      this.sprintStart = undefined;
+      if (!alive() || !over) return;
+      await this.wait(500);
+      if (!alive()) return;
+      // onde a corrida os deixou, no tabuleiro
+      const at = session.tacticalResult();
+      this.positions.update((m) => new Map(m).set(agentId, at.agent));
+      this.updateEnemy(enemyId, { hex: at.enemy, facing: facingBetween(at.agent, at.enemy) });
+      board.endChaseRun(agentId, at.agent, enemyId, at.enemy);
+      board.setChaseCamera(agentId, enemyId);
+      this.sound.play('ui.hex');
+      await session.leave(at.agent, at.enemy);
+      this.runnerOn.set(false);
+      session.dispose();
+      if (!alive()) return;
+      await this.chaseOutcome(over, route.escapes, enemyId, agentId, caught, alive);
+    } finally {
+      this.runnerOn.set(false);
+      session.dispose();
+      if (this.runner === session) this.runner = undefined;
+    }
+  }
+
+  /** O que aconteceu na corrida: bater, ele tropeçar, pular, deslizar. */
+  private runnerEvent(ev: RunnerEvent, who: string, enemy: string): void {
+    if (ev.type === 'bateu') {
+      this.gamepad.rumble(0.7, 0.4, 220);
+      this.haptics.vibrate(60);
+      this.sound.play('teste.falhou');
+      const what: Record<string, string> = { aviao: 'no avião', asa: 'na asa do avião', parede: 'na parede', porta: 'na porta' };
+      this.say(`${who} bateu ${what[ev.obstacle.kind] ?? 'no obstáculo'} e perdeu terreno!`, 'alert');
+    } else if (ev.type === 'tropecou') {
+      this.sound.play('teste.passou');
+      this.say(`${enemy} tropeçou (d20 ${ev.roll}, precisava de ${ev.need})!`, 'info');
+    } else if ((ev.type === 'pulo' || ev.type === 'deslize') && ev.who === 'agente') {
+      this.sound.play('ui.caminho');
+    } else if (ev.type === 'faixa' && ev.who === 'agente') {
+      this.sound.play('ui.hex');
+    }
+  }
+
+  /** Fim da perseguição (no tabuleiro ou no Modo Corrida): rende, foge ou escapa. */
+  private async chaseOutcome(
+    over: 'agarrou' | 'rendeu' | 'fugiu' | null,
+    escapes: boolean,
+    enemyId: string,
+    agentId: string,
+    caught: Set<string>,
+    alive: () => boolean,
+  ): Promise<void> {
+    if (over === 'agarrou' || over === 'rendeu') {
       const e = this.enemy(enemyId)!;
       const facing = facingBetween(e.hex, this.positions().get(agentId)!);
       this.updateEnemy(enemyId, { status: 'surrendered', shaken: true, facing });
-      board.setEnemyFacing(enemyId, facing);
-      board.setEnemyAlert(enemyId, false);
-      board.setEnemySurrendered(enemyId, true);
+      this.board?.setEnemyFacing(enemyId, facing);
+      this.board?.setEnemyAlert(enemyId, false);
+      this.board?.setEnemySurrendered(enemyId, true);
       caught.add(enemyId);
       this.sound.play('ini.rende', { at: e.hex });
       this.gamepad.rumble(0.8, 0.5, 300);
       this.say(
-        race.over === 'rendeu'
+        over === 'rendeu'
           ? `${e.name} não arrombou a porta e se rendeu! Abalado: +${CHASE_RULES.shakenBonus} no interrogatório.`
-          : `${who} agarrou ${e.name}! Rendido e abalado: +${CHASE_RULES.shakenBonus} no interrogatório.`,
+          : `${this.nameOf(agentId)} agarrou ${e.name}! Rendido e abalado: +${CHASE_RULES.shakenBonus} no interrogatório.`,
         'alert',
       );
-    } else if (route.escapes) {
+    } else if (escapes) {
       const e = this.enemy(enemyId)!;
       this.updateEnemy(enemyId, { status: 'fled' });
-      this.say(`${e.name} escapou de ${who} e fugiu do mapa!`, 'alert');
+      this.say(`${e.name} escapou de ${this.nameOf(agentId)} e fugiu do mapa!`, 'alert');
       this.sound.play('ini.foge', { at: e.hex });
-      await board.removeEnemy(enemyId);
-    } else this.say(`${enemy.name} escapou de ${who}.`, 'alert');
+      await this.board?.removeEnemy(enemyId);
+    } else this.say(`${this.enemy(enemyId)!.name} escapou de ${this.nameOf(agentId)}.`, 'alert');
     this.refreshVision();
     this.sound.chaseEnd();
     await this.wait(1400);
     if (!alive()) return;
-    board.setChaseCamera(null);
+    this.board?.setChaseCamera(null);
     this.chaseHud.set(null);
     await this.wait(800);
   }
@@ -3879,6 +4053,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * touchpad/R3 voltam para quem está na vez · Options mostra os comandos.
    */
   private padButton(b: PadButton): void {
+    // Modo Corrida: ✕ pula, ○ desliza (□ continua sendo a corrida)
+    if (this.runner && this.runnerOn() && (b === 'cross' || b === 'circle')) {
+      this.runner.input(b === 'cross' ? 'up' : 'down');
+      return;
+    }
     // abertura da missão: ✕ inicia, ○ pula
     if (this.intro()) {
       if (b === 'cross') this.beginMission();
@@ -4018,6 +4197,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Anda o cursor um hexágono; sobre um destino alcançável, já mostra o caminho (como o 1º toque). */
   private moveCursor(dir: Stick): void {
+    // Modo Corrida: direcional e analógico trocam de faixa, pulam e deslizam
+    if (this.runner && this.runnerOn()) {
+      if (Math.abs(dir.x) > Math.abs(dir.y)) this.runner.input(dir.x < 0 ? 'left' : 'right');
+      else if (dir.y) this.runner.input(dir.y < 0 ? 'up' : 'down');
+      return;
+    }
     // escolha de alvo: esquerda/direita olham (e, de novo, confirmam)
     if (this.targetPrompt()) {
       if (Math.abs(dir.x) > Math.abs(dir.y)) this.targetSide(dir.x < 0 ? 'esquerda' : 'direita', false);

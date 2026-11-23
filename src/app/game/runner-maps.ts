@@ -1,25 +1,36 @@
 /**
- * Laboratório do Modo Corrida (protótipo, só para renders): dois mapas de corrida montados a
- * partir do Aeroporto, esticados ao longo da corrida, com a pista no meio (3 faixas de 2
- * colunas). O corredor vai para o norte (fileira diminuindo).
+ * Modo Corrida — os mapas de corrida (ver `runner.ts`). Cada um é o Aeroporto redesenhado para
+ * correr em linha reta: a mesma pista, o mesmo hangar, a mesma mata, esticados ao longo da corrida
+ * (o hangar tem 39 fileiras; no tático, 15) e mais largos (40 colunas; o hangar tem 32), com a
+ * pista no meio: **3 faixas de 2 colunas** (17–18, 19–20, 21–22). O corredor vai para o norte
+ * (fileira diminuindo).
  *
- * Iteração 2: mapa mais largo (40 colunas). O hangar tem 32 colunas, com a carga arrumada nas
- * laterais como no hangar do mapa tático (fileiras de caixotes com vãos a oeste, um "L" a leste,
- * gaiolas junto ao portão, a pilha de suprimentos no fundo). O avião fica colado na pista: o
- * corpo na beira da faixa esquerda, pousado de barriga (trem quebrado), com a asa baixa por cima
- * da faixa esquerda e da do meio. Desvia pela direita ou desliza por baixo da asa, no meio.
+ * - **Mapa A** (pelo hangar): pista de terra → pátio → portão → hangar (um corredor entre duas
+ *   paredes de caixas, com o avião pousado de barriga colado na faixa esquerda: o corpo fecha a
+ *   esquerda e a asa baixa, a 1,57 m, cobre o meio) → porta dos fundos (só o meio passa,
+ *   deslizando sob a porta de enrolar) → trilha na mata norte.
+ * - **Mapa B** (pela lateral): pista de terra → pátio → por fora, colado na parede leste do
+ *   hangar (porta lateral) → mata leste.
+ *
+ * Qual mapa e onde a corrida começa saem da perseguição no tático (`runnerStart`): a rota de fuga
+ * que passa pelo hangar vai para o A, a que contorna, para o B; a zona tática em que o suspeito
+ * estava (`aeroportoZone`) dá a zona de largada. Fora da pista é sempre o trecho de mata.
  */
-import { GameMap, parseLayout } from '../game/maps';
-import { CoverKind } from '../game/scenery';
-import { HexCoord } from '../game/hex';
-import { MODELS } from '../game/character-model';
+import { GameMap, parseLayout } from './maps';
+import { CoverKind } from './scenery';
+import { HexCoord, hexDistance, hexKey } from './hex';
+import { MODELS } from './character-model';
+import type { Lane, LaneObstacle, RunnerMove } from './runner';
 
 export const W = 40;
 /** Primeira coluna da pista: faixas esquerda (17–18), meio (19–20) e direita (21–22). */
 export const TO = 17;
 export const LANES = { L: [17, 18], C: [19, 20], R: [21, 22] } as const;
 /** x (mundo) do meio de cada faixa e das bordas. */
-export const laneX = (lane: 'L' | 'C' | 'R') => 1.5 * (LANES[lane][0] + 0.5);
+/** x (mundo) do meio de uma faixa (contínua: 0 esquerda, 1 meio, 2 direita). */
+export const laneX = (lane: number): number => 1.5 * (TO + 2 * lane + 0.5);
+/** Faixa de uma coluna do mapa de corrida (fora da pista: `null`). */
+export const laneOfCol = (col: number): Lane | null => (col < TO || col > TO + 5 ? null : (Math.floor((col - TO) / 2) as Lane));
 
 type Row = string[];
 const row = (fill: string): Row => Array.from({ length: W }, () => fill);
@@ -52,6 +63,7 @@ export interface RaceZone {
   start: HexCoord;
 }
 export interface RaceObstacle extends HexCoord {
+  /** Fileira e primeira coluna; `span` colunas para o leste. */
   kind: CoverKind | 'log' | 'branch' | 'shutter' | 'fuel' | 'tarp' | 'plane';
   /** O que o jogador faz: pular, deslizar ou trocar de faixa. */
   move: 'pular' | 'deslizar' | 'desviar' | 'deslizar|desviar';
@@ -273,4 +285,115 @@ export function raceB(): RaceMap {
     { id: 'mata', name: 'Mata leste (fora da pista)', rows: [0, 39], start: { col: L + 2, row: 38 } },
   ];
   return { map, zones, obstacles, decor };
+}
+
+// ---------------------------------------------------------------------------
+// Obstáculos por faixa (para as regras)
+// ---------------------------------------------------------------------------
+
+/**
+ * Os obstáculos do mapa, faixa por faixa. O avião vira dois: o corpo fecha a faixa esquerda
+ * (desviar) e a asa cobre o meio (deslizar). A porta dos fundos (porta de enrolar) pede deslize
+ * no meio, e a parede do fundo fecha as outras duas.
+ */
+export function laneObstacles(race: RaceMap): LaneObstacle[] {
+  const out: LaneObstacle[] = [];
+  for (const o of race.obstacles) {
+    if (o.kind === 'plane') {
+      out.push({ row: o.row, lane: 0, move: 'desviar', kind: 'aviao' }, { row: o.row, lane: 1, move: 'deslizar', kind: 'asa' });
+      continue;
+    }
+    if (o.kind === 'shutter') {
+      out.push(
+        { row: o.row, lane: 0, move: 'desviar', kind: 'parede' },
+        { row: o.row, lane: 1, move: 'deslizar', kind: 'porta' },
+        { row: o.row, lane: 2, move: 'desviar', kind: 'parede' },
+      );
+      continue;
+    }
+    const lanes = new Set<Lane>();
+    for (let c = o.col; c < o.col + (o.span ?? 1); c++) {
+      const l = laneOfCol(c);
+      if (l !== null) lanes.add(l);
+    }
+    for (const lane of lanes) out.push({ row: o.row, lane, move: o.move as RunnerMove, kind: o.kind });
+  }
+  return out;
+}
+
+// ---------------------------------------------------------------------------
+// Do tático para a corrida
+// ---------------------------------------------------------------------------
+
+/** Zonas do Aeroporto tático (de onde a corrida começa). */
+export type TacticalZone = 'pista' | 'patio' | 'hangar' | 'fundos' | 'mata' | 'casa';
+
+/** Hangar e casa do Aeroporto tático (colunas e fileiras, inclusive). */
+const TACTICAL = {
+  hangar: { cols: [11, 32], rows: [4, 18] },
+  casa: { cols: [29, 41], rows: [26, 32] },
+  /** Faixa ao norte do hangar (atrás das portas dos fundos). */
+  fundos: { cols: [9, 34], rows: [-99, 3] },
+  /** Na frente do portão. */
+  patio: { cols: [9, 34], rows: [19, 21] },
+} as const;
+
+const inside = (h: HexCoord, r: { cols: readonly number[]; rows: readonly number[] }) =>
+  h.col >= r.cols[0] && h.col <= r.cols[1] && h.row >= r.rows[0] && h.row <= r.rows[1];
+
+/** Até quantos hexágonos da terra ainda é a pista. */
+const PISTA_MARGIN = 2;
+
+/** Zona tática de um hexágono do Aeroporto. Fora da pista (e de tudo o mais) é mata. */
+export function aeroportoZone(h: HexCoord, map: Pick<GameMap, 'ground'>): TacticalZone {
+  if (inside(h, TACTICAL.hangar)) return 'hangar';
+  if (inside(h, TACTICAL.casa)) return 'casa';
+  if (inside(h, TACTICAL.fundos)) return 'fundos';
+  if (inside(h, TACTICAL.patio)) return 'patio';
+  // a pista e a beira dela (até 2 hexágonos da terra: a pista de corrida também tem margem de grama)
+  for (let col = h.col - PISTA_MARGIN; col <= h.col + PISTA_MARGIN; col++) {
+    for (let row = h.row - PISTA_MARGIN; row <= h.row + PISTA_MARGIN; row++) {
+      const n = { col, row };
+      if (hexDistance(h, n) <= PISTA_MARGIN && map.ground?.get(hexKey(n)) === 'dirt') return 'pista';
+    }
+  }
+  return 'mata';
+}
+
+/** Zona de largada em cada mapa de corrida, para cada zona tática. */
+const START_ZONE: Record<'A' | 'B', Record<TacticalZone, string>> = {
+  A: { pista: 'pista', patio: 'patio', hangar: 'hangar', fundos: 'fundos', mata: 'mata', casa: 'mata' },
+  B: { pista: 'pista', patio: 'patio', hangar: 'lateral', fundos: 'lateral', mata: 'mata', casa: 'mata' },
+};
+
+export interface RunnerStart {
+  id: 'A' | 'B';
+  race: RaceMap;
+  zone: RaceZone;
+  /** Zona tática de onde ele fugiu. */
+  from: TacticalZone;
+}
+
+const built = new Map<'A' | 'B', RaceMap>();
+const raceMap = (id: 'A' | 'B'): RaceMap => {
+  let m = built.get(id);
+  if (!m) built.set(id, (m = id === 'A' ? raceA() : raceB()));
+  return m;
+};
+
+/** O mapa tático tem Modo Corrida? (por enquanto só o Aeroporto) */
+export const hasRunner = (mapId: string | undefined): boolean => mapId === 'aeroporto';
+
+/**
+ * Qual mapa de corrida e onde começa: a fuga (`route`, do suspeito até a saída) que passa por
+ * dentro do hangar vai para o mapa A; a que contorna, para o B. A zona tática em que ele estava
+ * dá a zona de largada (fora da pista é sempre a mata).
+ */
+export function runnerStart(enemyHex: HexCoord, route: readonly HexCoord[], map: Pick<GameMap, 'ground'>): RunnerStart {
+  const through = [enemyHex, ...route].some((h) => inside(h, TACTICAL.hangar));
+  const id = through ? 'A' : 'B';
+  const race = raceMap(id);
+  const from = aeroportoZone(enemyHex, map);
+  const zone = race.zones.find((z) => z.id === START_ZONE[id][from]) ?? race.zones.find((z) => z.id === 'mata')!;
+  return { id, race, zone, from };
 }

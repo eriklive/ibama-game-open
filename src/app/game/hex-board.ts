@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COVER_HEIGHT, GameMap, Ground, HexRect, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
-import { CharacterRig, METER, ModelDef } from './character-model';
+import { CharacterRig, ClipName, METER, ModelDef } from './character-model';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import type { Leg, RacePose } from './chase-race';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
@@ -10,7 +10,7 @@ import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
 import { StaticShadow, castsMovingShadow } from './static-shadow';
-import { HexTile, TileField } from './tile-field';
+import { HexTile, TILT_HIDDEN, TileField } from './tile-field';
 import { Door, commonDoors, isOpen, seeThroughDoors } from './door';
 import { lineOfSight } from './enemies';
 import { DoorPush, DoorViews } from './door-view';
@@ -48,6 +48,9 @@ const CHASE_CAMERA = {
 } as const;
 /** Tempo (s) que um personagem leva para correr de um hexágono ao vizinho (marca os passos). */
 /** Vista do tablet de abordagem (ver `frameRing`). */
+/** Virada do Modo Corrida (ver `setFlip`): largura da faixa de hexágonos de pé (mundo). */
+export const RUNNER_FLIP = { width: 2.6 } as const;
+
 const RING_VIEW = {
   /** Quanto a câmera sobe em relação à de jogo (graus)... */
   extraPitch: 40,
@@ -477,6 +480,8 @@ export class HexBoard {
   private moving = false;
   private inputEnabled = true;
   private disposed = false;
+  /** Desenha a cada quadro (ver `setRendering`). */
+  private rendering = true;
 
   // câmera
   private readonly camTarget = new THREE.Vector3();
@@ -529,9 +534,11 @@ export class HexBoard {
     private readonly map: GameMap,
     units: BoardUnit[],
     private readonly callbacks: HexBoardCallbacks,
-    extras: { walls?: HexCoord[]; enemies?: BoardEnemy[]; profile?: RenderProfile } = {},
+    extras: { walls?: HexCoord[]; enemies?: BoardEnemy[]; profile?: RenderProfile; transparent?: boolean } = {},
   ) {
-    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+    // transparente: o mapa de corrida, desenhado por cima do tabuleiro na virada (ver `setFlip`)
+    this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: !!extras.transparent });
+    if (extras.transparent) this.renderer.setClearColor(0x000000, 0);
     this.renderer.shadowMap.enabled = true;
     // PCFSoftShadowMap saiu do three.js: ele troca sozinho para PCF na primeira sombra, o que
     // recompila os shaders já prontos (inclusive os aquecidos para a abordagem)
@@ -1797,6 +1804,104 @@ export class HexBoard {
     if (!c || (c.unitId !== id && c.enemyId !== id)) return boost;
     // o slow-mo pega os dois juntos (e o pulso da corrida chega a parar o tempo)
     return slowmoRate(this.slowmo) * this.chaseTime * boost;
+  }
+
+  // ---------- Modo Corrida ----------
+
+  /**
+   * Céu de fundo. Sem ele, num tabuleiro transparente, o que não foi desenhado deixa ver o
+   * tabuleiro de baixo (a virada do Modo Corrida).
+   */
+  setBackdrop(on: boolean): void {
+    this.scene.background = on ? new THREE.Color(COLORS.background) : null;
+  }
+
+  /** Liga e desliga o desenho (o tabuleiro tático dorme enquanto a corrida cobre a tela). */
+  setRendering(on: boolean): void {
+    this.rendering = on;
+  }
+
+  /**
+   * A virada do Modo Corrida: uma onda reta que sai de `origin` na direção `dir` e está a `front`
+   * (mundo) dele. `sai`: o tabuleiro que vai embora — até a onda, nada (recortado); logo depois
+   * dela, os hexágonos ficam de pé, virando; longe, no lugar. `entra`: o que chega — até a onda,
+   * no lugar; logo antes dela, virando; depois, nada. Os dois, um por cima do outro com a mesma
+   * câmera, trocam o mapa na frente do agente. `null` desfaz.
+   */
+  setFlip(f: { origin: { x: number; z: number }; dir: { x: number; z: number }; front: number; mode: 'sai' | 'entra' } | null): void {
+    const field = this.field;
+    if (!f) {
+      this.renderer.clippingPlanes = [];
+      for (const t of field.list) field.setTilt(t, 0);
+      return;
+    }
+    const n = new THREE.Vector3(f.dir.x, 0, f.dir.z).normalize();
+    field.tiltAxis.set(n.z, 0, -n.x);
+    const o = n.x * f.origin.x + n.z * f.origin.z;
+    const w = RUNNER_FLIP.width;
+    this.renderer.clippingPlanes = [
+      f.mode === 'sai' ? new THREE.Plane(n.clone(), -o - f.front) : new THREE.Plane(n.clone().negate(), o + f.front),
+    ];
+    for (const t of field.list) {
+      const s = n.x * t.x + n.z * t.z - o;
+      const a =
+        f.mode === 'sai'
+          ? s < f.front ? TILT_HIDDEN : s > f.front + w ? 0 : (1 - (s - f.front) / w) * (Math.PI / 2)
+          : s > f.front ? TILT_HIDDEN : s < f.front - w ? 0 : ((s - (f.front - w)) / w) * (Math.PI / 2);
+      field.setTilt(t, a);
+    }
+  }
+
+  /** A câmera de perseguição já encostada (sem a descida): o mapa de corrida nasce assim. */
+  snapChaseCamera(): void {
+    if (this.chase) this.chaseBlend = 1;
+  }
+
+  /**
+   * Põe um corredor do Modo Corrida (ver `runner.ts`): no ponto do mundo, virado para o norte,
+   * com a altura do pulo (`hop`) e o clipe. `lean` inclina o corpo (tropeço). O agente leva a
+   * câmera e o raio carregado junto.
+   */
+  runnerPose(who: 'unit' | 'enemy', id: string, pose: { x: number; z: number; hop: number; clip: ClipName; lean?: number }): void {
+    const m = who === 'unit' ? this.units.get(id) : this.enemies.get(id);
+    if (!m) return;
+    m.group.position.x = pose.x;
+    m.group.position.z = pose.z;
+    m.hop = pose.hop;
+    m.group.rotation.z = pose.lean ?? 0;
+    m.rig?.play(pose.clip, 0.12);
+    const hex = worldToHex(pose.x, pose.z, HEX_SIZE);
+    m.hex = hex;
+    // na corrida, sempre de frente para o norte (sem girar até lá)
+    m.group.rotation.y = Math.PI;
+    if (who === 'unit') {
+      (m as UnitView).yaw = Math.PI;
+      this.camGoal.set(pose.x, 0, pose.z);
+      this.camTarget.copy(this.camGoal);
+    } else {
+      const e = m as EnemyView;
+      e.facing = e.facingGoal = Math.PI;
+      e.running = pose.clip === 'run';
+    }
+  }
+
+  /** Objetos soltos na cena (os do mapa de corrida, ver `runner-props.ts`). */
+  addProps(objects: readonly THREE.Object3D[]): void {
+    for (const o of objects) this.scene.add(o);
+  }
+
+  /**
+   * O avião do mapa: centro em `x` (mundo) e afundado `sink` (pousado de barriga, nivelado: o
+   * trem de pouso some sob o piso).
+   */
+  posePlane(x: number, sink: number): void {
+    const pl = this.planeModel;
+    if (!pl) return;
+    pl.updateWorldMatrix(true, false);
+    const wp = new THREE.Vector3().setFromMatrixPosition(pl.matrixWorld);
+    pl.position.x += x - wp.x;
+    pl.rotation.z = 0;
+    pl.position.y = -sink;
   }
 
   /** Vira o agente para o inimigo (a "cabeça" da escolha de alvo). */
@@ -3370,6 +3475,8 @@ export class HexBoard {
   private loop = (): void => {
     this.frameId = requestAnimationFrame(this.loop);
     const dt = Math.min(this.clock.getDelta(), 0.1);
+    // o tabuleiro tático dorme enquanto o mapa de corrida cobre a tela (ver `setRendering`)
+    if (!this.rendering) return;
     const t = this.clock.elapsedTime;
     // slow da curva: rampa linear, com os tempos da fita
     if (this.slowmo !== this.slowmoGoal) {
