@@ -6,8 +6,8 @@
  * Iteração 2: mapa mais largo (40 colunas). O hangar tem 32 colunas, com a carga arrumada nas
  * laterais como no hangar do mapa tático (fileiras de caixotes com vãos a oeste, um "L" a leste,
  * gaiolas junto ao portão, a pilha de suprimentos no fundo). O avião fica colado na pista: o
- * corpo na beira da faixa esquerda e a asa direita, baixa (trem direito quebrado), por cima da
- * faixa esquerda e da do meio. Desvia pela direita ou desliza por baixo da asa, no meio.
+ * corpo na beira da faixa esquerda, pousado de barriga (trem quebrado), com a asa baixa por cima
+ * da faixa esquerda e da do meio. Desvia pela direita ou desliza por baixo da asa, no meio.
  */
 import { GameMap, parseLayout } from '../game/maps';
 import { CoverKind } from '../game/scenery';
@@ -63,8 +63,8 @@ export interface RaceMap {
   obstacles: RaceObstacle[];
   /** Carga de cenário (fora da pista): só enfeita e dá a escala do lugar. */
   decor: (HexCoord & { kind: CoverKind })[];
-  /** Avião: hexágonos que ele ocupa e a pose (deslocamento em x e o quanto adernou). */
-  plane?: { hexes: HexCoord[]; x: number; roll: number };
+  /** Avião: hexágonos que ele ocupa e a pose (centro em x e o quanto afundou, de barriga no chão). */
+  plane?: { hexes: HexCoord[]; x: number; sink: number };
 }
 
 const T: [number, number] = [TO, TO + 5];
@@ -178,9 +178,10 @@ export function raceA(): RaceMap {
     { id: 'fundos', name: 'Porta dos fundos', rows: [44, 46], start: { col: L + 2, row: 50 } },
     { id: 'mata', name: 'Mata norte (fora da pista)', rows: [0, 43], start: { col: L + 2, row: 42 } },
   ];
-  // corpo com o centro em x = 24,4 (a fuselagem, de 2 de largura, morde a beira da faixa esquerda);
-  // adernado 12,6° para a pista: sobre a faixa do meio a asa fica entre 1,15 m e 1,45 m (a Ana tem 1,70)
-  return { map, zones, obstacles, decor, plane: { hexes: planeHexes, x: 24.4, roll: 0.22 } };
+  // corpo com o centro em x = 24,4 (a fuselagem, de 2 de largura, morde a beira da faixa esquerda).
+  // Pousou de barriga (o trem quebrou): afunda 1,1 até a fuselagem tocar o piso, nivelado. A asa
+  // fica a 2,09 (1,57 m) do chão, abaixo da cabeça da Ana (1,70 m), da faixa esquerda até a do meio.
+  return { map, zones, obstacles, decor, plane: { hexes: planeHexes, x: 24.4, sink: 1.1 } };
 }
 
 /** Mapa B: pista de terra → pátio → pela lateral leste do hangar (por fora) → mata leste. */

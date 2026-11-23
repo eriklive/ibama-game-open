@@ -185,15 +185,15 @@ export class RaceLab implements AfterViewInit, OnDestroy {
       extras.push(obj);
     }
 
-    // avião adernado: corpo colado na pista, asa direita baixa por cima da faixa esquerda e do meio
+    // avião de barriga no chão: corpo colado na pista, asa baixa por cima da faixa esquerda e do meio
     const pl: THREE.Object3D | undefined = b['planeModel'];
     if (pl && race?.plane) {
       pl.updateWorldMatrix(true, false);
       const wp = new THREE.Vector3().setFromMatrixPosition(pl.matrixWorld);
       pl.position.x += race.plane.x - wp.x;
-      pl.rotation.z = -race.plane.roll;
-      // a roda esquerda fica no chão (x local −0,8 × 2); a direita afunda (trem quebrado)
-      pl.position.y = -1.6 * Math.sin(race.plane.roll);
+      // nivelado, de barriga no chão: o trem de pouso quebrou e afunda sob o piso
+      pl.rotation.z = 0;
+      pl.position.y = -race.plane.sink;
     }
     const renderer: THREE.WebGLRenderer = b['renderer'];
     const camera: THREE.PerspectiveCamera = b['camera'];
