@@ -61,8 +61,7 @@ describe('hexágono menor por cima (alcance dentro de uma aura de ação)', () =
     const pos = meshes(layer)[0].geometry.getAttribute('position');
     const c = new THREE.Vector3();
     let max = 0;
-    for (let i = 0; i < pos.count; i++)
-      max = Math.max(max, c.fromBufferAttribute(pos, i).setY(0).length());
+    for (let i = 0; i < pos.count; i++) max = Math.max(max, c.fromBufferAttribute(pos, i).setY(0).length());
     return max;
   };
   const [n] = hexNeighbors({ col: 0, row: 0 });
