@@ -982,8 +982,9 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 }
 
 /* ---------- avião trancado, quadro de chaves e fala embaixo da tela ---------- */
+/* "Inspecionar" do avião: o mesmo post-it da porta (no mesmo canto; avião e porta nunca ficam colados
+   ao mesmo agente), só mais largo para caber a palavra. Não divide o lugar com o "Queimar". */
 .plane-btn { width: 94px; }
-.plane-btn .stencil { font-size: 13px; }
 .key-btn { width: 84px; }
 .key-slip { background: var(--postit); right: 108px; width: 150px; }
 .plane-note {

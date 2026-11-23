@@ -364,8 +364,9 @@
 
   <!-- Menu do avião (inspecionar): a câmera aproxima; olhar dentro e queimar ficam em fichas na direita -->
   @if (phase() === 'plane') {
-    <button type="button" class="paper-btn door-back" (click)="closePlaneMenu()" aria-label="Voltar ao tabuleiro" data-testid="plane-back">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+    <button type="button" class="door-back" (click)="closePlaneMenu()" aria-label="Voltar ao tabuleiro" data-testid="plane-back">
+      <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+      <span class="door-back-text">Voltar</span>
       @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
     </button>
     <aside class="door-sheet" aria-label="Ações do avião" data-testid="plane-sheet">
@@ -701,17 +702,18 @@
           @if (pad() && !canApproach()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
-      <!-- Avião: colado nele, abre o menu de inspecionar (olhar dentro ou queimar) -->
+      <!-- Avião: colado nele, abre o menu de inspecionar (olhar dentro ou queimar); post-it como o da porta -->
       @if (nearPlane(); as plane) {
         <button
           type="button"
-          class="paper burn plane-btn"
+          class="paper door-btn plane-btn"
           aria-label="Inspecionar o avião: olhar dentro ou queimar"
           data-testid="plane"
           (click)="openPlaneMenu()">
           <span class="stencil">Inspecionar</span>
           <span class="typed">{{ plane.short }}</span>
-          @if (pad() && !canApproach()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
+          <!-- o □ vai para o primeiro da fila: abordar, depois queimar (ver `padButton`) -->
+          @if (pad() && !canApproach() && !burnable()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
       <!-- Quadro de chaves: colado nele, procura a chave (percepção, se ninguém sabe qual é) -->
