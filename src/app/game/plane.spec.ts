@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { INITIAL_PLANE, PlaneState, leftKey, lookInside, needsKeyRoll, nextToPanel, seesKey, witness } from './plane';
+import {
+  INITIAL_PLANE,
+  PLANE_LOCKED,
+  PlaneState,
+  leftKey,
+  lockedClue,
+  lookInside,
+  needsKeyRoll,
+  nextToPanel,
+  seesKey,
+  witness,
+} from './plane';
 
 const s = (p: Partial<PlaneState> = {}): PlaneState => ({ ...INITIAL_PLANE, ...p });
 
@@ -57,5 +68,17 @@ describe('avião trancado', () => {
 
   it('depois de pegar a chave, ninguém mais comenta', () => {
     expect(witness(s({ seenBy: ['clara'], hasKey: true }))).toBeNull();
+  });
+});
+
+describe('inspecionar o avião', () => {
+  it('sem a chave, só abrir o menu já registra que está trancado (libera as perguntas da chave)', () => {
+    // vale antes de alguém tocar em "olhar dentro"
+    expect(lockedClue(s())).toBe(PLANE_LOCKED);
+    expect(lockedClue(s({ tried: true }))).toBe(PLANE_LOCKED);
+  });
+
+  it('com a chave na mão, não há pista de trancado', () => {
+    expect(lockedClue(s({ hasKey: true }))).toBeNull();
   });
 });

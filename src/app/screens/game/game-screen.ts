@@ -93,11 +93,11 @@ import { BURN_RULES, Burnable, burnTarget, canBurn, seeFire } from '../../game/b
 import {
   KEY_PANEL_ID,
   KEY_TAKEN,
-  PLANE_LOCKED,
   PlaneState,
   WITNESS_LINE,
   keyKnown,
   leftKey,
+  lockedClue,
   lookInside,
   needsKeyRoll,
   nextToPanel,
@@ -3377,7 +3377,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.speech.set(null);
   }
 
-  /** Abre o menu de inspecionar do avião (olhar dentro / queimar), como o da porta. */
+  /** Registra uma pista da missão (uma vez só); pode liberar perguntas nos interrogatórios. */
+  private noteClue(clue: string | null): void {
+    if (clue && !this.clueLog().has(clue)) this.clueLog.update((c) => new Set([...c, clue]));
+  }
+
+  /**
+   * Abre o menu de inspecionar do avião (olhar dentro / queimar), como o da porta. Sem a chave,
+   * o carimbo "Trancado" já conta como saber que está trancado (`lockedClue`).
+   */
   protected openPlaneMenu(): void {
     const plane = this.nearPlane();
     if (!plane || this.phase() !== 'moving-choice' || !this.board) return;
@@ -3391,6 +3399,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board.setReachable([]);
     this.planeNote.set(null);
     this.phase.set('plane');
+    // o carimbo "Trancado" já está à vista: as perguntas sobre a chave passam a existir
+    this.noteClue(lockedClue(this.planeState()));
     this.board.focusSpot(plane.hexes, this.active().id, this.doorPanelWidth() / 2, 1.2);
     addEventListener('resize', this.onDoorResize);
   }
@@ -3417,7 +3427,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     this.planeTried.set(true);
     this.sound.play('eq.aviao-trancado');
-    this.clueLog.update((c) => new Set([...c, PLANE_LOCKED]));
+    this.noteClue(lockedClue(this.planeState()));
     this.planeNote.set('O avião está trancado. Pergunte ao piloto e aos ajudantes onde está a chave.');
     this.board?.setCineZoom(1.45);
     const who = witness(this.planeState());
