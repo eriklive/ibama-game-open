@@ -152,8 +152,8 @@ Os bônus ficam em `GROUP_RULES` (`moveBonus` e `approachBonus`, em `src/app/gam
 
 ### Abertura da missão (tutorial, passo 1)
 
-Na **primeira vez** que o jogador abre um mapa com objetivos dentro de estruturas (no Aeroporto: o
-hangar e a casa), a partida começa com uma abertura antes do primeiro turno:
+Em **todo início de partida** num mapa com objetivos dentro de estruturas (no Aeroporto: o hangar e a
+casa), inclusive ao **Recomeçar**, a abertura vem antes da primeira rolagem de dados:
 
 1. A câmera começa **alta e afastada**: inclinação de **85°** (a de jogo é 55°) e zoom que cabe todas
    as estruturas com objetivo, acima do limite que o jogador alcança. Chega devagar, com faixas de
@@ -166,9 +166,8 @@ hangar e a casa), a partida começa com uma abertura antes do primeiro turno:
    zoom e à inclinação de jogo no caminho (2,6 s), e a vez começa com a rolagem de sempre.
 
 **Pular** (canto de cima) corta direto para o passo 4 já concluído. Teclado: Enter inicia, Esc pula;
-controle: ✕ inicia, ○ pula. Com "menos movimento" no sistema, sem animação nem pan. O jogo lembra no
-navegador (`ibama.intro.<mapa>`) que a abertura já foi vista; o menu tem **Rever objetivos da
-missão**, que circula só os objetivos ainda em aberto. Os objetivos que dependem de outro (`after`,
+controle: ✕ inicia, ○ pula. Com "menos movimento" no sistema, sem animação nem pan. No meio da
+partida, o menu tem **Rever objetivos da missão**, que circula só os objetivos ainda em aberto. Os objetivos que dependem de outro (`after`,
 como "Apreender a arma") só entram depois de liberados.
 
 As regras ficam em `src/app/game/mission-intro.ts` (o que circular, `INTRO`, traço de caneta e lugar da

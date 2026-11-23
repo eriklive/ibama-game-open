@@ -105,7 +105,7 @@ import {
   witness,
 } from '../../game/plane';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
-import { IntroTarget, STRUCTURE_TOP, introSeen, introTargets, markIntroSeen } from '../../game/mission-intro';
+import { IntroTarget, STRUCTURE_TOP, introTargets } from '../../game/mission-intro';
 import { IntroMark, MissionIntro } from '../../ui/mission-intro/mission-intro';
 import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
 import {
@@ -848,7 +848,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private finishIntro(): void {
     this.intro.set(null);
     removeEventListener('resize', this.onIntroResize);
-    if (this.map) markIntroSeen(this.map.id);
     const then = this.introThen;
     this.introThen = undefined;
     then?.();
@@ -1215,8 +1214,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // `?caso=` abre direto num caso de teste (o menu usa isso para trocar de mapa)
     const testCase = findTestCase(this.route.snapshot.queryParamMap.get('caso'));
     if (testCase?.mapId === this.map.id) void this.runTestCase(testCase);
-    // na primeira vez neste mapa, a abertura mostra os objetivos antes do primeiro turno
-    else if (introSeen(this.map.id) || !this.playIntro(() => this.startTurn())) this.startTurn();
+    else this.beginMatch();
     this.stopPad = this.gamepad.listen({
       button: (b) => this.padButton(b),
       move: (dir) => this.moveCursor(dir),
@@ -3739,7 +3737,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   protected restart(): void {
     this.resetMatch();
-    this.startTurn();
+    this.beginMatch();
+  }
+
+  /** Início de partida: a abertura da missão (se o mapa tem o que circular) e então a primeira rolagem. */
+  private beginMatch(): void {
+    // nada da partida anterior fica por baixo da abertura: sem dados na mesa nem destino marcado
+    this.rollSeq++;
+    this.rollKeys.set([]);
+    this.phase.set('rolling');
+    this.board?.setReachable([]);
+    this.board?.setSelected(null);
+    if (!this.playIntro(() => this.startTurn())) this.startTurn();
   }
 
   /** Volta tudo ao começo da partida (posições, inimigos, portas, fogo…) sem começar a vez. */
