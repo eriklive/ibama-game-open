@@ -178,10 +178,19 @@
     </button>
   }
 
-  <!-- Auto de abordagem: o tablet de campo sobe, a tela é uma lente verde sobre o tabuleiro com os
-       rabiscos de quem se rendeu e de quem vai correr; a tecla Confirmar guarda o tablet e passa a vez -->
+  <!-- Abordagem: ao tocar em Abordar, o tablet de campo sobe; a tela é uma lente verde sobre o
+       tabuleiro (a câmera sobe e enquadra o raio inteiro) com os rabiscos de quem se renderia, rolaria
+       ou correria. Abordar! guarda o tablet e só então rola os dados; Cancelar guarda e volta -->
   @if (tabletReport(); as t) {
-    <app-approach-tablet [report]="t" [pad]="!!pad()" [padGlyph]="glyph('confirm')" (confirmed)="closeReport()" />
+    <app-approach-tablet
+      [report]="t"
+      [pad]="!!pad()"
+      [padGlyph]="glyph('confirm')"
+      [cancelGlyph]="glyph('cancel')"
+      (screenArea)="frameTablet($event)"
+      (confirmed)="confirmApproach()"
+      (cancelled)="cancelApproach()"
+    />
   }
 
   <!-- Coluna da esquerda: quem está selecionado no topo (grande e animado), os outros em faixas, e as ferramentas -->
@@ -514,13 +523,6 @@
           }
         </ul>
       </div>
-      <button type="button" class="stamp confirm approach-confirm" data-testid="approach-confirm" (click)="confirmApproach()">
-        <span class="stamp-ring">
-          <span class="stamp-small">confirmar</span>
-          <span class="stamp-text">Abordar!</span>
-        </span>
-        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-      </button>
     } @else if (burning() && burnable(); as target) {
       <div class="slip burn-slip" role="status" aria-live="polite" data-testid="burn-hint">
         <strong>Queimar {{ target.name }}?</strong>
@@ -811,14 +813,6 @@
       (end)="endInterrogation()" />
   }
 
-  <!-- Modo de abordagem: cancelar fica sozinho na esquerda, longe do confirmar -->
-  @if (approaching()) {
-    <button type="button" class="approach-cancel" data-testid="approach-cancel" (click)="cancelApproach()" aria-label="Cancelar a abordagem">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
-      <span>Cancelar</span>
-      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
-    </button>
-  }
 
   @if (pad(); as p) {
     @if (padHelp()) {

@@ -47,6 +47,18 @@ const CHASE_CAMERA = {
   viewCut: 0.5,
 } as const;
 /** Tempo (s) que um personagem leva para correr de um hexágono ao vizinho (marca os passos). */
+/** Vista do tablet de abordagem (ver `frameRing`). */
+const RING_VIEW = {
+  /** Quanto a câmera sobe em relação à de jogo (graus)... */
+  extraPitch: 40,
+  /** ...sem passar de quase de cima (90 deixa a câmera sem "para cima"). */
+  maxPitch: 88,
+  /** Folga entre o raio e a borda da tela do tablet (px). */
+  margin: 22,
+  /** Velocidade da transição (maior, mais rápida). */
+  rate: 4.5,
+};
+
 export const SECONDS_PER_HEX = (HEX_STEP * HEX_SIZE) / RUN_SPEED;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
 const BASE_TOP = 0.07;
@@ -494,6 +506,10 @@ export class HexBoard {
    * `inspectBlend` vai de 0 (câmera de sempre) a 1 (close-up) e volta.
    */
   private inspect: CloseUpView | null = null;
+  /** Vista do tablet de abordagem (ver `frameRing`); `ringLast` segura a saída da transição. */
+  private ring: { target: THREE.Vector3; zoom: number; pitch: number } | null = null;
+  private ringLast: { target: THREE.Vector3; zoom: number; pitch: number } | null = null;
+  private ringBlend = 0;
   private inspectLast: CloseUpView | null = null;
   private inspectBlend = 0;
   /** Deslocamento da vista neste quadro (px): a cena da porta empurra para o lado, o close-up para cima. */
@@ -878,6 +894,57 @@ export class HexBoard {
     this.clampGoal();
   }
 
+  /**
+   * Vista do tablet de abordagem: a câmera sobe `RING_VIEW.extraPitch` graus (até quase de cima)
+   * e enquadra o raio inteiro (`radius` hexágonos em volta de `center`) dentro de `rect` (px do
+   * canvas, a tela do tablet). Chega e sai em transição; `null` volta à câmera de jogo.
+   */
+  frameRing(center: HexCoord | null, radius = 0, rect?: { x: number; y: number; w: number; h: number }): void {
+    if (!center || !rect || rect.w < 40 || rect.h < 40) {
+      if (this.ring) this.ringLast = this.ring;
+      this.ring = null;
+      return;
+    }
+    const pitch = Math.min(BASE_PITCH + RING_VIEW.extraPitch, RING_VIEW.maxPitch);
+    const c = this.worldOf(center);
+    const r = (radius + 0.5) * HEX_STEP * HEX_SIZE;
+    const pts = Array.from({ length: 32 }, (_, i) => {
+      const a = (i / 32) * Math.PI * 2;
+      return new THREE.Vector3(c.x + Math.cos(a) * r, BASE_TOP, c.z + Math.sin(a) * r);
+    });
+    const m = RING_VIEW.margin;
+    const area = { x: rect.x + m, y: rect.y + m, w: Math.max(20, rect.w - 2 * m), h: Math.max(20, rect.h - 2 * m) };
+    const target = c.clone().setY(0);
+    let zoom = this.zoom;
+    const look = new THREE.Vector3();
+    const w = this.canvas.clientWidth;
+    const h = this.canvas.clientHeight;
+    const box = () => {
+      this.placePerspective(target, zoom, pitch, look);
+      this.camera.lookAt(look);
+      this.camera.updateMatrixWorld();
+      let x0 = Infinity, x1 = -Infinity, y0 = Infinity, y1 = -Infinity;
+      for (const p of pts) {
+        const q = p.clone().project(this.camera);
+        const sx = ((q.x + 1) / 2) * w;
+        const sy = ((1 - q.y) / 2) * h;
+        x0 = Math.min(x0, sx); x1 = Math.max(x1, sx);
+        y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
+      }
+      return { cx: (x0 + x1) / 2, cy: (y0 + y1) / 2, w: Math.max(1, x1 - x0), h: Math.max(1, y1 - y0) };
+    };
+    // aproxima / afasta até o raio caber, depois centraliza na tela do tablet (algumas voltas)
+    for (let i = 0; i < 6; i++) {
+      let b = box();
+      zoom = THREE.MathUtils.clamp(zoom * Math.max(b.w / area.w, b.h / area.h), 0.3, 12);
+      b = box();
+      target.x += (b.cx - (area.x + area.w / 2)) * ((2 * r) / b.w);
+      target.z += (b.cy - (area.y + area.h / 2)) * ((2 * r) / b.h);
+    }
+    this.ring = { target, zoom, pitch };
+    if (reducedMotionQuery()) this.ringBlend = 1;
+  }
+
   /** Desloca a câmera só o necessário para o hexágono ficar longe das bordas da tela. */
   keepInView(hex: HexCoord): void {
     if (this.inspect || this.intro) return;
@@ -892,7 +959,7 @@ export class HexBoard {
 
   /** Arrasta a câmera (em unidades de tela: x direita, y baixo), proporcional ao zoom. */
   panBy(dx: number, dy: number): void {
-    if (this.inspect || this.intro) return;
+    if (this.inspect || this.intro || this.ring) return;
     this.camGoal.x += dx * this.zoom;
     this.camGoal.z += dy * this.zoom * 1.3;
     this.clampGoal();
@@ -900,7 +967,7 @@ export class HexBoard {
 
   /** Aproxima (< 1) ou afasta (> 1) a câmera. */
   zoomBy(factor: number): void {
-    if (this.inspect || this.intro) return;
+    if (this.inspect || this.intro || this.ring) return;
     this.setZoom(this.zoom * factor);
   }
 
@@ -3250,19 +3317,35 @@ export class HexBoard {
     const k = 1 - Math.exp(-dt * 6);
     this.stepIntro();
     this.camTarget.lerp(this.camGoal, k);
+    // vista do tablet de abordagem (ver `frameRing`): mistura os parâmetros, não as posições
+    const goal = this.ring ? 1 : 0;
+    this.ringBlend += (goal - this.ringBlend) * (1 - Math.exp(-dt * RING_VIEW.rate));
+    if (Math.abs(goal - this.ringBlend) < 0.002) this.ringBlend = goal;
+    const v = this.ring ?? this.ringLast;
+    if (v && this.ringBlend > 0) {
+      const e = easeInOutCubic(this.ringBlend);
+      return this.placePerspective(
+        new THREE.Vector3().lerpVectors(this.camTarget, v.target, e),
+        THREE.MathUtils.lerp(this.zoom, v.zoom, e),
+        THREE.MathUtils.lerp(this.pitchDeg, v.pitch, e),
+        look,
+      );
+    }
+    this.ringLast = null;
+    return this.placePerspective(this.camTarget, this.zoom, this.pitchDeg, look);
+  }
+
+  /** Põe a câmera inclinada `pitchDeg` sobre `target`, afastada conforme `zoom`; devolve a distância. */
+  private placePerspective(target: THREE.Vector3, zoom: number, pitchDeg: number, look: THREE.Vector3): number {
     // Em retrato a câmera recua para enxergar o mesmo número de colunas.
     const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
-    const dist = 11.5 * this.zoom * Math.min(portrait, 2.3);
-    const pitch = THREE.MathUtils.degToRad(this.pitchDeg);
-    this.camera.position.set(
-      this.camTarget.x,
-      this.camTarget.y + Math.sin(pitch) * dist,
-      this.camTarget.z + Math.cos(pitch) * dist,
-    );
+    const dist = 11.5 * zoom * Math.min(portrait, 2.3);
+    const pitch = THREE.MathUtils.degToRad(pitchDeg);
+    this.camera.position.set(target.x, target.y + Math.sin(pitch) * dist, target.z + Math.cos(pitch) * dist);
     // mira um pouco "abaixo" do jogador: ele fica acima do centro e o painel inferior não cobre o alcance
     const lead = this.camera.aspect < 1 ? 1.4 : 0.3;
     this.camera.position.z += lead;
-    look.set(this.camTarget.x, this.camTarget.y, this.camTarget.z + lead);
+    look.set(target.x, target.y, target.z + lead);
     return dist;
   }
 
@@ -3298,7 +3381,9 @@ export class HexBoard {
     const bob = Math.sin(t * 2.4) * 0.08;
     const lk = 1 - Math.exp(-dt * 8);
     // monta em segundo plano o que entrou no raio (e muda o centro, se a câmera foi longe)
-    this.stream.update(this.camTarget.x, this.camTarget.z, STREAM_BUDGET_MS);
+    // (na vista do tablet de abordagem, em volta de para onde a câmera foi)
+    const sc = this.ring && this.ringBlend > 0.5 ? this.ring.target : this.camTarget;
+    this.stream.update(sc.x, sc.z, STREAM_BUDGET_MS);
     this.updateStructure();
 
     for (const u of this.units.values()) {
