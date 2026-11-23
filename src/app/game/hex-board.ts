@@ -1230,6 +1230,44 @@ export class HexBoard {
     return { x: clamp(((p.x + 1) / 2) * w, 90, w - 90), y: clamp(((1 - p.y) / 2) * h, 70, h - 10) };
   }
 
+  /** Ponto do mundo na tela (px do canvas), sem prender à borda; `null` atrás da câmera. */
+  private worldOnScreen(x: number, y: number, z: number): { x: number; y: number } | null {
+    const p = new THREE.Vector3(x, y, z).project(this.camera);
+    if (p.z > 1) return null;
+    return { x: ((p.x + 1) / 2) * this.canvas.clientWidth, y: ((1 - p.y) / 2) * this.canvas.clientHeight };
+  }
+
+  /**
+   * Meio do corpo de uma peça (suspeito ou agente) na tela, em px do canvas, sem prender à borda
+   * (o tablet do auto de abordagem rabisca por cima dele); `null` se não há peça ou está atrás da câmera.
+   */
+  pieceOnScreen(id: string): { x: number; y: number } | null {
+    const e = this.enemies.get(id);
+    if (e) {
+      const p = e.group.position;
+      return this.worldOnScreen(p.x, p.y + Math.max(0.3, (e.signY - 0.45) * 0.5), p.z);
+    }
+    const u = this.units.get(id);
+    if (u) {
+      const p = u.group.position;
+      return this.worldOnScreen(p.x, p.y + 0.5, p.z);
+    }
+    return null;
+  }
+
+  /** Alcance da abordagem (`radius` hexágonos em volta de `center`), no chão, projetado na tela. */
+  groundRingOnScreen(center: HexCoord, radius: number, steps = 64): { x: number; y: number }[] {
+    const c = hexToWorld(center, HEX_SIZE);
+    const r = (radius + 0.5) * HEX_STEP * HEX_SIZE;
+    const pts: { x: number; y: number }[] = [];
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const p = this.worldOnScreen(c.x + Math.cos(a) * r, BASE_TOP, c.z + Math.sin(a) * r);
+      if (p) pts.push(p);
+    }
+    return pts;
+  }
+
   /**
    * Balão de fala sobre a cabeça do inimigo (bilhete de papel com letra de caneta, como a HUD),
    * desenhado na cena: acompanha a cabeça e fica por cima de tudo. Some depois de `ms`.
