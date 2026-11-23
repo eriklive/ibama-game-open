@@ -147,6 +147,31 @@ gasta movimento (o ponto ainda precisa estar ao alcance).
 
 Os bônus ficam em `GROUP_RULES` (`moveBonus` e `approachBonus`, em `src/app/game/group.ts`).
 
+### Abertura da missão (tutorial, passo 1)
+
+Na **primeira vez** que o jogador abre um mapa com objetivos dentro de estruturas (no Aeroporto: o
+hangar e a casa), a partida começa com uma abertura antes do primeiro turno:
+
+1. A câmera começa **alta e afastada**: inclinação de **85°** (a de jogo é 55°) e zoom que cabe todas
+   as estruturas com objetivo, acima do limite que o jogador alcança. Chega devagar, com faixas de
+   cinema; a papelada (HUD) fica escondida.
+2. O mapa escurece, menos as estruturas, e a **caneta vermelha** circula cada uma, com o nome e os
+   objetivos que ficam nela ("Hangar · Queimar o avião…"). A anotação vai para o lado que tiver espaço
+   sem cobrir o botão nem a outra estrutura (no celular, em cima ou embaixo).
+3. O botão grande **Iniciar missão** espera o toque; o tabuleiro não responde enquanto isso.
+4. A câmera desce em **linha reta** (não de hexágono em hexágono) até quem está na vez, voltando ao
+   zoom e à inclinação de jogo no caminho (2,6 s), e a vez começa com a rolagem de sempre.
+
+**Pular** (canto de cima) corta direto para o passo 4 já concluído. Teclado: Enter inicia, Esc pula;
+controle: ✕ inicia, ○ pula. Com "menos movimento" no sistema, sem animação nem pan. O jogo lembra no
+navegador (`ibama.intro.<mapa>`) que a abertura já foi vista; o menu tem **Rever objetivos da
+missão**, que circula só os objetivos ainda em aberto. Os objetivos que dependem de outro (`after`,
+como "Apreender a arma") só entram depois de liberados.
+
+As regras ficam em `src/app/game/mission-intro.ts` (o que circular, `INTRO`, traço de caneta e lugar da
+anotação, testados em `mission-intro.spec.ts`); a câmera, em `HexBoard` (`frameIntro`, `panFromIntro`,
+`skipIntro`, `introEllipses`); a camada, em `src/app/ui/mission-intro/`.
+
 ### Mapa do aeroporto
 
 O mapa **Aeroporto** (desenho de 44×38, com a missão num círculo — ver abaixo) é o primeiro mapa "de verdade". O **hangar** fica ao norte, com um

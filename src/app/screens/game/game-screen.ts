@@ -105,6 +105,8 @@ import {
   witness,
 } from '../../game/plane';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
+import { IntroTarget, STRUCTURE_TOP, introSeen, introTargets, markIntroSeen } from '../../game/mission-intro';
+import { IntroMark, MissionIntro } from '../../ui/mission-intro/mission-intro';
 import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
 import { GROUP_RULES, RallyPlan, followLeader, rallyPoints, suggestedRally } from '../../game/group';
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
@@ -246,7 +248,7 @@ const reducedMotion = (): boolean =>
 
 @Component({
   selector: 'app-game-screen',
-  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel, ChaseOverlay],
+  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel, ChaseOverlay, MissionIntro],
   templateUrl: './game-screen.html',
   styleUrl: './game-screen.css',
   host: { '(document:keydown)': 'onKey($event)' },
@@ -722,6 +724,108 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       .sort((a, b) => Number(b.primary) - Number(a.primary));
   });
 
+  // ---------- abertura da missão (tutorial, passo 1) ----------
+
+  /** Abertura na tela: as estruturas circuladas (vazio enquanto a câmera chega) e se já está saindo. */
+  protected readonly intro = signal<{ marks: IntroMark[]; leaving: boolean } | null>(null);
+  protected readonly introSize = signal({ w: 0, h: 0 });
+  private introTargetsNow: IntroTarget[] = [];
+  private introThen?: () => void;
+  private introEpoch = 0;
+  /** O mapa tem o que circular agora (o menu oferece rever a abertura). */
+  protected readonly hasIntro = computed(() => !!this.map && introTargets(this.map, this.openObjectives()).length > 0);
+
+  /** Objetivos visíveis e ainda em aberto: os que a abertura circula. */
+  private openObjectives() {
+    const p = this.progress();
+    return visibleObjectives(this.map?.objectives ?? [], p).filter((o) => objectiveState(o, p) === 'open');
+  }
+
+  /**
+   * Começa a abertura: câmera alta sobre as estruturas com objetivo, mapa escuro, círculos a
+   * caneta e o botão **Iniciar missão**. Depois do pan (ou do Pular), chama `then`. Devolve
+   * `false` se não há o que circular.
+   */
+  private playIntro(then: () => void): boolean {
+    const board = this.board;
+    if (!this.map || !board) return false;
+    const targets = introTargets(this.map, this.openObjectives());
+    if (!targets.length) return false;
+    this.introTargetsNow = targets;
+    this.introThen = then;
+    this.intro.set({ marks: [], leaving: false });
+    const epoch = ++this.introEpoch;
+    void board.frameIntro(targets.map((t) => t.rect)).then(() => {
+      if (epoch === this.introEpoch) this.layoutIntro();
+    });
+    addEventListener('resize', this.onIntroResize);
+    return true;
+  }
+
+  /** Projeta as estruturas na tela e põe os círculos (quando a câmera para, e a cada resize). */
+  private layoutIntro(): void {
+    const s = this.intro();
+    if (!s || s.leaving || !this.board) return;
+    const t = this.introTargetsNow;
+    const ellipses = this.board.introEllipses(
+      t.map((x) => x.rect),
+      t.map((x) => STRUCTURE_TOP[x.kind]),
+    );
+    const canvas = this.canvasRef().nativeElement;
+    this.introSize.set({ w: canvas.clientWidth, h: canvas.clientHeight });
+    this.intro.set({ leaving: false, marks: ellipses.map((e, i) => ({ ...e, label: t[i].label, notes: t[i].notes })) });
+  }
+
+  private readonly onIntroResize = () => {
+    const s = this.intro();
+    if (!s || s.leaving || !this.board) return;
+    // a proporção da tela muda o enquadramento: refaz e reposiciona os círculos
+    const epoch = ++this.introEpoch;
+    void this.board.frameIntro(this.introTargetsNow.map((t) => t.rect)).then(() => {
+      if (epoch === this.introEpoch) this.layoutIntro();
+    });
+  };
+
+  /** Onde a câmera termina a abertura: quem está na vez. */
+  private introAnchor(): HexCoord {
+    return this.positions().get(this.active().id) ?? this.map!.starts[0];
+  }
+
+  /** **Iniciar missão**: a tinta some e a câmera desce em linha reta até a equipe. */
+  protected beginMission(): void {
+    const s = this.intro();
+    if (!s || s.leaving || !this.board) return;
+    this.sound.play('ui.confirmar');
+    this.intro.set({ ...s, leaving: true });
+    const epoch = ++this.introEpoch;
+    void this.board.panFromIntro(this.introAnchor()).then(() => {
+      if (epoch === this.introEpoch) this.finishIntro();
+    });
+  }
+
+  /** **Pular**: corta direto para a equipe. */
+  protected skipMissionIntro(): void {
+    if (!this.intro()) return;
+    this.introEpoch++;
+    this.board?.skipIntro(this.introAnchor());
+    this.finishIntro();
+  }
+
+  private finishIntro(): void {
+    this.intro.set(null);
+    removeEventListener('resize', this.onIntroResize);
+    if (this.map) markIntroSeen(this.map.id);
+    const then = this.introThen;
+    this.introThen = undefined;
+    then?.();
+  }
+
+  /** Menu: rever a abertura no meio da partida (volta para quem está na vez). */
+  protected replayIntro(): void {
+    this.toggleMenu();
+    this.playIntro(() => this.board?.focus(this.active().id));
+  }
+
   // ---------- queimar e encerrar a operação ----------
 
   protected readonly burnRules = BURN_RULES;
@@ -1065,7 +1169,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // `?caso=` abre direto num caso de teste (o menu usa isso para trocar de mapa)
     const testCase = findTestCase(this.route.snapshot.queryParamMap.get('caso'));
     if (testCase?.mapId === this.map.id) void this.runTestCase(testCase);
-    else this.startTurn();
+    // na primeira vez neste mapa, a abertura mostra os objetivos antes do primeiro turno
+    else if (introSeen(this.map.id) || !this.playIntro(() => this.startTurn())) this.startTurn();
     this.stopPad = this.gamepad.listen({
       button: (b) => this.padButton(b),
       move: (dir) => this.moveCursor(dir),
@@ -1083,6 +1188,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     clearInterval(this.statsTicker);
     removeEventListener('resize', this.onDoorResize);
     removeEventListener('resize', this.onInterrogationResize);
+    removeEventListener('resize', this.onIntroResize);
     clearTimeout(this.doorCheckTimer);
     this.board?.dispose();
     this.sound.stopAll();
@@ -1286,6 +1392,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Teclado na perseguição: ↑ pula o caixote, G grita; Esc deixa fugir. */
   protected onKey(ev: KeyboardEvent): void {
+    if (this.intro()) {
+      if (ev.key === 'Enter') this.beginMission();
+      else if (ev.key === 'Escape') this.skipMissionIntro();
+      else return;
+      ev.preventDefault();
+      return;
+    }
     if (this.targetPrompt()) {
       if (ev.key === 'ArrowLeft' || ev.key === 'a') this.targetSide('esquerda');
       else if (ev.key === 'ArrowRight' || ev.key === 'd') this.targetSide('direita');
@@ -3678,6 +3791,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * touchpad/R3 voltam para quem está na vez · Options mostra os comandos.
    */
   private padButton(b: PadButton): void {
+    // abertura da missão: ✕ inicia, ○ pula
+    if (this.intro()) {
+      if (b === 'cross') this.beginMission();
+      else if (b === 'circle') this.skipMissionIntro();
+      return;
+    }
     // carimbo "Perseguir?": ✕ manda o primeiro da lista, ○ deixa fugir
     const offer = this.chaseOffer();
     if (offer) {
@@ -3852,7 +3971,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Analógico direito move a câmera; R2 aproxima e L2 afasta. */
   private padFrame(dt: number, state: PadState): void {
-    if (!this.board) return;
+    if (!this.board || this.intro()) return;
     const r = deadzone(state.right);
     if (r.x || r.y) this.board.panBy(r.x * dt * 9, r.y * dt * 9);
     const zoom = state.buttons.l2 - state.buttons.r2;
