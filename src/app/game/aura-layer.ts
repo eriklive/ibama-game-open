@@ -79,7 +79,10 @@ export function auraOutline(keys: Iterable<string>, inside: Iterable<string> = [
  * Separa a região em partes ligadas: as que contêm algum hexágono de `hot` (o agente da vez
  * está dentro) e as demais. Cada queimável ou suspeito acende sozinho.
  */
-export function splitHot(keys: Iterable<string>, hot: Iterable<string>): { hot: string[]; cold: string[] } {
+export function splitHot(
+  keys: Iterable<string>,
+  hot: Iterable<string>,
+): { hot: string[]; cold: string[] } {
   const region = new Set(keys);
   const warm = new Set([...hot].filter((k) => region.has(k)));
   const lit = new Set<string>();
@@ -161,7 +164,11 @@ export class AuraLayer {
     this.fill = new THREE.Mesh(
       new THREE.BufferGeometry(),
       new THREE.MeshBasicMaterial({
-        color: style.color, alphaMap: textures.fill, transparent: true, opacity: style.fill, depthWrite: false,
+        color: style.color,
+        alphaMap: textures.fill,
+        transparent: true,
+        opacity: style.fill,
+        depthWrite: false,
         side: THREE.DoubleSide,
       }),
     );
@@ -169,16 +176,25 @@ export class AuraLayer {
     this.rim = new THREE.Mesh(
       new THREE.BufferGeometry(),
       new THREE.MeshBasicMaterial({
-        color: style.edge, transparent: true, opacity: style.rim, depthWrite: false,
-        blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+        color: style.edge,
+        transparent: true,
+        opacity: style.rim,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide,
       }),
     );
     this.wall = style.wall
       ? new THREE.Mesh(
           new THREE.BufferGeometry(),
           new THREE.MeshBasicMaterial({
-            color: style.color, alphaMap: textures.fade, transparent: true, opacity: style.wallOpacity ?? 0.5,
-            depthWrite: false, blending: THREE.AdditiveBlending, side: THREE.DoubleSide,
+            color: style.color,
+            alphaMap: textures.fade,
+            transparent: true,
+            opacity: style.wallOpacity ?? 0.5,
+            depthWrite: false,
+            blending: THREE.AdditiveBlending,
+            side: THREE.DoubleSide,
           }),
         )
       : null;
@@ -243,9 +259,13 @@ export class AuraLayer {
     this.root.visible = this.keys.size > 0;
     const inset = this.style.inset;
     // menor: cada hexágono tem o seu contorno (os vizinhos não se encostam)
-    const sides = inset ? [...this.keys].flatMap((k) => auraOutline([k])) : auraOutline(this.keys, this.inside);
+    const sides = inset
+      ? [...this.keys].flatMap((k) => auraOutline([k]))
+      : auraOutline(this.keys, this.inside);
     const scale = inset ?? 1;
-    const rim = inset ? { outer: inset, inner: inset - INSET_RIM } : { outer: RIM_OUTER, inner: RIM_INNER };
+    const rim = inset
+      ? { outer: inset, inner: inset - INSET_RIM }
+      : { outer: RIM_OUTER, inner: RIM_INNER };
     replace(this.fill, fillGeometry(this.keys, FILL_RADIUS * scale));
     replace(this.rim, rimGeometry(sides, rim.outer, rim.inner));
     if (this.wall) replace(this.wall, wallGeometry(sides, WALL_RADIUS * scale));
@@ -282,7 +302,11 @@ function fillGeometry(keys: ReadonlySet<string>, radius: number): THREE.BufferGe
 }
 
 /** Uma faixa (trapézio) em cada lado de fronteira. */
-function rimGeometry(sides: readonly AuraSide[], outer: number, inner: number): THREE.BufferGeometry {
+function rimGeometry(
+  sides: readonly AuraSide[],
+  outer: number,
+  inner: number,
+): THREE.BufferGeometry {
   const pos: number[] = [];
   const uv: number[] = [];
   const index: number[] = [];
