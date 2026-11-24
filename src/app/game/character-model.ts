@@ -4,13 +4,27 @@ import { ANIMS_VERSION } from './anims-version';
 import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
+import { buildCuffClips } from './cuff-poses';
 
 /**
  * Clipes da biblioteca humanoide (`public/assets/anims/humanoid-base.glb`, gerada por
  * `tools/assets/build-anims.mjs`). Os loops tocam no relógio (`play`); os gestos do Modo Corrida
- * (`jump`, `slide`, `trip`, `crash`) são percorridos no tempo da regra (`scrub`).
+ * (`jump`, `slide`, `trip`, `crash`) são percorridos no tempo da regra (`scrub`). `cuffed` e `kneel`
+ * (suspeito algemado, de pé e ajoelhado) não vêm do arquivo: são montados por código a partir do
+ * `idle` (`cuff-poses.ts`).
  */
-export type ClipName = 'idle' | 'walk' | 'run' | 'crouch' | 'sprint' | 'jump' | 'slide' | 'trip' | 'crash';
+export type ClipName =
+  | 'idle'
+  | 'walk'
+  | 'run'
+  | 'crouch'
+  | 'sprint'
+  | 'jump'
+  | 'slide'
+  | 'trip'
+  | 'crash'
+  | 'cuffed'
+  | 'kneel';
 
 /** Modelo 3D de um personagem (ver docs/esqueletos-e-movimentacao.md). */
 export interface ModelDef {
@@ -90,6 +104,23 @@ const TINT_STRENGTH = 0.6;
 
 const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
 const cache = new Map<string, Promise<GLTF>>();
+/** Clipes do arquivo mais as poses algemadas, montadas uma vez por biblioteca. */
+const clipCache = new WeakMap<GLTF, THREE.AnimationClip[]>();
+
+function clipsOf(anims: GLTF): THREE.AnimationClip[] {
+  let clips = clipCache.get(anims);
+  if (!clips) {
+    const idle = anims.animations.find((c) => c.name === 'idle');
+    clips = [...anims.animations, ...(idle ? buildCuffClips(anims.scene, idle) : [])];
+    clipCache.set(anims, clips);
+  }
+  return clips;
+}
+
+/** Algema: uma argola em cada pulso e a corrente entre elas, feitas uma vez e divididas. */
+const CUFF_RING = new THREE.TorusGeometry(0.05, 0.013, 8, 20);
+const CUFF_LINK = new THREE.CylinderGeometry(0.009, 0.009, 1, 6).translate(0, 0.5, 0);
+const CUFF_MATERIAL = new THREE.MeshStandardMaterial({ color: 0xc9ced6, metalness: 0.85, roughness: 0.3 });
 
 function loadGltf(url: string): Promise<GLTF> {
   let p = cache.get(url);
@@ -117,6 +148,8 @@ export class CharacterRig {
    */
   readonly pose = { thigh: 0, calf: 0, thighL: 0, calfL: 0, spine: 0 };
   private readonly bones: Partial<Record<PoseBone, THREE.Object3D>> = {};
+  /** Argolas e corrente da algema (criadas no primeiro `setCuffed(true)`). */
+  private cuffs: { rings: THREE.Mesh[]; link: THREE.Mesh } | null = null;
 
   private constructor(
     /** Raiz do modelo já na escala do tabuleiro, com os pés em y = 0 e de frente para +Z. */
@@ -171,7 +204,7 @@ export class CharacterRig {
     const root = new THREE.Group();
     root.name = 'character';
     root.add(inner);
-    return new CharacterRig(root, scale, anims.animations, owned);
+    return new CharacterRig(root, scale, clipsOf(anims), owned);
   }
 
   /** Toca um clipe em loop, com crossfade a partir do atual. */
@@ -229,6 +262,42 @@ export class CharacterRig {
     if (action && clipSpeed) action.timeScale = worldSpeed / (clipSpeed * this.scale);
   }
 
+  /** Mostra ou esconde a algema nos pulsos (para as poses `cuffed` e `kneel`). */
+  setCuffed(on: boolean): void {
+    if (on && !this.cuffs) {
+      const hands = ['hand_l', 'hand_r'].map((n) => this.object.getObjectByName(n));
+      if (!hands[0] || !hands[1]) return;
+      const rings = hands.map((hand) => {
+        // argola em volta do pulso: o osso da mão aponta +Y ao longo do braço
+        const ring = new THREE.Mesh(CUFF_RING, CUFF_MATERIAL);
+        ring.rotation.x = Math.PI / 2;
+        ring.position.y = -0.015;
+        ring.layers.enable(MOVING_SHADOW_LAYER);
+        hand!.add(ring);
+        return ring;
+      });
+      const link = new THREE.Mesh(CUFF_LINK, CUFF_MATERIAL);
+      link.layers.enable(MOVING_SHADOW_LAYER);
+      this.object.add(link);
+      this.cuffs = { rings, link };
+    }
+    if (!this.cuffs) return;
+    for (const r of this.cuffs.rings) r.visible = on;
+    this.cuffs.link.visible = on;
+  }
+
+  /** Estica a corrente da algema entre as argolas, na pose deste quadro. */
+  private placeCuffLink(): void {
+    const c = this.cuffs!;
+    this.object.updateMatrixWorld(true);
+    const [a, b] = c.rings.map((r) => this.object.worldToLocal(r.getWorldPosition(new THREE.Vector3())));
+    const along = b.clone().sub(a);
+    const length = along.length();
+    c.link.position.copy(a);
+    c.link.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), along.divideScalar(length || 1));
+    c.link.scale.set(this.scale, length, this.scale);
+  }
+
   update(dt: number): void {
     this.mixer.update(dt);
     const { thigh, calf, thighL, calfL, spine } = this.pose;
@@ -237,6 +306,7 @@ export class CharacterRig {
     if (thighL && this.bones.thigh_l) this.bones.thigh_l.rotation.x += thighL;
     if (calfL && this.bones.calf_l) this.bones.calf_l.rotation.x += calfL;
     if (spine && this.bones.spine_01) this.bones.spine_01.rotation.x += spine;
+    if (this.cuffs?.link.visible) this.placeCuffLink();
   }
 
   dispose(): void {

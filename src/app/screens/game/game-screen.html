@@ -14,6 +14,11 @@
       (skip)="skipMissionIntro()" />
   }
 
+  <!-- Lousa tática (tutorial): a regra desenhada a giz, com o mapa visto de cima (ver game/tactical-board.ts) -->
+  @if (lesson(); as l) {
+    <app-tactical-board [lesson]="l" [zones]="activeApproach()" [hasChase]="hasChase" (closed)="closeLesson()" />
+  }
+
   <!-- Topo: voltar e menu soltos; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
   <div class="corner">
     <button type="button" class="paper-btn back" (click)="exit()" aria-label="Voltar ao início">
@@ -158,6 +163,9 @@
       </div>
       @if (hasIntro()) {
         <button type="button" class="menu-restart" (click)="replayIntro()" data-testid="menu-intro">Rever objetivos da missão</button>
+      }
+      @for (l of lessons; track l.id) {
+        <button type="button" class="menu-restart" (click)="reviewLesson(l.id)" [attr.data-testid]="'menu-lousa-' + l.id">Lousa tática: {{ l.label.toLowerCase() }}</button>
       }
       <button type="button" class="menu-restart" (click)="toggleMenu(); restart()" data-testid="menu-restart">Recomeçar a partida</button>
       <button type="button" class="menu-close" (click)="toggleMenu()">Fechar</button>

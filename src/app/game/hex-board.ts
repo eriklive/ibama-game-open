@@ -208,6 +208,11 @@ interface EnemyView extends Mover {
   running?: boolean;
   /** Instante (relógio do tabuleiro) do susto com a abordagem: um pulinho no lugar. */
   startleAt?: number;
+  /**
+   * Pose de rendido, escolhida quando ele se rende: alterna pela ordem de rendição (o primeiro
+   * fica de pé, o segundo ajoelhado...), para a cena nunca repetir a mesma pose lado a lado.
+   */
+  cuffPose?: 'cuffed' | 'kneel';
 }
 
 /** Diferença angular em (-π, π]. */
@@ -1142,16 +1147,28 @@ export class HexBoard {
     if (!e) return;
     e.surrendered = surrendered;
     if (surrendered) e.alert = false;
+    if (surrendered && !e.cuffPose) {
+      const before = [...this.enemies.values()].filter((o) => o.cuffPose).length;
+      e.cuffPose = before % 2 ? 'kneel' : 'cuffed';
+    }
     this.paintEnemy(e);
     this.refreshCover();
   }
 
   private paintEnemy(e: EnemyView): void {
-    // com modelo 3D, o rendido se agacha (a peça simples só afunda um pouco)
-    if (!e.running) e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+    // com modelo 3D, o rendido fica algemado (a peça simples só mostra a bandeira branca)
+    if (!e.running) e.rig?.play(this.enemyRestClip(e), 0.3);
+    e.rig?.setCuffed(e.surrendered);
     e.bodyMaterial.color.set(e.surrendered ? COLORS.enemySurrendered : e.alert ? COLORS.enemyAlert : COLORS.enemy);
     e.alertSprite.visible = e.alert;
-    e.flagSprite.visible = e.surrendered;
+    e.flagSprite.visible = e.surrendered && !e.rig;
+  }
+
+  /**
+   * Clipe parado do inimigo: rendido fica algemado, de pé ou ajoelhado (`cuffPose`).
+   */
+  private enemyRestClip(e: EnemyView): ClipName {
+    return e.surrendered ? (e.cuffPose ?? 'cuffed') : 'idle';
   }
 
   /**
@@ -1178,7 +1195,7 @@ export class HexBoard {
       if (onStep?.(step) === false) break;
     }
     e.running = false;
-    e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+    e.rig?.play(this.enemyRestClip(e), 0.3);
     this.moving = false;
     this.refreshCover();
   }
@@ -1669,7 +1686,7 @@ export class HexBoard {
       e.group.position.x = p.x;
       e.group.position.z = p.z;
       e.running = false;
-      e.rig?.play(e.surrendered ? 'crouch' : 'idle', 0.3);
+      e.rig?.play(this.enemyRestClip(e), 0.3);
     }
     if (u && e) {
       const d = e.group.position.clone().sub(u.group.position);
@@ -2782,11 +2799,11 @@ export class HexBoard {
     e.baseY = BASE_TOP;
     e.signY = BASE_TOP + def.height + 0.45;
     e.alertSprite.scale.set(0.9, 0.9, 1);
-    e.flagSprite.scale.set(1, 1, 1);
-    // a bandeira só aparece com o inimigo agachado, então fica mais baixa que o "!"
-    e.flagSprite.position.y = BASE_TOP + def.height * 0.68 + 0.45;
-    rig.play(e.surrendered ? 'crouch' : 'idle', 0);
     e.rig = rig;
+    // com o modelo, a algema mostra quem se rendeu: a bandeira branca fica só na peça simples
+    e.flagSprite.visible = false;
+    rig.play(this.enemyRestClip(e), 0);
+    rig.setCuffed(e.surrendered);
     // o destaque aquece de novo com o personagem animado (ver `warmSpotlight`)
     this.spotWarmDue = true;
   }
