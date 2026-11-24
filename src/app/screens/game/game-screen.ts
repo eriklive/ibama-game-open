@@ -119,7 +119,7 @@ import {
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-tablet';
-import { HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
+import { HexCoord, hexDistance, hexKey, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import { TEST_CASES, TestCase, findTestCase } from '../../game/test-cases';
@@ -417,11 +417,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const hot = this.canTalk() && here && show ? [hexKey(here)] : [];
       this.board?.setInterrogationAura(show ? talk : [], hot, show ? muted : []);
     });
-    // aura de brasa em volta de cada queimável (o avião, os suprimentos): chegar nela mostra o botão de ação
+    // os queimáveis (o avião, os suprimentos) não têm aura no chão: o próprio modelo ganha um contorno
+    // que pulsa, e só quando dá para tocar nele (a escolha da vez, sem outro modo aberto)
     effect(() => {
-      const show = !['interrogating', 'door', 'plane', 'over'].includes(this.phase()) && !this.search() && !this.aiming();
-      const { ring, hot } = this.actionAuraKeys();
-      this.board?.setActionAura(show ? ring : [], show ? hot : []);
+      const free =
+        this.phase() === 'moving-choice' && !this.search() && !this.aiming() &&
+        !this.approaching() && !this.grouping() && !this.burning();
+      this.board?.showTargetOutlines(free);
     });
     // cartão em foco no interrogatório (controle): o foco do teclado acompanha
     effect(() => {
@@ -1250,6 +1252,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.pickCharacter(id),
         onClueTap: () => this.tapClue(),
+        onTargetTap: (id) => this.tapTarget(id),
       },
       {
         profile: this.renderSettings.profile(),
@@ -1263,8 +1266,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         })),
       },
     );
-    // os queimáveis não levam ícone de chama: cada um tem a sua aura (ver `actionAuraKeys`)
+    // os queimáveis não levam ícone de chama nem aura: um contorno pulsante no modelo, que se toca
+    // de qualquer lugar (vai até lá e abre a ação, ver `tapTarget`)
     this.board.setBurnTargets([]);
+    this.board.setTargetOutlines(this.map.burnables ?? []);
     this.board.setDoors(this.doors(), true);
     this.refreshVision();
     // `?caso=` abre direto num caso de teste (o menu usa isso para trocar de mapa)
@@ -2242,6 +2247,64 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(this.selected(), this.selectedPath());
   }
 
+  /**
+   * Alvo tocado direto no tabuleiro (o avião, os suprimentos). Colado nele, abre a ação (o menu
+   * do avião ou o "Queimar"); de longe, escolhe o caminho mais curto até ficar colado — e o
+   * segundo toque (no alvo ou no Confirmar) anda até lá e já abre a ação.
+   */
+  private tapTarget(id: string): void {
+    if (this.phase() !== 'moving-choice' || this.approaching() || this.grouping()) return;
+    if (this.burning()) {
+      this.cancelBurn();
+      return;
+    }
+    const target = (this.map?.burnables ?? []).find((t) => t.id === id && !this.burned().has(t.id));
+    const from = this.positions().get(this.active().id);
+    if (!target || !from) return;
+    if (this.viewingOther()) this.focusCharacter(this.active().id);
+    if (canBurn(from, target)) {
+      this.aimedTarget = null;
+      this.actOn(target);
+      return;
+    }
+    const reach = this.reach();
+    let best: HexCoord | null = null;
+    let bestCost = Infinity;
+    for (const key of this.destinations()) {
+      const [col, row] = key.split(',').map(Number);
+      const h = { col, row };
+      const cost = reach.get(key)?.cost ?? Infinity;
+      if (cost < bestCost && canBurn(h, target)) {
+        best = h;
+        bestCost = cost;
+      }
+    }
+    if (!best) {
+      this.sound.play('ui.invalido');
+      this.say(`Chegue colado n${target.name} para interagir`, 'info');
+      return;
+    }
+    if (sameHex(best, this.selected())) {
+      void this.confirm();
+      return;
+    }
+    this.selected.set(best);
+    this.aimedTarget = { id: target.id, hex: best };
+    this.cursor.set(best);
+    this.sound.play('ui.hex');
+    this.sound.play('ui.caminho', { delay: 0.06 });
+    this.board?.setSelected(this.selected(), this.selectedPath());
+  }
+
+  /** Alvo escolhido por toque e o hexágono colado nele para onde o agente vai andar. */
+  private aimedTarget: { id: string; hex: HexCoord } | null = null;
+
+  /** A ação de um alvo colado no agente: o avião abre o menu de inspecionar; o resto, o "Queimar". */
+  private actOn(target: Burnable): void {
+    if (target.inspect) this.openPlaneMenu();
+    else this.startBurn();
+  }
+
   /** Toque numa peça ou num retrato: o mesmo que `focusCharacter`, com o som do cartão. */
   protected pickCharacter(id: string): void {
     if (id !== this.focusedId()) this.sound.play('ui.retrato');
@@ -2284,8 +2347,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.grouped()) this.groupLine.set([...paths.keys()]);
     if (left.length) this.leaveGroup(left, 'ficou para trás');
     this.movesLeft.update((n) => n - path.length);
+    // andou até um alvo tocado: chegando colado, a ação dele já abre
+    const aim = this.aimedTarget && sameHex(this.aimedTarget.hex, target) ? this.aimedTarget : null;
+    this.aimedTarget = null;
     if (!(await this.perceive(paths))) return;
     this.afterMove();
+    const goal = aim && (this.map?.burnables ?? []).find((t) => t.id === aim.id && !this.burned().has(t.id));
+    const here = this.positions().get(id);
+    if (goal && here && this.phase() === 'moving-choice' && canBurn(here, goal)) this.actOn(goal);
   }
 
   /** Anda com um ou mais agentes ao mesmo tempo, conferindo a visão dos inimigos a cada passo. */
@@ -3443,20 +3512,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const from = this.positions().get(this.active().id);
     if (!from) return null;
     return (this.map?.burnables ?? []).find((t) => t.inspect && !this.burned().has(t.id) && canBurn(from, t)) ?? null;
-  });
-  /** Hexágonos da aura dos queimáveis ainda inteiros (a coroa em volta deles) e os em que o agente da vez está. */
-  private readonly actionAuraKeys = computed(() => {
-    const planes = (this.map?.burnables ?? []).filter((t) => !this.burned().has(t.id));
-    const own = new Set(planes.flatMap((t) => t.hexes.map(hexKey)));
-    const ring = new Set<string>();
-    for (const t of planes)
-      for (const h of t.hexes)
-        for (const n of hexNeighbors(h)) {
-          const k = hexKey(n);
-          if (!own.has(k) && this.area.has(n) && !this.solid().has(k)) ring.add(k);
-        }
-    const here = this.positions().get(this.active().id);
-    return { ring: [...ring], hot: here && ring.has(hexKey(here)) ? [hexKey(here)] : [] };
   });
   /** A equipe já vê a chave no quadro: dá para pegar sem rolar percepção. */
   protected readonly keySeen = computed(() => keyKnown(this.planeState()));
