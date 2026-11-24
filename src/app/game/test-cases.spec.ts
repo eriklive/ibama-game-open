@@ -24,7 +24,7 @@ describe('casos de teste', () => {
       expect(agents).toContain(c.start.agent);
       for (const id of Object.keys(c.agents ?? {})) expect(agents).toContain(id);
       const enemies = map!.enemies.map((e) => e.id);
-      const runners = c.start.kind === 'chase' ? [c.start.enemy] : c.start.enemies;
+      const runners = c.start.kind === 'chase' ? [c.start.enemy] : c.start.kind === 'targets' ? c.start.enemies : [];
       for (const id of runners) expect(enemies).toContain(id);
       for (const id of Object.keys(c.enemies ?? {})) expect(enemies).toContain(id);
       // ninguém começa dentro de parede

@@ -180,7 +180,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
     trait: 'arisco · responde seco',
     mod: 0,
     intro: {
-      posture: 'de joelhos, mãos na cabeça, encara o chão',
+      posture: 'algemado, encara o chão',
       say: 'Pode revistar. Não devo nada.',
     },
     resume: ['Ainda isso?', 'Já falei, doutor. Pode revistar.'],
@@ -222,7 +222,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
     trait: 'nervoso · se faz de desentendido',
     mod: 0,
     intro: {
-      posture: 'rendido ao lado do avião, mãos na cabeça',
+      posture: 'algemado ao lado do avião',
       say: 'Calma, doutor, calma. Eu só piloto.',
     },
     resume: 'De novo, doutor? Já falei o que sei.',
@@ -286,7 +286,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
     trait: 'manso · protege a casa',
     mod: 0,
     intro: {
-      posture: 'rendido ao lado da mesa, mãos na cabeça',
+      posture: 'algemado ao lado da mesa',
       say: 'Calma, calma… eu só cuido da casa, doutor.',
     },
     resume: 'Pode perguntar, doutor. A casa tá aí.',
@@ -333,7 +333,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
     trait: 'debochado · minimiza tudo',
     mod: 0,
     intro: {
-      posture: 'mãos na cabeça, sorrindo de canto',
+      posture: 'algemado, sorrindo de canto',
       say: 'Que exagero. Tudo isso por causa de uma paca?',
     },
     resume: 'Vai demorar muito? A paca tá esfriando.',
@@ -381,7 +381,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
     trait: 'assustado · humilde',
     mod: 0,
     intro: {
-      posture: 'mãos na cabeça, tremendo',
+      posture: 'algemado, tremendo',
       say: 'Pelo amor de Deus, doutor, eu sou trabalhador.',
     },
     resume: 'Doutor, eu falo, eu falo.',

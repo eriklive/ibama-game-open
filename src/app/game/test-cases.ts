@@ -25,8 +25,10 @@ export interface TestCase {
    * atrás dele;
    * `targets` abre o turno inimigo com o agente no raio de perseguição de `enemies` (em alerta),
    * que vão correr: ele escolhe qual perseguir ou deixa os dois (`decisao:alvo`).
+   * `turn` só abre o turno do agente, com a cena montada.
    */
   start:
+    | { kind: 'turn'; agent: string }
     | { kind: 'chase'; agent: string; enemy: string }
     | { kind: 'targets'; agent: string; enemies: readonly string[] };
 }
@@ -93,6 +95,19 @@ export const TEST_CASES: readonly TestCase[] = [
       ...PILOTO_LONGE,
     },
     start: { kind: 'targets', agent: 'clara', enemies: ['garimpeiro', 'garimpeiro-pa'] },
+  },
+  {
+    id: 'rendidos',
+    name: 'Rendidos',
+    hint: 'Os três suspeitos do campo de teste já rendidos e algemados, perto da equipe, uns de pé e outros ajoelhados (as duas poses de rendido).',
+    mapId: 'teste-12x12',
+    active: 'ana',
+    enemies: {
+      piloto: { hex: { col: 5, row: 5 }, status: 'surrendered' },
+      garimpeiro: { hex: { col: 7, row: 5 }, status: 'surrendered' },
+      'garimpeiro-pa': { hex: { col: 6, row: 8 }, status: 'surrendered' },
+    },
+    start: { kind: 'turn', agent: 'ana' },
   },
 ];
 
