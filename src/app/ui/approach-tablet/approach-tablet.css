@@ -453,11 +453,16 @@
 }
 /* prévia: tecla Cancelar, menor e vermelha, ao lado da Abordar */
 .key.cancel {
-  width: 64px;
+  width: auto;
+  padding: 0 16px;
   background: linear-gradient(180deg, #8a3a2c, #6a2a20 55%, #5a231b);
 }
 .key.cancel::after {
   animation: none;
+}
+.key.cancel .lbl {
+  font-size: 13px;
+  letter-spacing: 0.08em;
 }
 .grip {
   position: absolute;
@@ -628,7 +633,7 @@
     width: 160px;
   }
   .key.cancel {
-    width: 52px;
+    padding: 0 12px;
   }
   .bump {
     width: 34px;
