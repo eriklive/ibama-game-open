@@ -67,6 +67,9 @@ refit, **sem baixar os pacotes da Quaternius**.
     O jogo não toca os gestos no relógio: percorre cada um do começo ao fim no tempo da regra
     (`CharacterRig.scrub`), então o pulo dura o que o pulo dura em `runner.ts`.
   - Descarta o boneco e comprime as curvas.
+  - Grava o hash do arquivo em `src/app/game/anims-version.ts`. O jogo pede o arquivo com `?v=<hash>`:
+    o GitHub Pages deixa o navegador reusar a cópia por 10 min, e código novo com clipes velhos
+    congelaria os personagens. Commite os dois juntos.
 
 ## O que o refit faz (`refit.mjs` + `lib/kit.mjs`)
 

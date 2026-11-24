@@ -7,8 +7,10 @@ import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
 import { prune, dedup, quantize, resample, meshopt } from '@gltf-transform/functions';
 import { MeshoptEncoder } from 'meshoptimizer';
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 const [UAL1, UAL2, OUT] = process.argv.slice(2);
 if (!UAL1 || !UAL2 || !OUT) {
@@ -195,3 +197,17 @@ for (const a of root.listAnimations()) {
   console.log(`${a.getName().padEnd(8)} ${end.toFixed(2)} s`);
 }
 console.log(`${file}: ${(fs.statSync(file).size / 1024).toFixed(0)} KB`);
+
+// O jogo pede o arquivo com `?v=<hash>` (ver `HUMANOID_ANIMS`): o GitHub Pages deixa o navegador
+// reusar a cópia por 10 min, e código novo com clipes velhos congela os personagens. Só quando a
+// saída é a do jogo, para um build de teste noutra pasta não mexer no código.
+const here = path.dirname(fileURLToPath(import.meta.url));
+if (path.resolve(OUT) === path.resolve(here, '../../public/assets')) {
+  const hash = crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex').slice(0, 10);
+  const ts = path.resolve(here, '../../src/app/game/anims-version.ts');
+  fs.writeFileSync(
+    ts,
+    `/** Hash de \`public/assets/anims/humanoid-base.glb\` (gerado por tools/assets/build-anims.mjs; não editar). */\nexport const ANIMS_VERSION = '${hash}';\n`,
+  );
+  console.log(`${path.relative(process.cwd(), ts)}: ${hash}`);
+}
