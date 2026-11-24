@@ -30,6 +30,10 @@
   color: var(--ink-paper);
 }
 .board { position: absolute; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+/* Modo Corrida: o mapa de corrida fica por cima do tabuleiro só enquanto a perseguição corre nele */
+.board.runner { visibility: hidden; pointer-events: none; }
+.board.runner.on { visibility: visible; pointer-events: auto; }
+.game.intro > .board.runner { visibility: hidden; }
 /* abertura da missão: só o tabuleiro e a camada da abertura; a papelada volta no fim do pan */
 .game.intro > :not(.board):not(app-mission-intro) { visibility: hidden; }
 

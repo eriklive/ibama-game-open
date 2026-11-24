@@ -19,7 +19,17 @@ export interface HexTile {
   visible: boolean;
   /** Objetos presos ao hexágono (paredes): acompanham a altura e a visibilidade. */
   attached: { object: THREE.Object3D; y: number }[];
+  /**
+   * Giro da virada do Modo Corrida (radianos, em volta de `TileField.tiltAxis`): 0 assentado,
+   * π/2 de pé; a partir de `TILT_HIDDEN` o hexágono some (virou: o verso é outro mapa).
+   */
+  tilt: number;
 }
+
+/** Giro a partir do qual o hexágono virado some. */
+export const TILT_HIDDEN = Math.PI / 2 + 0.6;
+/** Quanto o hexágono sobe no meio do giro (de pé). */
+const TILT_LIFT = 0.9;
 
 interface Decal {
   mesh: THREE.InstancedMesh;
@@ -49,6 +59,9 @@ export class TileField {
   private readonly dirty = new Set<number>();
   private readonly m = new THREE.Matrix4();
   private readonly lift = new THREE.Matrix4();
+  private readonly turn = new THREE.Matrix4();
+  /** Eixo (no chão) em volta do qual os hexágonos giram na virada. */
+  readonly tiltAxis = new THREE.Vector3(1, 0, 0);
 
   constructor(
     hexes: readonly HexCoord[],
@@ -101,7 +114,7 @@ export class TileField {
       const color = new THREE.Color(baseColor(coord));
       const tile: HexTile = {
         coord, index, x: p.x, z: p.z, baseColor: color, color: color.clone(), emissive: new THREE.Color(0),
-        lift: 0, y: 0, visible: true, attached: [],
+        lift: 0, y: 0, visible: true, attached: [], tilt: 0,
       };
       this.tiles.set(hexKey(coord), tile);
       this.list.push(tile);
@@ -183,14 +196,16 @@ export class TileField {
     const lines = this.linePos.array as Float32Array;
     for (const i of this.dirty) {
       const t = this.list[i];
-      this.mesh.setMatrixAt(i, t.visible ? this.m.makeTranslation(t.x, t.y, t.z) : ZERO);
+      this.mesh.setMatrixAt(i, this.tileMatrix(t));
       this.mesh.setColorAt(i, t.color);
       emissive.setXYZ(i, t.emissive.r, t.emissive.g, t.emissive.b);
       const o = i * seg.length;
+      // virando, o contorno some (ele é desenhado chapado)
+      const shown = t.visible && t.tilt <= 0;
       for (let k = 0; k < seg.length; k += 3) {
-        lines[o + k] = t.visible ? seg[k] + t.x : 0;
-        lines[o + k + 1] = t.visible ? seg[k + 1] + t.y : -1000;
-        lines[o + k + 2] = t.visible ? seg[k + 2] + t.z : 0;
+        lines[o + k] = shown ? seg[k] + t.x : 0;
+        lines[o + k + 1] = shown ? seg[k + 1] + t.y : -1000;
+        lines[o + k + 2] = shown ? seg[k + 2] + t.z : 0;
       }
       for (const a of t.attached) a.object.position.y = a.y + t.y;
       for (const d of this.decals) {
@@ -216,8 +231,24 @@ export class TileField {
     this.dirty.clear();
   }
 
+  /** Matriz do hexágono: no lugar, girando na virada ou escondido. */
+  private tileMatrix(t: HexTile): THREE.Matrix4 {
+    if (!t.visible || t.tilt >= TILT_HIDDEN) return ZERO;
+    this.m.makeTranslation(t.x, t.y, t.z);
+    if (t.tilt <= 0) return this.m;
+    this.m.makeTranslation(t.x, t.y + Math.sin(Math.min(t.tilt, Math.PI / 2)) * TILT_LIFT, t.z);
+    return this.m.multiply(this.turn.makeRotationAxis(this.tiltAxis, -t.tilt));
+  }
+
+  /** Gira um hexágono (virada do Modo Corrida); marca só se mudou. */
+  setTilt(tile: HexTile, tilt: number): void {
+    if (Math.abs(tile.tilt - tilt) < 1e-4) return;
+    tile.tilt = tilt;
+    this.mark(tile);
+  }
+
   private writeDecal(d: Decal, i: number, tile: HexTile): void {
-    if (!tile.visible) {
+    if (!tile.visible || tile.tilt > 0) {
       d.mesh.setMatrixAt(i, ZERO);
       return;
     }

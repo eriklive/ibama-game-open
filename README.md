@@ -554,6 +554,63 @@ aquele suspeito; o 2º no mesmo lado (ou ✕, Enter, o botão "vai atrás") conf
 aos agentes que ainda não correram. A pose animada de indecisão (cabeça varrendo, tronco para trás)
 ainda não existe: por enquanto o agente só vira o corpo.
 
+### Modo Corrida (Aeroporto)
+
+No Aeroporto, a perseguição sai do tabuleiro e vira uma **corrida em três faixas, com curvas**, no
+estilo do Temple Run. Os outros mapas continuam com a corrida no tabuleiro descrita acima.
+
+1. **A virada.** A câmera desce nas costas do agente, como sempre. Uma onda sai dos pés dele
+   para a frente: os hexágonos do tático ficam de pé e somem, e os do **mapa de corrida** chegam
+   virando, como cartas. A onda leva 1 s e a corrida não para. São dois tabuleiros, um por cima do
+   outro, com a mesma câmera (`HexBoard.setFlip`, `setBackdrop`, `setRendering`).
+2. **Qual mapa** (`runnerStart`, em `src/app/game/runner-maps.ts`). A rota travada da fuga decide:
+   - se passa por dentro do hangar, **mapa A**: pista de terra → pátio → hangar → porta dos fundos →
+     mata;
+   - se contorna o hangar, **mapa B**: pista → pátio → por fora, colado na parede leste do hangar →
+     mata.
+3. **Qual lado.** Depende de onde o garimpeiro está no tático:
+   - **à direita** do meio do hangar: no mapa A, a pista passa à direita do avião, **vira à esquerda**
+     por trás dele e sai pela porta dos fundos do oeste **virando à direita** (2 curvas no hangar);
+   - **à esquerda**: tudo espelhado.
+
+   A mata espelha junto. Ela tem **4 curvas**: vai para um lado, sobe, volta e sobe de novo.
+4. **Onde começa.** A zona tática em que o suspeito estava escolhe a zona de largada: pista (com 2
+   hexágonos de beira), pátio, hangar, fundos ou mata. **Fora da pista é sempre o trecho de mata.**
+   Da casa, por enquanto, também vai para a mata.
+5. **Os mapas de corrida** são gerados em volta de um **caminho** de trechos retos ligados por
+   esquinas de 90° (`runner-path.ts`). Cada trecho tem 3 faixas, a 3 unidades uma da outra.
+   - Dentro do hangar, a pista é um corredor entre duas paredes de caixas.
+   - O avião, pousado de barriga, fica ao lado da pista e a asa (a 1,57 m) cobre a faixa mais
+     perto dele.
+   - A porta dos fundos é do tamanho da pista.
+6. **A corrida** (`RunnerRace`, em `src/app/game/runner.ts`). Os dois correm a 4 fileiras/s e o
+   agente corre sozinho. O jogador só faz os gestos:
+
+   | Gesto | Teclado | Toque | Controle | Para quê |
+   |---|---|---|---|---|
+   | Trocar de faixa | ←/→ ou A/D | arrastar para o lado | direcional ou analógico | desviar de carga alta |
+   | **Virar** (perto da curva) | ←/→ ou A/D | arrastar para o lado | direcional ou analógico | as esquinas |
+   | Pular | ↑, W ou espaço | arrastar para cima | ✕ | tora, galões, sacos, gaiolas, caixote baixo |
+   | Deslizar | ↓ ou S | arrastar para baixo | ○ | lona, galho, asa do avião |
+
+   - **Curva:** a 4 fileiras da esquina (1 s), aparece "← Curva à esquerda!" e ←/→ passa a virar em
+     vez de trocar de faixa. Se o jogador não virar, ou virar para o lado errado, o agente **bate na
+     curva** e perde **2 hexágonos**; o caminho segue assim mesmo. A câmera acompanha a direção do
+     agente (`setChaseFollow`).
+   - **Bater num obstáculo** (passar sem o gesto certo): o agente tropeça e perde **1 hexágono**.
+   - **O garimpeiro** vira sempre e sai sozinho da faixa com carga alta. Nos obstáculos de pular ou
+     deslizar ele rola **d20 + agilidade ≥ 8**; se falhar, tropeça e o agente ganha 1 hexágono.
+   - **Correr!** (C, □) continua igual.
+   - **Distância 0: agarrou.** Ele se rende, abalado.
+   - **Ele chegou ao fim do caminho: fugiu.**
+7. **A volta** (`tacticalIndex`). Onde cada um parou na corrida vira um hexágono da pista tática (o
+   caminho até ele e a rota de fuga). A onda volta, de longe até os pés, e o tabuleiro reaparece com
+   os dois ali.
+
+Os números ficam em `RUNNER_RULES` (`runner.ts`) e `RUNNER_TRANSITION` (`runner-session.ts`). Os
+objetos próprios da corrida (tora, galho, lona, galões) ficam em `runner-props.ts`. O laboratório
+`#/lab?m=A|B&v=direita|esquerda` (ou `m=tatico`) monta os mapas sozinhos para renders (`src/app/lab/`).
+
 ## Auras
 
 As auras do tabuleiro são **luz por cima do chão**, não tinta: o hexágono mantém a cor do terreno
