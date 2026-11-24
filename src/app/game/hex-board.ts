@@ -1756,7 +1756,8 @@ export class HexBoard {
       this.camTarget.copy(this.camGoal);
     } else {
       const e = m as EnemyView;
-      e.facing = e.facingGoal = -pose.yaw;
+      // o garimpeiro mede o ângulo no chão como atan2(dz, dx); o caminho, como atan2(dx, dz)
+      e.facing = e.facingGoal = Math.atan2(Math.cos(pose.yaw), Math.sin(pose.yaw));
       e.running = pose.clip === 'run';
     }
   }
