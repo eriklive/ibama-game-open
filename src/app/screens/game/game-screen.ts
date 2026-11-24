@@ -146,6 +146,9 @@ import {
 import { npcClass } from '../../game/npc-dialogue';
 import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../game/stats';
 
+/** Quanto tempo o inimigo que fugiu do mapa corre para o infinito antes do aviso. */
+const ESCAPE_RUN_MS = 2600;
+
 /** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
 const MISSION_DEADLINE = 5;
 
@@ -392,6 +395,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     effect(() => this.searchCloseBtn()?.nativeElement.focus({ preventScroll: true }));
     // ficha do d20: o foco vai para "Continuar" (o tablet do auto de abordagem foca a própria tecla)
     effect(() => this.checkCloseBtn()?.nativeElement.focus({ preventScroll: true }));
+    effect(() => this.escapeBtn()?.nativeElement.focus({ preventScroll: true }));
     // troca de modo no menu: o tabuleiro remonta o mundo em segundo plano
     effect(() => {
       const mode = this.renderMode();
@@ -1302,6 +1306,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.destroyed = true;
+    this.escapeDone?.();
     this.stopPad?.();
     this.clearTimers();
     clearTimeout(this.slowResume);
@@ -1536,18 +1541,58 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.epoch !== epoch) return shown;
     if (isBorder(this.enemy(enemy.id)!.hex, this.area)) {
       this.updateEnemy(enemy.id, { status: 'fled' });
-      this.say(`${enemy.name} fugiu do mapa!`, 'alert');
       this.sound.play('ini.foge', { at: this.enemy(enemy.id)!.hex });
-      await this.board!.removeEnemy(enemy.id);
+      await this.showEscape(enemy.id, epoch);
       return true;
     }
     return shown;
+  }
+
+  /**
+   * Fugiu do mapa: ele segue correndo para o infinito enquanto a tela escurece e aparece o aviso
+   * "O garimpeiro escapou". Só segue (e a vez passa) quando o jogador confirma.
+   */
+  protected readonly escaped = signal<{ name: string; ready: boolean } | null>(null);
+  private escapeDone?: () => void;
+  private readonly escapeBtn = viewChild('escapeOk', { read: ElementRef<HTMLButtonElement> });
+
+  private async showEscape(enemyId: string, epoch: number): Promise<void> {
+    const board = this.board;
+    const enemy = this.enemy(enemyId);
+    if (!board || !enemy) return;
+    const stale = () => this.destroyed || this.epoch !== epoch;
+    this.escaped.set({ name: enemy.name, ready: false });
+    await board.escapeEnemy(enemyId, ESCAPE_RUN_MS);
+    if (stale()) return this.escaped.set(null);
+    this.escaped.set({ name: enemy.name, ready: true });
+    this.sound.play('teste.falhou');
+    this.haptics.vibrate(80);
+    await new Promise<void>((resolve) => (this.escapeDone = resolve));
+    this.escapeDone = undefined;
+    if (stale()) return;
+    await board.removeEnemy(enemyId);
+    this.escaped.set(null);
+    this.refreshVision();
+  }
+
+  /** **Continuar** no aviso de fuga. */
+  protected closeEscape(): void {
+    if (!this.escaped()?.ready) return;
+    this.sound.play('ui.confirmar');
+    this.escapeDone?.();
   }
 
   // ---------- perseguição (ver `chase.ts`) ----------
 
   /** Teclado na perseguição: ↑ pula o caixote, G grita; Esc deixa fugir. */
   protected onKey(ev: KeyboardEvent): void {
+    if (this.escaped()) {
+      if (ev.key === 'Enter' || ev.key === ' ' || ev.key === 'Escape') {
+        ev.preventDefault();
+        this.closeEscape();
+      }
+      return;
+    }
     // Modo Corrida: setas (ou WASD) trocam de faixa, pulam e deslizam
     if (this.runner && this.runnerOn()) {
       const cmd = RUNNER_KEYS[ev.key];
@@ -2084,9 +2129,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     } else if (escapes) {
       const e = this.enemy(enemyId)!;
       this.updateEnemy(enemyId, { status: 'fled' });
-      this.say(`${e.name} escapou de ${this.nameOf(agentId)} e fugiu do mapa!`, 'alert');
       this.sound.play('ini.foge', { at: e.hex });
-      await this.board?.removeEnemy(enemyId);
+      this.board?.setChaseCamera(null);
+      await this.showEscape(enemyId, this.epoch);
+      if (!alive()) return;
     } else this.say(`${this.enemy(enemyId)!.name} escapou de ${this.nameOf(agentId)}.`, 'alert');
     this.refreshVision();
     this.sound.chaseEnd();
@@ -3744,6 +3790,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Volta tudo ao começo da partida (posições, inimigos, portas, fogo…) sem começar a vez. */
   private resetMatch(): void {
     this.epoch++;
+    this.escaped.set(null);
+    this.escapeDone?.();
     this.clearTimers();
     this.resetSlow();
     this.closeApproach();
@@ -3896,6 +3944,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * touchpad/R3 voltam para quem está na vez · Options mostra os comandos.
    */
   private padButton(b: PadButton): void {
+    // aviso de fuga: ✕ continua (e nada mais até lá)
+    if (this.escaped()) {
+      if (b === 'cross') this.closeEscape();
+      return;
+    }
     // Modo Corrida: ✕ pula, ○ desliza (□ continua sendo a corrida)
     if (this.runner && this.runnerOn() && (b === 'cross' || b === 'circle')) {
       this.runner.input(b === 'cross' ? 'up' : 'down');

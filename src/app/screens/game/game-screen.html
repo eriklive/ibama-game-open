@@ -851,6 +851,24 @@
       </div>
     </div>
   }
+  <!-- Fugiu do mapa: ele corre para o infinito, a tela escurece e o aviso espera a confirmação -->
+  @if (escaped(); as esc) {
+    <div class="escape-stage" [class.ready]="esc.ready" data-testid="escape" [attr.role]="esc.ready ? 'dialog' : null" [attr.aria-modal]="esc.ready ? 'true' : null" aria-labelledby="escape-title">
+      @if (esc.ready) {
+        <article class="escape-card">
+          <span class="escape-kicker">Fuga</span>
+          <h2 class="escape-title" id="escape-title">O garimpeiro escapou</h2>
+          <p class="escape-line">{{ esc.name }} correu para fora do mapa e sumiu na mata.</p>
+          <button type="button" class="paper debrief-btn primary escape-btn" #escapeOk (click)="closeEscape()" data-testid="escape-ok">
+            <span class="stencil">Continuar</span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+          </button>
+        </article>
+      } @else {
+        <span class="sr-only" role="status">{{ esc.name }} está fugindo do mapa…</span>
+      }
+    </div>
+  }
   <!-- Relatório da operação: confirma o encerramento e depois mostra o resultado -->
   @if (debrief(); as stage) {
     <div class="debrief-stage" role="dialog" aria-modal="true" aria-labelledby="debrief-title" data-testid="debrief">

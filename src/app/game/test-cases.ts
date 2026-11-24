@@ -112,6 +112,15 @@ export const TEST_CASES: readonly TestCase[] = [
     },
     start: { kind: 'turn', agent: 'ana' },
   },
+  {
+    id: 'fuga-do-mapa',
+    name: 'Fuga do mapa',
+    hint: 'O garimpeiro do campo de teste, em alerta e a um passo da borda, foge no turno inimigo: corre para o infinito, a tela escurece e aparece "O garimpeiro escapou". Continuar passa a vez.',
+    mapId: 'teste-12x12',
+    active: 'clara',
+    enemies: { garimpeiro: { hex: { col: 10, row: 10 }, status: 'alert' } },
+    start: { kind: 'targets', agent: 'clara', enemies: ['garimpeiro'] },
+  },
 ];
 
 export const findTestCase = (id: string | null | undefined): TestCase | undefined =>

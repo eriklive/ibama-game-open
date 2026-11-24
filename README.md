@@ -80,7 +80,9 @@ uma base vermelha; o corpo mostra para onde olham).
   hexágonos, 120° à frente). Entrar nele — mesmo só de passagem — ou ser alcançado por
   ele faz o inimigo **avistar** o agente: a base fica laranja, aparece um **!** e ele para.
 - Em alerta, no turno inimigo ele **corre** 4 passos rumo à borda mais próxima. Se
-  chegar a uma borda, **foge** do mapa. Agentes, paredes e outros inimigos bloqueiam o
+  chegar a uma borda, **foge** do mapa: ele segue correndo para fora do tabuleiro, a tela
+  escurece e aparece o aviso **O garimpeiro escapou**; **Continuar** (Enter, ✕) passa a vez
+  para o próximo agente (caso de teste **Fuga do mapa**, no Campo de teste). Agentes, paredes e outros inimigos bloqueiam o
   caminho: cercando as saídas, ele fica **encurralado**.
 
 ### Abordagem

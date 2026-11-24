@@ -1263,6 +1263,56 @@ export class HexBoard {
     this.refreshCover();
   }
 
+  /**
+   * Fuga do mapa: o inimigo continua correndo reto para fora do tabuleiro, rumo ao infinito
+   * (sempre se afastando do centro), com a câmera atrás dele, por `ms` milissegundos. Ele não
+   * some: quem tira a peça é `removeEnemy`, depois (a tela escurece por cima enquanto ele corre).
+   */
+  async escapeEnemy(id: string, ms = 2600): Promise<void> {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    e.epoch++;
+    const epoch = e.epoch;
+    const pos = e.group.position;
+    const w = this.worldBounds;
+    const b = this.bounds;
+    const cx = w ? w.x : (b.minX + b.maxX) / 2;
+    const cz = w ? w.z : (b.minZ + b.maxZ) / 2;
+    const out = new THREE.Vector2(pos.x - cx, pos.z - cz);
+    if (out.lengthSq() < 1e-4) out.set(Math.cos(e.facingGoal), Math.sin(e.facingGoal));
+    out.normalize();
+    // se ele já vinha correndo para fora, mantém o rumo (sem virar do nada)
+    const ahead = new THREE.Vector2(Math.cos(e.facingGoal), Math.sin(e.facingGoal));
+    const dir = ahead.dot(out) > 0.3 ? ahead.add(out).normalize() : out;
+    e.facingGoal = Math.atan2(dir.y, dir.x);
+    e.running = true;
+    e.alert = false;
+    e.alertSprite.visible = false;
+    const speed = RUN_SPEED * 1.5;
+    e.rig?.matchSpeed('run', speed);
+    e.rig?.play('run', 0.15);
+    const reduced = reducedMotionQuery();
+    await new Promise<void>((resolve) => {
+      const start = performance.now();
+      let last = start;
+      const step = (now: number) => {
+        if (e.epoch !== epoch || this.disposed) return resolve();
+        const dt = (now - last) / 1000;
+        last = now;
+        if (!reduced) {
+          pos.x += dir.x * speed * dt;
+          pos.z += dir.y * speed * dt;
+          // a câmera vai atrás só no começo; depois para e ele some sozinho na distância
+          if (now - start < ms * 0.4) this.camGoal.set(pos.x, 0, pos.z);
+        }
+        if (now - start < ms) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+    if (e.epoch === epoch) e.running = false;
+  }
+
   /** O inimigo sai do tabuleiro (fugiu). */
   async removeEnemy(id: string): Promise<void> {
     const e = this.enemies.get(id);

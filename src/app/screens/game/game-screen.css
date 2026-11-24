@@ -554,6 +554,39 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .debrief-btn { position: relative; width: auto; min-width: 104px; height: 44px; padding: 0 12px; }
 .debrief-btn.primary { background: var(--postit); }
 
+/* fugiu do mapa: a tela escurece enquanto ele corre para o infinito, depois o aviso */
+.escape-stage {
+  position: absolute; inset: 0;
+  display: grid; place-items: center;
+  padding: 16px;
+  z-index: 7;
+  pointer-events: auto;
+  background: radial-gradient(ellipse at center, rgba(4, 6, 4, .25) 0%, rgba(4, 6, 4, .92) 70%, #030403 100%);
+  animation: escape-dark 2.6s ease-in both;
+}
+.escape-stage.ready { animation: none; }
+.escape-card {
+  width: min(320px, 100%);
+  padding: 16px 18px 18px;
+  background: var(--paper-light);
+  box-shadow: 4px 6px 0 rgba(0, 0, 0, .5);
+  transform: rotate(-1deg);
+  text-align: center;
+  animation: slap .3s ease-out both;
+}
+.escape-kicker { font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--red-text); }
+.escape-title { margin: 2px 0 8px; font-family: var(--stencil); font-size: 24px; font-weight: 700; text-transform: uppercase; line-height: 1.1; }
+.escape-line { margin: 0; font-size: 14px; }
+.escape-btn { position: relative; margin: 16px auto 0; }
+@keyframes escape-dark {
+  0% { opacity: 0; }
+  35% { opacity: .35; }
+  100% { opacity: 1; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .escape-stage, .escape-card { animation: none; }
+}
+
 /* auto de abordagem: ver ui/approach-tablet */
 
 /* ---------- dados (d4) ---------- */
