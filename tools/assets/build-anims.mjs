@@ -26,12 +26,14 @@ const LOOPS = { Idle_Loop: 'idle', Walk_Loop: 'walk', Jog_Fwd_Loop: 'run', Crouc
  * O jogo não toca esses clipes no relógio: ele os percorre do começo ao fim no tempo do gesto
  * (`CharacterRig.scrub`), então a duração aqui só define o ritmo relativo entre os pedaços.
  * `gap` é o tempo da transição entre um pedaço e o próximo (as poses se misturam nesse trecho).
+ * Um pedaço com `início === fim` congela aquela pose pelo tempo do 5º valor.
  */
 const GESTURES = {
-  // pulo encolhido (ninja) e o pouso agachado: o pouso chega no fim, quando o pulo do jogo acaba
+  // pulo de quem foge: uma passada do sprint, com as pernas abertas, congelada no ar
   jump: [
-    ['ual2', 'NinjaJump_Start', 0.08, 0.6],
-    ['ual2', 'NinjaJump_Land', 0.0, 0.22],
+    ['ual1', 'Sprint_Loop', 0.12, 0.2],
+    ['ual1', 'Sprint_Loop', 0.2, 0.2, 0.35],
+    ['ual1', 'Sprint_Loop', 0.2, 0.3],
   ],
   // deita de lado deslizando e levanta já correndo
   slide: [
@@ -105,7 +107,7 @@ function restOf(doc, node, p) {
 
 /** Emenda os pedaços num clipe só: `{ chave: { node, path, times, values, size } }`. */
 function compose(parts) {
-  const pieces = parts.map(([src, clip, t0, t1]) => ({ doc: docs[src], tracks: tracksOf(docs[src], clip), t0, t1 }));
+  const pieces = parts.map(([src, clip, t0, t1, hold = 0]) => ({ doc: docs[src], tracks: tracksOf(docs[src], clip), t0, t1, len: Math.max(t1 - t0, hold) }));
   const keys = new Set(pieces.flatMap((p) => [...p.tracks.keys()]));
   const out = new Map();
   for (const key of keys) {
@@ -117,21 +119,16 @@ function compose(parts) {
     for (const piece of pieces) {
       const tr = piece.tracks.get(key);
       const push = (t, v) => {
-        times.push(offset + t - piece.t0);
+        times.push(offset + t);
         values.push(...v);
       };
-      if (!tr) {
-        const rest = restOf(piece.doc, node, p);
-        push(piece.t0, rest);
-        push(piece.t1, rest);
-      } else {
-        push(piece.t0, sampleAt(tr, piece.t0));
-        for (let i = 0; i < tr.times.length; i++) {
-          if (tr.times[i] > piece.t0 + 1e-4 && tr.times[i] < piece.t1 - 1e-4) push(tr.times[i], sampleAt(tr, tr.times[i]));
-        }
-        push(piece.t1, sampleAt(tr, piece.t1));
+      const at = (t) => (tr ? sampleAt(tr, t) : restOf(piece.doc, node, p));
+      push(0, at(piece.t0));
+      if (tr) {
+        for (const t of tr.times) if (t > piece.t0 + 1e-4 && t < piece.t1 - 1e-4) push(t - piece.t0, at(t));
       }
-      offset += piece.t1 - piece.t0 + GAP;
+      push(piece.len, at(piece.t1));
+      offset += piece.len + GAP;
     }
     out.set(key, { node, path: p, times, values, size });
   }
@@ -139,6 +136,9 @@ function compose(parts) {
 }
 
 // ---------- saída: a UAL1 sem boneco, com os clipes escolhidos ----------
+
+// os gestos primeiro: os loops ainda têm o nome original (um gesto pode usar um loop de fonte)
+const composed = Object.fromEntries(Object.entries(GESTURES).map(([name, parts]) => [name, compose(parts)]));
 
 const doc = docs.ual1;
 const root = doc.getRoot();
@@ -158,9 +158,9 @@ for (const a of root.listAnimations()) {
 }
 
 const nodeByName = new Map(root.listNodes().map((n) => [n.getName(), n]));
-for (const [name, parts] of Object.entries(GESTURES)) {
+for (const [name, tracks] of Object.entries(composed)) {
   const anim = doc.createAnimation(name);
-  for (const tr of compose(parts).values()) {
+  for (const tr of tracks.values()) {
     const target = nodeByName.get(tr.node);
     if (!target) continue;
     const input = doc.createAccessor().setType('SCALAR').setArray(new Float32Array(tr.times)).setBuffer(buffer);
