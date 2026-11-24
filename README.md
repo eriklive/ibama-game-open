@@ -510,7 +510,7 @@ que já está no jogo:
    dentro das construções ou pela mata a atravessar a pista à vista. Passa por portas que ele
    consegue usar (bloqueada é parede). Chegou à borda: some do mapa e a perseguição acaba.
 4. **A corrida.** A perseguição sai do tabuleiro e vira o [Modo Corrida](#modo-corrida-aeroporto).
-   **Correr!** (C, □), uma vez por perseguição: d20 + vigor vira o bônus de velocidade (%) por 5 s.
+   **Correr!** (C, □), quantas vezes quiser: d20 + vigor vira o bônus de velocidade (%) por 5 s; acabou, 3 s de recarga e pode rolar outro d20.
    Só o agente acelera.
 5. **Grito.** Oculto por enquanto.
 6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
@@ -544,7 +544,7 @@ estilo do Temple Run: o agente corre sempre no meio da pista.
 
 1. **A virada.** A câmera desce nas costas do agente, como sempre. Uma onda sai dos pés dele
    para a frente: os hexágonos do tático ficam de pé e somem, e os do **mapa de corrida** chegam
-   virando, como cartas. A onda leva 1 s e a corrida não para. São dois tabuleiros, um por cima do
+   virando, como cartas. A onda leva 0,75 s e a corrida não para. São dois tabuleiros, um por cima do
    outro, com a mesma câmera (`HexBoard.setFlip`, `setBackdrop`, `setRendering`).
 2. **Qual mapa** (`runnerStart`, em `src/app/game/runner-maps.ts`). A rota travada da fuga decide:
    - se passa por dentro do hangar, **mapa A**: pista de terra → pátio → hangar → porta dos fundos →
@@ -567,7 +567,7 @@ estilo do Temple Run: o agente corre sempre no meio da pista.
    - O avião, pousado de barriga, fica colado na pista e a asa (a 1,57 m) passa por cima do meio
      dela: é preciso deslizar.
    - A porta dos fundos é do tamanho da pista.
-6. **A corrida** (`RunnerRace`, em `src/app/game/runner.ts`). Os dois correm a 4 fileiras/s e o
+6. **A corrida** (`RunnerRace`, em `src/app/game/runner.ts`). Os dois correm a 5,5 fileiras/s e o
    agente corre sozinho, sempre no meio da pista (não há troca de faixa). O jogador só faz os
    gestos:
 
@@ -577,7 +577,7 @@ estilo do Temple Run: o agente corre sempre no meio da pista.
    | Pular | ↑, W ou espaço | arrastar para cima | ✕ | tora, galões, sacos, gaiolas, caixote baixo |
    | Deslizar | ↓ ou S | arrastar para baixo | ○ | lona, galho, asa do avião |
 
-   - **Curva:** a 4 fileiras da esquina (1 s), aparece "← Curva à esquerda!" e ←/→ vira. Longe de
+   - **Curva:** a 5 fileiras da esquina (~0,9 s), aparece "← Curva à esquerda!" e ←/→ vira. Longe de
      uma curva, ←/→ não faz nada. O agente **não vira sozinho**: até o jogador virar, ele corre reto
      para a esquina. Se não virar, ou virar para o lado errado, ele **bate na curva** e perde **2
      hexágonos**; aí encaixa no caminho e segue. A câmera acompanha a direção do agente

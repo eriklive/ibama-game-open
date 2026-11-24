@@ -94,8 +94,9 @@ describe('RunnerRace: o garimpeiro', () => {
   });
 
   it('no obstáculo de pular, rola d20 + agilidade: abaixo de 8 tropeça e o agente ganha 1', () => {
-    // o agente pula a tora a tempo (a 20 fileiras: 5 s), para só ele tropeçar
-    const jumpAt = (race: RunnerRace) => (t: number) => t >= 4.75 && t < 4.75 + 1 / 60 && race.jump();
+    // o agente pula a tora a tempo (a 20 fileiras), para só ele tropeçar
+    const at = 20 / R.rowsPerSecond - 0.25;
+    const jumpAt = (race: RunnerRace) => (t: number) => t >= at && t < at + 1 / 60 && race.jump();
     const fail = new RunnerRace({ obstacles: [ob(20, 'pular')], startAt: 0, length: 100, hexes: 3, agilidade: 0, rollEnemy: () => 7 });
     const ev = run(fail, 6, jumpAt(fail));
     const trip = ev.find((e) => e.type === 'tropecou');

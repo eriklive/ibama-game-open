@@ -24,7 +24,7 @@ import { CORNER_RADIUS, S3, pathLength, pathPose, pathTurns, straightPose } from
 import { buildRunnerProps } from './runner-props';
 
 /** Tempos da virada (ms) e até onde a onda vai (mundo: passa do fim da névoa da câmera rasante). */
-export const RUNNER_TRANSITION = { enterMs: 1000, leaveMs: 900, reach: 46, from: -3 } as const;
+export const RUNNER_TRANSITION = { enterMs: 750, leaveMs: 700, reach: 46, from: -3 } as const;
 
 /** Altura do pulo (mundo) e quanto o corpo inclina no tropeço sem animação própria (rad). */
 const JUMP_HEIGHT = 1.1;
@@ -33,9 +33,9 @@ const STUMBLE_LEAN = 0.35;
 const TURN_BLEND = 0.22;
 /**
  * Velocidade da animação de corrida (1 = a do clipe). O sprint do clipe corre 8,25 m/s e a pista
- * anda ~5,2 m/s: a 0,85 a passada fica um pouco longa, mas o ritmo das pernas é o de quem foge.
+ * anda ~7,2 m/s: a 1,05 a passada fica um pouco longa, mas o ritmo das pernas é o de quem foge.
  */
-const RUN_ANIM = 0.85;
+const RUN_ANIM = 1.05;
 /**
  * "Drift" na curva: o corpo inclina para dentro, proporcional a quanto a direção gira (rad por
  * fileira), até `DRIFT_MAX`. `DRIFT_LOOK` é quanto (fileiras) à frente e atrás se mede o giro.

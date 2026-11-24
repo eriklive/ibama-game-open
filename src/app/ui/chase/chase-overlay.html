@@ -25,12 +25,12 @@
   </div>
 }
 
-<!-- Perseguição: corrida, uma vez por perseguição. O d20 (teste de vigor) pula do botão, mostra o bônus e some. -->
+<!-- Perseguição: corrida, quantas vezes quiser (com recarga). O d20 (teste de vigor) pula do botão, mostra o bônus e some. -->
 @if (hud() && sprint(); as sp) {
   <button
     type="button"
     class="sprint-btn"
-    [class.used]="sp.state === 'used'"
+    [class.used]="sp.state === 'cooldown'"
     [disabled]="sp.state !== 'ready'"
     data-testid="chase-sprint"
     [attr.aria-label]="sprintLabel(sp)"
@@ -39,9 +39,11 @@
     <span class="sprint-sub">{{ sprintSub(sp) }}</span>
     @if (sp.state === 'active') {
       <span class="sprint-timer" aria-hidden="true"><i [style.animation-duration.ms]="sp.ms"></i></span>
+    } @else if (sp.state === 'cooldown') {
+      <span class="sprint-timer cooldown" aria-hidden="true"><i [style.animation-duration.ms]="sp.ms"></i></span>
     }
   </button>
-  @if (sp.roll !== null && sp.state !== 'used') {
+  @if (sp.roll !== null && (sp.state === 'rolling' || sp.state === 'active')) {
     <div class="sprint-pop" data-testid="sprint-pop" aria-hidden="true">
       <app-d20 class="sprint-die" [value]="sp.roll" [duration]="dieMs" />
       @if (sp.state === 'active') {

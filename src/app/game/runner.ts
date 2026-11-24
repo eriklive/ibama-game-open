@@ -24,7 +24,7 @@ import type { PathTurn, Side } from './runner-path';
 
 export const RUNNER_RULES = {
   /** Velocidade dos dois (fileiras do caminho por segundo). */
-  rowsPerSecond: 4,
+  rowsPerSecond: 5.5,
   /** Fileiras do caminho por hexágono do placar (o mapa é esticado ~2,5× na corrida). */
   rowsPerHex: 2,
   /** Encostou: a esta distância (fileiras) ele está agarrado. */
@@ -34,10 +34,10 @@ export const RUNNER_RULES = {
   /** Bater na curva custa isto (fileiras): 2 hexágonos. */
   curveRows: 4,
   /** Pulo e deslize (s): o gesto cobre o obstáculo se estiver no ar (ou no chão) ao passar. */
-  jumpSeconds: 0.7,
-  slideSeconds: 0.8,
-  /** Curva: a quantas fileiras da esquina ← e → passam a virar (1 s de corrida). */
-  turnWindow: 4,
+  jumpSeconds: 0.6,
+  slideSeconds: 0.7,
+  /** Curva: a quantas fileiras da esquina ← e → passam a virar (~0,9 s de corrida). */
+  turnWindow: 5,
   /** Curva: até quantas fileiras depois da esquina ainda dá para virar. */
   turnGrace: 0.6,
   /** Garimpeiro: d20 + agilidade, pelo menos isto, em cada obstáculo de pular ou deslizar. */
