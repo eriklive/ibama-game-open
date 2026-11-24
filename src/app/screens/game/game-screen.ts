@@ -116,7 +116,7 @@ import {
   toBack,
   toFront,
 } from '../../game/group';
-import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
+import { AIM_PATTERN, APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-tablet';
 import { HexCoord, hexDistance, hexKey, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
@@ -424,9 +424,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.phase() === 'moving-choice' && !this.search() && !this.aiming() &&
         !this.approaching() && !this.grouping() && !this.burning();
       this.board?.showTargetOutlines(free);
-      // alvo já tocado uma vez (o caminho até ele está marcado): contorno maior, amarelo e intenso
+      // alvo já tocado uma vez (o caminho até ele está marcado): contorno maior e amarelo, fantasma
+      // do agente no destino, pontos correndo no caminho, arco até o alvo e o balão do segundo toque
+      const target = free ? this.armedTarget() : null;
       const aim = this.aimedTarget();
-      this.board?.setArmedTarget(free && aim && sameHex(aim.hex, this.selected()) ? aim.id : null);
+      const cost = this.selectedCost();
+      this.board?.setTargetAim(
+        target && aim
+          ? {
+              id: target.id,
+              unitId: this.active().id,
+              dest: aim.hex,
+              path: this.selectedPath(),
+              label: `Toque de novo para ir · ${cost} ${cost === 1 ? 'passo' : 'passos'}`,
+            }
+          : null,
+      );
     });
     // cartão em foco no interrogatório (controle): o foco do teclado acompanha
     effect(() => {
@@ -2294,13 +2307,24 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.selected.set(best);
     this.aimedTarget.set({ id: target.id, hex: best });
     this.cursor.set(best);
-    this.sound.play('ui.hex');
-    this.sound.play('ui.caminho', { delay: 0.06 });
+    // "trava-mira": som e vibração próprios, diferentes do toque comum num hexágono
+    this.sound.play('ui.mira');
+    this.sound.play('ui.caminho', { delay: 0.2 });
+    this.haptics.vibrate(AIM_PATTERN);
     this.board?.setSelected(this.selected(), this.selectedPath());
   }
 
   /** Alvo escolhido por toque e o hexágono colado nele para onde o agente vai andar. */
   private readonly aimedTarget = signal<{ id: string; hex: HexCoord } | null>(null);
+  /**
+   * Alvo tocado uma vez cujo caminho ainda está marcado (o destino não mudou): o Confirmar vira
+   * "Ir até o avião" e o tabuleiro mostra que o agente vai andar até lá.
+   */
+  protected readonly armedTarget = computed<Burnable | null>(() => {
+    const aim = this.aimedTarget();
+    if (!aim || !sameHex(aim.hex, this.selected()) || this.phase() !== 'moving-choice') return null;
+    return (this.map?.burnables ?? []).find((t) => t.id === aim.id && !this.burned().has(t.id)) ?? null;
+  });
 
   /** A ação de um alvo colado no agente: o avião abre o menu de inspecionar; o resto, o "Queimar". */
   private actOn(target: Burnable): void {

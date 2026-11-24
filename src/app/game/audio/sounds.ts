@@ -769,6 +769,7 @@ export function fireLoop(
 export type SoundId =
   | 'ui.hex'
   | 'ui.caminho'
+  | 'ui.mira'
   | 'ui.confirmar'
   | 'ui.invalido'
   | 'ui.vez-agente'
@@ -821,6 +822,12 @@ export const SOUNDS: Readonly<Record<SoundId, (e: AudioEngine, t: number) => voi
     [880, 988, 1175, 1319].forEach((f, i) =>
       e.tone({ t: t + i * 0.04, type: 'triangle', f, dur: 0.14, gain: 0.04, bus: 'ui' }),
     ),
+  // alvo tocado uma vez: "trava-mira" — dois bipes agudos e um tom que sobe
+  'ui.mira': (e, t) => {
+    e.tone({ t, type: 'square', f: 1760, dur: 0.035, gain: 0.035, bus: 'ui', lp: 4000 });
+    e.tone({ t: t + 0.06, type: 'square', f: 1760, dur: 0.035, gain: 0.035, bus: 'ui', lp: 4000 });
+    e.tone({ t: t + 0.12, type: 'triangle', f: 880, f2: 1320, dur: 0.18, gain: 0.07, bus: 'ui' });
+  },
   'ui.confirmar': (e, t) => {
     e.tone({ t, type: 'triangle', f: 660, dur: 0.09, gain: 0.13, bus: 'ui' });
     e.tone({ t: t + 0.07, type: 'triangle', f: 990, dur: 0.16, gain: 0.13, bus: 'ui' });

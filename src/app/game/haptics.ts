@@ -6,6 +6,8 @@ const STORAGE_KEY = 'ibama.vibration';
 export const ROLL_PATTERN: readonly number[] = [35, 110, 28, 170, 22, 240, 16, 320, 10];
 /** Toque curto quando os dados param e o resultado aparece. */
 export const SETTLE_PATTERN: readonly number[] = [45];
+/** Alvo tocado uma vez ("trava-mira"): dois toques curtinhos. */
+export const AIM_PATTERN: readonly number[] = [14, 45, 24];
 /** O grito da abordagem: uma pancada forte e um eco. */
 export const APPROACH_PATTERN: readonly number[] = [70, 50, 30];
 
