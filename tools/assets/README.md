@@ -5,27 +5,34 @@ Os pacotes não ficam no repositório (são ~140 MB); só o resultado otimizado 
 
 ## Passo a passo
 
-1. Baixe a versão grátis (Standard) dos dois pacotes e descompacte:
+1. Baixe a versão grátis (Standard) dos pacotes e descompacte:
    - Universal Base Characters: https://quaternius.itch.io/universal-base-characters
    - Universal Animation Library: https://quaternius.itch.io/universal-animation-library
+   - Universal Animation Library 2: https://quaternius.itch.io/universal-animation-library-2
+     (também em https://opengameart.org/content/universal-animation-library-2, com link direto)
+
+   A UAL 1 do OpenGameArt é uma versão antiga, com outro esqueleto: baixe a do itch.io.
 2. Rode:
 
 ```bash
 cd tools/assets
 npm install
-node build-assets.mjs \
-  "/caminho/Universal Base Characters[Standard]" \
+# personagens
+node build-assets.mjs "/caminho/Universal Base Characters[Standard]" ../../public/assets
+# clipes
+node build-anims.mjs \
   "/caminho/Universal Animation Library[Standard]" \
+  "/caminho/Universal Animation Library 2 [Standard]" \
   ../../public/assets
 ```
 
-Para refazer só alguns personagens, acrescente `--only=ana,cacador` ao comando.
+Para refazer só alguns personagens, acrescente `--only=ana,cacador` ao primeiro comando.
 
 O build grava a **base** de cada personagem (corpo, cabelo, roupa pintada, acessórios simples).
 O equipamento com volume entra num segundo passo, o **refit**:
 
 ```bash
-node build-assets.mjs "<UBC>" "<UAL>" base   # só quando mudar corpo, cabelo ou roupa pintada
+node build-assets.mjs "<UBC>" base          # só quando mudar corpo, cabelo ou roupa pintada
 node refit.mjs                               # base/ → ../../public/assets (aceita --only=ana)
 ```
 
@@ -48,9 +55,17 @@ refit, **sem baixar os pacotes da Quaternius**.
   - Tinge o cabelo. A textura original é neutra, porque a versão paga tinge por shader.
   - Remove mapas de normal e de rugosidade, cores de vértice do corpo e UVs extras.
   - Textura do corpo em 1024 px (JPEG); cabelo em 512 px; malha comprimida com meshopt.
-- **Clipes (`anims/humanoid-base.glb`):**
-  - Pega `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop` e `Crouch_Idle_Loop` do arquivo sem root motion.
-  - Renomeia para `idle`, `walk`, `run` e `crouch`.
+- **Clipes (`anims/humanoid-base.glb`, por `build-anims.mjs`):**
+  - Loops, do arquivo sem root motion da UAL 1: `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop`,
+    `Crouch_Idle_Loop` e `Sprint_Loop`, renomeados para `idle`, `walk`, `run`, `crouch` e `sprint`.
+  - Gestos do Modo Corrida, emendados de pedaços das duas bibliotecas (tabela `GESTURES`):
+    - `jump`: `NinjaJump_Start` + o começo de `NinjaJump_Land` (UAL 2), pulo encolhido e pouso agachado;
+    - `slide`: `Slide_Start` + `Slide_Exit` (UAL 2), deita deslizando e levanta correndo;
+    - `trip`: um trecho de `Jump_Land` (UAL 1), agacha com as mãos perto do chão e se recupera;
+    - `crash`: `Hit_Knockback` + `Slide_Exit` (UAL 2), bate, cai de costas e levanta correndo.
+
+    O jogo não toca os gestos no relógio: percorre cada um do começo ao fim no tempo da regra
+    (`CharacterRig.scrub`), então o pulo dura o que o pulo dura em `runner.ts`.
   - Descarta o boneco e comprime as curvas.
 
 ## O que o refit faz (`refit.mjs` + `lib/kit.mjs`)

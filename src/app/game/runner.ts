@@ -66,7 +66,11 @@ export interface RunnerPose {
   action: RunnerAction;
   /** De 0 a 1 dentro da ação (pulo, deslize, tropeço). */
   t: number;
+  /** Tropeçando: num obstáculo ou na parede de uma curva (para escolher a animação). */
+  fall?: RunnerFall;
 }
+
+export type RunnerFall = 'obstaculo' | 'curva';
 
 export type RunnerEvent =
   | { type: 'pulo' | 'deslize'; who: RunnerWho }
@@ -104,6 +108,8 @@ interface Runner {
   /** Tempo restante da ação (s) e a duração dela. */
   left: number;
   span: number;
+  /** Por que tropeçou (só vale com `action === 'tropeca'`). */
+  fall?: RunnerFall;
   /** Obstáculos já resolvidos (índice em `obstacles`). */
   done: Set<number>;
 }
@@ -188,7 +194,8 @@ export class RunnerRace {
 
   pose(who: RunnerWho): RunnerPose {
     const r = who === 'agente' ? this.agent : this.enemy;
-    return { at: r.at, action: r.action, t: r.span ? 1 - r.left / r.span : 0 };
+    const t = r.span ? 1 - r.left / r.span : 0;
+    return r.action === 'tropeca' ? { at: r.at, action: r.action, t, fall: r.fall } : { at: r.at, action: r.action, t };
   }
 
   /** A próxima curva do agente, se ele está na janela dela. */
@@ -269,7 +276,7 @@ export class RunnerRace {
       if (passed) st.done = true;
       else if ((wrong && at >= t.at) || late) {
         st.done = true;
-        this.stumble(this.agent, RUNNER_RULES.curveRows);
+        this.stumble(this.agent, RUNNER_RULES.curveRows, 'curva');
         out.push({ type: 'bateu-curva', side: t.side, wrong });
       }
     });
@@ -312,7 +319,7 @@ export class RunnerRace {
       if (who === 'agente') {
         if (clears(o.move, acting)) out.push({ type: 'passou', who, obstacle: o });
         else {
-          this.stumble(r, RUNNER_RULES.hitRows);
+          this.stumble(r, RUNNER_RULES.hitRows, 'obstaculo');
           out.push({ type: 'bateu', obstacle: o });
         }
         return;
@@ -321,14 +328,15 @@ export class RunnerRace {
       const roll = this.rollEnemy();
       if (roll + this.agilidade >= RUNNER_RULES.enemyDC) out.push({ type: 'passou', who, obstacle: o });
       else {
-        this.stumble(r, RUNNER_RULES.hitRows);
+        this.stumble(r, RUNNER_RULES.hitRows, 'obstaculo');
         out.push({ type: 'tropecou', obstacle: o, roll, need: RUNNER_RULES.enemyDC - this.agilidade });
       }
     });
   }
 
-  private stumble(r: Runner, rows: number): void {
+  private stumble(r: Runner, rows: number, fall: RunnerFall): void {
     r.action = 'tropeca';
+    r.fall = fall;
     r.span = r.left = rows / RUNNER_RULES.rowsPerSecond;
   }
 }

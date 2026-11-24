@@ -139,6 +139,20 @@ describe('RunnerRace: curvas', () => {
     expect(race.distance()).toBe(4);
   });
 
+  it('a pose diz por que tropeçou: obstáculo ou parede da curva', () => {
+    const until = (race: RunnerRace, type: RunnerEvent['type']) => {
+      for (let i = 0; i < 600; i++) if (race.step(1 / 60).some((e) => e.type === type)) return;
+    };
+    const wall = new RunnerRace({ obstacles: [], turns: [turn(10, 'direita')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
+    until(wall, 'bateu-curva');
+    expect(wall.pose('agente')).toMatchObject({ action: 'tropeca', fall: 'curva' });
+    const log = new RunnerRace({ obstacles: [ob(5, 'pular')], startAt: 0, length: 100, hexes: 3, rollEnemy: () => 20 });
+    until(log, 'bateu');
+    expect(log.pose('agente')).toMatchObject({ action: 'tropeca', fall: 'obstaculo' });
+    // correndo, não tem motivo nenhum
+    expect(new RunnerRace({ obstacles: [], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 }).pose('agente').fall).toBeUndefined();
+  });
+
   it('virar para o lado errado: bate na esquina', () => {
     const race = new RunnerRace({ obstacles: [], turns: [turn(10, 'direita')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     const ev = run(race, 5, () => {
