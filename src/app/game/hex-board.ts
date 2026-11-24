@@ -1749,15 +1749,18 @@ export class HexBoard {
     const hex = worldToHex(pose.x, pose.z, HEX_SIZE);
     m.hex = hex;
     // na corrida, de frente para onde o caminho vai (a curva já vem suave do caminho)
-    m.group.rotation.y = pose.yaw;
     if (who === 'unit') {
+      m.group.rotation.y = pose.yaw;
       (m as UnitView).yaw = pose.yaw;
       this.camGoal.set(pose.x, 0, pose.z);
       this.camTarget.copy(this.camGoal);
     } else {
       const e = m as EnemyView;
-      // o garimpeiro mede o ângulo no chão como atan2(dz, dx); o caminho, como atan2(dx, dz)
+      // o garimpeiro mede o ângulo no chão como atan2(dz, dx) (o modelo dele já vem girado 90°
+      // dentro do grupo) e o grupo gira para −facing; o caminho mede como atan2(dx, dz). O grupo
+      // gira aqui mesmo, para nenhum quadro sair com o ângulo do caminho (ele de lado)
       e.facing = e.facingGoal = Math.atan2(Math.cos(pose.yaw), Math.sin(pose.yaw));
+      e.group.rotation.y = -e.facing;
       e.running = pose.clip === 'run';
     }
   }
