@@ -15,7 +15,6 @@ import {
   ChalkHex,
   LessonId,
   TALK,
-  approachBands,
   chalkCenter,
   chalkHexes,
   hexPolygon,
@@ -56,6 +55,10 @@ interface ChalkMap {
     text: string;
     cls: string;
     anchor?: 'start' | 'middle' | 'end';
+    /** Tamanho da letra (unidades do desenho); sem ele, o da classe. */
+    size?: number;
+    /** Inclinação (graus), girando em volta do próprio ponto. */
+    rotate?: number;
   }[];
   pieces: Piece[];
   /** Tamanho das peças (mapas com muitos anéis precisam de peças maiores para ler). */
@@ -70,7 +73,10 @@ interface Page {
   notes: { text: string; chip?: string; tone?: 'surrender' | 'roll' | 'flee' | 'talk' | 'muted' }[];
   /** Linha miúda embaixo das frases (regras de canto). */
   rule?: string;
-  photo?: { src: string; caption: string };
+  /** Recado a giz no canto de cima à direita do desenho, uma linha por item. */
+  tip?: string[];
+  /** Embaixo das frases: uma foto colada com uma anotação ao lado. */
+  aside?: { text: string; photo?: { src: string; caption: string } };
 }
 
 const at = (q: number, r: number) => chalkCenter(q, r, HEX);
@@ -113,15 +119,30 @@ function ringsMap(z: ApproachZones): ChalkMap {
             ? 'flee'
             : 'out';
   const inBand = (k: string) => all.filter((h) => band(h.d) === k);
-  // garimpeiros: um em cada faixa (nos anéis do meio de cada uma)
+  // garimpeiros: um em cada faixa, longe do corredor de baixo à direita, onde vão os nomes
   const sAt = { q: 1, r: -Math.max(1, z.surrenderRange - 1) };
   const rollD = Math.ceil((z.surrenderRange + 1 + z.rollRange) / 2);
   const rAt = { q: -rollD, r: Math.ceil(rollD / 2) };
-  const fAt = { q: Math.ceil(R / 2), r: R - Math.ceil(R / 2) };
+  const fAt = { q: -Math.floor(R / 2), r: R };
   const s = at(sAt.q, sAt.r);
   const r = at(rAt.q, rAt.r);
   const f = at(fAt.q, fAt.r);
-  const out = at(fAt.q + 1, fAt.r + 1);
+  const out = at(fAt.q - 1, fAt.r + 1);
+  // o nome de cada faixa, escrito grande ao longo da face de baixo à direita (inclinado -30°)
+  const size = 2.7 * (R + 1);
+  const face = (d: number) => at(d / 2, d / 2);
+  const zone = (d: number, text: string, cls: string) => {
+    const c = face(d);
+    return {
+      x: c.x,
+      y: c.y + size / 3,
+      text,
+      cls: `zone ${cls}`,
+      anchor: 'middle' as const,
+      size,
+      rotate: -30,
+    };
+  };
   return {
     viewBox: box(R + 1, 8, 8),
     pieceScale: Math.max(1.6, R / 4),
@@ -133,7 +154,7 @@ function ringsMap(z: ApproachZones): ChalkMap {
     strokes: [
       // fuga: a seta sai da faixa vermelha para fora
       {
-        d: `M${f.x + 4} ${f.y + 3}Q${(f.x + out.x) / 2 + 6} ${(f.y + out.y) / 2} ${out.x + 6} ${out.y + 4}`,
+        d: `M${f.x - 4} ${f.y + 3}Q${(f.x + out.x) / 2 - 6} ${(f.y + out.y) / 2} ${out.x - 6} ${out.y + 4}`,
         cls: 'flee',
         arrow: true,
       },
@@ -147,6 +168,9 @@ function ringsMap(z: ApproachZones): ChalkMap {
         const c = at(0, -d);
         return { x: c.x, y: c.y + 4.5, text: `${d}`, cls: `num ${k}`, anchor: 'middle' as const };
       }),
+      zone(z.surrenderRange * 0.55, 'Preso', 'surrender'),
+      zone((z.surrenderRange + 1 + z.rollRange) / 2, 'Tenta fugir', 'roll'),
+      zone(R + 1.9, 'Foge', 'flee'),
     ],
     pieces: [
       { kind: 'agent', x: 0, y: 0 },
@@ -166,24 +190,34 @@ function talkMap(): ChalkMap {
   const white = { q: 3, r: -1 };
   const dist = (h: { q: number; r: number }, c: { q: number; r: number }) =>
     Math.max(Math.abs(h.q - c.q), Math.abs(h.r - c.r), Math.abs(h.q - c.q + h.r - c.r));
-  const walk = [
-    { q: -3, r: 3 },
-    { q: -2, r: 2 },
-    { q: -2, r: 1 },
+  // a rota do agente até o raio laranja: hexágonos acesos, como o caminho no jogo
+  const route = [
+    { q: -4, r: 3 },
+    { q: -4, r: 2 },
+    { q: -3, r: 1 },
+    { q: -2, r: 0 },
   ];
-  const agent = at(-3, 3);
-  const stop = at(-2, 1);
+  const onRoute = (h: { q: number; r: number }) =>
+    route.findIndex((p) => p.q === h.q && p.r === h.r);
+  const start = at(route[0].q, route[0].r);
+  const stop = at(route[route.length - 1].q, route[route.length - 1].r);
   const o = at(orange.q, orange.r);
   const w = at(white.q, white.r);
   const cls = (h: ChalkHex) => {
+    const i = onRoute(h);
+    if (i === route.length - 1) return 'route-end';
+    if (i > 0) return 'route';
     if (dist(h, orange) <= TALK.radius) return dist(h, orange) === 0 ? 'talk-center' : 'talk';
     if (dist(h, white) <= TALK.radius) return dist(h, white) === 0 ? 'muted-center' : 'muted';
     return 'out';
   };
-  // pista nova: uma seta a giz chega no branco (ele pode ganhar assunto)
-  const clue = { x: w.x + 12, y: w.y - 30 };
+  // nomes fora dos raios, com uma seta da mesma cor
+  const hasTalk = { x: o.x + 12, y: o.y - 40 };
+  const nothing = { x: w.x + 6, y: w.y + 44 };
+  // o botão que aparece no jogo, rabiscado a giz no canto de baixo
+  const button = { x: o.x + 4, y: o.y + 58 };
   return {
-    viewBox: box(R, 12, 8),
+    viewBox: box(R, 12, 14),
     hexes: all.map((h) => ({ ...poly(h), cls: cls(h), d: h.d })),
     outlines: [
       {
@@ -202,21 +236,35 @@ function talkMap(): ChalkMap {
       },
     ],
     strokes: [
-      { d: path(walk), cls: 'agent-path', arrow: true },
+      { d: path(route), cls: 'route-line', arrow: true },
       {
-        d: `M${clue.x + 8} ${clue.y + 3}Q${w.x + 26} ${w.y - 14} ${w.x + 11} ${w.y - 8}`,
-        cls: 'talk dashed-clue',
+        d: `M${hasTalk.x - 2} ${hasTalk.y + 4}Q${o.x + 10} ${o.y - 28} ${o.x + 5} ${o.y - 18}`,
+        cls: 'talk',
+        arrow: true,
+      },
+      {
+        d: `M${nothing.x} ${nothing.y - 10}Q${w.x - 8} ${w.y + 28} ${w.x - 4} ${w.y + 19}`,
+        cls: 'muted-line',
+        arrow: true,
+      },
+      // botão "Conversar" a giz, ligado ao fim da rota
+      {
+        d: `M${button.x - 26} ${button.y - 8}h52v16h-52z`,
+        cls: 'talk button-box',
+      },
+      {
+        d: `M${stop.x + 4} ${stop.y + 10}Q${stop.x + 8} ${button.y - 22} ${button.x - 10} ${button.y - 11}`,
+        cls: 'talk',
         arrow: true,
       },
     ],
     labels: [
-      { x: o.x, y: o.y - 19, text: 'tem assunto', cls: 'small talk', anchor: 'middle' },
-      { x: w.x, y: w.y + 25, text: 'nada a falar', cls: 'small', anchor: 'middle' },
-      { x: clue.x, y: clue.y, text: 'pista nova', cls: 'small talk', anchor: 'middle' },
-      { x: stop.x - 11, y: stop.y + 3, text: 'pare aqui', cls: 'small talk', anchor: 'end' },
-      { x: agent.x, y: agent.y + 15, text: 'agente', cls: 'small', anchor: 'middle' },
+      { x: hasTalk.x, y: hasTalk.y, text: 'tem assunto', cls: 'mid talk', anchor: 'middle' },
+      { x: nothing.x, y: nothing.y, text: 'nada a falar', cls: 'mid', anchor: 'middle' },
+      { x: button.x, y: button.y + 3.5, text: 'Conversar', cls: 'small talk', anchor: 'middle' },
     ],
     pieces: [
+      { kind: 'agent', ...start },
       { kind: 'surrendered', ...o },
       { kind: 'surrendered', ...w },
     ],
@@ -258,8 +306,6 @@ export class TacticalBoard {
 
   protected readonly scale = `scale(${CHALK_SCALE})`;
   protected readonly page = signal(0);
-  /** Tela deitada: com foto, o mapa vai para a direita e a foto fica à esquerda dele. */
-  protected readonly landscape = signal(false);
   protected readonly closing = signal(false);
 
   protected readonly heading = computed(() =>
@@ -283,28 +329,21 @@ export class TacticalBoard {
       ];
     }
     const z = this.zones();
-    const [s, r, f] = approachBands(z);
     const chase = this.hasChase();
     return [
       {
         kicker: 'Garimpeiro à vista',
         title: 'Abordagem',
         map: ringsMap(z),
-        notes: [
-          { chip: s.range, text: '*Se rende*', tone: 'surrender' },
-          {
-            chip: r.range,
-            text: `*Rola d20*: ${APPROACH_RULES.escapeDC}+ escapa, senão se rende`,
-            tone: 'roll',
-          },
-          {
-            chip: f.range,
-            text: chase ? '*Foge* e vira perseguição' : '*Foge* para a saída do mapa',
-            tone: 'flee',
-          },
-        ],
+        notes: [],
         rule: 'Parede bloqueia · abordar encerra a vez',
-        photo: chase ? { src: 'tutorial/perseguicao.jpg', caption: 'Perseguição' } : undefined,
+        tip: ['dica:', 'se posicione', 'melhor para', 'evitar fugas!'],
+        aside: chase
+          ? {
+              text: 'Se um suspeito fugir, os agentes ainda podem *ir atrás dele*.',
+              photo: { src: 'tutorial/perseguicao.jpg', caption: 'Perseguição' },
+            }
+          : { text: 'Quem foge corre para a *saída do mapa*. Feche o caminho antes.' },
       },
     ];
   });
@@ -315,13 +354,6 @@ export class TacticalBoard {
   protected readonly last = computed(() => this.page() >= this.pages().length - 1);
 
   constructor() {
-    if (typeof matchMedia === 'function') {
-      const mq = matchMedia('(orientation: landscape)');
-      const sync = () => this.landscape.set(mq.matches);
-      sync();
-      mq.addEventListener('change', sync);
-      inject(DestroyRef).onDestroy(() => mq.removeEventListener('change', sync));
-    }
     // trocou de lição (rever pelo menu): volta para a primeira página
     effect(() => {
       this.lesson();

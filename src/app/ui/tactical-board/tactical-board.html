@@ -62,15 +62,13 @@
       </button>
     </header>
 
-    <figure class="sketch" [class.with-photo]="!!current().photo">
+    <figure class="sketch">
       @let m = current().map;
       @for (k of [page()]; track k) {
         <svg
           class="map"
           [attr.viewBox]="m.viewBox"
-          [attr.preserveAspectRatio]="
-            landscape() && current().photo ? 'xMaxYMid meet' : 'xMidYMid meet'
-          "
+          [attr.preserveAspectRatio]="'xMidYMid meet'"
           role="img"
           [attr.aria-label]="'Mapa visto de cima: ' + current().title"
         >
@@ -132,6 +130,11 @@
                   [attr.y]="l.y"
                   [attr.class]="'label ' + l.cls"
                   [attr.text-anchor]="l.anchor ?? 'start'"
+                  [attr.font-size]="l.size ?? null"
+                  [style.stroke-width]="l.size ? l.size * 0.28 : null"
+                  [attr.transform]="
+                    l.rotate ? 'rotate(' + l.rotate + ' ' + l.x + ' ' + l.y + ')' : null
+                  "
                 >
                   {{ l.text }}
                 </text>
@@ -140,29 +143,47 @@
           </g>
         </svg>
       }
-      @if (current().photo; as ph) {
-        <div class="photo">
-          <span class="tape" aria-hidden="true"></span>
-          <img [src]="ph.src" [alt]="'Foto: ' + ph.caption" draggable="false" />
-          <figcaption>{{ ph.caption }}</figcaption>
-        </div>
+      @if (current().tip; as tip) {
+        <p class="tip" aria-label="Dica">
+          @for (line of tip; track $index) {
+            <span [class.tip-head]="$first">{{ line }}</span>
+          }
+        </p>
       }
     </figure>
 
-    <ul class="notes" role="list">
-      @for (n of current().notes; track $index) {
-        <li [attr.class]="(n.tone ?? '') + (n.chip ? ' has-chip' : '')" [style.--i]="$index">
-          @if (n.chip) {
-            <span class="chip">{{ n.chip }}</span>
+    @if (current().aside; as note) {
+      <div class="aside">
+        @if (note.photo; as ph) {
+          <div class="photo">
+            <span class="tape" aria-hidden="true"></span>
+            <img [src]="ph.src" [alt]="'Foto: ' + ph.caption" draggable="false" />
+            <span class="caption">{{ ph.caption }}</span>
+          </div>
+        }
+        <p class="aside-text">
+          @for (part of parts(note.text); track $index) {
+            <span [class.em]="part.em">{{ part.t }}</span>
           }
-          <span class="txt">
-            @for (part of parts(n.text); track $index) {
-              <span [class.em]="part.em">{{ part.t }}</span>
+        </p>
+      </div>
+    }
+    @if (current().notes.length) {
+      <ul class="notes" role="list">
+        @for (n of current().notes; track $index) {
+          <li [attr.class]="(n.tone ?? '') + (n.chip ? ' has-chip' : '')" [style.--i]="$index">
+            @if (n.chip) {
+              <span class="chip">{{ n.chip }}</span>
             }
-          </span>
-        </li>
-      }
-    </ul>
+            <span class="txt">
+              @for (part of parts(n.text); track $index) {
+                <span [class.em]="part.em">{{ part.t }}</span>
+              }
+            </span>
+          </li>
+        }
+      </ul>
+    }
     @if (current().rule; as rule) {
       <p class="rule">{{ rule }}</p>
     }
