@@ -14,7 +14,7 @@
  */
 import { HexBoard } from './hex-board';
 import { GameMap } from './maps';
-import { ModelDef } from './character-model';
+import { ClipName, ModelDef } from './character-model';
 import { HexCoord, hexToWorld, worldToHex } from './hex';
 import { RenderProfile } from './render-settings';
 import { spawnDoors } from './door';
@@ -26,11 +26,34 @@ import { buildRunnerProps } from './runner-props';
 /** Tempos da virada (ms) e até onde a onda vai (mundo: passa do fim da névoa da câmera rasante). */
 export const RUNNER_TRANSITION = { enterMs: 1000, leaveMs: 900, reach: 46, from: -3 } as const;
 
-/** Altura do pulo (mundo) e quanto o corpo inclina no tropeço (rad). */
-const JUMP_HEIGHT = 1.3;
+/** Altura do pulo (mundo) e quanto o corpo inclina no tropeço sem animação própria (rad). */
+const JUMP_HEIGHT = 1.1;
 const STUMBLE_LEAN = 0.35;
-/** Velocidade da animação de corrida (1 = a do clipe): 15% mais rápida, combina com a pista. */
-const RUN_ANIM = 1.15;
+/**
+ * Velocidade da animação de corrida (1 = a do clipe). O sprint do clipe corre 8,25 m/s e a pista
+ * anda ~5,2 m/s: a 0,85 a passada fica um pouco longa, mas o ritmo das pernas é o de quem foge.
+ */
+const RUN_ANIM = 0.85;
+/**
+ * "Drift" na curva: o corpo inclina para dentro, proporcional a quanto a direção gira (rad por
+ * fileira), até `DRIFT_MAX`. `DRIFT_LOOK` é quanto (fileiras) à frente e atrás se mede o giro.
+ */
+const DRIFT_GAIN = 0.9;
+const DRIFT_MAX = 0.32;
+const DRIFT_LOOK = 0.5;
+
+/** A animação de cada gesto do Modo Corrida (ver `tools/assets/build-anims.mjs`). */
+function gestureOf(p: RunnerPose): { clip: ClipName; t: number } | undefined {
+  if (p.action === 'pula') return { clip: 'jump', t: p.t };
+  if (p.action === 'desliza') return { clip: 'slide', t: p.t };
+  if (p.action === 'tropeca') return { clip: p.fall === 'curva' ? 'crash' : 'trip', t: p.t };
+  return undefined;
+}
+
+/** Diferença de ângulo em (−π, π]. */
+function angleDelta(a: number, b: number): number {
+  return Math.atan2(Math.sin(a - b), Math.cos(a - b));
+}
 
 export interface RunnerSessionOptions {
   canvas: HTMLCanvasElement;
@@ -221,15 +244,30 @@ export class RunnerSession {
 
   /** Põe os dois no tabuleiro de corrida. */
   private pose(): void {
-    const draw = (who: 'unit' | 'enemy', id: string, p: RunnerPose) => {
+    const path = this.o.start.race.path;
+    const draw = (who: 'unit' | 'enemy', id: string, p: RunnerPose, rate: number) => {
       const hop = p.action === 'pula' ? Math.sin(Math.PI * p.t) * JUMP_HEIGHT : 0;
-      const clip = p.action === 'desliza' ? 'crouch' : p.action === 'tropeca' ? 'idle' : 'run';
+      // sem a animação do gesto (modelo antigo, ou ainda carregando): agacha, para ou inclina
+      const clip: ClipName = p.action === 'desliza' ? 'crouch' : p.action === 'tropeca' ? 'idle' : 'sprint';
       const lean = p.action === 'tropeca' ? Math.sin(Math.PI * p.t) * STUMBLE_LEAN : 0;
-      const at = pathPose(this.o.start.race.path, p.at);
-      this.board.runnerPose(who, id, { x: at.x, z: at.z, yaw: at.yaw, hop, clip, lean, runAnim: RUN_ANIM });
+      const at = pathPose(path, p.at);
+      // drift: virando para a esquerda (yaw cresce) inclina para a esquerda (rotação z negativa)
+      const turning = angleDelta(pathPose(path, p.at + DRIFT_LOOK).yaw, pathPose(path, p.at - DRIFT_LOOK).yaw) / (2 * DRIFT_LOOK);
+      const bank = p.action === 'tropeca' ? 0 : Math.max(-DRIFT_MAX, Math.min(DRIFT_MAX, -turning * DRIFT_GAIN));
+      this.board.runnerPose(who, id, {
+        x: at.x,
+        z: at.z,
+        yaw: at.yaw,
+        hop,
+        clip,
+        gesture: gestureOf(p),
+        lean,
+        bank,
+        runAnim: RUN_ANIM * rate,
+      });
     };
-    draw('unit', this.o.agent.id, this.race.pose('agente'));
-    draw('enemy', this.o.enemy.id, this.race.pose('garimpeiro'));
+    draw('unit', this.o.agent.id, this.race.pose('agente'), this.race.over ? 1 : this.o.boost());
+    draw('enemy', this.o.enemy.id, this.race.pose('garimpeiro'), 1);
   }
 
   /** O jogador: `left`/`right` viram (só perto de uma curva), `up` pula, `down` desliza. */

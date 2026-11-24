@@ -4,8 +4,12 @@ import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 
-/** Clipes da biblioteca humanoide (`public/assets/anims/humanoid-base.glb`). */
-export type ClipName = 'idle' | 'walk' | 'run' | 'crouch';
+/**
+ * Clipes da biblioteca humanoide (`public/assets/anims/humanoid-base.glb`, gerada por
+ * `tools/assets/build-anims.mjs`). Os loops tocam no relógio (`play`); os gestos do Modo Corrida
+ * (`jump`, `slide`, `trip`, `crash`) são percorridos no tempo da regra (`scrub`).
+ */
+export type ClipName = 'idle' | 'walk' | 'run' | 'crouch' | 'sprint' | 'jump' | 'slide' | 'trip' | 'crash';
 
 /** Modelo 3D de um personagem (ver docs/esqueletos-e-movimentacao.md). */
 export interface ModelDef {
@@ -41,7 +45,7 @@ export const heightOf = (meters: number): number => meters * METER;
  * medida na versão com root motion da Universal Animation Library. Serve para casar a
  * velocidade da animação com a velocidade real da peça, sem os pés "patinarem".
  */
-const CLIP_SPEED: Partial<Record<ClipName, number>> = { walk: 0.97, run: 5.36 };
+const CLIP_SPEED: Partial<Record<ClipName, number>> = { walk: 0.97, run: 5.36, sprint: 8.25 };
 
 /** Do osso da cabeça ao topo do crânio, em metros, nos corpos da Quaternius. */
 const HEAD_TOP = 0.21;
@@ -170,6 +174,26 @@ export class CharacterRig {
     if (this.current && fade > 0) next.crossFadeFrom(this.current, fade, true);
     else this.current?.stop();
     this.current = next;
+  }
+
+  /**
+   * Para o clipe `name` no ponto `t` (0 a 1 da duração), com crossfade se ele ainda não era o
+   * atual. Serve para gestos que precisam bater com o tempo da regra (o pulo dura o que o pulo
+   * dura), em vez de correr no relógio. Devolve `false` se a biblioteca não tem o clipe.
+   */
+  scrub(name: ClipName, t: number, fade = 0.1): boolean {
+    const action = this.actions.get(name);
+    if (!action) return false;
+    if (action !== this.current) {
+      action.reset().setEffectiveWeight(1).play();
+      action.timeScale = 0;
+      // sem "warp": a velocidade deste clipe fica em 0, quem anda o tempo é `t`
+      if (this.current && fade > 0) action.crossFadeFrom(this.current, fade, false);
+      else this.current?.stop();
+      this.current = action;
+    }
+    action.time = Math.min(0.999, Math.max(0, t)) * action.getClip().duration;
+    return true;
   }
 
   /** O clipe em loop agora é `name`. */
