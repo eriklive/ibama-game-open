@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import { MOVING_SHADOW_LAYER } from './static-shadow';
+import { ANIMS_VERSION } from './anims-version';
 import { GLTF, GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -26,8 +27,15 @@ export interface ModelDef {
   tint?: number;
 }
 
-/** Biblioteca de clipes do esqueleto humanoide padrão (nomes de ossos da Quaternius UAL). */
-export const HUMANOID_ANIMS = 'assets/anims/humanoid-base.glb';
+/**
+ * Biblioteca de clipes do esqueleto humanoide padrão (nomes de ossos da Quaternius UAL). O `?v=`
+ * muda a cada build dos clipes: o navegador reusa o arquivo por até 10 min (GitHub Pages), e
+ * código novo com clipes velhos deixaria os personagens congelados.
+ */
+export const HUMANOID_ANIMS = `assets/anims/humanoid-base.glb?v=${ANIMS_VERSION}`;
+
+/** Se a biblioteca não tem o clipe (arquivo antigo), toca este no lugar, em vez de congelar. */
+const CLIP_FALLBACK: Partial<Record<ClipName, ClipName>> = { sprint: 'run' };
 /**
  * Escala do tabuleiro: o hexágono cabe num quadrado de 1,5 m × 1,5 m, isto é, mede 1,5 m de
  * ponta a ponta (2 × raio). Com raio 1, um metro vale 2 / 1,5 ≈ 1,33 unidade do mundo.
@@ -168,7 +176,7 @@ export class CharacterRig {
 
   /** Toca um clipe em loop, com crossfade a partir do atual. */
   play(name: ClipName, fade = 0.25): void {
-    const next = this.actions.get(name);
+    const next = this.action(name);
     if (!next || next === this.current) return;
     next.reset().setEffectiveWeight(1).play();
     if (this.current && fade > 0) next.crossFadeFrom(this.current, fade, true);
@@ -196,15 +204,21 @@ export class CharacterRig {
     return true;
   }
 
+  /** O clipe `name`, ou o de reserva dele (`CLIP_FALLBACK`). */
+  private action(name: ClipName): THREE.AnimationAction | undefined {
+    const fallback = CLIP_FALLBACK[name];
+    return this.actions.get(name) ?? (fallback ? this.actions.get(fallback) : undefined);
+  }
+
   /** O clipe em loop agora é `name`. */
   isPlaying(name: ClipName): boolean {
-    const action = this.actions.get(name);
+    const action = this.action(name);
     return !!action && action === this.current;
   }
 
   /** Velocidade de um clipe (negativa toca ao contrário: andar de costas). */
   setTimeScale(name: ClipName, scale: number): void {
-    const action = this.actions.get(name);
+    const action = this.action(name);
     if (action) action.timeScale = scale;
   }
 
