@@ -1871,16 +1871,21 @@ export class HexBoard {
 
   /**
    * Põe um corredor do Modo Corrida (ver `runner.ts`): no ponto do mundo, virado para o norte,
-   * com a altura do pulo (`hop`) e o clipe. `lean` inclina o corpo (tropeço). O agente leva a
-   * câmera e o raio carregado junto.
+   * com a altura do pulo (`hop`) e o clipe. `lean` inclina o corpo (tropeço); `runAnim` é a
+   * velocidade do clipe de corrida. O agente leva a câmera e o raio carregado junto.
    */
-  runnerPose(who: 'unit' | 'enemy', id: string, pose: { x: number; z: number; yaw: number; hop: number; clip: ClipName; lean?: number }): void {
+  runnerPose(
+    who: 'unit' | 'enemy',
+    id: string,
+    pose: { x: number; z: number; yaw: number; hop: number; clip: ClipName; lean?: number; runAnim?: number },
+  ): void {
     const m = who === 'unit' ? this.units.get(id) : this.enemies.get(id);
     if (!m) return;
     m.group.position.x = pose.x;
     m.group.position.z = pose.z;
     m.hop = pose.hop;
     m.group.rotation.z = pose.lean ?? 0;
+    m.rig?.setTimeScale('run', pose.runAnim ?? 1);
     m.rig?.play(pose.clip, 0.12);
     const hex = worldToHex(pose.x, pose.z, HEX_SIZE);
     m.hex = hex;

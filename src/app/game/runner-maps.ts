@@ -1,11 +1,11 @@
 /**
  * Modo Corrida — os mapas de corrida (ver `runner.ts`). Cada um é o Aeroporto redesenhado como
- * um **caminho com curvas** (`runner-path.ts`), no estilo do Temple Run: trechos retos de **3
- * faixas** ligados por esquinas de 90°. O chão, o hangar, a mata e a carga são gerados em volta do
+ * um **caminho com curvas** (`runner-path.ts`), no estilo do Temple Run: trechos retos (com a
+ * largura de 3 faixas, mas os corredores sempre no meio) ligados por esquinas de 90°. O chão, o hangar, a mata e a carga são gerados em volta do
  * caminho (`buildRaceMap`), com o mesmo `HexBoard` do tabuleiro.
  *
  * - **Mapa A** (pelo hangar): pista de terra → pátio → portão → hangar: a pista passa **ao lado do
- *   avião** (a asa baixa cobre a faixa mais perto dele: deslizar), vira **por trás dele** e sai
+ *   avião** (a asa baixa cobre o meio da pista: deslizar), vira **por trás dele** e sai
  *   pela **porta dos fundos** do outro lado, virando de novo (2 curvas). Fora, a **mata** tem 4
  *   curvas (vai para um lado, sobe, volta e sobe de novo).
  * - **Mapa B** (pela lateral): pista → pátio → por fora, colado na parede leste do hangar (a porta
@@ -22,7 +22,7 @@ import { GameMap, parseLayout } from './maps';
 import { CoverKind } from './scenery';
 import { HexCoord, hexDistance, hexKey, hexToWorld } from './hex';
 import { MODELS } from './character-model';
-import type { Lane, LaneObstacle, RunnerMove } from './runner';
+import type { RunnerMove, TrackObstacle } from './runner';
 import { Point, S3, Segment, TRACK_HALF, buildPath, nearestOnPath, pathLength, pathPose, pathTurns } from './runner-path';
 
 /** Tamanho do mapa de corrida (colunas × fileiras) e a coluna do meio da pista de terra. */
@@ -42,13 +42,20 @@ export interface RaceZone {
 
 export type ObstacleKind = CoverKind | 'log' | 'branch' | 'fuel' | 'tarp' | 'wing';
 
-/** Obstáculo no caminho: `d` fileiras depois do começo do trecho `seg`, nas faixas `lanes`. */
+/** Faixa da pista (0 esquerda, 1 meio, 2 direita de quem corre). Os corredores ficam sempre na 1. */
+export type Lane = 0 | 1 | 2;
+
+/**
+ * Obstáculo no caminho: `d` fileiras depois do começo do trecho `seg`, nas faixas `lanes` (para
+ * desenhar). Só conta nas regras se cobre o **meio** (os corredores não trocam de faixa); a carga
+ * alta nas faixas de fora (`cenario`) é só enfeite na beira da pista.
+ */
 export interface RaceObstacle {
   seg: number;
   d: number;
   lanes: Lane[];
   kind: ObstacleKind;
-  move: RunnerMove;
+  move: RunnerMove | 'cenario';
 }
 
 export interface RaceMap {
@@ -246,7 +253,7 @@ function forestPoints(start: Point, m: number, zTurn1: number, zTurn2: number, z
  * dessa curva). O trecho que chega na primeira curva é de cada mapa.
  */
 function forestObstacles(first: number, m: number): RaceObstacle[] {
-  const o = (seg: number, d: number, lanes: Lane[], kind: ObstacleKind, move: RunnerMove): RaceObstacle => ({
+  const o = (seg: number, d: number, lanes: Lane[], kind: ObstacleKind, move: RaceObstacle['move']): RaceObstacle => ({
     seg: first + seg,
     d,
     lanes: mirrorLanes(lanes, m),
@@ -256,7 +263,7 @@ function forestObstacles(first: number, m: number): RaceObstacle[] {
   return [
     o(0, 7, [0, 1], 'branch', 'deslizar'),
     o(1, 6, [0, 1, 2], 'log', 'pular'),
-    o(1, 13, [2], 'branch', 'deslizar'),
+    o(1, 13, [1, 2], 'branch', 'deslizar'),
     o(2, 8, [0, 1], 'log', 'pular'),
     o(3, 8, [1, 2], 'branch', 'deslizar'),
     o(3, 18, [0, 1, 2], 'log', 'pular'),
@@ -266,12 +273,12 @@ function forestObstacles(first: number, m: number): RaceObstacle[] {
 
 /** Obstáculos da pista de terra e do pátio (trecho 0, do começo até o portão). */
 function pistaObstacles(m: number): RaceObstacle[] {
-  const o = (d: number, lanes: Lane[], kind: ObstacleKind, move: RunnerMove): RaceObstacle => ({ seg: 0, d, lanes: mirrorLanes(lanes, m), kind, move });
+  const o = (d: number, lanes: Lane[], kind: ObstacleKind, move: RaceObstacle['move']): RaceObstacle => ({ seg: 0, d, lanes: mirrorLanes(lanes, m), kind, move });
   return [
     o(27, [1], 'fuel', 'pular'),
     o(35, [0, 1], 'log', 'pular'),
-    o(41, [2], 'crates', 'desviar'),
-    o(44, [0], 'cages', 'pular'),
+    o(41, [2], 'crates', 'cenario'),
+    o(44, [1], 'cages', 'pular'),
   ];
 }
 
@@ -297,17 +304,18 @@ export function raceA(variant: Variant = 'direita'): RaceMap {
     // na mata, primeiro volta para o meio do mapa (para o lado contrário ao da porta)
     ...forestPoints(door, m, zRow(59), zRow(41), zRow(3)),
   ];
-  const planeX = X0 + m * 9;
-  // a asa (no meio da corda: 0,9 à frente do centro) cobre a faixa mais perto do avião
+  // colado na pista: a ponta da asa (meia envergadura 6,2) passa do meio, onde o agente corre
+  const planeX = X0 + m * 5;
+  // a asa (no meio da corda: 0,9 à frente do centro) cobre o meio e a faixa do lado do avião
   const wingLane: Lane = m < 0 ? 0 : 2;
   const dWing = (zRow(H - 3) - (zPlane + 0.9)) / S3;
-  const o = (seg: number, d: number, lanes: Lane[], kind: ObstacleKind, move: RunnerMove): RaceObstacle => ({ seg, d, lanes, kind, move });
+  const o = (seg: number, d: number, lanes: Lane[], kind: ObstacleKind, move: RaceObstacle['move']): RaceObstacle => ({ seg, d, lanes, kind, move });
   const obstacles: RaceObstacle[] = [
     ...pistaObstacles(m),
     // dentro do hangar, ao lado do avião
     o(0, 53, mirrorLanes([1], m), 'sacks', 'pular'),
-    o(0, 60, mirrorLanes([2], m), 'boxes', 'desviar'),
-    o(0, dWing, [wingLane], 'wing', 'deslizar'),
+    o(0, 60, mirrorLanes([2], m), 'boxes', 'cenario'),
+    o(0, dWing, [wingLane, 1], 'wing', 'deslizar'),
     // por trás do avião
     o(1, 6, [1], 'lowCrate', 'pular'),
     // saindo pela porta dos fundos, na trilha
@@ -343,14 +351,14 @@ export function raceB(variant: Variant = 'direita'): RaceMap {
   const m = variant === 'direita' ? -1 : 1;
   const start: Point = { x: X0, z: zRow(66) };
   const points: Point[] = [{ x: X0, z: zRow(H - 3) }, ...forestPoints(start, -m, zRow(66), zRow(46), zRow(3))];
-  const o = (seg: number, d: number, lanes: Lane[], kind: ObstacleKind, move: RunnerMove): RaceObstacle => ({ seg, d, lanes, kind, move });
+  const o = (seg: number, d: number, lanes: Lane[], kind: ObstacleKind, move: RaceObstacle['move']): RaceObstacle => ({ seg, d, lanes, kind, move });
   const obstacles: RaceObstacle[] = [
     ...pistaObstacles(m),
     // lateral do hangar: carga largada do lado de fora
     o(0, 55, [1], 'cages', 'pular'),
     o(0, 64, [1, 2], 'tarp', 'deslizar'),
-    o(0, 72, [2], 'crates', 'desviar'),
-    o(0, 80, [0], 'lowCrate', 'pular'),
+    o(0, 72, [2], 'crates', 'cenario'),
+    o(0, 80, [0, 1], 'lowCrate', 'pular'),
     ...forestObstacles(1, m),
     // (a lateral emenda direto na mata: o trecho 0 vai da pista até a primeira curva dela)
   ];
@@ -376,12 +384,12 @@ export function raceB(variant: Variant = 'direita'): RaceMap {
 // Obstáculos por faixa (para as regras)
 // ---------------------------------------------------------------------------
 
-/** Os obstáculos do mapa, faixa por faixa, na posição do caminho (fileiras). */
-export function laneObstacles(race: RaceMap): LaneObstacle[] {
-  const out: LaneObstacle[] = [];
+/** Os obstáculos que cobrem o meio da pista (os que contam nas regras), na posição do caminho. */
+export function trackObstacles(race: RaceMap): TrackObstacle[] {
+  const out: TrackObstacle[] = [];
   for (const o of race.obstacles) {
-    const at = obstacleAt(race, o);
-    for (const lane of o.lanes) out.push({ at, lane, move: o.move, kind: o.kind === 'wing' ? 'asa' : o.kind });
+    if (o.move === 'cenario' || !o.lanes.includes(1)) continue;
+    out.push({ at: obstacleAt(race, o), move: o.move, kind: o.kind === 'wing' ? 'asa' : o.kind });
   }
   return out;
 }

@@ -2155,8 +2155,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.say(`${enemy} tropeçou (d20 ${ev.roll}, precisava de ${ev.need})!`, 'info');
     } else if ((ev.type === 'pulo' || ev.type === 'deslize') && ev.who === 'agente') {
       this.sound.play('ui.caminho');
-    } else if (ev.type === 'faixa' && ev.who === 'agente') {
-      this.sound.play('ui.hex');
     }
   }
 

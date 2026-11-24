@@ -7,8 +7,8 @@
  *    do tático com a mesma câmera de perseguição. Uma onda sai dos pés do agente para a frente: no
  *    tático os hexágonos ficam de pé e somem (`setFlip` `sai`); no de corrida eles chegam virando
  *    (`entra`). Atrás da onda, corrida; à frente, ainda o tático. Pronto: o tático dorme.
- * 2. **Corrida** (`run`): o relógio anda, o jogador troca de faixa, pula e desliza (teclado,
- *    toque ou controle) e o garimpeiro se vira sozinho.
+ * 2. **Corrida** (`run`): o relógio anda, o jogador vira nas curvas, pula e desliza (teclado,
+ *    toque ou controle) e o garimpeiro se vira sozinho. Os dois correm sempre no meio da pista.
  * 3. **Volta** (`tacticalResult` e `leave`): onde cada um parou na corrida vira um hexágono da pista
  *    tática (`tacticalIndex`); a onda volta, de longe até os pés, e o mapa de corrida some.
  */
@@ -19,7 +19,7 @@ import { HexCoord, hexToWorld, worldToHex } from './hex';
 import { RenderProfile } from './render-settings';
 import { spawnDoors } from './door';
 import { RUNNER_RULES, RunnerEnd, RunnerEvent, RunnerPose, RunnerRace, tacticalIndex } from './runner';
-import { RunnerStart, laneObstacles } from './runner-maps';
+import { RunnerStart, trackObstacles } from './runner-maps';
 import { pathLength, pathPose, pathTurns } from './runner-path';
 import { buildRunnerProps } from './runner-props';
 
@@ -29,6 +29,8 @@ export const RUNNER_TRANSITION = { enterMs: 1000, leaveMs: 900, reach: 46, from:
 /** Altura do pulo (mundo) e quanto o corpo inclina no tropeço (rad). */
 const JUMP_HEIGHT = 1.3;
 const STUMBLE_LEAN = 0.35;
+/** Velocidade da animação de corrida (1 = a do clipe): 15% mais rápida, combina com a pista. */
+const RUN_ANIM = 1.15;
 
 export interface RunnerSessionOptions {
   canvas: HTMLCanvasElement;
@@ -72,7 +74,7 @@ export class RunnerSession {
     this.origin = a;
     const path = start.race.path;
     this.race = new RunnerRace({
-      obstacles: laneObstacles(start.race),
+      obstacles: trackObstacles(start.race),
       turns: pathTurns(path),
       startAt: start.zone.at,
       length: pathLength(path),
@@ -118,8 +120,7 @@ export class RunnerSession {
 
   /** Onde o agente está no mapa de corrida (mundo). */
   private raceOrigin(): { x: number; z: number } {
-    const p = this.race.pose('agente');
-    return pathPose(this.o.start.race.path, p.at, p.lane);
+    return pathPose(this.o.start.race.path, this.race.pose('agente').at);
   }
 
   /** Para onde o agente corre no mapa de corrida (no chão). */
@@ -224,23 +225,23 @@ export class RunnerSession {
       const hop = p.action === 'pula' ? Math.sin(Math.PI * p.t) * JUMP_HEIGHT : 0;
       const clip = p.action === 'desliza' ? 'crouch' : p.action === 'tropeca' ? 'idle' : 'run';
       const lean = p.action === 'tropeca' ? Math.sin(Math.PI * p.t) * STUMBLE_LEAN : 0;
-      const at = pathPose(this.o.start.race.path, p.at, p.lane);
-      this.board.runnerPose(who, id, { x: at.x, z: at.z, yaw: at.yaw, hop, clip, lean });
+      const at = pathPose(this.o.start.race.path, p.at);
+      this.board.runnerPose(who, id, { x: at.x, z: at.z, yaw: at.yaw, hop, clip, lean, runAnim: RUN_ANIM });
     };
     draw('unit', this.o.agent.id, this.race.pose('agente'));
     draw('enemy', this.o.enemy.id, this.race.pose('garimpeiro'));
   }
 
-  /** O jogador: −1/+1 troca de faixa, `up` pula, `down` desliza. */
+  /** O jogador: `left`/`right` viram (só perto de uma curva), `up` pula, `down` desliza. */
   input(cmd: 'left' | 'right' | 'up' | 'down'): void {
     if (this.race.over) return;
-    if (cmd === 'left') this.race.move(-1);
-    else if (cmd === 'right') this.race.move(1);
+    if (cmd === 'left') this.race.turn(-1);
+    else if (cmd === 'right') this.race.turn(1);
     else if (cmd === 'up') this.race.jump();
     else this.race.slide();
   }
 
-  /** Arrastar na tela: para os lados troca de faixa, para cima pula, para baixo desliza. */
+  /** Arrastar na tela: para os lados vira, para cima pula, para baixo desliza. */
   private bindTouch(): void {
     const el = this.o.canvas;
     const MIN = 24;

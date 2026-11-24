@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { LaneObstacle, RUNNER_RULES, RunnerEvent, RunnerRace, shownDistance, tacticalIndex } from './runner';
+import { RUNNER_RULES, RunnerEvent, RunnerRace, shownDistance, tacticalIndex, TrackObstacle } from './runner';
 
 const R = RUNNER_RULES;
 /** Obstáculo a `d` fileiras da largada (o caminho dos testes começa em 0). */
-const ob = (d: number, lane: 0 | 1 | 2, move: LaneObstacle['move'], kind = 'x'): LaneObstacle => ({ at: d, lane, move, kind });
+const ob = (d: number, move: TrackObstacle['move'], kind = 'x'): TrackObstacle => ({ at: d, move, kind });
 
 /** Roda em quadros de 1/60 s até `seconds` (ou até acabar), chamando `each` antes de cada quadro. */
 function run(race: RunnerRace, seconds: number, each?: (t: number) => void): RunnerEvent[] {
@@ -43,26 +43,16 @@ describe('RunnerRace: distância e fim', () => {
 });
 
 describe('RunnerRace: o agente e os obstáculos', () => {
-  it('passar por carga alta na faixa dele: bate, tropeça e perde 1 hexágono', () => {
-    const race = new RunnerRace({ obstacles: [ob(5, 1, 'desviar')], startAt: 0, length: 100, hexes: 3, rollEnemy: () => 20 });
-    // ele desvia sozinho; o agente segue no meio
+  it('passar pela tora sem pular: bate, tropeça e perde 1 hexágono', () => {
+    const race = new RunnerRace({ obstacles: [ob(5, 'pular')], startAt: 0, length: 100, hexes: 3, rollEnemy: () => 20 });
     const ev = run(race, 2.5);
     expect(types(ev)).toContain('bateu');
     expect(race.distance()).toBe(4);
   });
 
-  it('trocar de faixa antes da carga alta: passa sem bater', () => {
-    const race = new RunnerRace({ obstacles: [ob(5, 1, 'desviar')], startAt: 0, length: 100, hexes: 3, rollEnemy: () => 20 });
-    race.move(1);
-    const ev = run(race, 2.5);
-    expect(types(ev)).not.toContain('bateu');
-    expect(race.lane('agente')).toBe(2);
-    expect(race.distance()).toBe(3);
-  });
-
   it('pular na hora certa passa a tora; sem pular, bate', () => {
     const lead = 0.25; // s antes de chegar
-    const make = () => new RunnerRace({ obstacles: [ob(4, 1, 'pular', 'tora')], startAt: 0, length: 100, hexes: 2, enemyLane: 0, rollEnemy: () => 20 });
+    const make = () => new RunnerRace({ obstacles: [ob(4, 'pular', 'tora')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     const ok = make();
     const at = 4 / R.rowsPerSecond - lead;
     const ev = run(ok, 2, (t) => t >= at && t < at + 1 / 60 && ok.jump());
@@ -72,55 +62,50 @@ describe('RunnerRace: o agente e os obstáculos', () => {
   });
 
   it('pular cedo demais não serve: o pulo acaba antes da tora', () => {
-    const race = new RunnerRace({ obstacles: [ob(10, 1, 'pular')], startAt: 0, length: 100, hexes: 2, enemyLane: 0, rollEnemy: () => 20 });
+    const race = new RunnerRace({ obstacles: [ob(10, 'pular')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     race.jump();
     expect(types(run(race, 3))).toContain('bateu');
   });
 
   it('deslizar passa por baixo da asa; pular não', () => {
     const at = 4 / R.rowsPerSecond - 0.3;
-    const slide = new RunnerRace({ obstacles: [ob(4, 1, 'deslizar', 'aviao')], startAt: 0, length: 100, hexes: 2, enemyLane: 2, rollEnemy: () => 20 });
+    const slide = new RunnerRace({ obstacles: [ob(4, 'deslizar', 'asa')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     const ev = run(slide, 2, (t) => t >= at && t < at + 1 / 60 && slide.slide());
     expect(types(ev)).not.toContain('bateu');
-    const jump = new RunnerRace({ obstacles: [ob(4, 1, 'deslizar', 'aviao')], startAt: 0, length: 100, hexes: 2, enemyLane: 2, rollEnemy: () => 20 });
+    const jump = new RunnerRace({ obstacles: [ob(4, 'deslizar', 'asa')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     expect(types(run(jump, 2, (t) => t >= at && t < at + 1 / 60 && jump.jump()))).toContain('bateu');
   });
 
-  it('a faixa não passa das bordas', () => {
-    const race = new RunnerRace({ obstacles: [], startAt: 0, length: 100, hexes: 2, agentLane: 0, rollEnemy: () => 20 });
-    expect(race.move(-1)).toBe(false);
-    expect(race.move(1)).toBe(true);
-    expect(race.move(1)).toBe(true);
-    expect(race.move(1)).toBe(false);
+  it('longe das curvas, ← e → não fazem nada: não há troca de faixa', () => {
+    const race = new RunnerRace({ obstacles: [], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
+    expect(race.turn(-1)).toBe(false);
+    expect(race.turn(1)).toBe(false);
+    expect(types(run(race, 1))).toEqual([]);
   });
 });
 
 describe('RunnerRace: o garimpeiro', () => {
-  it('sai da faixa com carga alta antes de chegar e não bate', () => {
-    const race = new RunnerRace({ obstacles: [ob(20, 1, 'desviar')], startAt: 0, length: 100, hexes: 2, agentLane: 0, rollEnemy: () => 20 });
+  it('faz o gesto certo sozinho (pula a tora, desliza sob a lona)', () => {
+    const race = new RunnerRace({ obstacles: [ob(20, 'pular'), ob(26, 'deslizar')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     const ev = run(race, 6);
-    expect(ev.some((e) => e.type === 'faixa' && e.who === 'garimpeiro')).toBe(true);
+    expect(ev.some((e) => e.type === 'pulo' && e.who === 'garimpeiro')).toBe(true);
+    expect(ev.some((e) => e.type === 'deslize' && e.who === 'garimpeiro')).toBe(true);
     expect(types(ev)).not.toContain('tropecou');
   });
 
   it('no obstáculo de pular, rola d20 + agilidade: abaixo de 8 tropeça e o agente ganha 1', () => {
-    const fail = new RunnerRace({ obstacles: [ob(20, 1, 'pular')], startAt: 0, length: 100, hexes: 3, agentLane: 0, agilidade: 0, rollEnemy: () => 7 });
-    const ev = run(fail, 6);
+    // o agente pula a tora a tempo (a 20 fileiras: 5 s), para só ele tropeçar
+    const jumpAt = (race: RunnerRace) => (t: number) => t >= 4.75 && t < 4.75 + 1 / 60 && race.jump();
+    const fail = new RunnerRace({ obstacles: [ob(20, 'pular')], startAt: 0, length: 100, hexes: 3, agilidade: 0, rollEnemy: () => 7 });
+    const ev = run(fail, 6, jumpAt(fail));
     const trip = ev.find((e) => e.type === 'tropecou');
     expect(trip).toMatchObject({ roll: 7, need: R.enemyDC });
     expect(fail.distance()).toBe(2);
-    const agile = new RunnerRace({ obstacles: [ob(20, 1, 'pular')], startAt: 0, length: 100, hexes: 3, agentLane: 0, agilidade: 2, rollEnemy: () => 7 });
-    expect(types(run(agile, 6))).not.toContain('tropecou');
+    const agile = new RunnerRace({ obstacles: [ob(20, 'pular')], startAt: 0, length: 100, hexes: 3, agilidade: 2, rollEnemy: () => 7 });
+    expect(types(run(agile, 6, jumpAt(agile)))).not.toContain('tropecou');
     expect(agile.distance()).toBe(3);
   });
 
-  it('no avião: corpo na esquerda, asa no meio, direita livre — ele vai para a direita ou desliza', () => {
-    const plane = [ob(20, 0, 'desviar', 'aviao'), ob(20, 1, 'deslizar', 'aviao')];
-    const race = new RunnerRace({ obstacles: plane, startAt: 0, length: 100, hexes: 3, enemyLane: 0, agentLane: 2, rollEnemy: () => 20 });
-    const ev = run(race, 6);
-    expect(types(ev)).not.toContain('tropecou');
-    expect(race.lane('garimpeiro')).not.toBe(0);
-  });
 });
 
 describe('tacticalIndex: volta ao tabuleiro', () => {
@@ -140,13 +125,11 @@ describe('RunnerRace: curvas', () => {
   it('virar para o lado certo na janela: segue sem bater', () => {
     const race = new RunnerRace({ obstacles: [], turns: [turn(10, 'esquerda')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     const ev = run(race, 4, (t) => {
-      if (race.pose('agente').at >= 10 - R.turnWindow + 0.5 && t < 2.5) race.move(-1);
+      if (race.pose('agente').at >= 10 - R.turnWindow + 0.5 && t < 2.5) race.turn(-1);
     });
     expect(types(ev)).toContain('curva-perto');
     expect(types(ev)).toContain('virou');
     expect(types(ev)).not.toContain('bateu-curva');
-    // perto da esquina ← vira, não troca de faixa
-    expect(race.lane('agente')).toBe(1);
   });
 
   it('não virar: bate na curva e perde 2 hexágonos', () => {
@@ -159,16 +142,20 @@ describe('RunnerRace: curvas', () => {
   it('virar para o lado errado: bate na esquina', () => {
     const race = new RunnerRace({ obstacles: [], turns: [turn(10, 'direita')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     const ev = run(race, 5, () => {
-      if (race.pose('agente').at >= 7) race.move(-1);
+      if (race.pose('agente').at >= 7) race.turn(-1);
     });
     expect(ev.find((e) => e.type === 'bateu-curva')).toMatchObject({ wrong: true });
     expect(types(ev)).not.toContain('virou');
   });
 
-  it('longe da esquina, ← e → continuam trocando de faixa', () => {
+  it('virar antes da janela não conta: ainda dá para virar quando a curva chega', () => {
     const race = new RunnerRace({ obstacles: [], turns: [turn(30, 'esquerda')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
-    race.move(1);
-    expect(race.lane('agente')).toBe(2);
+    expect(race.turn(1)).toBe(false);
+    const ev = run(race, 9, () => {
+      if (race.pose('agente').at >= 30 - R.turnWindow + 0.5) race.turn(-1);
+    });
+    expect(types(ev)).toContain('virou');
+    expect(types(ev)).not.toContain('bateu-curva');
   });
 
   it('a curva que ficou para trás da largada não conta', () => {

@@ -556,8 +556,8 @@ ainda não existe: por enquanto o agente só vira o corpo.
 
 ### Modo Corrida (Aeroporto)
 
-No Aeroporto, a perseguição sai do tabuleiro e vira uma **corrida em três faixas, com curvas**, no
-estilo do Temple Run. Os outros mapas continuam com a corrida no tabuleiro descrita acima.
+No Aeroporto, a perseguição sai do tabuleiro e vira uma **corrida com curvas**, no
+estilo do Temple Run: o agente corre sempre no meio da pista. Os outros mapas continuam com a corrida no tabuleiro descrita acima.
 
 1. **A virada.** A câmera desce nas costas do agente, como sempre. Uma onda sai dos pés dele
    para a frente: os hexágonos do tático ficam de pé e somem, e os do **mapa de corrida** chegam
@@ -578,29 +578,29 @@ estilo do Temple Run. Os outros mapas continuam com a corrida no tabuleiro descr
    hexágonos de beira), pátio, hangar, fundos ou mata. **Fora da pista é sempre o trecho de mata.**
    Da casa, por enquanto, também vai para a mata.
 5. **Os mapas de corrida** são gerados em volta de um **caminho** de trechos retos ligados por
-   esquinas de 90° (`runner-path.ts`). Cada trecho tem 3 faixas, a 3 unidades uma da outra.
+   esquinas de 90° (`runner-path.ts`). A pista tem a largura de 3 faixas (a 3 unidades uma da
+   outra), mas os dois correm sempre na do meio; a carga alta nas faixas de fora é só cenário.
    - Dentro do hangar, a pista é um corredor entre duas paredes de caixas.
-   - O avião, pousado de barriga, fica ao lado da pista e a asa (a 1,57 m) cobre a faixa mais
-     perto dele.
+   - O avião, pousado de barriga, fica colado na pista e a asa (a 1,57 m) passa por cima do meio
+     dela: é preciso deslizar.
    - A porta dos fundos é do tamanho da pista.
 6. **A corrida** (`RunnerRace`, em `src/app/game/runner.ts`). Os dois correm a 4 fileiras/s e o
-   agente corre sozinho. O jogador só faz os gestos:
+   agente corre sozinho, sempre no meio da pista (não há troca de faixa). O jogador só faz os
+   gestos:
 
    | Gesto | Teclado | Toque | Controle | Para quê |
    |---|---|---|---|---|
-   | Trocar de faixa | ←/→ ou A/D | arrastar para o lado | direcional ou analógico | desviar de carga alta |
    | **Virar** (perto da curva) | ←/→ ou A/D | arrastar para o lado | direcional ou analógico | as esquinas |
    | Pular | ↑, W ou espaço | arrastar para cima | ✕ | tora, galões, sacos, gaiolas, caixote baixo |
    | Deslizar | ↓ ou S | arrastar para baixo | ○ | lona, galho, asa do avião |
 
-   - **Curva:** a 4 fileiras da esquina (1 s), aparece "← Curva à esquerda!" e ←/→ passa a virar em
-     vez de trocar de faixa. Se o jogador não virar, ou virar para o lado errado, o agente **bate na
+   - **Curva:** a 4 fileiras da esquina (1 s), aparece "← Curva à esquerda!" e ←/→ vira. Longe de
+     uma curva, ←/→ não faz nada. Se o jogador não virar, ou virar para o lado errado, o agente **bate na
      curva** e perde **2 hexágonos**; o caminho segue assim mesmo. A câmera acompanha a direção do
      agente (`setChaseFollow`).
    - **Bater num obstáculo** (passar sem o gesto certo): o agente tropeça e perde **1 hexágono**.
-   - **O garimpeiro** vira sempre e sai sozinho da faixa com carga alta. Nos obstáculos de pular ou
-     deslizar ele rola **d20 + agilidade ≥ 8**; se falhar, tropeça e o agente ganha 1 hexágono.
-   - **Correr!** (C, □) continua igual.
+   - **O garimpeiro** também corre no meio e vira sempre. Em cada obstáculo ele rola **d20 + agilidade ≥ 8**; se falhar, tropeça e o agente ganha 1 hexágono.
+   - **Correr!** (C, □) continua igual. A animação de corrida toca 15% mais rápida que o clipe.
    - **Distância 0: agarrou.** Ele se rende, abalado.
    - **Ele chegou ao fim do caminho: fugiu.**
 7. **A volta** (`tacticalIndex`). Onde cada um parou na corrida vira um hexágono da pista tática (o
