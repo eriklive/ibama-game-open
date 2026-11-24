@@ -134,6 +134,7 @@ import {
   auraHexes,
   dialogueOptions,
   hasDialogue,
+  hasOpenQuestions,
   hasTalked,
   itemClue,
   noteKind,
@@ -659,15 +660,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly fieldNotes = signal<readonly FieldNote[]>([]);
   private noteSeq = 0;
 
-  /** Todo rendido ganha a aura (a dos que não têm diálogo fica apagada). */
+  /** Todo rendido ganha a aura (a de quem não tem nada a falar agora fica apagada, branca). */
   private readonly surrenderedEnemies = computed(() => this.enemies().filter((e) => e.status === 'surrendered'));
-  /** Hexágonos da aura: dos rendidos com diálogo (`talk`) e dos sem diálogo (`muted`). */
+  /** Hexágonos da aura: dos rendidos com pergunta em aberto (`talk`) e dos sem nada a falar (`muted`). */
   private readonly auraKeys = computed(() => {
     const ring = (e: EnemyState) => auraHexes(e.hex, this.area, this.solid()).map(hexKey);
     const es = this.surrenderedEnemies();
+    // laranja: tem pergunta em aberto agora; branco: nada a falar (sem diálogo, ou tudo já
+    // perguntado). Uma pista nova pode abrir pergunta e o branco volta a ficar laranja.
+    const clues = this.clues();
+    const hasSomething = (e: EnemyState) => {
+      const cls = npcClass(e.npc);
+      return hasDialogue(cls) && hasOpenQuestions(dialogueOptions(cls, this.dialogues().get(e.id) ?? EMPTY_MEMORY, clues));
+    };
     return {
-      talk: es.filter((e) => hasDialogue(npcClass(e.npc))).flatMap(ring),
-      muted: es.filter((e) => !hasDialogue(npcClass(e.npc))).flatMap(ring),
+      talk: es.filter(hasSomething).flatMap(ring),
+      muted: es.filter((e) => !hasSomething(e)).flatMap(ring),
     };
   });
   /**

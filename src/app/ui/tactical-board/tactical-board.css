@@ -5,7 +5,8 @@
   --c-surrender: #f3efe2;
   --c-roll: #f6d76b;
   --c-flee: #f08a7a;
-  --c-talk: #8fd8ee;
+  --c-talk: #f7a94e;
+  --c-muted: #e9e2d0;
   --c-agent: #a8e29a;
   --slate: #22392e;
   --slate-deep: #182a21;
@@ -190,11 +191,18 @@
   fill: rgba(240, 138, 122, 0.1);
 }
 .hex.talk {
-  fill: rgba(143, 216, 238, 0.24);
+  fill: rgba(247, 169, 78, 0.28);
 }
 .hex.talk-center {
-  fill: rgba(143, 216, 238, 0.12);
+  fill: rgba(247, 169, 78, 0.14);
   stroke: var(--c-talk);
+}
+.hex.muted {
+  fill: rgba(233, 226, 208, 0.16);
+}
+.hex.muted-center {
+  fill: rgba(233, 226, 208, 0.08);
+  stroke: var(--c-muted);
 }
 
 .outline {
@@ -219,6 +227,11 @@
   animation:
     chalk-in 0.4s 0.3s ease both,
     glow 2.4s 0.8s ease-in-out infinite;
+}
+.outline.muted {
+  stroke: var(--c-muted);
+  stroke-width: 1.6;
+  opacity: 0.8;
 }
 .outline.edge-line {
   stroke: var(--c-flee);
@@ -249,6 +262,10 @@
 .stroke.wall {
   stroke: var(--chalk);
   stroke-width: 4;
+}
+.stroke.talk {
+  stroke: var(--c-talk);
+  stroke-width: 1.3;
 }
 .stroke.voice {
   stroke: var(--c-roll);
@@ -441,7 +458,7 @@
 }
 .notes li.talk::before {
   border-color: var(--c-talk);
-  background: rgba(143, 216, 238, 0.3);
+  background: rgba(247, 169, 78, 0.3);
 }
 .notes li.talk .em {
   color: var(--c-talk);
@@ -679,10 +696,15 @@ li.flee .chip {
   color: var(--c-flee);
   background: rgba(240, 138, 122, 0.14);
 }
+li.muted .chip {
+  border-color: var(--c-muted);
+  color: var(--c-muted);
+  background: rgba(233, 226, 208, 0.14);
+}
 li.talk .chip {
   border-color: var(--c-talk);
   color: var(--c-talk);
-  background: rgba(143, 216, 238, 0.14);
+  background: rgba(247, 169, 78, 0.14);
 }
 .rule {
   grid-area: rule;

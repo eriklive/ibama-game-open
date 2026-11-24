@@ -67,7 +67,7 @@ interface Page {
   title: string;
   map: ChalkMap;
   /** Frases curtas ao lado do mapa (a primeira palavra em destaque vai entre `*`). */
-  notes: { text: string; chip?: string; tone?: 'surrender' | 'roll' | 'flee' | 'talk' }[];
+  notes: { text: string; chip?: string; tone?: 'surrender' | 'roll' | 'flee' | 'talk' | 'muted' }[];
   /** Linha miúda embaixo das frases (regras de canto). */
   rule?: string;
   photo?: { src: string; caption: string };
@@ -161,35 +161,65 @@ function ringsMap(z: ApproachZones): ChalkMap {
 function talkMap(): ChalkMap {
   const R = 4;
   const all = chalkHexes(R);
+  // laranja: tem o que falar; branco: nada a falar (por enquanto)
+  const orange = { q: -1, r: 0 };
+  const white = { q: 3, r: -1 };
+  const dist = (h: { q: number; r: number }, c: { q: number; r: number }) =>
+    Math.max(Math.abs(h.q - c.q), Math.abs(h.r - c.r), Math.abs(h.q - c.q + h.r - c.r));
   const walk = [
     { q: -3, r: 3 },
     { q: -2, r: 2 },
-    { q: -1, r: 1 },
+    { q: -2, r: 1 },
   ];
   const agent = at(-3, 3);
-  const stop = at(-1, 1);
+  const stop = at(-2, 1);
+  const o = at(orange.q, orange.r);
+  const w = at(white.q, white.r);
+  const cls = (h: ChalkHex) => {
+    if (dist(h, orange) <= TALK.radius) return dist(h, orange) === 0 ? 'talk-center' : 'talk';
+    if (dist(h, white) <= TALK.radius) return dist(h, white) === 0 ? 'muted-center' : 'muted';
+    return 'out';
+  };
+  // pista nova: uma seta a giz chega no branco (ele pode ganhar assunto)
+  const clue = { x: w.x + 12, y: w.y - 30 };
   return {
     viewBox: box(R, 12, 8),
-    hexes: all.map((h) => ({
-      ...poly(h),
-      cls: h.d === 0 ? 'talk-center' : h.d <= TALK.radius ? 'talk' : 'out',
-      d: h.d,
-    })),
+    hexes: all.map((h) => ({ ...poly(h), cls: cls(h), d: h.d })),
     outlines: [
       {
         d: regionOutline(
-          all.filter((h) => h.d <= TALK.radius),
+          all.filter((h) => dist(h, orange) <= TALK.radius),
           HEX,
         ),
         cls: 'talk',
       },
+      {
+        d: regionOutline(
+          all.filter((h) => dist(h, white) <= TALK.radius),
+          HEX,
+        ),
+        cls: 'muted',
+      },
     ],
-    strokes: [{ d: path(walk), cls: 'agent-path', arrow: true }],
+    strokes: [
+      { d: path(walk), cls: 'agent-path', arrow: true },
+      {
+        d: `M${clue.x + 8} ${clue.y + 3}Q${w.x + 26} ${w.y - 14} ${w.x + 11} ${w.y - 8}`,
+        cls: 'talk dashed-clue',
+        arrow: true,
+      },
+    ],
     labels: [
-      { x: stop.x + 16, y: stop.y + 16, text: 'pare aqui', cls: 'small talk', anchor: 'middle' },
+      { x: o.x, y: o.y - 19, text: 'tem assunto', cls: 'small talk', anchor: 'middle' },
+      { x: w.x, y: w.y + 25, text: 'nada a falar', cls: 'small', anchor: 'middle' },
+      { x: clue.x, y: clue.y, text: 'pista nova', cls: 'small talk', anchor: 'middle' },
+      { x: stop.x - 11, y: stop.y + 3, text: 'pare aqui', cls: 'small talk', anchor: 'end' },
       { x: agent.x, y: agent.y + 15, text: 'agente', cls: 'small', anchor: 'middle' },
     ],
-    pieces: [{ kind: 'surrendered', x: 0, y: 0 }],
+    pieces: [
+      { kind: 'surrendered', ...o },
+      { kind: 'surrendered', ...w },
+    ],
   };
 }
 
@@ -244,14 +274,11 @@ export class TacticalBoard {
           title: 'Interrogatório',
           map: talkMap(),
           notes: [
-            {
-              chip: `${TALK.radius} hex`,
-              text: 'Todo rendido tem um *raio de conversa*',
-              tone: 'talk',
-            },
-            { text: 'Pare o agente dentro dele: aparece *Conversar*' },
-            { text: `A 1ª pergunta gasta *${TALK.moveCost} de movimento*` },
+            { chip: 'laranja', text: 'Tem o que falar: pare no raio e *Converse*', tone: 'talk' },
+            { chip: 'branco', text: '*Nada a falar* por enquanto', tone: 'muted' },
+            { text: 'Achou uma pista? Quem estava branco pode ganhar *assunto novo*' },
           ],
+          rule: `Raio de ${TALK.radius} hex · 1ª pergunta: ${TALK.moveCost} de movimento`,
         },
       ];
     }
