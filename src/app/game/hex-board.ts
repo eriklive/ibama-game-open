@@ -428,14 +428,26 @@ export class HexBoard {
    * pulsam em volta deles, mostrando que dá para tocar.
    */
   private readonly outlined = new Map<string, { models: THREE.Object3D[]; hulls: THREE.Mesh[] }>();
+  /** Contorno de "dá para tocar": fino, branco e suave. */
   private readonly outlineMat = new THREE.MeshBasicMaterial({
-    color: 0xffd66b,
+    color: 0xffffff,
     side: THREE.BackSide,
     transparent: true,
     depthWrite: false,
     toneMapped: false,
-    opacity: 0.8,
+    opacity: 0.35,
   });
+  /** Contorno do alvo já tocado uma vez (ver `setArmedTarget`): mais grosso, amarelo e intenso. */
+  private readonly armedOutlineMat = new THREE.MeshBasicMaterial({
+    color: 0xffd23a,
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+    opacity: 0.9,
+  });
+  /** Alvo tocado uma vez, esperando o segundo toque (ou `null`). */
+  private armedTarget: string | null = null;
   /** Contornos acesos (a tela apaga nos close-ups e quando não é a vez de escolher). */
   private outlinesOn = false;
   /** Incêndios acesos: chamas, fumaça e luz que tremula, e os materiais trocados pelos queimados. */
@@ -2407,12 +2419,42 @@ export class HexBoard {
           hull.castShadow = hull.receiveShadow = false;
           hull.renderOrder = -1;
           hull.userData['outline'] = true;
+          // o contorno armado é ~2,5× mais grosso: guarda a escala/posição do fino e as da grossa
+          const armed = 2.5 * thick;
+          const growA = (len: number, ws: number) => (len > 1e-4 ? 1 + (2 * armed) / Math.max(len * Math.abs(ws), 1e-4) : 1);
+          const big = new THREE.Vector3(growA(size.x, scale.x), growA(size.y, scale.y), growA(size.z, scale.z));
+          hull.userData['thin'] = { scale: hull.scale.clone(), position: hull.position.clone() };
+          hull.userData['thick'] = {
+            scale: big,
+            position: new THREE.Vector3(center.x * (1 - big.x), center.y * (1 - big.y), center.z * (1 - big.z)),
+          };
           hull.visible = this.outlinesOn;
           mesh.add(hull);
           hulls.push(hull);
         }
       }
       this.outlined.set(t.id, { models, hulls });
+    }
+    const armed = this.armedTarget;
+    this.armedTarget = null;
+    this.setArmedTarget(armed);
+  }
+
+  /**
+   * Alvo tocado uma vez (o caminho até ele já está marcado, o segundo toque anda até lá): o
+   * contorno dele engrossa e vira amarelo intenso. `null` volta todos ao branco fino.
+   */
+  setArmedTarget(id: string | null): void {
+    if (id === this.armedTarget) return;
+    this.armedTarget = id;
+    for (const [tid, o] of this.outlined) {
+      const on = tid === id;
+      for (const h of o.hulls) {
+        const pose = h.userData[on ? 'thick' : 'thin'] as { scale: THREE.Vector3; position: THREE.Vector3 };
+        h.scale.copy(pose.scale);
+        h.position.copy(pose.position);
+        h.material = on ? this.armedOutlineMat : this.outlineMat;
+      }
     }
   }
 
@@ -3533,10 +3575,15 @@ export class HexBoard {
     field.flush();
 
     if (this.outlinesOn && this.outlined.size) {
-      // pulsa entre o laranja apagado e o amarelo aceso: dá para tocar
-      const k = 0.5 + Math.sin(t * 4) * 0.5;
-      this.outlineMat.opacity = 0.45 + k * 0.55;
-      this.outlineMat.color.setRGB(1, 0.55 + k * 0.35, 0.05 + k * 0.2);
+      // branco suave que respira devagar: dá para tocar
+      const k = 0.5 + Math.sin(t * 2.5) * 0.5;
+      this.outlineMat.opacity = 0.2 + k * 0.25;
+      // tocado uma vez: amarelo que pulsa rápido e forte, quase branco no pico
+      if (this.armedTarget) {
+        const a = 0.5 + Math.sin(t * 7) * 0.5;
+        this.armedOutlineMat.opacity = 0.75 + a * 0.25;
+        this.armedOutlineMat.color.setRGB(1, 0.78 + a * 0.18, 0.1 + a * 0.35);
+      }
     }
 
     if (this.aura) {

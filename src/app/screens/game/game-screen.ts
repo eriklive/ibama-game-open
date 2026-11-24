@@ -424,6 +424,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.phase() === 'moving-choice' && !this.search() && !this.aiming() &&
         !this.approaching() && !this.grouping() && !this.burning();
       this.board?.showTargetOutlines(free);
+      // alvo já tocado uma vez (o caminho até ele está marcado): contorno maior, amarelo e intenso
+      const aim = this.aimedTarget();
+      this.board?.setArmedTarget(free && aim && sameHex(aim.hex, this.selected()) ? aim.id : null);
     });
     // cartão em foco no interrogatório (controle): o foco do teclado acompanha
     effect(() => {
@@ -2263,7 +2266,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!target || !from) return;
     if (this.viewingOther()) this.focusCharacter(this.active().id);
     if (canBurn(from, target)) {
-      this.aimedTarget = null;
+      this.aimedTarget.set(null);
       this.actOn(target);
       return;
     }
@@ -2289,7 +2292,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     this.selected.set(best);
-    this.aimedTarget = { id: target.id, hex: best };
+    this.aimedTarget.set({ id: target.id, hex: best });
     this.cursor.set(best);
     this.sound.play('ui.hex');
     this.sound.play('ui.caminho', { delay: 0.06 });
@@ -2297,7 +2300,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /** Alvo escolhido por toque e o hexágono colado nele para onde o agente vai andar. */
-  private aimedTarget: { id: string; hex: HexCoord } | null = null;
+  private readonly aimedTarget = signal<{ id: string; hex: HexCoord } | null>(null);
 
   /** A ação de um alvo colado no agente: o avião abre o menu de inspecionar; o resto, o "Queimar". */
   private actOn(target: Burnable): void {
@@ -2348,8 +2351,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (left.length) this.leaveGroup(left, 'ficou para trás');
     this.movesLeft.update((n) => n - path.length);
     // andou até um alvo tocado: chegando colado, a ação dele já abre
-    const aim = this.aimedTarget && sameHex(this.aimedTarget.hex, target) ? this.aimedTarget : null;
-    this.aimedTarget = null;
+    const aimed = this.aimedTarget();
+    const aim = aimed && sameHex(aimed.hex, target) ? aimed : null;
+    this.aimedTarget.set(null);
     if (!(await this.perceive(paths))) return;
     this.afterMove();
     const goal = aim && (this.map?.burnables ?? []).find((t) => t.id === aim.id && !this.burned().has(t.id));
