@@ -84,7 +84,7 @@ import {
   rollsDie,
   spawnDoors,
 } from '../../game/door';
-import { BURN_RULES, Burnable, burnTarget, canBurn, inSnap, seeFire, sideSpot } from '../../game/burn';
+import { BURN_RULES, Burnable, burnTarget, canBurn, seeFire } from '../../game/burn';
 import {
   KEY_PANEL_ID,
   KEY_TAKEN,
@@ -2171,12 +2171,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else this.say('Chegue colado na porta para interagir com ela', 'info');
       return;
     }
-    // entorno do avião (até `BURN_RULES.snap` hexágonos): o agente vai sozinho para o lado dele
-    const plane = hex && (this.map?.burnables ?? []).find((t) => t.inspect && !this.burned().has(t.id) && inSnap(hex, t));
-    if (plane) {
-      this.tapTarget(plane.id, hex);
-      return;
-    }
     if (this.viewingOther()) this.focusCharacter(this.active().id);
     if (hex && this.destinations().has(hexKey(hex))) {
       // segundo toque no mesmo hexágono confirma o movimento
@@ -2195,12 +2189,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Alvo tocado direto no tabuleiro (o avião, os suprimentos) ou no entorno do avião (`near`, o
-   * hexágono tocado). O agente vai para o lado do alvo (o mais perto do toque, ou o caminho mais
-   * curto): se já está lá, abre a ação (o menu do avião ou o "Queimar"); senão, escolhe o caminho
-   * — e o segundo toque (no alvo, no entorno ou no Confirmar) anda até lá e já abre a ação.
+   * Alvo tocado direto no tabuleiro (o avião, os suprimentos). Colado nele, abre a ação (o menu
+   * do avião ou o "Queimar"); de longe, escolhe o caminho mais curto até ficar colado — e o
+   * segundo toque (no alvo ou no Confirmar) anda até lá e já abre a ação.
    */
-  private tapTarget(id: string, near?: HexCoord): void {
+  private tapTarget(id: string): void {
     if (this.phase() !== 'moving-choice' || this.approaching() || this.grouping()) return;
     if (this.burning()) {
       this.cancelBurn();
@@ -2210,16 +2203,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const from = this.positions().get(this.active().id);
     if (!target || !from) return;
     if (this.viewingOther()) this.focusCharacter(this.active().id);
-    const reach = this.reach();
-    const options = [...this.destinations()].map((key) => {
-      const [col, row] = key.split(',').map(Number);
-      return { hex: { col, row }, cost: reach.get(key)?.cost ?? Infinity };
-    });
-    const best = sideSpot(target, from, options, near);
-    if (best && sameHex(best, from)) {
+    if (canBurn(from, target)) {
       this.aimedTarget = null;
       this.actOn(target);
       return;
+    }
+    const reach = this.reach();
+    let best: HexCoord | null = null;
+    let bestCost = Infinity;
+    for (const key of this.destinations()) {
+      const [col, row] = key.split(',').map(Number);
+      const h = { col, row };
+      const cost = reach.get(key)?.cost ?? Infinity;
+      if (cost < bestCost && canBurn(h, target)) {
+        best = h;
+        bestCost = cost;
+      }
     }
     if (!best) {
       this.sound.play('ui.invalido');
