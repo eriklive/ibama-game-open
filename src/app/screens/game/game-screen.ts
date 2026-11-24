@@ -3510,7 +3510,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     seenBy: this.keySeenBy(),
   }));
 
-  /** Avião ainda inteiro, colado no agente da vez (abre o menu de inspecionar). */
+  /**
+   * Avião ainda inteiro, colado no agente da vez. Não tem botão na tela: o menu de inspecionar abre
+   * tocando no próprio avião (`tapTarget`) ou, no controle, no □.
+   */
   protected readonly nearPlane = computed<Burnable | null>(() => {
     if (this.phase() !== 'moving-choice' || this.viewingOther()) return null;
     const from = this.positions().get(this.active().id);

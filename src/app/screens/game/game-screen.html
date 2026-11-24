@@ -659,20 +659,7 @@
           @if (pad() && !canApproach()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
         </button>
       }
-      <!-- Avião: colado nele, abre o menu de inspecionar (olhar dentro ou queimar); post-it como o da porta -->
-      @if (nearPlane(); as plane) {
-        <button
-          type="button"
-          class="paper door-btn plane-btn"
-          aria-label="Inspecionar o avião: olhar dentro ou queimar"
-          data-testid="plane"
-          (click)="openPlaneMenu()">
-          <span class="stencil">Inspecionar</span>
-          <span class="typed">{{ plane.short }}</span>
-          <!-- o □ vai para o primeiro da fila: abordar, depois queimar (ver `padButton`) -->
-          @if (pad() && !canApproach() && !burnable()) { <span class="pad-glyph left" aria-hidden="true">{{ glyph('approach') }}</span> }
-        </button>
-      }
+      <!-- Avião: sem botão; o menu de inspecionar abre tocando no próprio avião (ver `tapTarget`) -->
       <!-- Quadro de chaves: colado nele, procura a chave (percepção, se ninguém sabe qual é) -->
       @if (nearPanel()) {
         <button
