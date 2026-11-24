@@ -317,6 +317,8 @@ export interface HexBoardCallbacks {
   onUnitTap(id: string): void;
   /** Toque na lupa (ou no móvel debaixo dela). */
   onClueTap?(): void;
+  /** Toque direto num alvo com contorno (o avião, os suprimentos): ver `setTargetOutlines`. */
+  onTargetTap?(id: string): void;
   /** Na escolha do caixote (perseguição): tocou no caixote (`pular`) ou na faixa da volta. */
 }
 
@@ -416,6 +418,21 @@ export class HexBoard {
   private readonly cargoModels = new Map<string, THREE.Object3D>();
   /** Alvos da missão (queimar): um ícone de chama flutua sobre cada um até ele queimar. */
   private readonly targets = new Map<string, { sprite: THREE.Sprite; center: THREE.Vector3; height: number }>();
+  /**
+   * Alvos tocáveis (o avião, os suprimentos): os modelos (para o toque) e os contornos que
+   * pulsam em volta deles, mostrando que dá para tocar.
+   */
+  private readonly outlined = new Map<string, { models: THREE.Object3D[]; hulls: THREE.Mesh[] }>();
+  private readonly outlineMat = new THREE.MeshBasicMaterial({
+    color: 0xffd66b,
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+    opacity: 0.8,
+  });
+  /** Contornos acesos (a tela apaga nos close-ups e quando não é a vez de escolher). */
+  private outlinesOn = false;
   /** Incêndios acesos: chamas, fumaça e luz que tremula, e os materiais trocados pelos queimados. */
   private readonly fires = new Map<string, Fire>();
   private flameTex?: THREE.Texture;
@@ -2322,6 +2339,90 @@ export class HexBoard {
     }
   }
 
+  /** Modelos (avião e carga) que ocupam esses hexágonos. */
+  private modelsOn(hexes: readonly HexCoord[]): Set<THREE.Object3D> {
+    const models = new Set<THREE.Object3D>();
+    const planeKeys = new Set((this.map.plane ?? []).map(hexKey));
+    for (const h of hexes) {
+      const key = hexKey(h);
+      if (planeKeys.has(key) && this.planeModel) models.add(this.planeModel);
+      const cargo = this.cargoModels.get(key);
+      if (cargo) models.add(cargo);
+    }
+    return models;
+  }
+
+  /**
+   * Alvos que dá para tocar direto (o avião, os suprimentos): cada peça do modelo ganha uma
+   * casca um pouco maior, só com as faces de trás, que aparece como um contorno pulsante em
+   * volta da silhueta. Tocar no modelo chama `onTargetTap`. Alvos que pegam fogo perdem o
+   * contorno (ver `ignite`).
+   */
+  setTargetOutlines(targets: readonly { id: string; hexes: readonly HexCoord[] }[]): void {
+    for (const id of [...this.outlined.keys()]) this.dropOutline(id);
+    const thick = 0.08; // espessura do contorno, em unidades do mundo
+    const size = new THREE.Vector3();
+    const center = new THREE.Vector3();
+    const scale = new THREE.Vector3();
+    for (const t of targets) {
+      const models = [...this.modelsOn(t.hexes)];
+      if (!models.length) continue;
+      const hulls: THREE.Mesh[] = [];
+      for (const model of models) {
+        model.updateWorldMatrix(true, true);
+        const meshes: THREE.Mesh[] = [];
+        model.traverse((o) => {
+          const m = o as THREE.Mesh;
+          if (m.isMesh && !(m as THREE.InstancedMesh).isInstancedMesh && !(m as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(m);
+        });
+        for (const mesh of meshes) {
+          const geo = mesh.geometry;
+          if (!geo.boundingBox) geo.computeBoundingBox();
+          const box = geo.boundingBox!;
+          box.getSize(size);
+          box.getCenter(center);
+          mesh.getWorldScale(scale);
+          // cresce `thick` para cada lado, em volta do centro da peça (caixas e cilindros ficam inteiros)
+          const grow = (len: number, ws: number) => (len > 1e-4 ? 1 + (2 * thick) / Math.max(len * Math.abs(ws), 1e-4) : 1);
+          const hull = new THREE.Mesh(geo, this.outlineMat);
+          hull.scale.set(grow(size.x, scale.x), grow(size.y, scale.y), grow(size.z, scale.z));
+          hull.position.set(center.x * (1 - hull.scale.x), center.y * (1 - hull.scale.y), center.z * (1 - hull.scale.z));
+          hull.castShadow = hull.receiveShadow = false;
+          hull.renderOrder = -1;
+          hull.userData['outline'] = true;
+          hull.visible = this.outlinesOn;
+          mesh.add(hull);
+          hulls.push(hull);
+        }
+      }
+      this.outlined.set(t.id, { models, hulls });
+    }
+  }
+
+  /** Acende ou apaga os contornos dos alvos (o toque neles só vale aceso). */
+  showTargetOutlines(on: boolean): void {
+    if (this.outlinesOn === on) return;
+    this.outlinesOn = on;
+    for (const o of this.outlined.values()) for (const h of o.hulls) h.visible = on;
+  }
+
+  private dropOutline(id: string): void {
+    const o = this.outlined.get(id);
+    if (!o) return;
+    for (const h of o.hulls) h.removeFromParent();
+    this.outlined.delete(id);
+  }
+
+  /** Alvo com contorno debaixo do toque (o mais perto da câmera), ou `null`. */
+  private targetHit(): { id: string; point: THREE.Vector3 } | null {
+    let best: { id: string; point: THREE.Vector3; distance: number } | null = null;
+    for (const [id, o] of this.outlined) {
+      const hit = this.raycaster.intersectObjects(o.models, true).find((h) => h.object.visible);
+      if (hit && (!best || hit.distance < best.distance)) best = { id, point: hit.point, distance: hit.distance };
+    }
+    return best;
+  }
+
   /**
    * Ateia fogo num alvo: o modelo escurece (materiais trocados por cópias queimadas) e
    * nascem chamas, fumaça e uma luz alaranjada que tremula. O fogo não apaga sozinho.
@@ -2331,14 +2432,8 @@ export class HexBoard {
     const target = this.targets.get(id);
     if (target) target.sprite.visible = false;
 
-    const models = new Set<THREE.Object3D>();
-    const planeKeys = new Set((this.map.plane ?? []).map(hexKey));
-    for (const h of hexes) {
-      const key = hexKey(h);
-      if (planeKeys.has(key) && this.planeModel) models.add(this.planeModel);
-      const cargo = this.cargoModels.get(key);
-      if (cargo) models.add(cargo);
-    }
+    this.dropOutline(id);
+    const models = this.modelsOn(hexes);
     // o fade do close-up troca os materiais: volta aos originais antes de queimar
     for (const o of [...this.occluders.keys()]) {
       for (const model of models) {
@@ -3420,6 +3515,13 @@ export class HexBoard {
     // só o que mudou neste quadro vai para a placa de vídeo
     field.flush();
 
+    if (this.outlinesOn && this.outlined.size) {
+      // pulsa entre o laranja apagado e o amarelo aceso: dá para tocar
+      const k = 0.5 + Math.sin(t * 4) * 0.5;
+      this.outlineMat.opacity = 0.45 + k * 0.55;
+      this.outlineMat.color.setRGB(1, 0.55 + k * 0.35, 0.05 + k * 0.2);
+    }
+
     if (this.aura) {
       const glow = 0.5 + Math.sin(t * 1.6) * 0.12;
       (this.aura.wall.material as THREE.MeshBasicMaterial).opacity = glow;
@@ -3716,6 +3818,16 @@ export class HexBoard {
     if (unitHit) {
       this.callbacks.onUnitTap(unitHit.object.userData['unitId'] as string);
       return;
+    }
+    // alvo com contorno (o avião, os suprimentos): o toque no modelo vale como tocar nele
+    // (menos no destino já escolhido, para o segundo toque ainda confirmar o movimento)
+    if (this.outlinesOn && this.callbacks.onTargetTap) {
+      const target = this.targetHit();
+      const below = target && worldToHex(target.point.x, target.point.z, HEX_SIZE);
+      if (target && !(below && sameHex(below, this.selected))) {
+        this.callbacks.onTargetTap(target.id);
+        return;
+      }
     }
     // Os hexágonos do caminho flutuam: o toque vale tanto para onde o hexágono aparece
     // (malha) quanto para onde ele fica em repouso (plano y = 0). O destino já escolhido
