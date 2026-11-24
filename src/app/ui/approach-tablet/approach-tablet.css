@@ -552,6 +552,36 @@
 .closing .key::after {
   animation: none;
 }
+/* tecla Abordar/Confirmar: laranja desbotado puxando pro vermelho, pra chamar o dedo */
+.key:not(.cancel) {
+  background: linear-gradient(180deg, #dc7a3c, #bc4f2a 55%, #9a3720);
+  box-shadow:
+    inset 0 1.5px 0 rgba(255, 255, 255, 0.28),
+    inset 0 -2px 0 rgba(0, 0, 0, 0.35),
+    0 5px 0 #33120a,
+    0 8px 10px rgba(0, 0, 0, 0.55);
+}
+.key:not(.cancel):active,
+.key:not(.cancel).pressed {
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.14),
+    inset 0 2px 6px rgba(0, 0, 0, 0.5),
+    0 1px 0 #33120a,
+    0 2px 4px rgba(0, 0, 0, 0.5);
+}
+.key:not(.cancel) .lbl {
+  color: #2a1006;
+}
+.key:not(.cancel) .chk {
+  stroke: #2a1006;
+}
+.key:not(.cancel) .kled {
+  background: #5a2410;
+  animation-name: kled-hot;
+}
+.key:not(.cancel)::after {
+  animation-name: halo-hot;
+}
 
 .pad-glyph {
   position: absolute;
@@ -700,6 +730,22 @@
   to {
     background: #2bff6a;
     box-shadow: 0 0 6px 2px rgba(43, 255, 106, 0.7);
+  }
+}
+@keyframes kled-hot {
+  to {
+    background: #ffe08a;
+    box-shadow: 0 0 6px 2px rgba(255, 200, 110, 0.75);
+  }
+}
+@keyframes halo-hot {
+  0% {
+    border-color: rgba(255, 150, 80, 0.6);
+    transform: scale(0.96);
+  }
+  100% {
+    border-color: rgba(255, 150, 80, 0);
+    transform: scale(1.12);
   }
 }
 @keyframes halo {
