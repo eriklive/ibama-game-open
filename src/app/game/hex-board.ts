@@ -3,6 +3,7 @@ import { COVER_HEIGHT, GameMap, Ground, HexRect, doorsOf, inStructure, playArea,
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, ClipName, METER, ModelDef } from './character-model';
+import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
@@ -315,6 +316,34 @@ function reducedMotionQuery(): boolean {
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 }
 
+/**
+ * Alvo tocado uma vez (ver `HexBoard.setTargetAim`): quem vai andar, para onde e por onde, e o
+ * balão que fica sobre o alvo.
+ */
+export interface TargetAim {
+  id: string;
+  unitId: string;
+  /** Hexágono colado no alvo onde o agente vai parar. */
+  dest: HexCoord;
+  /** Caminho até `dest`, sem a origem. */
+  path: readonly HexCoord[];
+  label: string;
+}
+
+/** Efeitos do alvo tocado uma vez: fantasma no destino, pontos no caminho e balão. */
+interface AimFx {
+  key: string;
+  unitId: string;
+  ghost: THREE.Object3D;
+  ghostMat: THREE.Material;
+  curve: THREE.Curve<THREE.Vector3> | null;
+  length: number;
+  dots: THREE.Sprite[];
+  label: THREE.Sprite;
+  /** `prefers-reduced-motion`: nada corre nem saltita. */
+  calm: boolean;
+}
+
 export interface HexBoardCallbacks {
   /** Toque num hexágono vazio (ou fora do tabuleiro, com `null`). */
   onHexTap(hex: HexCoord | null): void;
@@ -428,14 +457,29 @@ export class HexBoard {
    * pulsam em volta deles, mostrando que dá para tocar.
    */
   private readonly outlined = new Map<string, { models: THREE.Object3D[]; hulls: THREE.Mesh[] }>();
+  /** Contorno de "dá para tocar": fino, branco e suave. */
   private readonly outlineMat = new THREE.MeshBasicMaterial({
-    color: 0xffd66b,
+    color: 0xffffff,
     side: THREE.BackSide,
     transparent: true,
     depthWrite: false,
     toneMapped: false,
-    opacity: 0.8,
+    opacity: 0.35,
   });
+  /** Contorno do alvo já tocado uma vez (ver `setArmedTarget`): mais grosso, amarelo e intenso. */
+  private readonly armedOutlineMat = new THREE.MeshBasicMaterial({
+    color: 0xffd23a,
+    side: THREE.BackSide,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+    opacity: 0.9,
+  });
+  /** Alvo tocado uma vez, esperando o segundo toque (ou `null`). */
+  private armedTarget: string | null = null;
+  /** Efeitos do alvo tocado uma vez (ver `setTargetAim`). */
+  private aimFx: AimFx | null = null;
+  private aimDotTex?: THREE.Texture;
   /** Contornos acesos (a tela apaga nos close-ups e quando não é a vez de escolher). */
   private outlinesOn = false;
   /** Incêndios acesos: chamas, fumaça e luz que tremula, e os materiais trocados pelos queimados. */
@@ -1917,6 +1961,7 @@ export class HexBoard {
 
   dispose(): void {
     this.disposed = true;
+    this.clearAimFx();
     cancelAnimationFrame(this.frameId);
     for (const u of [...this.units.values(), ...this.enemies.values()]) u.rig?.dispose();
     this.resizeObserver.disconnect();
@@ -2407,6 +2452,15 @@ export class HexBoard {
           hull.castShadow = hull.receiveShadow = false;
           hull.renderOrder = -1;
           hull.userData['outline'] = true;
+          // o contorno armado é ~2,5× mais grosso: guarda a escala/posição do fino e as da grossa
+          const armed = 2.5 * thick;
+          const growA = (len: number, ws: number) => (len > 1e-4 ? 1 + (2 * armed) / Math.max(len * Math.abs(ws), 1e-4) : 1);
+          const big = new THREE.Vector3(growA(size.x, scale.x), growA(size.y, scale.y), growA(size.z, scale.z));
+          hull.userData['thin'] = { scale: hull.scale.clone(), position: hull.position.clone() };
+          hull.userData['thick'] = {
+            scale: big,
+            position: new THREE.Vector3(center.x * (1 - big.x), center.y * (1 - big.y), center.z * (1 - big.z)),
+          };
           hull.visible = this.outlinesOn;
           mesh.add(hull);
           hulls.push(hull);
@@ -2414,6 +2468,152 @@ export class HexBoard {
       }
       this.outlined.set(t.id, { models, hulls });
     }
+    const armed = this.armedTarget;
+    this.armedTarget = null;
+    this.setArmedTarget(armed);
+  }
+
+  /**
+   * Alvo tocado uma vez (o caminho até ele já está marcado, o segundo toque anda até lá): o
+   * contorno dele engrossa e vira amarelo intenso. `null` volta todos ao branco fino.
+   */
+  setArmedTarget(id: string | null): void {
+    if (id === this.armedTarget) return;
+    this.armedTarget = id;
+    for (const [tid, o] of this.outlined) {
+      const on = tid === id;
+      for (const h of o.hulls) {
+        const pose = h.userData[on ? 'thick' : 'thin'] as { scale: THREE.Vector3; position: THREE.Vector3 };
+        h.scale.copy(pose.scale);
+        h.position.copy(pose.position);
+        h.material = on ? this.armedOutlineMat : this.outlineMat;
+      }
+    }
+  }
+
+  /**
+   * Alvo tocado uma vez: além do contorno amarelo (`setArmedTarget`), mostra que o agente vai
+   * andar até lá — um fantasma dele no destino, olhando para o alvo; pontos que correm pelo
+   * caminho; um balão sobre o alvo; e o próprio agente
+   * vira para o alvo e saltita no lugar. `null` apaga tudo.
+   */
+  setTargetAim(aim: TargetAim | null): void {
+    const key = aim ? `${aim.id}|${aim.unitId}|${hexKey(aim.dest)}|${aim.path.map(hexKey).join(';')}|${aim.label}` : '';
+    if (key === (this.aimFx?.key ?? '')) return;
+    this.clearAimFx();
+    this.setArmedTarget(aim?.id ?? null);
+    const target = aim && this.outlined.get(aim.id);
+    const u = aim && this.units.get(aim.unitId);
+    if (!aim || !target || !u) return;
+
+    const box = new THREE.Box3();
+    for (const m of target.models) box.expandByObject(m);
+    const center = box.getCenter(new THREE.Vector3());
+    const lift = (h: HexCoord, dy: number) => {
+      const p = this.worldOf(h);
+      p.y = this.groundAt(p.x, p.z) + BASE_TOP + dy;
+      return p;
+    };
+
+    // fantasma: cópia translúcida do agente, parado no destino e de frente para o alvo
+    const ghostMat = new THREE.MeshBasicMaterial({
+      color: 0xffe27a,
+      transparent: true,
+      opacity: 0.4,
+      depthWrite: false,
+      toneMapped: false,
+    });
+    const body = u.rig ? cloneSkinned(u.rig.object) : u.group.clone(true);
+    if (!u.rig) {
+      body.position.set(0, 0.3, 0);
+      body.rotation.set(0, 0, 0);
+    }
+    body.traverse((o) => {
+      const m = o as THREE.Mesh;
+      if (!m.isMesh) return;
+      m.material = ghostMat;
+      m.castShadow = m.receiveShadow = false;
+      m.renderOrder = 4;
+    });
+    const ghost = new THREE.Group();
+    ghost.add(body);
+    const spot = lift(aim.dest, 0);
+    ghost.position.copy(spot);
+    ghost.rotation.y = Math.atan2(center.x - spot.x, center.z - spot.z);
+    this.scene.add(ghost);
+
+    // caminho: pontos amarelos que correm do agente até o destino
+    const points = [u.hex, ...aim.path].map((h) => lift(h, 0.12));
+    const curve = points.length > 1 ? new THREE.CatmullRomCurve3(points, false, 'centripetal') : null;
+    const length = curve ? curve.getLength() : 0;
+    const dots: THREE.Sprite[] = [];
+    if (curve) {
+      this.aimDotTex ??= this.glowTexture([
+        [0, 'rgba(255,255,255,1)'],
+        [0.35, 'rgba(255,226,110,0.95)'],
+        [1, 'rgba(255,200,40,0)'],
+      ]);
+      const count = Math.max(3, Math.min(40, Math.round(length * 1.6)));
+      for (let i = 0; i < count; i++) {
+        const dot = new THREE.Sprite(
+          new THREE.SpriteMaterial({ map: this.aimDotTex, transparent: true, depthWrite: false, toneMapped: false }),
+        );
+        dot.scale.setScalar(0.42);
+        dot.renderOrder = 5;
+        dot.userData['phase'] = i / count;
+        this.scene.add(dot);
+        dots.push(dot);
+      }
+    }
+
+    // balão sobre o alvo: "Toque de novo para ir · 3 passos"
+    const label = this.labelSprite(aim.label, 'aim');
+    label.position.set(center.x, box.max.y + 0.35, center.z);
+    this.labelScene.add(label);
+
+    // o agente vira para o alvo, pronto para sair
+    u.yaw = Math.atan2(center.x - u.group.position.x, center.z - u.group.position.z);
+
+    this.aimFx = { key, unitId: u.id, ghost, ghostMat, curve, length, dots, label, calm: reducedMotionQuery() };
+  }
+
+  private clearAimFx(): void {
+    const fx = this.aimFx;
+    if (!fx) return;
+    this.aimFx = null;
+    fx.ghost.removeFromParent();
+    fx.ghostMat.dispose();
+    for (const d of fx.dots) {
+      d.removeFromParent();
+      d.material.dispose();
+    }
+    this.labelScene.remove(fx.label);
+    fx.label.material.map?.dispose();
+    fx.label.material.dispose();
+  }
+
+  /** Anima os efeitos do alvo tocado uma vez (pontos correndo, fantasma respirando). */
+  private updateAimFx(t: number): void {
+    const fx = this.aimFx;
+    if (!fx) return;
+    const calm = fx.calm;
+    if (fx.curve) {
+      // ~2,2 unidades por segundo, os pontos somem nas pontas
+      const speed = calm ? 0 : 2.2 / Math.max(fx.length, 0.01);
+      for (const d of fx.dots) {
+        const k = ((d.userData['phase'] as number) + t * speed) % 1;
+        fx.curve.getPointAt(k, d.position);
+        d.material.opacity = Math.min(1, Math.sin(Math.PI * k) * 1.6);
+      }
+    }
+    const pulse = 0.5 + Math.sin(t * 4) * 0.5;
+    (fx.ghostMat as THREE.MeshBasicMaterial).opacity = 0.28 + pulse * 0.2;
+  }
+
+  /** Saltinho no lugar do agente que vai andar até o alvo tocado (pronto para sair). */
+  private readyBounce(id: string, t: number): number {
+    if (this.aimFx?.unitId !== id || this.aimFx.calm) return 0;
+    return Math.abs(Math.sin(t * 6)) * 0.07;
   }
 
   /** Acende ou apaga os contornos dos alvos (o toque neles só vale aceso). */
@@ -2426,6 +2626,7 @@ export class HexBoard {
   private dropOutline(id: string): void {
     const o = this.outlined.get(id);
     if (!o) return;
+    if (this.aimFx?.key.startsWith(`${id}|`)) this.clearAimFx();
     for (const h of o.hulls) h.removeFromParent();
     this.outlined.delete(id);
   }
@@ -3445,7 +3646,7 @@ export class HexBoard {
         u.rig.update(dt * this.animRate(u.id));
         const ground = this.groundAt(u.group.position.x, u.group.position.z) + BASE_TOP;
         u.ground = u.ground === undefined ? ground : u.ground + (ground - u.ground) * (1 - Math.exp(-dt * 14));
-        u.group.position.y = u.ground + u.hop;
+        u.group.position.y = u.ground + u.hop + this.readyBounce(u.id, t);
         const turn = Math.atan2(Math.sin(u.yaw - u.group.rotation.y), Math.cos(u.yaw - u.group.rotation.y));
         u.group.rotation.y += turn * (1 - Math.exp(-dt * 12));
         u.shadow.position.set(u.group.position.x, u.ground - BASE_TOP + 0.01, u.group.position.z);
@@ -3455,7 +3656,7 @@ export class HexBoard {
       u.lift += ((active ? 1 : 0) - u.lift) * lk;
       // quem está na vez flutua e gira; os outros descansam baixos e parados
       const float = 0.3 + u.lift * (0.45 + bob);
-      u.group.position.y = float + u.hop;
+      u.group.position.y = float + u.hop + this.readyBounce(u.id, t);
       if (active) u.group.rotation.y += dt * 0.8;
       u.shadow.position.set(u.group.position.x, 0.01, u.group.position.z);
       u.shadow.scale.setScalar(1 - (float - 0.3 + u.hop) * 0.6);
@@ -3533,10 +3734,16 @@ export class HexBoard {
     field.flush();
 
     if (this.outlinesOn && this.outlined.size) {
-      // pulsa entre o laranja apagado e o amarelo aceso: dá para tocar
-      const k = 0.5 + Math.sin(t * 4) * 0.5;
-      this.outlineMat.opacity = 0.45 + k * 0.55;
-      this.outlineMat.color.setRGB(1, 0.55 + k * 0.35, 0.05 + k * 0.2);
+      // branco suave que respira devagar: dá para tocar
+      const k = 0.5 + Math.sin(t * 2.5) * 0.5;
+      this.outlineMat.opacity = 0.2 + k * 0.25;
+      // tocado uma vez: amarelo que pulsa rápido e forte, quase branco no pico
+      if (this.armedTarget) {
+        const a = 0.5 + Math.sin(t * 7) * 0.5;
+        this.armedOutlineMat.opacity = 0.75 + a * 0.25;
+        this.armedOutlineMat.color.setRGB(1, 0.78 + a * 0.18, 0.1 + a * 0.35);
+      }
+      this.updateAimFx(t);
     }
 
     if (this.aura) {
@@ -3566,7 +3773,7 @@ export class HexBoard {
     this.updateSpotlight();
     if (this.spotWarmDue && !this.spot) this.warmSpotlight();
     this.spotlight.render(dt);
-    if (this.labels.size) {
+    if (this.labels.size || this.aimFx) {
       this.renderer.autoClear = false;
       this.renderer.render(this.labelScene, this.camera);
       this.renderer.autoClear = true;
@@ -3628,7 +3835,7 @@ export class HexBoard {
   }
 
   /** Etiqueta de um suspeito no modo de abordagem ("se rende" em verde, "rola" em amarelo, "corre" em laranja). */
-  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee'): THREE.Sprite {
+  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee' | 'aim'): THREE.Sprite {
     const font = 'bold 40px "Special Elite", "Courier New", monospace';
     const c = document.createElement('canvas');
     const g = c.getContext('2d');
@@ -3642,7 +3849,7 @@ export class HexBoard {
     c.width = width;
     c.height = 64 + tip;
     if (g) {
-      g.fillStyle = tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : '#c4621a';
+      g.fillStyle = tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : tone === 'aim' ? '#ffd23a' : '#c4621a';
       g.beginPath();
       g.roundRect(0, 0, width, 64, 12);
       g.moveTo(width / 2 - tip, 64);
@@ -3650,7 +3857,7 @@ export class HexBoard {
       g.lineTo(width / 2 + tip, 64);
       g.fill();
       g.font = font;
-      g.fillStyle = '#ffffff';
+      g.fillStyle = tone === 'aim' ? '#2a2100' : '#ffffff';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillText(text, width / 2, 34);
