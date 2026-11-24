@@ -16,7 +16,8 @@ Todos da [Quaternius](https://quaternius.com), licença CC0 1.0, na versão grá
 
 A biblioteca 2 usa o mesmo esqueleto, então os clipes tocam nos nossos corpos sem retarget. Ela
 complementa a 1 com combate, parkour, lavoura e zumbis. **Não tem animação de abaixar/agachar nem
-de rendição** na versão grátis; por isso o inimigo rendido usa `Crouch_Idle_Loop` da biblioteca 1.
+de rendição** na versão grátis; por isso as poses do inimigo rendido (algemado de pé e ajoelhado)
+são montadas por código em cima do `Idle_Loop` (`src/app/game/cuff-poses.ts`).
 
 Outros candidatos da biblioteca 2 para o futuro: `TreeChopping_Loop` (madeireiro), `Walk_Carry_Loop`,
 `Idle_TalkingPhone_Loop`, `Idle_FoldArms_Loop`, `Yes` e `Idle_No_Loop`.

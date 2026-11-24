@@ -438,8 +438,10 @@ flutuação/giro em unidades **sem** rig.
   batem; não precisou retarget.
 - Código: `src/app/game/character-model.ts` (`CharacterRig`). No `HexBoard`, a peça vira base do
   modelo e o personagem corre em linha reta de hexágono em hexágono, virando para onde vai.
-  Todos os agentes e inimigos têm modelo próprio (ver "Elenco" abaixo). Inimigo rendido toca o
-  clipe `crouch`. `ModelDef.tint` continua disponível para tingir cópias de um mesmo modelo. Os pacotes de origem estão listados em `public/assets/README.md`.
+  Todos os agentes e inimigos têm modelo próprio (ver "Elenco" abaixo). Inimigo rendido fica
+  algemado, de pé (`cuffed`) ou ajoelhado (`kneel`), conforme o id: as duas poses são montadas por
+  código a partir do `idle` (`cuff-poses.ts`, IK dos braços para as costas) e a algema (argolas
+  e corrente) é presa aos ossos das mãos por `CharacterRig.setCuffed`. `ModelDef.tint` continua disponível para tingir cópias de um mesmo modelo. Os pacotes de origem estão listados em `public/assets/README.md`.
 - O build dos dois GLBs está em `tools/assets/` (ver o README de lá).
 - **A versão grátis é menor que a anunciada:** traz só 2 dos 6 corpos (Super-herói masc./fem.)
   e 43 das 120+ animações. Os outros corpos e animações estão na versão Source, que é paga.
