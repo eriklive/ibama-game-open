@@ -2288,19 +2288,20 @@ export class HexBoard {
     }
   }
 
-  /** Avião estacionado: centrado nos hexágonos que ocupa, com o nariz para o sul (o portão). */
+  /**
+   * Avião estacionado: centrado no retângulo dos hexágonos que ocupa (o desenho tem a forma do
+   * avião, então a média puxaria o modelo para o lado da asa), com o nariz para o sul (o portão).
+   * O piso debaixo dele fica com a cor do resto do hangar.
+   */
   private buildPlane(hexes: HexCoord[]): void {
     if (!hexes.length) return;
-    const center = new THREE.Vector3();
-    for (const h of hexes) {
-      center.add(this.worldOf(h));
-      this.tiles.get(hexKey(h))?.baseColor.set(0x9c8c70);
-    }
+    const box = new THREE.Box3();
+    for (const h of hexes) box.expandByPoint(this.worldOf(h));
     const plane = buildPlane();
-    plane.scale.setScalar(2); // avião com o dobro do tamanho (cobre 8 × 6 hexágonos, ver `maps.ts`)
+    plane.scale.setScalar(2); // avião com o dobro do tamanho (cabe em 8 × 6 hexágonos, ver `maps.ts`)
     this.planeModel = plane;
     const holder = this.housed(hexes[0], plane);
-    holder.position.copy(center.divideScalar(hexes.length));
+    holder.position.copy(box.getCenter(new THREE.Vector3()));
     this.addScenery(holder);
   }
 
