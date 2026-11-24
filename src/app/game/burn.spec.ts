@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BURN_RULES, Burnable, burnTarget, canBurn, distanceTo, seeFire } from './burn';
+import { BURN_RULES, Burnable, burnTarget, canBurn, distanceTo, inSnap, seeFire, sideSpot } from './burn';
 import { spawnEnemy } from './enemies';
 import { HexCoord, hexKey, hexNeighbors, reachableHexes } from './hex';
 import { MAPS, blockedHexes, lowCoverHexes, playArea } from './maps';
@@ -31,6 +31,39 @@ describe('queimar', () => {
     const far = spawn('longe', 7 + BURN_RULES.alertRadius);
     const quiet = { ...spawn('rendido', 7), status: 'surrendered' as const };
     expect(seeFire(plane, [near, far, quiet]).map((e) => e.id)).toEqual(['perto']);
+  });
+});
+
+describe('tocar no entorno do avião', () => {
+  it(`vale até ${BURN_RULES.snap} hexágonos do avião`, () => {
+    expect(inSnap({ col: 5, row: 5 }, plane)).toBe(true);
+    expect(inSnap({ col: 8, row: 5 }, plane)).toBe(true);
+    expect(inSnap({ col: 9, row: 5 }, plane)).toBe(false);
+  });
+
+  const options = [
+    { hex: { col: 7, row: 5 }, cost: 3 }, // colado à direita
+    { hex: { col: 4, row: 5 }, cost: 1 }, // colado à esquerda
+    { hex: { col: 8, row: 5 }, cost: 4 }, // não colado
+  ];
+  const far = { col: 0, row: 5 };
+
+  it('sem toque no entorno, vai pelo caminho mais barato', () => {
+    expect(sideSpot(plane, far, options)).toEqual({ col: 4, row: 5 });
+  });
+
+  it('tocando no entorno, vai para o lado do avião mais perto do toque', () => {
+    expect(sideSpot(plane, far, options, { col: 8, row: 5 })).toEqual({ col: 7, row: 5 });
+  });
+
+  it('já colado e tocando do seu lado, fica (abre a ação)', () => {
+    const here = { col: 4, row: 5 };
+    expect(sideSpot(plane, here, options.slice(0, 1))).toEqual(here);
+    expect(sideSpot(plane, here, options.slice(0, 1), { col: 3, row: 5 })).toEqual(here);
+  });
+
+  it('sem lado alcançável, não vai', () => {
+    expect(sideSpot(plane, far, options.slice(2))).toBeNull();
   });
 });
 
