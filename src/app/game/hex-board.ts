@@ -330,7 +330,7 @@ export interface TargetAim {
   label: string;
 }
 
-/** Efeitos do alvo tocado uma vez: fantasma no destino, pontos no caminho, arco e balão. */
+/** Efeitos do alvo tocado uma vez: fantasma no destino, pontos no caminho e balão. */
 interface AimFx {
   key: string;
   unitId: string;
@@ -339,8 +339,6 @@ interface AimFx {
   curve: THREE.Curve<THREE.Vector3> | null;
   length: number;
   dots: THREE.Sprite[];
-  arc: THREE.Mesh;
-  arcTex: THREE.Texture;
   label: THREE.Sprite;
   /** `prefers-reduced-motion`: nada corre nem saltita. */
   calm: boolean;
@@ -482,7 +480,6 @@ export class HexBoard {
   /** Efeitos do alvo tocado uma vez (ver `setTargetAim`). */
   private aimFx: AimFx | null = null;
   private aimDotTex?: THREE.Texture;
-  private aimDashTex?: THREE.Texture;
   /** Contornos acesos (a tela apaga nos close-ups e quando não é a vez de escolher). */
   private outlinesOn = false;
   /** Incêndios acesos: chamas, fumaça e luz que tremula, e os materiais trocados pelos queimados. */
@@ -2497,7 +2494,7 @@ export class HexBoard {
   /**
    * Alvo tocado uma vez: além do contorno amarelo (`setArmedTarget`), mostra que o agente vai
    * andar até lá — um fantasma dele no destino, olhando para o alvo; pontos que correm pelo
-   * caminho; um arco tracejado do agente até o alvo; um balão sobre o alvo; e o próprio agente
+   * caminho; um balão sobre o alvo; e o próprio agente
    * vira para o alvo e saltita no lugar. `null` apaga tudo.
    */
   setTargetAim(aim: TargetAim | null): void {
@@ -2569,33 +2566,6 @@ export class HexBoard {
       }
     }
 
-    // arco tracejado do peito do agente até a borda do alvo mais perto dele
-    const from = lift(u.hex, 1.1);
-    const to = box.clampPoint(from, new THREE.Vector3());
-    to.y = THREE.MathUtils.lerp(box.min.y, box.max.y, 0.55);
-    const mid = from.clone().lerp(to, 0.5);
-    mid.y = Math.max(from.y, to.y) + 0.6 + from.distanceTo(to) * 0.25;
-    const bend = new THREE.QuadraticBezierCurve3(from, mid, to);
-    this.aimDashTex ??= this.dashTexture();
-    const arcTex = this.aimDashTex.clone();
-    arcTex.needsUpdate = true;
-    arcTex.repeat.set(Math.max(2, bend.getLength() * 2.5), 1);
-    const arc = new THREE.Mesh(
-      new THREE.TubeGeometry(bend, 48, 0.045, 6, false),
-      new THREE.MeshBasicMaterial({
-        color: 0xffd23a,
-        map: arcTex,
-        transparent: true,
-        alphaTest: 0.05,
-        // por cima de tudo: o avião fica dentro do hangar e a parede esconderia o arco
-        depthTest: false,
-        depthWrite: false,
-        toneMapped: false,
-      }),
-    );
-    arc.renderOrder = 12;
-    this.scene.add(arc);
-
     // balão sobre o alvo: "Toque de novo para ir · 3 passos"
     const label = this.labelSprite(aim.label, 'aim');
     label.position.set(center.x, box.max.y + 0.35, center.z);
@@ -2604,7 +2574,7 @@ export class HexBoard {
     // o agente vira para o alvo, pronto para sair
     u.yaw = Math.atan2(center.x - u.group.position.x, center.z - u.group.position.z);
 
-    this.aimFx = { key, unitId: u.id, ghost, ghostMat, curve, length, dots, arc, arcTex, label, calm: reducedMotionQuery() };
+    this.aimFx = { key, unitId: u.id, ghost, ghostMat, curve, length, dots, label, calm: reducedMotionQuery() };
   }
 
   private clearAimFx(): void {
@@ -2617,16 +2587,12 @@ export class HexBoard {
       d.removeFromParent();
       d.material.dispose();
     }
-    fx.arc.removeFromParent();
-    fx.arc.geometry.dispose();
-    (fx.arc.material as THREE.Material).dispose();
-    fx.arcTex.dispose();
     this.labelScene.remove(fx.label);
     fx.label.material.map?.dispose();
     fx.label.material.dispose();
   }
 
-  /** Anima os efeitos do alvo tocado uma vez (pontos correndo, arco, fantasma respirando). */
+  /** Anima os efeitos do alvo tocado uma vez (pontos correndo, fantasma respirando). */
   private updateAimFx(t: number): void {
     const fx = this.aimFx;
     if (!fx) return;
@@ -2640,7 +2606,6 @@ export class HexBoard {
         d.material.opacity = Math.min(1, Math.sin(Math.PI * k) * 1.6);
       }
     }
-    if (!calm) fx.arcTex.offset.x = -t * 1.8;
     const pulse = 0.5 + Math.sin(t * 4) * 0.5;
     (fx.ghostMat as THREE.MeshBasicMaterial).opacity = 0.28 + pulse * 0.2;
   }
@@ -2649,22 +2614,6 @@ export class HexBoard {
   private readyBounce(id: string, t: number): number {
     if (this.aimFx?.unitId !== id || this.aimFx.calm) return 0;
     return Math.abs(Math.sin(t * 6)) * 0.07;
-  }
-
-  /** Traço branco com o vão transparente (o arco do alvo, repetido ao longo do tubo). */
-  private dashTexture(): THREE.Texture {
-    const c = document.createElement('canvas');
-    c.width = 64;
-    c.height = 8;
-    const g = c.getContext('2d');
-    if (g) {
-      g.fillStyle = '#ffffff';
-      g.fillRect(0, 0, 38, 8);
-    }
-    const tex = new THREE.CanvasTexture(c);
-    tex.wrapS = THREE.RepeatWrapping;
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
   }
 
   /** Acende ou apaga os contornos dos alvos (o toque neles só vale aceso). */

@@ -425,7 +425,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         !this.approaching() && !this.grouping() && !this.burning();
       this.board?.showTargetOutlines(free);
       // alvo já tocado uma vez (o caminho até ele está marcado): contorno maior e amarelo, fantasma
-      // do agente no destino, pontos correndo no caminho, arco até o alvo e o balão do segundo toque
+      // do agente no destino, pontos correndo no caminho e o balão do segundo toque
       const target = free ? this.armedTarget() : null;
       const aim = this.aimedTarget();
       const cost = this.selectedCost();
