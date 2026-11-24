@@ -44,8 +44,9 @@ equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a 
   rolagem e a de fuga se afastam junto.
 - **Iniciativa** e **Agilidade** (perseguição; regras em `src/app/game/chase.ts` e `runner.ts`):
   a iniciativa soma no raio de perseguição e no d20 para arrancar (8 ou mais); a agilidade dos
-  suspeitos soma no d20 deles em cada obstáculo da corrida. A **classe dá a base**: Capitão começa com **+1 de iniciativa**,
-  Agente com **+1 de agilidade**.
+  suspeitos soma no d20 deles em cada obstáculo da corrida. A agilidade dos agentes **ainda não tem
+  uso** (era o pulo do caixote da perseguição antiga, que saiu). A **classe dá a base**: Capitão
+  começa com **+1 de iniciativa**, Agente com **+1 de agilidade**.
 - Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
   direita, negativo em vermelho para a esquerda; o tracejado mostra onde o ponto livre pode
   entrar). Todo agente começa com 0, mais a base da classe.
@@ -195,8 +196,8 @@ O hangar tem carga empilhada para os agentes se esconderem e planejarem a aproxi
 - **Cobertura baixa** (sacos no palete e gaiolas vazias): ninguém passa, mas o inimigo enxerga por
   cima. Só não vê o agente que está **colado nela, do lado de lá** (o último hexágono antes dele, na
   linha do olhar, é a carga). O cone vermelho já mostra essa "sombra" atrás da carga. Parado ao lado de
-  carga baixa, o agente fica agachado. Na perseguição, o garimpeiro dá a volta em qualquer carga baixa
-  (e na mesa) e o agente pode **pular por cima** (ver **Caixote**, na perseguição).
+  carga baixa, o agente fica agachado. Na fuga, a carga baixa (e a mesa) é obstáculo: a rota travada
+  dá a volta nela.
 - **Decoração** (galões de gasolina e botijão): não bloqueia nada.
 
 A carga é desenhada no texto do mapa (`B` caixotes, `M` papelão, `S` sacos, `G` gaiolas, `f` galões) e
@@ -484,10 +485,9 @@ genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em
 
 ## Perseguição (em construção)
 
-Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regras em
-`src/app/game/chase.ts` (funções puras, testadas em `chase.spec.ts`). Só há perseguição nos mapas
-com **Modo Corrida** (por enquanto, o Aeroporto); nos outros, quem corre só foge para a borda. O
-que já está no jogo:
+Regras em `src/app/game/chase.ts` (funções puras, testadas em `chase.spec.ts`). Só há perseguição
+nos mapas com **Modo Corrida** (por enquanto, o Aeroporto); nos outros, quem corre só foge para a
+borda. O que já está no jogo:
 
 1. **Gatilho.** No turno inimigo, antes de um suspeito em alerta correr, os agentes que chegam até
    ele andando no máximo **4 + vigor + iniciativa** hexágonos podem ir atrás. Aparece o carimbo
@@ -512,14 +512,13 @@ que já está no jogo:
 4. **A corrida.** A perseguição sai do tabuleiro e vira o [Modo Corrida](#modo-corrida-aeroporto).
    **Correr!** (C, □), quantas vezes quiser: d20 + vigor vira o bônus de velocidade (%) por 5 s; acabou, 3 s de recarga e pode rolar outro d20.
    Só o agente acelera.
-5. **Grito.** Oculto por enquanto.
-6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
+5. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
 
 **Música.** A faixa da perseguição (`public/assets/sounds/perseguicao.mp3`, 11,9 s em loop) entra
-quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. Nas decisões
-(iniciativa, escolha de alvo) a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
+quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. Na escolha de
+alvo (e na iniciativa que vem logo depois dela) a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
 mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
 `CHASE_MUSIC` (`sound.service.ts`).
 

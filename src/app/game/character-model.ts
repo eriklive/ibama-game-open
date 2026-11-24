@@ -96,7 +96,7 @@ export const MODELS = {
 } satisfies Record<string, ModelDef>;
 
 /** Ossos que a camada procedural (`CharacterRig.pose`) mexe. */
-const POSE_BONES = ['thigh_r', 'calf_r', 'thigh_l', 'calf_l', 'spine_01'] as const;
+const POSE_BONES = ['thigh_r', 'calf_r', 'spine_01'] as const;
 type PoseBone = (typeof POSE_BONES)[number];
 
 /** Quanto da cor de `tint` entra no material (0 = nada, 1 = cor cheia). */
@@ -144,9 +144,8 @@ export class CharacterRig {
    * Camada procedural por cima do clipe (em radianos, somada depois do mixer): a biblioteca
    * de clipes não tem chute, então o arrombamento dobra a perna direita e a coluna à mão.
    * `thigh` < 0 levanta a coxa para a frente; `calf` > 0 dobra o joelho; `spine` < 0 inclina para trás.
-   * `thighL`/`calfL` fazem o mesmo com a perna esquerda (o pulo do caixote encolhe as duas).
    */
-  readonly pose = { thigh: 0, calf: 0, thighL: 0, calfL: 0, spine: 0 };
+  readonly pose = { thigh: 0, calf: 0, spine: 0 };
   private readonly bones: Partial<Record<PoseBone, THREE.Object3D>> = {};
   /** Argolas e corrente da algema (criadas no primeiro `setCuffed(true)`). */
   private cuffs: { rings: THREE.Mesh[]; link: THREE.Mesh } | null = null;
@@ -300,11 +299,9 @@ export class CharacterRig {
 
   update(dt: number): void {
     this.mixer.update(dt);
-    const { thigh, calf, thighL, calfL, spine } = this.pose;
+    const { thigh, calf, spine } = this.pose;
     if (thigh && this.bones.thigh_r) this.bones.thigh_r.rotation.x += thigh;
     if (calf && this.bones.calf_r) this.bones.calf_r.rotation.x += calf;
-    if (thighL && this.bones.thigh_l) this.bones.thigh_l.rotation.x += thighL;
-    if (calfL && this.bones.calf_l) this.bones.calf_l.rotation.x += calfL;
     if (spine && this.bones.spine_01) this.bones.spine_01.rotation.x += spine;
     if (this.cuffs?.link.visible) this.placeCuffLink();
   }

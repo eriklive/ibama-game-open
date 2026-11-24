@@ -74,13 +74,10 @@ export const CHASE_RULES = {
 
 export type Side = 'esquerda' | 'direita';
 
-/** Atributos de perseguição (agente ou garimpeiro). Os que faltam valem 0. */
+/** Atributos de perseguição do agente (vigor: raio e gás; iniciativa: raio e arrancada). Os que faltam valem 0. */
 export interface ChaseStats {
   vigor?: number;
   iniciativa?: number;
-  agilidade?: number;
-  /** Só o do agente conta (no grito: d20 + intimidação). */
-  intimidacao?: number;
 }
 
 // ---------- gatilho ----------
