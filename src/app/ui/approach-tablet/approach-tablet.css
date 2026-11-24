@@ -618,6 +618,16 @@
   border: 0;
 }
 
+/* telas estreitas: some o ✓ e a tecla encolhe, pra caber ao lado do Cancelar sem cobrir as pegas */
+@media (max-width: 400px) {
+  .key .chk {
+    display: none;
+  }
+  .key:not(.cancel) {
+    width: 140px;
+  }
+}
+
 /* telas baixas (celular deitado): bordas mais finas, tecla menor */
 @media (max-height: 520px) {
   :host {
