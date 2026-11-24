@@ -1,50 +1,46 @@
 <!-- Perseguição: placar (distância e rota dele) -->
 @if (hud(); as h) {
-  @if (!vault()) {
-    <div class="chase-hud" role="status" aria-live="polite" data-testid="chase-hud">
-      <span class="chase-hud-kicker">{{ h.agent }} × {{ h.enemy }}</span>
-      <span class="chase-hud-row">
-        <span class="chase-hud-label">Distância</span>
-        <span class="chase-hud-dots" aria-hidden="true">
-          @for (d of [0, 1, 2, 3, 4, 5, 6, 7]; track d) {
-            @if (d < h.distance) {
-              <i class="on"></i>
-            } @else if (d < 6) {
-              <i></i>
-            }
+  <div class="chase-hud" role="status" aria-live="polite" data-testid="chase-hud">
+    <span class="chase-hud-kicker">{{ h.agent }} × {{ h.enemy }}</span>
+    <span class="chase-hud-row">
+      <span class="chase-hud-label">Distância</span>
+      <span class="chase-hud-dots" aria-hidden="true">
+        @for (d of [0, 1, 2, 3, 4, 5, 6, 7]; track d) {
+          @if (d < h.distance) {
+            <i class="on"></i>
+          } @else if (d < 6) {
+            <i></i>
           }
-        </span>
-        <strong data-testid="chase-distance">{{ h.distance }}</strong>
+        }
       </span>
-      <span class="chase-hud-row">
-        <span class="chase-hud-label">Rota dele</span>
-        <span class="chase-hud-bar" aria-hidden="true"
-          ><i [style.width.%]="h.total ? (100 * h.step) / h.total : 100"></i
-        ></span>
-        <span>{{ h.step }}/{{ h.total }}</span>
-      </span>
-    </div>
-  }
+      <strong data-testid="chase-distance">{{ h.distance }}</strong>
+    </span>
+    <span class="chase-hud-row">
+      <span class="chase-hud-label">Rota dele</span>
+      <span class="chase-hud-bar" aria-hidden="true"
+        ><i [style.width.%]="h.total ? (100 * h.step) / h.total : 100"></i
+      ></span>
+      <span>{{ h.step }}/{{ h.total }}</span>
+    </span>
+  </div>
 }
 
 <!-- Perseguição: corrida, uma vez por perseguição. O d20 (teste de vigor) pula do botão, mostra o bônus e some. -->
 @if (hud() && sprint(); as sp) {
-  @if (!vault()) {
-    <button
-      type="button"
-      class="sprint-btn"
-      [class.used]="sp.state === 'used'"
-      [disabled]="sp.state !== 'ready'"
-      data-testid="chase-sprint"
-      [attr.aria-label]="sprintLabel(sp)"
-      (click)="sprintPress.emit()">
-      <span class="sprint-main">Correr!</span>
-      <span class="sprint-sub">{{ sprintSub(sp) }}</span>
-      @if (sp.state === 'active') {
-        <span class="sprint-timer" aria-hidden="true"><i [style.animation-duration.ms]="sp.ms"></i></span>
-      }
-    </button>
-  }
+  <button
+    type="button"
+    class="sprint-btn"
+    [class.used]="sp.state === 'used'"
+    [disabled]="sp.state !== 'ready'"
+    data-testid="chase-sprint"
+    [attr.aria-label]="sprintLabel(sp)"
+    (click)="sprintPress.emit()">
+    <span class="sprint-main">Correr!</span>
+    <span class="sprint-sub">{{ sprintSub(sp) }}</span>
+    @if (sp.state === 'active') {
+      <span class="sprint-timer" aria-hidden="true"><i [style.animation-duration.ms]="sp.ms"></i></span>
+    }
+  </button>
   @if (sp.roll !== null && sp.state !== 'used') {
     <div class="sprint-pop" data-testid="sprint-pop" aria-hidden="true">
       <app-d20 class="sprint-die" [value]="sp.roll" [duration]="dieMs" />
@@ -53,35 +49,6 @@
       }
     </div>
   }
-}
-
-<!-- Perseguição: escolha no caixote de meia altura, antes de chegar nele. O slow-mo para o tempo e
-     tudo fica cinza, menos o caixote e a faixa da volta (o caminho dele); o relógio corre até o
-     tempo voltar. Sem escolha, o agente dá a volta. -->
-@if (vault(); as vt) {
-  <div class="vault-scene" data-testid="vault" role="dialog" aria-label="Caixote: pular por cima ou dar a volta">
-    <div class="curve-head vault-head">
-      <span class="curve-kicker">Pular?</span>
-      <span class="vault-hint">Toque no caixote para pular ou no caminho dele para dar a volta.</span>
-    </div>
-    <div class="vault-card" data-testid="vault-card">
-      <span class="vault-clock" aria-hidden="true" [style.animation-duration.ms]="vt.ms">
-        <svg viewBox="0 0 40 40">
-          <circle class="vault-clock-face" cx="20" cy="20" r="17" />
-          <circle class="vault-clock-left" cx="20" cy="20" r="17" pathLength="100" [style.animation-duration.ms]="vt.ms" />
-          <line class="vault-clock-hand" x1="20" y1="20" x2="20" y2="6" [style.animation-duration.ms]="vt.ms" />
-        </svg>
-      </span>
-      <span class="vault-actions">
-        <button type="button" class="vault-btn go" data-testid="vault-jump" (click)="vaultPick.emit('pular')">
-          Pular <small>d20 {{ vt.need }}+</small>
-        </button>
-        <button type="button" class="vault-btn" data-testid="vault-around" (click)="vaultPick.emit('volta')">
-          Dar a volta
-        </button>
-      </span>
-    </div>
-  </div>
 }
 
 <!-- Escolha de alvo (decisao:alvo): metade da tela = um lado; 1º toque olha, 2º confirma -->

@@ -42,9 +42,9 @@ equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a 
 - **Vigor:** cada ponto vale **+1 de movimento** no turno (somado aos 2d4).
 - **Intimidação:** cada ponto vale **+1 no raio de abordagem** (a zona de rendição). A zona de
   rolagem e a de fuga se afastam junto.
-- **Iniciativa** e **Agilidade** (Modo Perseguição, em construção; regras em `src/app/game/chase.ts`):
-  a iniciativa soma no raio de perseguição e no d20 para arrancar (8 ou mais); a agilidade soma no
-  d20 do pulo por cima do caixote (8 ou mais). A **classe dá a base**: Capitão começa com **+1 de iniciativa**,
+- **Iniciativa** e **Agilidade** (perseguição; regras em `src/app/game/chase.ts` e `runner.ts`):
+  a iniciativa soma no raio de perseguição e no d20 para arrancar (8 ou mais); a agilidade dos
+  suspeitos soma no d20 deles em cada obstáculo da corrida. A **classe dá a base**: Capitão começa com **+1 de iniciativa**,
   Agente com **+1 de agilidade**.
 - Cada atributo vai de **−5 a +5** numa régua centrada no 0 (positivo enche em verde para a
   direita, negativo em vermelho para a esquerda; o tracejado mostra onde o ponto livre pode
@@ -442,6 +442,10 @@ O botão **☰** (topo, à direita) abre o **menu**, com três modos (a escolha 
 | Desempenho | 30 | 20 | densidade de pixels até 1,5× |
 | Ultra desempenho | 20 | 10 | densidade 1×, sem sombras |
 
+No **Modo Corrida** o mapa de corrida pré-renderiza 90 e enxerga 60 hexágonos em qualquer modo
+(`runnerProfile`), e a névoa não fecha mais perto na câmera rasante: o horizonte inteiro da pista
+aparece e o garimpeiro nunca some na névoa. A densidade de pixels e as sombras são as do modo.
+
 O menu também mostra quantos blocos estão carregados e se ainda há algum sendo montado. Como tudo é
 desenhado em poucas malhas instanciadas — o chão da missão (cor, brilho e flutuação por hexágono),
 e cada bloco de 12 × 12 hexágonos do mundo (chão, contornos, troncos, copas, pinheiros e sulcos) —,
@@ -481,7 +485,9 @@ genéricos) também funcionam, com as letras A/B/X/Y. Leitura e mapeamento em
 ## Perseguição (em construção)
 
 Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regras em
-`src/app/game/chase.ts` (funções puras, testadas em `chase.spec.ts`). O que já está no jogo:
+`src/app/game/chase.ts` (funções puras, testadas em `chase.spec.ts`). Só há perseguição nos mapas
+com **Modo Corrida** (por enquanto, o Aeroporto); nos outros, quem corre só foge para a borda. O
+que já está no jogo:
 
 1. **Gatilho.** No turno inimigo, antes de um suspeito em alerta correr, os agentes que chegam até
    ele andando no máximo **4 + vigor + iniciativa** hexágonos podem ir atrás. Aparece o carimbo
@@ -503,47 +509,24 @@ Ideia completa, com renders e decisões, no artefato do Modo Perseguição. Regr
    fechada no meio): cada hexágono à vista custa 6 passos a mais, então ele prefere correr por
    dentro das construções ou pela mata a atravessar a pista à vista. Passa por portas que ele
    consegue usar (bloqueada é parede). Chegou à borda: some do mapa e a perseguição acaba.
-4. **Tempo e distância** (`ChaseRace`, em `chase-race.ts`). Os dois correm juntos pela pista, cada
-   um no **seu próprio relógio**, na velocidade padrão (0,225 s por hexágono), e **ninguém para**
-   (só o garimpeiro, na porta). O dado ou a escolha de um nunca segura o outro. Curvas não param nem
-   rolam. A distância é quanto da pista ele está à frente (menos o hexágono de encostar); começa no
-   número de hexágonos entre eles.
-   **Slow-mo.** Decisões e dados acontecem num **pulso fixo de 1,6 s** (`SLOWMO_PULSE`, em
-   `chase-slowmo.ts`): o tempo desacelera até parar em 300 ms (a câmera abre), fica parado 1 s (a
-   escolha, o dado) e volta em 300 ms (a câmera fecha). Pega os dois juntos, então a distância não
-   muda; depois tudo segue de onde estava.
-   **Caixote.** Onde a pista contorna carga baixa (sacos, gaiolas, mesa, caixote de meia altura), ele sempre **dá a volta**, que leva
-   **x = 1 s** (freia, inclina e escorrega na curva). O agente decide **antes** de chegar: a 1 s de
-   corrida do caixote entra o pulso, o mundo fica cinza, menos o caixote e uma faixa amarela com
-   setas em volta dele (o caminho do garimpeiro), e um relógio corre. Aqui o tempo fica parado
-   até o jogador escolher, por **até 10 s** (`SLOWMO_PULSE.vaultHoldMs`), com os dois congelados na
-   pose de corrida; escolheu, o tempo volta na hora (no pulo, depois do dado). Toque no caixote ou em
-   **Pular** (↑/W, ✕) para **pular**: d20 + agilidade ≥ 8 na hora; passou, pula em **x/2**; falhou,
-   pula mal, em **x**. Toque na faixa ou em **Dar a volta** (↓/S, ○), ou não escolha: volta em **x**.
-   A cena fica em `vault-scene.ts`.
-   **Porta.** Fechada na rota dele: ele emenda a corrida na animação de arrombar (0,6 s; recua e
-   tromba) e o pulso entra; o d20 dele (≥ 3 encostada, ≥ 12 trancada) cai no tempo parado. Passou: a
-   porta fica arrombada e ele sai correndo. Falhou: **se rende** ali (abalado, como agarrado).
-   **Corrida.** Uma vez por perseguição, **Correr!** (C, □): d20 + vigor vira o bônus de velocidade
-   (%) por 5 s. Só o agente acelera.
-   Os tempos ficam em `CHASE_RULES` (`hexSeconds`, `doorBreakSeconds`, `aroundSeconds`,
-   `vaultLeadSeconds`).
-5. **Grito.** Oculto por enquanto (`resolveShout`).
+4. **A corrida.** A perseguição sai do tabuleiro e vira o [Modo Corrida](#modo-corrida-aeroporto).
+   **Correr!** (C, □), uma vez por perseguição: d20 + vigor vira o bônus de velocidade (%) por 5 s.
+   Só o agente acelera.
+5. **Grito.** Oculto por enquanto.
 6. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
    escapa (e sai do mapa, se chegou à borda). Perseguir não custa nada ao agente.
 
 **Música.** A faixa da perseguição (`public/assets/sounds/perseguicao.mp3`, 11,9 s em loop) entra
-quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. No pulso de
-slow-mo (caixote e porta) a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
+quando a perseguição começa, num barramento próprio (`musica`), e o ambiente abafa. Nas decisões
+(iniciativa, escolha de alvo) a fita cai para o **ultra slow** (velocidade ×0,25, o tom cai junto) e volta no gesto; quanto
 mais perto do suspeito, mais aberta a faixa (passa-baixa). Some no fim. Os números ficam em
 `CHASE_MUSIC` (`sound.service.ts`).
 
 **Câmera.** Ao arrancar, a câmera desce (~0,8 s) e encosta nas costas do agente, um pouco à
 direita, olhando para o suspeito (atrás 4,4 · altura 2,5 · mira 7 à frente; em retrato, atrás 6,2 ·
 altura 3,6). O FOV abre um pouco e a névoa fecha mais perto. A HUD de papel some (fica o placar
-embaixo); no caixote, a câmera abre para a escolha (inclinada 56°, enquadrando o agente, o caixote e
-a pista; `VAULT_SCENE`, em `vault-scene.ts`). No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
+embaixo). No fim a câmera sobe de volta. Os números ficam em `CHASE_CAMERA` (`hex-board.ts`).
 
 **Dois fugindo (`decisao:alvo`).** No começo do turno inimigo, se um agente está no raio de dois ou
 mais suspeitos em alerta, ele escolhe qual perseguir: a câmera desce atrás dele olhando para o meio
@@ -557,7 +540,7 @@ ainda não existe: por enquanto o agente só vira o corpo.
 ### Modo Corrida (Aeroporto)
 
 No Aeroporto, a perseguição sai do tabuleiro e vira uma **corrida com curvas**, no
-estilo do Temple Run: o agente corre sempre no meio da pista. Os outros mapas continuam com a corrida no tabuleiro descrita acima.
+estilo do Temple Run: o agente corre sempre no meio da pista.
 
 1. **A virada.** A câmera desce nas costas do agente, como sempre. Uma onda sai dos pés dele
    para a frente: os hexágonos do tático ficam de pé e somem, e os do **mapa de corrida** chegam
@@ -595,9 +578,10 @@ estilo do Temple Run: o agente corre sempre no meio da pista. Os outros mapas co
    | Deslizar | ↓ ou S | arrastar para baixo | ○ | lona, galho, asa do avião |
 
    - **Curva:** a 4 fileiras da esquina (1 s), aparece "← Curva à esquerda!" e ←/→ vira. Longe de
-     uma curva, ←/→ não faz nada. Se o jogador não virar, ou virar para o lado errado, o agente **bate na
-     curva** e perde **2 hexágonos**; o caminho segue assim mesmo. A câmera acompanha a direção do
-     agente (`setChaseFollow`).
+     uma curva, ←/→ não faz nada. O agente **não vira sozinho**: até o jogador virar, ele corre reto
+     para a esquina. Se não virar, ou virar para o lado errado, ele **bate na curva** e perde **2
+     hexágonos**; aí encaixa no caminho e segue. A câmera acompanha a direção do agente
+     (`setChaseFollow`).
    - **Bater num obstáculo** (passar sem o gesto certo): o agente tropeça e perde **1 hexágono**.
    - **O garimpeiro** também corre no meio e vira sempre. Em cada obstáculo ele rola **d20 + agilidade ≥ 8**; se falhar, tropeça e o agente ganha 1 hexágono.
    - **Correr!** (C, □) continua igual. A animação de corrida toca 15% mais rápida que o clipe.

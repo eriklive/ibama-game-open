@@ -1,6 +1,5 @@
 import { Component, input, output } from '@angular/core';
 import type { Side } from '../../game/chase';
-import type { VaultPick } from '../../game/vault-scene';
 import { D20 } from '../dice/d20';
 
 /** Placar da perseguição: distância até ele e quanto da rota travada já foi. */
@@ -10,21 +9,6 @@ export interface ChaseHud {
   distance: number;
   step: number;
   total: number;
-}
-
-/**
- * Escolha no caixote de meia altura (`id` muda a cada caixote), antes de o agente chegar nele: o
- * slow-mo para o tempo e o relógio corre `ms`; o toque no caixote (ou Pular) pula, na faixa (ou
- * Dar a volta) vai atrás dele. O relógio acabou: dá a volta.
- */
-export interface VaultPrompt {
-  id: number;
-  /** Prazo da escolha (ms): até o fim do tempo parado do slow-mo. */
-  ms: number;
-  /** Passos que o pulo corta. */
-  saves: number;
-  /** Quanto o d20 precisa tirar para pular (já com a agilidade). */
-  need: number;
 }
 
 /**
@@ -54,9 +38,9 @@ export interface TargetPrompt {
 export const SPRINT_DIE_MS = 650;
 
 /**
- * Por cima do tabuleiro durante a perseguição: o placar no topo e o botão de correr. No caixote
- * de meia altura, a cena de escolha: faixas de cinema, o relógio de 1 s e o cartão da decisão (o
- * toque vai para o caixote ou para a faixa da volta, no 3D, ou para os botões). Na escolha de alvo (`decisao:alvo`), tocar numa metade da tela olha para aquele lado e tocar de novo confirma.
+ * Por cima do tabuleiro durante a perseguição: o placar no topo e o botão de correr. Na escolha
+ * de alvo (`decisao:alvo`), tocar numa metade da tela olha para aquele lado e tocar de novo
+ * confirma.
  */
 @Component({
   selector: 'app-chase-overlay',
@@ -66,12 +50,9 @@ export const SPRINT_DIE_MS = 650;
 })
 export class ChaseOverlay {
   readonly hud = input<ChaseHud | null>(null);
-  readonly vault = input<VaultPrompt | null>(null);
   readonly target = input<TargetPrompt | null>(null);
   /** Corrida: `null` sem botão (fora da perseguição). */
   readonly sprint = input<SprintView | null>(null);
-  /** Escolha no caixote (botões de apoio para teclado e leitor de tela; o toque vai no 3D). */
-  readonly vaultPick = output<VaultPick>();
   readonly sprintPress = output<void>();
   protected readonly dieMs = SPRINT_DIE_MS;
 

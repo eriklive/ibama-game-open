@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { CHASE_SLOWMO, SLOWMO_PULSE, pulseRate, pulseRestart, pulseTotalMs, slowmoFov, slowmoRate } from './chase-slowmo';
+import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import { CHASE_MUSIC } from './sound.service';
 
 describe('CHASE_SLOWMO', () => {
@@ -18,30 +18,5 @@ describe('CHASE_SLOWMO', () => {
     const full = slowmoFov(48, CHASE_SLOWMO.rate);
     expect(full).toBeLessThan(48);
     expect(full).toBeGreaterThan(48 * 0.85);
-  });
-});
-
-describe('SLOWMO_PULSE', () => {
-  it('desce em 300 ms, fica parado 1 s e volta em 300 ms (1,6 s)', () => {
-    expect(pulseTotalMs()).toBe(1600);
-    expect(pulseRate(0)).toBe(1);
-    expect(pulseRate(150)).toBeCloseTo(0.5);
-    expect(pulseRate(300)).toBe(0);
-    expect(pulseRate(1299)).toBe(0);
-    expect(pulseRate(1450)).toBeCloseTo(0.5);
-    expect(pulseRate(1600)).toBe(1);
-  });
-  it('no caixote, o tempo parado vai até 10 s', () => {
-    const hold = SLOWMO_PULSE.vaultHoldMs;
-    expect(hold).toBe(10000);
-    expect(pulseRate(9000, hold)).toBe(0);
-    expect(pulseRate(10299, hold)).toBe(0);
-    expect(pulseRate(10450, hold)).toBeCloseTo(0.5);
-    expect(pulseTotalMs(hold)).toBe(10600);
-  });
-  it('emenda um pulso novo na velocidade de agora', () => {
-    expect(pulseRate(pulseRestart(1))).toBe(1);
-    expect(pulseRate(pulseRestart(0.5))).toBeCloseTo(0.5);
-    expect(pulseRate(pulseRestart(0))).toBe(0);
   });
 });

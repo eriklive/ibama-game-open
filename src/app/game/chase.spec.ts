@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DOOR_RULES, Door, DoorState } from './door';
-import { HexCoord, hexKey, hexNeighbors, pathTo, reachableHexes, rectArea } from './hex';
-import { blockedHexes, findMap, lowCoverHexes, playArea, vaultHexes } from './maps';
+import { HexCoord, hexKey, hexNeighbors, rectArea } from './hex';
+import { blockedHexes, findMap, lowCoverHexes, playArea } from './maps';
 import { spawnDoors } from './door';
 import { spawnEnemy } from './enemies';
 import {
@@ -9,20 +9,13 @@ import {
   agentSight,
   arrestQueue,
   chaseCandidates,
-  chaseEnd,
   chaseRadius,
-  fleeDoorNeed,
   initiativeChance,
   initiativeCheck,
   lockRoute,
-  resolveFleeDoor,
-  resolveShout,
   resolveSprint,
   sprintRate,
   sprintTotalMs,
-  agentVaults,
-  vaultPasses,
-  routeStops,
   targetChoices,
 } from './chase';
 
@@ -157,21 +150,6 @@ describe('initiativeCheck', () => {
   });
 });
 
-describe('routeStops', () => {
-  it('só portas fechadas param; curva não é parada', () => {
-    const pts = [...line(h(5, 1), 6, 0, 1), ...line(h(6, 6), 5, 1, 0)];
-    expect(routeStops(pts)).toEqual([]);
-    const d = door(pts[5], 'encostada');
-    const stops = routeStops(pts, new Map([[hexKey(d.hex), d]]));
-    expect(stops).toMatchObject([{ kind: 'porta', index: 5 }]);
-  });
-  it('porta aberta não para', () => {
-    const pts = line(h(5, 1), 6, 0, 1);
-    const d = door(pts[3], 'aberta');
-    expect(routeStops(pts, new Map([[hexKey(d.hex), d]]))).toEqual([]);
-  });
-});
-
 describe('lockRoute', () => {
   // corredor: parede na coluna 8 com uma porta em (8, 5); a borda leste fica do outro lado
   const area = rectArea(12, 11);
@@ -184,7 +162,7 @@ describe('lockRoute', () => {
   it('na borda: já fugiu', () => {
     expect(lockRoute(h(0, 5), area, new Set()).escapes).toBe(true);
   });
-  it('passa pela porta encostada ou trancada e para nela', () => {
+  it('passa pela porta encostada ou trancada', () => {
     for (const state of ['encostada', 'trancada'] as const) {
       const r = lockRoute(h(9, 5), rectArea(12, 11), wall, at(state), [
         h(10, 5),
@@ -198,7 +176,6 @@ describe('lockRoute', () => {
       ]);
       expect(r.cornered).toBe(false);
       expect(r.flee[0]).toEqual(h(8, 5));
-      expect(r.stops[0]).toMatchObject({ kind: 'porta', index: 1 });
     }
   });
   it('bloqueada é parede: encurralado se não houver outra saída', () => {
@@ -250,62 +227,14 @@ describe('lockRoute', () => {
   });
 });
 
-describe('porta na fuga', () => {
-  it('o que ele precisa tirar para arrombar', () => {
-    expect(fleeDoorNeed(door(h(0, 0), 'encostada'))).toBe(3);
-    expect(fleeDoorNeed(door(h(0, 0), 'trancada', { lock: 10 }))).toBe(12);
-    expect(fleeDoorNeed(door(h(0, 0), 'aberta'))).toBe(0);
-    expect(fleeDoorNeed(door(h(0, 0), 'bloqueada'))).toBe(Infinity);
-  });
-  it('passou: arromba a porta; falhou: porta igual (ele tenta de novo)', () => {
-    const d = door(h(0, 0), 'trancada');
-    expect(resolveFleeDoor(d, 12)).toMatchObject({ pass: true });
-    expect(resolveFleeDoor(d, 12).door.broken).toBe(true);
-    const fail = resolveFleeDoor(d, 11);
-    expect(fail).toMatchObject({ pass: false });
-    expect(fail.door).toBe(d);
-  });
-  it('porta já aberta: passa sem quebrar', () => {
-    const d = door(h(0, 0), 'aberta');
-    expect(resolveFleeDoor(d, 1)).toMatchObject({ pass: true });
-    expect(resolveFleeDoor(d, 1).door).toBe(d);
-  });
-});
-
-describe('grito', () => {
-  it('disputa: agente maior, ele olha para trás (−1)', () => {
-    expect(resolveShout(12, {}, 9)).toEqual({ total: 12, lookedBack: true, delta: -1 });
-  });
-  it('empate também: ele olha para trás (−1)', () => {
-    expect(resolveShout(10, {}, 10)).toEqual({ total: 10, lookedBack: true, delta: -1 });
-  });
-  it('ele maior: nada acontece', () => {
-    expect(resolveShout(9, {}, 10)).toEqual({ total: 9, lookedBack: false, delta: 0 });
-  });
-  it('a intimidação do agente soma no d20 dele; vigor não conta', () => {
-    expect(resolveShout(8, { intimidacao: 2 }, 10).lookedBack).toBe(true);
-    expect(resolveShout(8, { vigor: 5 }, 10).lookedBack).toBe(false);
-  });
-});
-
-describe('fim', () => {
-  it('distância 0 agarra (mesmo no fim da rota); rota no fim, foge', () => {
-    expect(chaseEnd(0, false)).toBe('agarrou');
-    expect(chaseEnd(0, true)).toBe('agarrou');
-    expect(chaseEnd(2, true)).toBe('fugiu');
-    expect(chaseEnd(2, false)).toBeNull();
-  });
-});
-
 describe('rotas no Aeroporto', () => {
   const m = findMap('aeroporto')!;
   const route = (from: HexCoord, agent: HexCoord) =>
     lockRoute(from, playArea(m), blockedHexes(m), spawnDoors(m.doors ?? [], m.doorStates), [agent]);
 
-  it('pista de terra: reta para o sul, sem paradas', () => {
+  it('pista de terra: reta para o sul', () => {
     const r = route(h(22, 26), h(21, 21));
     expect(r.flee.every((p) => p.col === 22)).toBe(true);
-    expect(r.stops).toEqual([]);
   });
   it('com um agente olhando a pista, ele sai dela pela mata até a borda', () => {
     const area = playArea(m);
@@ -317,66 +246,25 @@ describe('rotas no Aeroporto', () => {
     expect(r.flee.filter((p) => sight.has(hexKey(p))).length).toBeLessThan(r.flee.length / 3);
     expect(area.isEdge(r.flee.at(-1)!)).toBe(true);
   });
-  it('trilha na mata: as curvas não viram paradas', () => {
-    const r = route(h(11, 21), h(15, 21));
-    expect(r.stops.every((s) => s.kind === 'porta')).toBe(true);
-  });
-  it('casa: sai pela porta encostada, que é a primeira parada', () => {
+  it('casa: sai pela porta encostada', () => {
+    const m2 = findMap('aeroporto')!;
+    const doors = spawnDoors(m2.doors ?? [], m2.doorStates);
     const r = route(h(33, 28), h(31, 28));
-    expect(r.stops[0]).toMatchObject({ kind: 'porta', door: { state: 'encostada' } });
+    const first = r.flee.find((p) => doors.has(hexKey(p)));
+    expect(first && doors.get(hexKey(first))!.state).toBe('encostada');
   });
 });
 
-describe('pulo da carga baixa', () => {
-  it('atalho por cima do caixote onde a pista dá a volta; só se poupar passos', () => {
-    const area = rectArea(10, 10);
-    const crate = h(4, 4);
-    // a pista sobe pela coluna 4 e contorna o caixote pela coluna 5
-    const around = [h(4, 7), h(4, 6), h(4, 5), h(5, 5), h(6, 4), h(6, 3), h(5, 3), h(4, 2), h(4, 1)];
-    const [v, ...rest] = agentVaults(around, new Set([hexKey(crate)]), area);
-    expect(rest).toEqual([]);
-    expect(v.over).toEqual(crate);
-    expect(v.path).toContainEqual(crate);
-    expect(v.path.at(-1)).toEqual(around[v.land]);
-    expect(v.saves).toBe(v.land - v.index - v.path.length);
-    expect(v.saves).toBeGreaterThan(0);
-    // pista reta, sem caixote no caminho: nada a pular
-    expect(agentVaults(line(h(2, 8), 8, 0, -1), new Set([hexKey(crate)]), area)).toEqual([]);
-  });
-  it('pulo: d20 + agilidade, pelo menos vaultDC', () => {
-    const need = CHASE_RULES.vaultDC;
-    expect(vaultPasses(need)).toBe(true);
-    expect(vaultPasses(need - 1)).toBe(false);
-    expect(vaultPasses(need - 2, { agilidade: 2 })).toBe(true);
-  });
-  it('aeroporto: toda carga baixa é pulável (sacos, gaiolas, mesa); a alta, não', () => {
+describe('carga baixa do Aeroporto', () => {
+  it('sacos, gaiolas e mesa: ninguém anda por ela, mas não tapa a visão; a alta tapa', () => {
     const m = findMap('aeroporto')!;
-    const vault = vaultHexes(m);
-    expect(vault).toEqual(lowCoverHexes(m));
-    const kinds = new Set((m.cover ?? []).filter((c) => vault.has(hexKey(c))).map((c) => c.kind));
+    const low = lowCoverHexes(m);
+    const kinds = new Set((m.cover ?? []).filter((c) => low.has(hexKey(c))).map((c) => c.kind));
     expect(kinds).toEqual(new Set(['sacks', 'cages', 'table']));
     for (const c of m.cover ?? []) {
-      // meia altura: ninguém anda por ela, mas não tapa a visão
-      if (vault.has(hexKey(c))) expect(blockedHexes(m).has(hexKey(c)), hexKey(c)).toBe(false);
+      if (low.has(hexKey(c))) expect(blockedHexes(m).has(hexKey(c)), hexKey(c)).toBe(false);
       else expect(blockedHexes(m).has(hexKey(c)), hexKey(c)).toBe(true);
     }
-  });
-  it('aeroporto: no fundo do hangar ele contorna as gaiolas e o agente pode pular por cima', () => {
-    const m = findMap('aeroporto')!;
-    const area = playArea(m);
-    const blocked = new Set([...blockedHexes(m), ...lowCoverHexes(m)]);
-    const from = h(20, 7);
-    const agent = h(24, 7);
-    const r = lockRoute(from, area, blocked, spawnDoors(m.doors ?? [], m.doorStates), [agent]);
-    expect(r.flee).toContainEqual(h(14, 4));
-    const free = new Set(blocked);
-    free.delete(hexKey(from));
-    const approach = pathTo(reachableHexes(agent, 10, area, free), from);
-    const vaults = agentVaults([agent, ...approach, ...r.flee], vaultHexes(m), area, blocked);
-    expect(vaults.length).toBeGreaterThanOrEqual(1);
-    const cover = new Map((m.cover ?? []).map((c) => [hexKey(c), c.kind]));
-    expect(cover.get(hexKey(vaults[0].over))).toBe('cages');
-    expect(vaults[0].saves).toBeGreaterThanOrEqual(1);
   });
 });
 

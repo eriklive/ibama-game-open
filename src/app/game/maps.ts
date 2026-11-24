@@ -120,8 +120,7 @@ export const CHARACTERS: Character[] = [
  *
  * Carga no piso (cobertura, ver `COVER_HEIGHT`): `B` caixotes de madeira e `M` caixas de
  * papelão (altas) · `S` sacos no palete e `G` gaiolas vazias (baixas) · `b` caixote de meia
- * altura (baixo) · `f` galões e botijão (só decoração, passa). Toda carga baixa (e a mesa) é
- * pulável: na perseguição o agente pode pular por cima (ver `vaultHexes`).
+ * altura (baixo) · `f` galões e botijão (só decoração, passa).
  *
  * Móveis: `m` mesa (baixa, como os sacos) · `P` prateleira encostada na parede (alta)
  *
@@ -205,12 +204,6 @@ export const blockedHexes = (map: GameMap): Set<string> =>
 export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map, 'low').map(hexKey));
 
 /**
- * Carga que o agente pula por cima na perseguição (o garimpeiro dá a volta): toda cobertura
- * **baixa** (sacos, gaiolas, mesa, caixote de meia altura…; ver `COVER_HEIGHT`).
- */
-export const vaultHexes = lowCoverHexes;
-
-/**
  * Aeroporto clandestino: o hangar fica ao norte, com um portão largo (12 hexágonos) e duas
  * portas nos fundos. A pista é um rastro de terra de 6 hexágonos de largura que sai do meio
  * do portão e corta a mata de sul a norte, até a borda do mapa. O avião é grande: ocupa
@@ -227,7 +220,7 @@ export const vaultHexes = lowCoverHexes;
  * O avião fica **trancado**; a chave está no quadro de chaves (`K`), na parede do fundo.
  *
  * O caminho para os fundos do hangar é cheio de cobertura **baixa** (sacos, gaiolas): na fuga o
- * garimpeiro dá a volta nelas, e o agente pode pular por cima de qualquer uma (ver `vaultHexes`).
+ * garimpeiro dá a volta nelas.
  *
  * A missão principal é queimar o **avião** e a pilha de **suprimentos do garimpo** (`R`), no
  * fundo do hangar, à direita de quem entra pelo portão.

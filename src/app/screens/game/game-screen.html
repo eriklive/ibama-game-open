@@ -438,11 +438,9 @@
   <!-- Perseguição: placar, corrida e caixote -->
   <app-chase-overlay
     [hud]="chaseHud()"
-    [vault]="vaultPrompt()"
     [target]="targetView()"
     [sprint]="chaseSprint()"
     (sprintPress)="sprint()"
-    (vaultPick)="vaultPick($event)"
     (targetSide)="targetSide($event)"
     (targetConfirm)="targetConfirm()"
     (targetCancel)="targetCancel()" />
