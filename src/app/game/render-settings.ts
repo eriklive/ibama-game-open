@@ -83,3 +83,18 @@ export class RenderSettings {
     return 'normal';
   }
 }
+
+/**
+ * Modo Corrida: o horizonte da pista inteiro, em qualquer modo (o garimpeiro nunca some na
+ * névoa). Pré-carrega o mapa de corrida quase todo e enxerga longe; densidade de pixels e
+ * sombras continuam as do modo escolhido.
+ */
+export const RUNNER_VIEW = { loadRadius: 90, viewRadius: 60 } as const;
+
+export function runnerProfile(p: RenderProfile): RenderProfile {
+  return {
+    ...p,
+    loadRadius: Math.max(p.loadRadius, RUNNER_VIEW.loadRadius),
+    viewRadius: Math.max(p.viewRadius, RUNNER_VIEW.viewRadius),
+  };
+}

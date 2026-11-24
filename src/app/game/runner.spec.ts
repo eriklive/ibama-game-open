@@ -176,4 +176,20 @@ describe('RunnerRace: curvas', () => {
     const race = new RunnerRace({ obstacles: [], turns: [turn(5, 'esquerda')], startAt: 10, length: 100, hexes: 2, rollEnemy: () => 20 });
     expect(types(run(race, 3))).not.toContain('bateu-curva');
   });
+
+  it('o agente não vira sozinho: a esquina fica presa até ele virar certo (ou bater nela)', () => {
+    const ok = new RunnerRace({ obstacles: [], turns: [turn(10, 'esquerda'), turn(30, 'direita')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
+    expect(ok.heldTurn()).toBe(0);
+    run(ok, 1.8);
+    ok.turn(-1);
+    // virou certo: a próxima esquina é que fica presa
+    expect(ok.heldTurn()).toBe(1);
+    const wrong = new RunnerRace({ obstacles: [], turns: [turn(10, 'esquerda')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
+    run(wrong, 1.8);
+    wrong.turn(1);
+    // virou errado: segue reto até bater na esquina; bateu, o caminho segue
+    expect(wrong.heldTurn()).toBe(0);
+    run(wrong, 1.5);
+    expect(wrong.heldTurn()).toBe(-1);
+  });
 });

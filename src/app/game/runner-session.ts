@@ -16,11 +16,11 @@ import { HexBoard } from './hex-board';
 import { GameMap } from './maps';
 import { ClipName, ModelDef } from './character-model';
 import { HexCoord, hexToWorld, worldToHex } from './hex';
-import { RenderProfile } from './render-settings';
+import { RENDER_PROFILES, RenderProfile, runnerProfile } from './render-settings';
 import { spawnDoors } from './door';
 import { RUNNER_RULES, RunnerEnd, RunnerEvent, RunnerPose, RunnerRace, tacticalIndex } from './runner';
 import { RunnerStart, trackObstacles } from './runner-maps';
-import { pathLength, pathPose, pathTurns } from './runner-path';
+import { CORNER_RADIUS, S3, pathLength, pathPose, pathTurns, straightPose } from './runner-path';
 import { buildRunnerProps } from './runner-props';
 
 /** Tempos da virada (ms) e até onde a onda vai (mundo: passa do fim da névoa da câmera rasante). */
@@ -29,6 +29,8 @@ export const RUNNER_TRANSITION = { enterMs: 1000, leaveMs: 900, reach: 46, from:
 /** Altura do pulo (mundo) e quanto o corpo inclina no tropeço sem animação própria (rad). */
 const JUMP_HEIGHT = 1.1;
 const STUMBLE_LEAN = 0.35;
+/** Quanto (s) o agente leva para sair do reto e encaixar no caminho, ao virar tarde ou bater. */
+const TURN_BLEND = 0.22;
 /**
  * Velocidade da animação de corrida (1 = a do clipe). O sprint do clipe corre 8,25 m/s e a pista
  * anda ~5,2 m/s: a 0,85 a passada fica um pouco longa, mas o ritmo das pernas é o de quem foge.
@@ -84,6 +86,9 @@ export class RunnerSession {
   private readonly origin: { x: number; z: number };
   private readonly gap0: number;
   private touch: { id: number; x: number; y: number; done: boolean } | null = null;
+  /** O agente seguia reto (`seg`) numa esquina e acabou de pegar o caminho: encaixa desde `t0`. */
+  private release: { seg: number; t0: number } | null = null;
+  private held = -1;
   private readonly unbind: (() => void)[] = [];
   private disposed = false;
 
@@ -119,7 +124,9 @@ export class RunnerSession {
       {
         walls: map.walls,
         enemies: [{ id: o.enemy.id, start: hexAt(this.race.pose('garimpeiro').at), facing: Math.PI, model: o.enemy.model }],
-        profile: o.profile,
+        // o horizonte inteiro da pista, em qualquer modo de renderização
+        profile: runnerProfile(o.profile ?? RENDER_PROFILES.normal),
+        wideChase: true,
         transparent: true,
       },
     );
@@ -143,13 +150,51 @@ export class RunnerSession {
 
   /** Onde o agente está no mapa de corrida (mundo). */
   private raceOrigin(): { x: number; z: number } {
-    return pathPose(this.o.start.race.path, this.race.pose('agente').at);
+    return this.agentPose();
   }
 
   /** Para onde o agente corre no mapa de corrida (no chão). */
   private raceDir(): { x: number; z: number } {
-    const { yaw } = pathPose(this.o.start.race.path, this.race.pose('agente').at);
+    const { yaw } = this.agentPose();
     return { x: Math.sin(yaw), z: Math.cos(yaw) };
+  }
+
+  /**
+   * Onde o agente aparece: no caminho, menos numa esquina que ele ainda não pegou. Ali ele corre
+   * **reto** (não vira sozinho): só vira quando o jogador vira; se não virar, passa da esquina e
+   * bate. Ao pegar o caminho depois de já ter começado a curva, encaixa em `TURN_BLEND`.
+   */
+  private agentPose(now = performance.now()): { x: number; z: number; yaw: number } {
+    const path = this.o.start.race.path;
+    const at = this.race.pose('agente').at;
+    const turns = this.race.turns;
+    const held = this.race.heldTurn();
+    // a curva suave do caminho começa a `CORNER_RADIUS` da esquina: antes disso, reto e caminho são iguais
+    const lead = CORNER_RADIUS / S3;
+    const holding = held >= 0 && at >= turns[held].at - lead;
+    if (holding) {
+      this.held = held;
+      this.release = null;
+      return straightPose(path, held, at);
+    }
+    if (this.held >= 0) {
+      this.release = { seg: this.held, t0: now };
+      this.held = -1;
+    }
+    const goal = pathPose(path, at);
+    const r = this.release;
+    if (!r) return goal;
+    const t = Math.min(1, (now - r.t0) / 1000 / TURN_BLEND);
+    if (t >= 1) {
+      this.release = null;
+      return goal;
+    }
+    const from = straightPose(path, r.seg, at);
+    const k = t * t * (3 - 2 * t);
+    let dy = goal.yaw - from.yaw;
+    if (dy > Math.PI) dy -= 2 * Math.PI;
+    if (dy < -Math.PI) dy += 2 * Math.PI;
+    return { x: from.x + (goal.x - from.x) * k, z: from.z + (goal.z - from.z) * k, yaw: from.yaw + dy * k };
   }
 
   // ---------- ida e volta ----------
@@ -250,9 +295,11 @@ export class RunnerSession {
       // sem a animação do gesto (modelo antigo, ou ainda carregando): agacha, para ou inclina
       const clip: ClipName = p.action === 'desliza' ? 'crouch' : p.action === 'tropeca' ? 'idle' : 'sprint';
       const lean = p.action === 'tropeca' ? Math.sin(Math.PI * p.t) * STUMBLE_LEAN : 0;
-      const at = pathPose(path, p.at);
+      // o agente corre reto numa esquina que ainda não pegou (ver `agentPose`): sem drift ali
+      const at = who === 'unit' ? this.agentPose() : pathPose(path, p.at);
+      const straight = who === 'unit' && this.held >= 0;
       // drift: virando para a esquerda (yaw cresce) inclina para a esquerda (rotação z negativa)
-      const turning = angleDelta(pathPose(path, p.at + DRIFT_LOOK).yaw, pathPose(path, p.at - DRIFT_LOOK).yaw) / (2 * DRIFT_LOOK);
+      const turning = straight ? 0 : angleDelta(pathPose(path, p.at + DRIFT_LOOK).yaw, pathPose(path, p.at - DRIFT_LOOK).yaw) / (2 * DRIFT_LOOK);
       const bank = p.action === 'tropeca' ? 0 : Math.max(-DRIFT_MAX, Math.min(DRIFT_MAX, -turning * DRIFT_GAIN));
       this.board.runnerPose(who, id, {
         x: at.x,

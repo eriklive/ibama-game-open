@@ -7,12 +7,12 @@ import {
   inStructure,
   lowCoverHexes,
   playArea,
-  vaultHexes,
 } from './maps';
-import { agentSight, agentVaults, arrestQueue, chaseCandidates, lockRoute, targetChoices } from './chase';
+import { agentSight, arrestQueue, chaseCandidates, lockRoute, targetChoices } from './chase';
 import { isOpen, spawnDoors } from './door';
 import { HexCoord, hexKey } from './hex';
 import { TEST_CASES, findTestCase } from './test-cases';
+import { runnerStart } from './runner-maps';
 
 describe('casos de teste', () => {
   it('cada caso aponta para mapa, agentes e inimigos que existem', () => {
@@ -40,8 +40,8 @@ describe('casos de teste', () => {
 
   /**
    * A perseguição do caso como o jogo monta (ver `chaseSteps`): a rota travada dele (os outros
-   * inimigos, na posição do caso ou no começo da patrulha, bloqueiam), a distância inicial e os
-   * pulos de caixote da pista do agente.
+   * inimigos, na posição do caso ou no começo da patrulha, bloqueiam), a distância inicial e o
+   * mapa de corrida que ela abre (Modo Corrida).
    */
   const chaseOf = (id: string) => {
     const c = findTestCase(id)!;
@@ -66,15 +66,16 @@ describe('casos de teste', () => {
     const route = lockRoute(runner, area, blocked, doors, others, sight);
     // acabou de abordar: começa colada nele (distância = passos até ele − 1)
     const [first] = arrestQueue(runner, start.agent, [{ id: start.agent, hex: agent, stats: {} }], area, fixed);
-    const track = [agent, ...first.path, ...route.flee];
-    const vaults = agentVaults(track, vaultHexes(map), area, blocked);
     const hangar = map.structures!.find((s) => s.kind === 'hangar')!.rect;
     const inHangar = route.flee.filter((h) => inStructure(h, hangar)).length;
-    return { route, distance: first.path.length - 1, vaults, inHangar };
+    // passa por alguma porta fechada no caminho (ele arromba sem parar, na corrida)
+    const throughDoor = route.flee.some((h) => doors.has(hexKey(h)) && !isOpen(doors.get(hexKey(h))!));
+    const race = runnerStart(runner, route.flee, map);
+    return { route, distance: first.path.length - 1, inHangar, throughDoor, race };
   };
 
   it('fuga pelo aeroporto: o vigia sobe a pista, cruza o hangar e sai pelos fundos, pela esquerda', () => {
-    const { route, distance, vaults, inHangar } = chaseOf('fuga-aeroporto');
+    const { route, distance, inHangar, throughDoor, race } = chaseOf('fuga-aeroporto');
     expect(route.escapes).toBe(true);
     expect(distance).toBeLessThanOrEqual(2);
     // corrida longa: sobe a pista antes de entrar no hangar
@@ -86,15 +87,13 @@ describe('casos de teste', () => {
     // corre por dentro do hangar e passa pela porta dos fundos do oeste
     expect(inHangar).toBeGreaterThanOrEqual(10);
     expect(route.flee.some((h) => h.col === 14 && h.row === 4)).toBe(true);
-    expect(route.stops.some((s) => s.kind === 'porta')).toBe(true);
-    // no caminho para os fundos ele contorna os sacos: a escolha de pular aparece (o piloto, longe
-    // dali, não fecha o caminho). O atalho pode deixá-lo na frente dele: a corrida o faz esperar
-    expect(vaults.map((v) => hexKey(v.over))).toEqual(['15,13']);
-    expect(vaults[0].saves).toBeGreaterThanOrEqual(1);
+    expect(throughDoor).toBe(true);
+    // na corrida: o mapa A (por dentro do hangar), largando na pista
+    expect(race).toMatchObject({ id: 'A', zone: { id: 'pista' } });
   });
 
   it('fuga pela direita: o vigia cruza a pista e some na mata do leste, sem entrar no hangar', () => {
-    const { route, distance, vaults, inHangar } = chaseOf('fuga-aeroporto-direita');
+    const { route, distance, inHangar, throughDoor, race } = chaseOf('fuga-aeroporto-direita');
     expect(route.escapes).toBe(true);
     expect(distance).toBeLessThanOrEqual(2);
     expect(route.flee.length).toBeGreaterThanOrEqual(25);
@@ -103,15 +102,16 @@ describe('casos de teste', () => {
     const end = route.flee.at(-1)!;
     expect(end.col).toBeGreaterThan(start.col + 25);
     expect(inHangar).toBe(0);
-    expect(route.stops).toEqual([]);
-    expect(vaults).toEqual([]);
+    expect(throughDoor).toBe(false);
+    // na corrida: o mapa B (pela lateral do hangar)
+    expect(race.id).toBe('B');
   });
 
   it('fuga pelos fundos do hangar: o garimpeiro do portão cruza o fundo do hangar e sai pela porta do oeste', () => {
     const c = findTestCase('fuga-aeroporto-fundos')!;
     // começa no posto de sempre
     expect(c.enemies!['garimpeiro'].hex).toEqual(findMap('aeroporto')!.enemies.find((e) => e.id === 'garimpeiro')!.patrol[0]);
-    const { route, distance, inHangar } = chaseOf('fuga-aeroporto-fundos');
+    const { route, distance, inHangar, throughDoor, race } = chaseOf('fuga-aeroporto-fundos');
     expect(route.escapes).toBe(true);
     expect(distance).toBeLessThanOrEqual(2);
     expect(inHangar).toBeGreaterThanOrEqual(20);
@@ -119,7 +119,8 @@ describe('casos de teste', () => {
     const back = route.flee.filter((h) => inStructure(h, findMap('aeroporto')!.structures![0].rect) && h.row <= 7);
     expect(back.length).toBeGreaterThanOrEqual(8);
     expect(route.flee.some((h) => h.col === 14 && h.row === 4)).toBe(true);
-    expect(route.stops.some((s) => s.kind === 'porta')).toBe(true);
+    expect(throughDoor).toBe(true);
+    expect(race.id).toBe('A');
     const end = route.flee.at(-1)!;
     expect(end.row).toBeLessThan(0);
   });

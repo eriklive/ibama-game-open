@@ -90,6 +90,18 @@ export function segmentAt(segs: readonly Segment[], at: number): number {
 /** Direita de quem anda na direção `dx, dz` (no chão). */
 const rightOf = (dx: number, dz: number): Point => ({ x: -dz, z: dx });
 
+/**
+ * Reto no trecho `seg`, mesmo passando do fim dele: quem ainda não virou segue em frente até
+ * a esquina (e um pouco além, até bater). Ponto e direção como em `pathPose`.
+ */
+export function straightPose(segs: readonly Segment[], seg: number, at: number, lane = 1): Point & { yaw: number } {
+  const s = segs[Math.max(0, Math.min(segs.length - 1, seg))];
+  const d = (at - s.at) * S3;
+  const r = rightOf(s.dx, s.dz);
+  const off = (lane - 1) * LANE_WIDTH;
+  return { x: s.x + s.dx * d + r.x * off, z: s.z + s.dz * d + r.z * off, yaw: Math.atan2(s.dx, s.dz) };
+}
+
 /** Ponto e direção (yaw: `atan2(dx, dz)`) a `at` fileiras do começo, na faixa contínua `lane`. */
 export function pathPose(segs: readonly Segment[], at: number, lane = 1): Point & { yaw: number } {
   const i = segmentAt(segs, at);

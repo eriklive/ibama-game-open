@@ -198,6 +198,14 @@ export class RunnerRace {
     return r.action === 'tropeca' ? { at: r.at, action: r.action, t, fall: r.fall } : { at: r.at, action: r.action, t };
   }
 
+  /**
+   * A esquina que o agente ainda não pegou (não virou para o lado certo, nem bateu nela): até
+   * ela, ele corre **reto**, sem virar sozinho. `-1`: nenhuma.
+   */
+  heldTurn(): number {
+    return this.turns.findIndex((t, i) => !this.turnState[i].done && this.turnState[i].chose !== t.side);
+  }
+
   /** A próxima curva do agente, se ele está na janela dela. */
   private turnWindow(): number {
     const at = this.agent.at;

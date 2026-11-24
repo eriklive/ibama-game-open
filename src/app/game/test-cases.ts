@@ -21,7 +21,8 @@ export interface TestCase {
   /** Inimigos mexidos: posição e situação. Quem não aparece começa como no mapa. */
   enemies?: Readonly<Record<string, { hex: HexCoord; status?: EnemyStatus }>>;
   /**
-   * O que começa ao carregar: `chase` é a perseguição já com o agente correndo atrás dele;
+   * O que começa ao carregar: `chase` é a perseguição (o Modo Corrida) já com o agente correndo
+   * atrás dele;
    * `targets` abre o turno inimigo com o agente no raio de perseguição de `enemies` (em alerta),
    * que vão correr: ele escolhe qual perseguir ou deixa os dois (`decisao:alvo`).
    */
@@ -40,7 +41,7 @@ export const TEST_CASES: readonly TestCase[] = [
   {
     id: 'fuga-aeroporto',
     name: 'Fuga pelo aeroporto',
-    hint: 'Clara aborda o vigia na pista, que corre até o hangar, cruza por dentro e sai pelos fundos, pela esquerda, contornando os sacos (escolha: pular ou dar a volta). Começa na perseguição.',
+    hint: 'Clara aborda o vigia na pista, que corre até o hangar, cruza por dentro e sai pelos fundos, pela esquerda. Começa na corrida, no mapa A (pelo hangar).',
     mapId: 'aeroporto',
     active: 'clara',
     // no meio do caminho entre a clareira da equipe e o portão do hangar, 4 hexágonos abaixo
@@ -54,7 +55,7 @@ export const TEST_CASES: readonly TestCase[] = [
   {
     id: 'fuga-aeroporto-direita',
     name: 'Fuga pela direita',
-    hint: 'Clara aborda o vigia à esquerda da pista; ele cruza a pista correndo para a direita, passa pelo lado do hangar e some na mata do leste, sem portas no caminho. Começa na perseguição.',
+    hint: 'Clara aborda o vigia à esquerda da pista; ele cruza a pista correndo para a direita, passa pelo lado do hangar e some na mata do leste. Começa na corrida, no mapa B (pela lateral).',
     mapId: 'aeroporto',
     active: 'clara',
     // Clara chega por baixo e pela esquerda: ele foge para o outro lado
@@ -65,12 +66,11 @@ export const TEST_CASES: readonly TestCase[] = [
   {
     id: 'fuga-aeroporto-fundos',
     name: 'Fuga pelos fundos do hangar',
-    hint: 'Clara aborda o garimpeiro no posto dele, à direita do portão; ele entra no hangar, corre pelo fundo, de leste a oeste, e sai pela porta dos fundos do oeste. Começa na perseguição.',
+    hint: 'Clara aborda o garimpeiro no posto dele, à direita do portão; ele entra no hangar e sai pela porta dos fundos do oeste. Começa na corrida, no mapa A, largando no pátio.',
     mapId: 'aeroporto',
     active: 'clara',
     // ele fica no posto de sempre (27,19); Clara chega pela direita e por baixo, então ele foge
-    // para dentro do hangar (mais perto, ele pularia para a mata do leste: as gaiolas do fundo
-    // deixam a volta por dentro 2 passos mais longa)
+    // para dentro do hangar (mais perto, ele pularia para a mata do leste)
     agents: { clara: { col: 30, row: 21 } },
     enemies: { garimpeiro: { hex: { col: 27, row: 19 }, status: 'alert' }, ...PILOTO_LONGE },
     start: { kind: 'chase', agent: 'clara', enemy: 'garimpeiro' },

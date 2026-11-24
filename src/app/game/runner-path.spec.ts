@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { LANE_WIDTH, S3, buildPath, nearestOnPath, pathLength, pathPose, pathTurns, turnSide } from './runner-path';
+import { LANE_WIDTH, S3, buildPath, nearestOnPath, pathLength, pathPose, pathTurns, straightPose, turnSide } from './runner-path';
 
 // norte é −z: sobe 10√3, vira à esquerda (oeste) 12, vira à direita (norte) 6√3
 const path = buildPath([
@@ -41,5 +41,12 @@ describe('runner-path', () => {
     expect(n.dist).toBeCloseTo(2);
     expect(n.side).toBeCloseTo(2);
     expect(n.at).toBeCloseTo(5);
+  });
+
+  it('reto no trecho, mesmo passando da esquina (quem não virou segue em frente)', () => {
+    const p = straightPose(path, 0, 10.5);
+    expect(p.x).toBeCloseTo(0);
+    expect(p.z).toBeCloseTo(-10.5 * S3);
+    expect(p.yaw).toBeCloseTo(pathPose(path, 2).yaw);
   });
 });
