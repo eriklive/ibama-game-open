@@ -117,7 +117,7 @@ import {
 import { APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } from '../../game/haptics';
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-tablet';
-import { HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
+import { HexCoord, hexDistance, hexKey, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import { TEST_CASES, TestCase, findTestCase } from '../../game/test-cases';
@@ -414,14 +414,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const hot = this.canTalk() && here && show ? [hexKey(here)] : [];
       this.board?.setInterrogationAura(show ? talk : [], hot, show ? muted : []);
     });
-    // aura de brasa em volta de cada queimável (o avião, os suprimentos): chegar nela mostra o botão de ação
+    // os queimáveis (o avião, os suprimentos) não têm aura no chão: o próprio modelo ganha um contorno
+    // que pulsa, e só quando dá para tocar nele (a escolha da vez, sem outro modo aberto)
     effect(() => {
-      const show = !['interrogating', 'door', 'plane', 'over'].includes(this.phase()) && !this.search() && !this.aiming();
-      const { ring, hot } = this.actionAuraKeys();
-      this.board?.setActionAura(show ? ring : [], show ? hot : []);
-      // o contorno só pulsa quando dá para tocar no alvo (a escolha da vez, sem outro modo aberto)
-      const free = this.phase() === 'moving-choice' && !this.approaching() && !this.grouping() && !this.burning();
-      this.board?.showTargetOutlines(show && free);
+      const free =
+        this.phase() === 'moving-choice' && !this.search() && !this.aiming() &&
+        !this.approaching() && !this.grouping() && !this.burning();
+      this.board?.showTargetOutlines(free);
     });
     // cartão em foco no interrogatório (controle): o foco do teclado acompanha
     effect(() => {
@@ -1218,9 +1217,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         })),
       },
     );
-    // os queimáveis não levam ícone de chama: cada um tem a sua aura (ver `actionAuraKeys`)
+    // os queimáveis não levam ícone de chama nem aura: um contorno pulsante no modelo, que se toca
+    // de qualquer lugar (vai até lá e abre a ação, ver `tapTarget`)
     this.board.setBurnTargets([]);
-    // …e um contorno pulsante no modelo: tocar nele vai até lá e abre a ação (ver `tapTarget`)
     this.board.setTargetOutlines(this.map.burnables ?? []);
     this.board.setDoors(this.doors(), true);
     this.refreshVision();
@@ -3454,20 +3453,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const from = this.positions().get(this.active().id);
     if (!from) return null;
     return (this.map?.burnables ?? []).find((t) => t.inspect && !this.burned().has(t.id) && canBurn(from, t)) ?? null;
-  });
-  /** Hexágonos da aura dos queimáveis ainda inteiros (a coroa em volta deles) e os em que o agente da vez está. */
-  private readonly actionAuraKeys = computed(() => {
-    const planes = (this.map?.burnables ?? []).filter((t) => !this.burned().has(t.id));
-    const own = new Set(planes.flatMap((t) => t.hexes.map(hexKey)));
-    const ring = new Set<string>();
-    for (const t of planes)
-      for (const h of t.hexes)
-        for (const n of hexNeighbors(h)) {
-          const k = hexKey(n);
-          if (!own.has(k) && this.area.has(n) && !this.solid().has(k)) ring.add(k);
-        }
-    const here = this.positions().get(this.active().id);
-    return { ring: [...ring], hot: here && ring.has(hexKey(here)) ? [hexKey(here)] : [] };
   });
   /** A equipe já vê a chave no quadro: dá para pegar sem rolar percepção. */
   protected readonly keySeen = computed(() => keyKnown(this.planeState()));
