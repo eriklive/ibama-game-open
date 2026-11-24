@@ -328,6 +328,11 @@ export interface TargetAim {
   /** Caminho até `dest`, sem a origem. */
   path: readonly HexCoord[];
   label: string;
+  /**
+   * O que a interface põe por cima do tabuleiro (cartões, placar, botões), em coordenadas da
+   * janela: o balão desce pelo alvo até sair de baixo disso (ver `placeAimLabel`).
+   */
+  avoid?: () => readonly DOMRect[];
 }
 
 /** Efeitos do alvo tocado uma vez: fantasma no destino, pontos no caminho e balão. */
@@ -340,6 +345,10 @@ interface AimFx {
   length: number;
   dots: THREE.Sprite[];
   label: THREE.Sprite;
+  /** Onde o balão prefere ficar (em cima do alvo) e o ponto mais baixo na tela (a frente do alvo, no chão). */
+  labelTop: THREE.Vector3;
+  labelLow: THREE.Vector3;
+  avoid?: () => readonly DOMRect[];
   /** `prefers-reduced-motion`: nada corre nem saltita. */
   calm: boolean;
 }
@@ -2288,19 +2297,20 @@ export class HexBoard {
     }
   }
 
-  /** Avião estacionado: centrado nos hexágonos que ocupa, com o nariz para o sul (o portão). */
+  /**
+   * Avião estacionado: centrado no retângulo dos hexágonos que ocupa (o desenho tem a forma do
+   * avião, então a média puxaria o modelo para o lado da asa), com o nariz para o sul (o portão).
+   * O piso debaixo dele fica com a cor do resto do hangar.
+   */
   private buildPlane(hexes: HexCoord[]): void {
     if (!hexes.length) return;
-    const center = new THREE.Vector3();
-    for (const h of hexes) {
-      center.add(this.worldOf(h));
-      this.tiles.get(hexKey(h))?.baseColor.set(0x9c8c70);
-    }
+    const box = new THREE.Box3();
+    for (const h of hexes) box.expandByPoint(this.worldOf(h));
     const plane = buildPlane();
-    plane.scale.setScalar(2); // avião com o dobro do tamanho (cobre 8 × 6 hexágonos, ver `maps.ts`)
+    plane.scale.setScalar(2); // avião com o dobro do tamanho (cabe em 8 × 6 hexágonos, ver `maps.ts`)
     this.planeModel = plane;
     const holder = this.housed(hexes[0], plane);
-    holder.position.copy(center.divideScalar(hexes.length));
+    holder.position.copy(box.getCenter(new THREE.Vector3()));
     this.addScenery(holder);
   }
 
@@ -2566,15 +2576,37 @@ export class HexBoard {
       }
     }
 
-    // balão sobre o alvo: "Toque de novo para ir · 3 passos"
+    // balão sobre o alvo: "Toque de novo para ir · 3 passos". Se o alto do alvo cai debaixo da
+    // interface (cartões, placar), o balão desce pelo alvo até a frente dele (o lado de baixo da tela)
     const label = this.labelSprite(aim.label, 'aim');
-    label.position.set(center.x, box.max.y + 0.35, center.z);
+    const labelTop = new THREE.Vector3(center.x, box.max.y + 0.35, center.z);
+    const toCam = new THREE.Vector3(this.camera.position.x - center.x, 0, this.camera.position.z - center.z);
+    if (toCam.lengthSq() < 1e-6) toCam.set(0, 0, 1);
+    toCam.normalize();
+    const size = box.getSize(new THREE.Vector3());
+    const reach = (Math.abs(toCam.x) * size.x + Math.abs(toCam.z) * size.z) / 2;
+    const labelLow = new THREE.Vector3(center.x + toCam.x * reach, box.min.y + 0.4, center.z + toCam.z * reach);
+    label.position.copy(labelTop);
     this.labelScene.add(label);
 
     // o agente vira para o alvo, pronto para sair
     u.yaw = Math.atan2(center.x - u.group.position.x, center.z - u.group.position.z);
 
-    this.aimFx = { key, unitId: u.id, ghost, ghostMat, curve, length, dots, label, calm: reducedMotionQuery() };
+    this.aimFx = {
+      key,
+      unitId: u.id,
+      ghost,
+      ghostMat,
+      curve,
+      length,
+      dots,
+      label,
+      labelTop,
+      labelLow,
+      avoid: aim.avoid,
+      calm: reducedMotionQuery(),
+    };
+    this.placeAimLabel(this.aimFx);
   }
 
   private clearAimFx(): void {
@@ -2608,6 +2640,59 @@ export class HexBoard {
     }
     const pulse = 0.5 + Math.sin(t * 4) * 0.5;
     (fx.ghostMat as THREE.MeshBasicMaterial).opacity = 0.28 + pulse * 0.2;
+    this.placeAimLabel(fx);
+  }
+
+  /**
+   * Põe o balão do alvo tocado onde dá para ler: em cima do alvo quando cabe; se ali ele fica
+   * debaixo da interface (`avoid`) ou sai da tela, desce pelo alvo até a frente dele. Na
+   * horizontal, fica sempre inteiro dentro da tela (a ponta continua apontando para o alvo).
+   */
+  private placeAimLabel(fx: AimFx): void {
+    const canvas = this.renderer.domElement.getBoundingClientRect();
+    if (!canvas.width || !canvas.height) return;
+    this.camera.updateMatrixWorld();
+    const proj = this.camera.projectionMatrix.elements;
+    // `sizeAttenuation: false`: o tamanho do balão na tela não depende da distância
+    const w = (fx.label.scale.x * proj[0] * canvas.width) / 2;
+    const h = (fx.label.scale.y * proj[5] * canvas.height) / 2;
+    const margin = 8;
+    const avoid = (fx.avoid?.() ?? []).filter((r) => r.width > 0 && r.height > 0);
+    const toScreen = (p: THREE.Vector3) => {
+      const n = p.clone().project(this.camera);
+      return { n, x: canvas.left + ((n.x + 1) / 2) * canvas.width, y: canvas.top + ((1 - n.y) / 2) * canvas.height };
+    };
+    const clampX = (x: number) =>
+      Math.min(Math.max(x, canvas.left + margin + w / 2), canvas.right - margin - w / 2);
+    const free = (x: number, y: number) =>
+      y - h >= canvas.top + margin &&
+      y <= canvas.bottom - margin &&
+      !avoid.some((r) => x + w / 2 > r.left && x - w / 2 < r.right && y > r.top && y - h < r.bottom);
+    const p = new THREE.Vector3();
+    let spot: { n: THREE.Vector3; x: number; y: number } | null = null;
+    for (let i = 0; i <= 10; i++) {
+      p.lerpVectors(fx.labelTop, fx.labelLow, i / 10);
+      const s = toScreen(p);
+      s.x = clampX(s.x);
+      if (free(s.x, s.y)) {
+        spot = s;
+        break;
+      }
+    }
+    if (!spot) {
+      // nada livre pelo alvo: fica na frente dele, mas abaixo do que estiver em cima
+      spot = toScreen(p.copy(fx.labelLow));
+      spot.x = clampX(spot.x);
+      for (const r of avoid) {
+        if (spot.x + w / 2 > r.left && spot.x - w / 2 < r.right && spot.y > r.top && spot.y - h < r.bottom && r.top < canvas.top + canvas.height / 2)
+          spot.y = Math.max(spot.y, r.bottom + h + margin);
+      }
+    }
+    // volta para o mundo na mesma profundidade
+    const n = spot.n;
+    n.x = ((spot.x - canvas.left) / canvas.width) * 2 - 1;
+    n.y = 1 - ((spot.y - canvas.top) / canvas.height) * 2;
+    fx.label.position.copy(n.unproject(this.camera));
   }
 
   /** Saltinho no lugar do agente que vai andar até o alvo tocado (pronto para sair). */

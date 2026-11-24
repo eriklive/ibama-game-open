@@ -90,7 +90,7 @@ export const TEST_CASES: readonly TestCase[] = [
     agents: { clara: { col: 20, row: 22 } },
     enemies: {
       garimpeiro: { hex: { col: 24, row: 20 }, status: 'alert' },
-      'garimpeiro-pa': { hex: { col: 21, row: 18 }, status: 'alert' },
+      'garimpeiro-pa': { hex: { col: 20, row: 18 }, status: 'alert' },
       'vigia-pista': { hex: { col: 21, row: 30 } },
       ...PILOTO_LONGE,
     },

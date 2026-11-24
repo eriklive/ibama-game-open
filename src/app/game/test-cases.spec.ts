@@ -115,8 +115,9 @@ describe('casos de teste', () => {
     expect(route.escapes).toBe(true);
     expect(distance).toBeLessThanOrEqual(2);
     expect(inHangar).toBeGreaterThanOrEqual(20);
-    // corre pelo fundo do hangar (fileiras de cima), de leste a oeste, até a porta dos fundos
-    const back = route.flee.filter((h) => inStructure(h, findMap('aeroporto')!.structures![0].rect) && h.row <= 7);
+    // corre pelo fundo do hangar (fileiras de cima, atrás da cauda do avião), de leste a oeste,
+    // até a porta dos fundos
+    const back = route.flee.filter((h) => inStructure(h, findMap('aeroporto')!.structures![0].rect) && h.row <= 8);
     expect(back.length).toBeGreaterThanOrEqual(8);
     expect(route.flee.some((h) => h.col === 14 && h.row === 4)).toBe(true);
     expect(throughDoor).toBe(true);

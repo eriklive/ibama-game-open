@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { commonDoors } from './door';
-import { HexCoord, hexKey, reachableHexes } from './hex';
+import { HexCoord, hexDistance, hexKey, reachableHexes } from './hex';
 import {
   COVER_HEIGHT, DOOR_REVEAL, HexRect, MAPS, STRUCTURE_SIGHT, doorsOf, structureRect, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
 } from './maps';
@@ -66,13 +66,14 @@ describe('mapas', () => {
     expect(reachableHexes(map.starts[0], 999, playArea(map), sealed).has(hexKey(inside))).toBe(false);
   });
 
-  it('aeroporto: o avião é grande (8 × 6 hexágonos) e cabe dentro do hangar, sem pegar carga', () => {
+  it('aeroporto: o avião é grande (cabe em 8 × 6 hexágonos) e fica dentro do hangar, sem pegar carga', () => {
     const map = MAPS.find((m) => m.id === 'aeroporto')!;
     const [c0, c1] = structureRect(map, 'hangar')!.cols;
     const [r0, r1] = structureRect(map, 'hangar')!.rows;
     const cols = map.plane!.map((h) => h.col);
     const rows = map.plane!.map((h) => h.row);
-    expect(map.plane!.length).toBe(48);
+    // só os hexágonos debaixo do avião (fuselagem, asa, empenagem) bloqueiam
+    expect(map.plane!.length).toBe(25);
     expect([Math.max(...cols) - Math.min(...cols) + 1, Math.max(...rows) - Math.min(...rows) + 1]).toEqual([8, 6]);
     // por dentro das paredes
     expect(Math.min(...cols)).toBeGreaterThan(c0);
@@ -81,6 +82,17 @@ describe('mapas', () => {
     expect(Math.max(...rows)).toBeLessThan(r1);
     const plane = new Set(map.plane!.map(hexKey));
     expect((map.cover ?? []).some((c) => plane.has(hexKey(c)))).toBe(false);
+  });
+
+  it('aeroporto: os cantos do retângulo do avião (ao lado do nariz) são piso livre e colados nele', () => {
+    const map = MAPS.find((m) => m.id === 'aeroporto')!;
+    const plane = new Set(map.plane!.map(hexKey));
+    const blocked = blockedHexes(map);
+    for (const h of [{ col: 17, row: 13 }, { col: 21, row: 13 }, { col: 22, row: 14 }]) {
+      expect(blocked.has(hexKey(h))).toBe(false);
+      expect(map.plane!.some((p) => hexDistance(p, h) === 1)).toBe(true);
+    }
+    expect(plane.has('19,14') && plane.has('20,14')).toBe(true);
   });
 
   it('aeroporto: todo hexágono livre é alcançável (nenhuma clareira isolada, nem atrás da carga)', () => {
