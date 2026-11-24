@@ -1,6 +1,6 @@
-// Gera public/assets/characters/<id>/<id>.glb (um por personagem de characters.mjs) e
-// public/assets/anims/humanoid-base.glb a partir dos pacotes CC0 da Quaternius
-// (Universal Base Characters + Universal Animation Library).
+// Gera public/assets/characters/<id>/<id>.glb (um por personagem de characters.mjs) a partir
+// do pacote CC0 Universal Base Characters, da Quaternius.
+// Os clipes (anims/humanoid-base.glb) saem de build-anims.mjs.
 // Uso: ver tools/assets/README.md
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
@@ -15,9 +15,9 @@ import { Gear, PIECES, measure } from './lib/gear.mjs';
 
 const args = process.argv.slice(2);
 const only = args.find((a) => a.startsWith('--only='))?.slice(7).split(',');
-const [UBC, UAL, OUT] = args.filter((a) => !a.startsWith('--'));
-if (!UBC || !UAL || !OUT) {
-  console.error('uso: node build-assets.mjs <Universal Base Characters> <Universal Animation Library> <saída> [--only=id,id]');
+const [UBC, OUT] = args.filter((a) => !a.startsWith('--'));
+if (!UBC || !OUT) {
+  console.error('uso: node build-assets.mjs <Universal Base Characters> <saída> [--only=id,id]');
   process.exit(1);
 }
 await MeshoptEncoder.ready;
@@ -216,17 +216,5 @@ async function buildCharacter(def) {
 
 for (const def of CHARACTERS) if (!only || only.includes(def.id)) await buildCharacter(def);
 
-// ---------- biblioteca de clipes ----------
-if (!only) {
-  const CLIPS = { Idle_Loop: 'idle', Walk_Loop: 'walk', Jog_Fwd_Loop: 'run', Crouch_Idle_Loop: 'crouch' };
-  const anims = await io.read(path.join(UAL, 'Unreal-Godot/UAL1_Standard.glb'));
-  const ar = anims.getRoot();
-  for (const a of ar.listAnimations()) { if (CLIPS[a.getName()]) { a.setName(CLIPS[a.getName()]); continue; } a.listChannels().forEach((c) => c.dispose()); a.listSamplers().forEach((s) => s.dispose()); a.dispose(); }
-  for (const n of ar.listNodes()) { n.setMesh(null); n.setSkin(null); }
-  ar.listSkins().forEach((s) => s.dispose());
-  ar.listMeshes().forEach((m) => m.dispose());
-  await anims.transform(resample(), prune({ keepLeaves: true }), dedup(), quantize(), meshopt({ encoder: MeshoptEncoder, level: 'medium' }));
-  fs.mkdirSync(path.join(OUT, 'anims'), { recursive: true });
-  await io.write(path.join(OUT, 'anims/humanoid-base.glb'), anims);
-}
+// a biblioteca de clipes (anims/humanoid-base.glb) sai de build-anims.mjs
 console.log('ok');

@@ -1736,16 +1736,34 @@ export class HexBoard {
   runnerPose(
     who: 'unit' | 'enemy',
     id: string,
-    pose: { x: number; z: number; yaw: number; hop: number; clip: ClipName; lean?: number; runAnim?: number },
+    pose: {
+      x: number;
+      z: number;
+      yaw: number;
+      hop: number;
+      /** Clipe em loop (e o de reserva, se o gesto não tem animação). */
+      clip: ClipName;
+      /** Gesto percorrido no tempo da regra: pulo, deslize, tropeço (`CharacterRig.scrub`). */
+      gesture?: { clip: ClipName; t: number };
+      /** Inclinação para o lado (rad) quando o gesto não tem animação. */
+      lean?: number;
+      /** Inclinação para dentro da curva (rad), o "drift": soma com tudo. */
+      bank?: number;
+      /** Velocidade do clipe em loop. */
+      runAnim?: number;
+    },
   ): void {
     const m = who === 'unit' ? this.units.get(id) : this.enemies.get(id);
     if (!m) return;
     m.group.position.x = pose.x;
     m.group.position.z = pose.z;
     m.hop = pose.hop;
-    m.group.rotation.z = pose.lean ?? 0;
-    m.rig?.setTimeScale('run', pose.runAnim ?? 1);
-    m.rig?.play(pose.clip, 0.12);
+    const animated = !!pose.gesture && !!m.rig?.scrub(pose.gesture.clip, pose.gesture.t);
+    m.group.rotation.z = (animated ? 0 : (pose.lean ?? 0)) + (pose.bank ?? 0);
+    if (!animated) {
+      m.rig?.setTimeScale(pose.clip, pose.runAnim ?? 1);
+      m.rig?.play(pose.clip, 0.12);
+    }
     const hex = worldToHex(pose.x, pose.z, HEX_SIZE);
     m.hex = hex;
     // na corrida, de frente para onde o caminho vai (a curva já vem suave do caminho)
@@ -1761,7 +1779,8 @@ export class HexBoard {
       // gira aqui mesmo, para nenhum quadro sair com o ângulo do caminho (ele de lado)
       e.facing = e.facingGoal = Math.atan2(Math.cos(pose.yaw), Math.sin(pose.yaw));
       e.group.rotation.y = -e.facing;
-      e.running = pose.clip === 'run';
+      // na corrida ele nunca para: pintar o estado não pode trocar o clipe por cima do gesto
+      e.running = true;
     }
   }
 

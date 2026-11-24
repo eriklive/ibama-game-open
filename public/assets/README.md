@@ -11,17 +11,14 @@ Todos da [Quaternius](https://quaternius.com), licença CC0 1.0, na versão grá
 | Pacote | Versão conferida | O que usamos | Vira |
 |---|---|---|---|
 | [Universal Base Characters](https://quaternius.itch.io/universal-base-characters) | Standard, baixado em 12/11/2026 | Corpos `Superhero_Female_FullBody` e `Superhero_Male_FullBody`; penteados `Hair_Buns`, `Hair_Long`, `Hair_SimpleParted`, `Hair_Buzzed`, `Hair_Beard` | `characters/<id>/<id>.glb` |
-| [Universal Animation Library](https://quaternius.itch.io/universal-animation-library) (a "1") | v3.0 Standard (16/06/2026) | Clipes `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop`, `Crouch_Idle_Loop`, do arquivo sem root motion | `anims/humanoid-base.glb` (`idle`, `walk`, `run`, `crouch`) |
+| [Universal Animation Library](https://quaternius.itch.io/universal-animation-library) (a "1") | v3.0 Standard (16/06/2026) | Clipes `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop`, `Crouch_Idle_Loop`, `Sprint_Loop` e um trecho de `Jump_Land`, do arquivo sem root motion | `anims/humanoid-base.glb` (`idle`, `walk`, `run`, `crouch`, `sprint`, `trip`) |
+| [Universal Animation Library 2](https://quaternius.itch.io/universal-animation-library-2) | v2.2 Standard (28/09/2026) | Trechos de `NinjaJump_Start`, `NinjaJump_Land`, `Slide_Start`, `Slide_Exit` e `Hit_Knockback` | `anims/humanoid-base.glb` (`jump`, `slide`, `crash`) |
 
-## Pacote avaliado, ainda sem uso
+A biblioteca 2 usa o mesmo esqueleto, então os clipes tocam nos nossos corpos sem retarget. Ela
+complementa a 1 com combate, parkour, lavoura e zumbis. **Não tem animação de abaixar/agachar nem
+de rendição** na versão grátis; por isso o inimigo rendido usa `Crouch_Idle_Loop` da biblioteca 1.
 
-[Universal Animation Library 2](https://quaternius.itch.io/universal-animation-library-2)
-(v2.2 Standard, 28/09/2026, CC0). Usa o mesmo esqueleto, então os clipes tocam nos nossos corpos
-sem retarget. Complementa a biblioteca 1 com combate, parkour, lavoura e zumbis. **Não tem
-animação de abaixar/agachar nem de rendição** na versão grátis; por isso o inimigo rendido usa
-`Crouch_Idle_Loop` da biblioteca 1.
-
-Candidatos da biblioteca 2 para o futuro: `TreeChopping_Loop` (madeireiro), `Walk_Carry_Loop`,
+Outros candidatos da biblioteca 2 para o futuro: `TreeChopping_Loop` (madeireiro), `Walk_Carry_Loop`,
 `Idle_TalkingPhone_Loop`, `Idle_FoldArms_Loop`, `Yes` e `Idle_No_Loop`.
 
 ## O que vem em cada pacote (versão grátis)
@@ -55,4 +52,5 @@ As versões pagas (Source) anunciam 120+ e 130+ clipes; não conferimos o conte�
 
 1. Inclua o pacote na tabela "Pacotes em uso" (com link, versão e licença).
 2. Liste o arquivo gerado em `LICENSES.md`.
-3. Se o arquivo sai de um pacote, acrescente o passo em `tools/assets/build-assets.mjs`.
+3. Se o arquivo sai de um pacote, acrescente o passo em `tools/assets/build-assets.mjs` (personagens)
+   ou `tools/assets/build-anims.mjs` (clipes).
