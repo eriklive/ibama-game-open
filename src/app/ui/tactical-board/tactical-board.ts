@@ -1,6 +1,15 @@
-import { Component, computed, effect, input, output, signal } from '@angular/core';
+import {
+  Component,
+  DestroyRef,
+  computed,
+  effect,
+  inject,
+  input,
+  output,
+  signal,
+} from '@angular/core';
 import { MainButton } from '../main-button';
-import { ApproachZones, BASE_APPROACH } from '../../game/enemies';
+import { APPROACH_RULES, ApproachZones, BASE_APPROACH } from '../../game/enemies';
 import {
   ApproachBand,
   ChalkHex,
@@ -49,6 +58,8 @@ interface ChalkMap {
     anchor?: 'start' | 'middle' | 'end';
   }[];
   pieces: Piece[];
+  /** Tamanho das peças (mapas com muitos anéis precisam de peças maiores para ler). */
+  pieceScale?: number;
 }
 
 interface Page {
@@ -56,7 +67,9 @@ interface Page {
   title: string;
   map: ChalkMap;
   /** Frases curtas ao lado do mapa (a primeira palavra em destaque vai entre `*`). */
-  notes: { text: string; tone?: 'surrender' | 'roll' | 'flee' | 'talk' }[];
+  notes: { text: string; chip?: string; tone?: 'surrender' | 'roll' | 'flee' | 'talk' }[];
+  /** Linha miúda embaixo das frases (regras de canto). */
+  rule?: string;
   photo?: { src: string; caption: string };
 }
 
@@ -111,6 +124,7 @@ function ringsMap(z: ApproachZones): ChalkMap {
   const out = at(fAt.q + 1, fAt.r + 1);
   return {
     viewBox: box(R + 1, 8, 8),
+    pieceScale: Math.max(1.6, R / 4),
     hexes: all.map((h) => ({ ...poly(h), cls: band(h.d), d: h.d })),
     outlines: (['surrender', 'roll', 'flee'] as const).map((k) => ({
       d: regionOutline(inBand(k), HEX),
@@ -139,91 +153,6 @@ function ringsMap(z: ApproachZones): ChalkMap {
       { kind: 'surrendered', ...s },
       { kind: 'roller', ...r },
       { kind: 'runner', ...f },
-    ],
-  };
-}
-
-/** Página 2: a voz não atravessa parede. */
-function wallMap(z: ApproachZones): ChalkMap {
-  const R = Math.min(4, z.surrenderRange + 1);
-  const all = chalkHexes(R);
-  // parede vertical à direita do agente, entre q = 1 e q = 2
-  const wallQ = 2;
-  const behind = (h: ChalkHex) => h.q >= wallQ && h.r <= 0 && h.r >= -3;
-  const wallTop = at(wallQ, -3.4);
-  const wallBot = at(wallQ, 0.4);
-  const hidden = at(3, -2);
-  const seen = at(-2, 0);
-  return {
-    viewBox: box(R, 10, 8),
-    hexes: all.map((h) => ({
-      ...poly(h),
-      cls:
-        h.d === 0 ? 'center' : behind(h) ? 'shadow' : h.d <= z.surrenderRange ? 'surrender' : 'out',
-      d: h.d,
-    })),
-    outlines: [
-      {
-        d: regionOutline(
-          all.filter((h) => h.d > 0 && h.d <= z.surrenderRange && !behind(h)),
-          HEX,
-        ),
-        cls: 'surrender',
-      },
-    ],
-    strokes: [
-      { d: `M${wallTop.x - 7.5} ${wallTop.y}L${wallBot.x - 7.5} ${wallBot.y}`, cls: 'wall' },
-      // o grito bate na parede
-      {
-        d: `M5 -4L${wallTop.x - 12} ${(wallTop.y + wallBot.y) / 2 + 4}`,
-        cls: 'voice',
-        arrow: true,
-      },
-    ],
-    labels: [
-      { x: wallTop.x - 7.5, y: wallTop.y - 5, text: 'parede', cls: 'small', anchor: 'middle' },
-      { x: hidden.x, y: hidden.y + 15, text: 'não ouve', cls: 'small flee', anchor: 'middle' },
-    ],
-    pieces: [
-      { kind: 'agent', x: 0, y: 0 },
-      { kind: 'suspect', ...hidden },
-      { kind: 'surrendered', ...seen },
-    ],
-  };
-}
-
-/** Página 3: quem escapa corre até a borda do mapa (e o agente vai atrás). */
-function chaseMap(): ChalkMap {
-  const R = 4;
-  const all = chalkHexes(R);
-  const route = [
-    { q: -1, r: 1 },
-    { q: 0, r: 0 },
-    { q: 1, r: -1 },
-    { q: 2, r: -2 },
-    { q: 3, r: -3 },
-    { q: 4, r: -4 },
-  ];
-  const chase = [
-    { q: -3, r: 2 },
-    { q: -2, r: 2 },
-    { q: -1, r: 1 },
-  ];
-  const runner = at(0, 0);
-  const agent = at(-3, 2);
-  const edge = at(4, -4);
-  return {
-    viewBox: box(R, 12, 8),
-    hexes: all.map((h) => ({ ...poly(h), cls: h.d === R ? 'edge' : 'out', d: h.d })),
-    outlines: [{ d: regionOutline(all, HEX), cls: 'edge-line' }],
-    strokes: [
-      { d: path(route), cls: 'flee dashed', arrow: true },
-      { d: path(chase), cls: 'agent-path', arrow: true },
-    ],
-    labels: [{ x: edge.x - 2, y: edge.y - 13, text: 'saída', cls: 'small flee', anchor: 'middle' }],
-    pieces: [
-      { kind: 'runner', ...runner },
-      { kind: 'agent', ...agent },
     ],
   };
 }
@@ -264,41 +193,6 @@ function talkMap(): ChalkMap {
   };
 }
 
-/** Interrogatório, página 2: dentro do raio, conversa; fora, não. */
-function talkInsideMap(): ChalkMap {
-  const R = 3;
-  const all = chalkHexes(R);
-  const inside = at(1, 0);
-  const outside = at(-3, 1);
-  return {
-    viewBox: box(R, 12, 8),
-    hexes: all.map((h) => ({
-      ...poly(h),
-      cls: h.d === 0 ? 'talk-center' : h.d <= TALK.radius ? 'talk' : 'out',
-      d: h.d,
-    })),
-    outlines: [
-      {
-        d: regionOutline(
-          all.filter((h) => h.d <= TALK.radius),
-          HEX,
-        ),
-        cls: 'talk',
-      },
-    ],
-    strokes: [],
-    labels: [
-      { x: inside.x + 9, y: inside.y - 12, text: '?', cls: 'big talk', anchor: 'middle' },
-      { x: outside.x, y: outside.y + 15, text: 'longe', cls: 'small flee', anchor: 'middle' },
-    ],
-    pieces: [
-      { kind: 'surrendered', x: 0, y: 0 },
-      { kind: 'agent', ...inside },
-      { kind: 'agent', ...outside },
-    ],
-  };
-}
-
 const poly = (h: { q: number; r: number }) => {
   const c = at(h.q, h.r);
   return { points: hexPolygon(c.x, c.y, HEX * 0.94) };
@@ -334,6 +228,8 @@ export class TacticalBoard {
 
   protected readonly scale = `scale(${CHALK_SCALE})`;
   protected readonly page = signal(0);
+  /** Tela deitada: com foto, o mapa vai para a direita e a foto fica à esquerda dele. */
+  protected readonly landscape = signal(false);
   protected readonly closing = signal(false);
 
   protected readonly heading = computed(() =>
@@ -345,28 +241,16 @@ export class TacticalBoard {
       return [
         {
           kicker: 'Suspeito rendido',
-          title: 'Raio de conversa',
+          title: 'Interrogatório',
           map: talkMap(),
           notes: [
             {
-              text: `Todo suspeito *rendido* tem um raio de ${TALK.radius} hexágono em volta dele.`,
+              chip: `${TALK.radius} hex`,
+              text: 'Todo rendido tem um *raio de conversa*',
               tone: 'talk',
             },
-            { text: 'Pare o agente da vez *dentro do raio*: aparece o botão Conversar.' },
-            { text: 'Pode entrar e sair quantas vezes quiser, a qualquer momento da vez.' },
-          ],
-        },
-        {
-          kicker: 'Na conversa',
-          title: 'Pergunte de perto',
-          map: talkInsideMap(),
-          notes: [
-            {
-              text: `A *1ª pergunta* de cada conversa gasta ${TALK.moveCost} de movimento.`,
-              tone: 'talk',
-            },
-            { text: 'Ele pode mentir. *Intimidação* ajuda a arrancar a verdade.' },
-            { text: 'Agarrado numa perseguição, chega *abalado*: cede mais fácil.' },
+            { text: 'Pare o agente dentro dele: aparece *Conversar*' },
+            { text: `A 1ª pergunta gasta *${TALK.moveCost} de movimento*` },
           ],
         },
       ];
@@ -377,43 +261,23 @@ export class TacticalBoard {
     return [
       {
         kicker: 'Garimpeiro à vista',
-        title: 'Raio de ação',
+        title: 'Abordagem',
         map: ringsMap(z),
         notes: [
-          { text: `*${s.range} hex · ${s.title}.* ${s.outcome}`, tone: 'surrender' },
-          { text: `*${r.range} hex · ${r.title}.* ${r.outcome}`, tone: 'roll' },
-          { text: `*${f.range} hex · ${f.title}.* ${f.outcome}`, tone: 'flee' },
+          { chip: s.range, text: '*Se rende*', tone: 'surrender' },
+          {
+            chip: r.range,
+            text: `*Rola d20*: ${APPROACH_RULES.escapeDC}+ escapa, senão se rende`,
+            tone: 'roll',
+          },
+          {
+            chip: f.range,
+            text: chase ? '*Foge* e vira perseguição' : '*Foge* para a saída do mapa',
+            tone: 'flee',
+          },
         ],
-      },
-      {
-        kicker: 'Antes de gritar',
-        title: 'Consequências',
-        map: wallMap(z),
-        notes: [
-          { text: '*Parede*, porta fechada ou carga alta no meio: ele não ouve.' },
-          { text: '*Abordar encerra a vez* do agente. Chegue perto antes.' },
-          { text: '*Intimidação* e o grupo junto aumentam o raio.', tone: 'surrender' },
-        ],
-      },
-      {
-        kicker: 'Se ele fugir',
-        title: chase ? 'Perseguição!' : 'Fuga',
-        map: chaseMap(),
-        notes: chase
-          ? [
-              { text: 'Quem foge corre para a *saída do mapa* mais perto.', tone: 'flee' },
-              { text: 'Um agente perto pode *ir atrás*: vira uma corrida.' },
-              {
-                text: '*Alcançou:* rendido na hora. Ele chegou na saída: fugiu.',
-                tone: 'surrender',
-              },
-            ]
-          : [
-              { text: 'Quem foge corre para a *saída do mapa* mais perto.', tone: 'flee' },
-              { text: 'Feche o caminho: agentes e paredes *bloqueiam* a fuga.' },
-              { text: 'Saiu do mapa: *fugiu*. Aborde de novo antes disso.', tone: 'surrender' },
-            ],
-        photo: chase ? { src: 'tutorial/perseguicao.jpg', caption: 'Modo perseguição' } : undefined,
+        rule: 'Parede bloqueia · abordar encerra a vez',
+        photo: chase ? { src: 'tutorial/perseguicao.jpg', caption: 'Perseguição' } : undefined,
       },
     ];
   });
@@ -424,6 +288,13 @@ export class TacticalBoard {
   protected readonly last = computed(() => this.page() >= this.pages().length - 1);
 
   constructor() {
+    if (typeof matchMedia === 'function') {
+      const mq = matchMedia('(orientation: landscape)');
+      const sync = () => this.landscape.set(mq.matches);
+      sync();
+      mq.addEventListener('change', sync);
+      inject(DestroyRef).onDestroy(() => mq.removeEventListener('change', sync));
+    }
     // trocou de lição (rever pelo menu): volta para a primeira página
     effect(() => {
       this.lesson();

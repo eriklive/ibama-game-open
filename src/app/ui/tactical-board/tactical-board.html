@@ -49,7 +49,7 @@
     </svg>
 
     <header class="head">
-      <p class="kicker">Lousa tática · {{ heading() }}</p>
+      <p class="kicker">Lousa tática · {{ current().kicker }}</p>
       <h2 class="title">{{ current().title }}</h2>
       <button
         type="button"
@@ -68,6 +68,9 @@
         <svg
           class="map"
           [attr.viewBox]="m.viewBox"
+          [attr.preserveAspectRatio]="
+            landscape() && current().photo ? 'xMaxYMid meet' : 'xMidYMid meet'
+          "
           role="img"
           [attr.aria-label]="'Mapa visto de cima: ' + current().title"
         >
@@ -90,7 +93,9 @@
               @for (p of m.pieces; track $index) {
                 <g
                   [attr.class]="'piece ' + p.kind"
-                  [attr.transform]="'translate(' + p.x + ' ' + p.y + ') scale(1.6)'"
+                  [attr.transform]="
+                    'translate(' + p.x + ' ' + p.y + ') scale(' + (m.pieceScale ?? 1.6) + ')'
+                  "
                 >
                   <g class="pop">
                     @switch (p.kind) {
@@ -146,37 +151,47 @@
 
     <ul class="notes" role="list">
       @for (n of current().notes; track $index) {
-        <li [attr.class]="n.tone ?? ''" [style.--i]="$index">
-          @for (part of parts(n.text); track $index) {
-            <span [class.em]="part.em">{{ part.t }}</span>
+        <li [attr.class]="(n.tone ?? '') + (n.chip ? ' has-chip' : '')" [style.--i]="$index">
+          @if (n.chip) {
+            <span class="chip">{{ n.chip }}</span>
           }
+          <span class="txt">
+            @for (part of parts(n.text); track $index) {
+              <span [class.em]="part.em">{{ part.t }}</span>
+            }
+          </span>
         </li>
       }
     </ul>
+    @if (current().rule; as rule) {
+      <p class="rule">{{ rule }}</p>
+    }
 
-    <footer class="ledge">
-      <button
-        type="button"
-        class="chalk-btn back"
-        (click)="prev()"
-        [disabled]="page() === 0"
-        data-testid="lousa-prev"
-      >
-        ‹ Voltar
-      </button>
-      <div class="dots" role="tablist" aria-label="Páginas">
-        @for (p of pages(); track $index) {
-          <button
-            type="button"
-            role="tab"
-            class="dot"
-            [class.on]="$index === page()"
-            [attr.aria-selected]="$index === page()"
-            [attr.aria-label]="'Página ' + ($index + 1) + ': ' + p.title"
-            (click)="go($index)"
-          ></button>
-        }
-      </div>
+    <footer class="ledge" [class.single]="pages().length === 1">
+      @if (pages().length > 1) {
+        <button
+          type="button"
+          class="chalk-btn back"
+          (click)="prev()"
+          [disabled]="page() === 0"
+          data-testid="lousa-prev"
+        >
+          ‹ Voltar
+        </button>
+        <div class="dots" role="tablist" aria-label="Páginas">
+          @for (p of pages(); track $index) {
+            <button
+              type="button"
+              role="tab"
+              class="dot"
+              [class.on]="$index === page()"
+              [attr.aria-selected]="$index === page()"
+              [attr.aria-label]="'Página ' + ($index + 1) + ': ' + p.title"
+              (click)="go($index)"
+            ></button>
+          }
+        </div>
+      }
       <button type="button" appMainButton class="next" (click)="next()" data-testid="lousa-next">
         {{ last() ? 'Entendi!' : 'Próximo ›' }}
       </button>
