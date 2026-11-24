@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAPS } from './maps';
-import { aeroportoZone, laneObstacles, raceA, raceB, runnerStart } from './runner-maps';
+import { aeroportoZone, raceA, raceB, runnerStart, trackObstacles } from './runner-maps';
 import { pathTurns } from './runner-path';
 
 const aero = MAPS.find((m) => m.id === 'aeroporto')!;
@@ -34,10 +34,14 @@ describe('Modo Corrida: as curvas', () => {
     // à direita: a pista vira para o oeste, então o avião fica a oeste dela (x menor)
     expect(right.plane!.x).toBeLessThan(right.path[0].x);
     expect(left.plane!.x).toBeGreaterThan(left.path[0].x);
-    // a asa cobre a faixa do lado dele
-    const wing = (r: typeof right) => laneObstacles(r).find((o) => o.kind === 'asa')!;
-    expect(wing(right)).toMatchObject({ lane: 0, move: 'deslizar' });
-    expect(wing(left)).toMatchObject({ lane: 2, move: 'deslizar' });
+    // a asa cobre o meio (onde o agente corre) e a faixa do lado dele
+    for (const r of [right, left]) {
+      expect(trackObstacles(r).find((o) => o.kind === 'asa')).toMatchObject({ move: 'deslizar' });
+      // a ponta da asa (meia envergadura 6,2) passa do meio da pista
+      expect(Math.abs(r.plane!.x - r.path[0].x)).toBeLessThan(6.2);
+    }
+    expect(right.obstacles.find((o) => o.kind === 'wing')!.lanes).toContain(0);
+    expect(left.obstacles.find((o) => o.kind === 'wing')!.lanes).toContain(2);
   });
 
   it('mapa B: a lateral reta e as 4 curvas da mata', () => {
@@ -67,6 +71,26 @@ describe('Modo Corrida: qual mapa, qual lado e onde começa', () => {
     for (const race of [raceA('direita'), raceA('esquerda'), raceB('direita')]) {
       const at = race.zones.map((z) => z.at);
       expect([...at].sort((a, b) => a - b)).toEqual(at);
+    }
+  });
+});
+
+describe('Modo Corrida: obstáculos no meio da pista', () => {
+  const all = [raceA('direita'), raceA('esquerda'), raceB('direita'), raceB('esquerda')];
+
+  it('só o que cobre o meio conta nas regras; a carga das faixas de fora é cenário', () => {
+    for (const race of all) {
+      const counted = trackObstacles(race);
+      const middle = race.obstacles.filter((o) => o.lanes.includes(1));
+      expect(middle.every((o) => o.move !== 'cenario')).toBe(true);
+      expect(counted).toHaveLength(middle.length);
+      expect(counted.every((o) => o.move === 'pular' || o.move === 'deslizar')).toBe(true);
+    }
+  });
+
+  it('nenhum obstáculo enfeite fica fora da pista: os de fora são carga alta nas faixas laterais', () => {
+    for (const race of all) {
+      for (const o of race.obstacles.filter((x) => !x.lanes.includes(1))) expect(o.move).toBe('cenario');
     }
   });
 });

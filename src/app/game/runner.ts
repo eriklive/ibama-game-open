@@ -1,22 +1,22 @@
 /**
  * Modo Corrida — regras puras (testadas em `runner.spec.ts`). A perseguição sai do tabuleiro
  * tático: as peças viram e, no verso, está um **mapa de corrida** (ver `runner-maps.ts`): um
- * caminho de **três faixas** com obstáculos e **esquinas** (`runner-path.ts`). O agente corre
- * sozinho; o jogador só troca de faixa, pula, desliza e vira nas curvas.
+ * caminho com obstáculos e **esquinas** (`runner-path.ts`), como no Temple Run. Os dois correm
+ * sempre **no meio da pista** (não há troca de faixa); o jogador só pula, desliza e vira nas
+ * curvas.
  *
  * - **Posição** é a distância percorrida no caminho (`at`, em fileiras desde o começo dele). Os
  *   dois correm na mesma velocidade (`RUNNER_RULES.rowsPerSecond`); a corrida (o gás) acelera só
  *   o agente.
- * - **Obstáculos** ocupam uma faixa num ponto do caminho e pedem um gesto: `pular` (tora, sacos,
- *   gaiolas, caixote baixo), `deslizar` (lona, galho, a asa do avião) ou `desviar` (carga alta,
- *   parede: só trocando de faixa). Quem passa sem o gesto certo **bate**: tropeça e fica parado
- *   `stumbleSeconds`.
- * - **Curvas**: a `turnWindow` fileiras da esquina, ← ou → **vira** (não troca de faixa). Virou
- *   para o lado certo: segue. Para o lado errado, ou não virou até `turnGrace` depois da esquina:
- *   **bate na curva** (`curveRows`, mais caro que um obstáculo) e o caminho segue assim mesmo.
- * - **O garimpeiro** vira sempre, escolhe a faixa sozinho (sai antes de carga alta) e faz o gesto
- *   certo, mas rola **d20 + agilidade** em cada obstáculo de pular ou deslizar (`enemyDC`): abaixo,
- *   tropeça e o agente ganha a mesma distância.
+ * - **Obstáculos** ficam num ponto do caminho, no meio da pista, e pedem um gesto: `pular` (tora,
+ *   sacos, gaiolas, caixote baixo) ou `deslizar` (lona, galho, a asa do avião). Quem passa sem o
+ *   gesto certo **bate**: tropeça e perde `hitRows`.
+ * - **Curvas**: ← e → só **viram** (fora da janela de uma curva não fazem nada). A `turnWindow`
+ *   fileiras da esquina, virou para o lado certo: segue. Para o lado errado, ou não virou até
+ *   `turnGrace` depois da esquina: **bate na curva** (`curveRows`, mais caro que um obstáculo) e o
+ *   caminho segue assim mesmo.
+ * - **O garimpeiro** vira sempre e faz o gesto certo, mas rola **d20 + agilidade** em cada
+ *   obstáculo (`enemyDC`): abaixo, tropeça e o agente ganha a mesma distância.
  * - **Distância** (no placar, em hexágonos): `(ele − agente − catchRows) / rowsPerHex`. Chegou a 0:
  *   **agarrou**. Ele chegou ao fim do caminho: **fugiu**.
  */
@@ -36,27 +36,21 @@ export const RUNNER_RULES = {
   /** Pulo e deslize (s): o gesto cobre o obstáculo se estiver no ar (ou no chão) ao passar. */
   jumpSeconds: 0.7,
   slideSeconds: 0.8,
-  /** Troca de faixa (s, de uma faixa para a vizinha). */
-  laneSeconds: 0.16,
   /** Curva: a quantas fileiras da esquina ← e → passam a virar (1 s de corrida). */
   turnWindow: 4,
   /** Curva: até quantas fileiras depois da esquina ainda dá para virar. */
   turnGrace: 0.6,
   /** Garimpeiro: d20 + agilidade, pelo menos isto, em cada obstáculo de pular ou deslizar. */
   enemyDC: 8,
-  /** Garimpeiro: a quantas fileiras de um obstáculo ele já está na faixa certa. */
-  enemyLookahead: 5,
   /** Ele some antes do fim do caminho (fileiras). */
   endMargin: 2,
 } as const;
 
-export type Lane = 0 | 1 | 2;
-export type RunnerMove = 'pular' | 'deslizar' | 'desviar';
+export type RunnerMove = 'pular' | 'deslizar';
 
-/** Um obstáculo numa faixa, a `at` fileiras do começo do caminho; pede `move`. */
-export interface LaneObstacle {
+/** Um obstáculo no meio da pista, a `at` fileiras do começo do caminho; pede `move`. */
+export interface TrackObstacle {
   at: number;
-  lane: Lane;
   move: RunnerMove;
   /** O que é (para o som e o texto): tora, avião, lona… */
   kind: string;
@@ -69,19 +63,16 @@ export type RunnerAction = 'corre' | 'pula' | 'desliza' | 'tropeca';
 export interface RunnerPose {
   /** Fileiras desde o começo do caminho. */
   at: number;
-  /** Faixa contínua (0 esquerda, 1 meio, 2 direita), já com a troca em andamento. */
-  lane: number;
   action: RunnerAction;
   /** De 0 a 1 dentro da ação (pulo, deslize, tropeço). */
   t: number;
 }
 
 export type RunnerEvent =
-  | { type: 'faixa'; who: RunnerWho; lane: Lane }
   | { type: 'pulo' | 'deslize'; who: RunnerWho }
-  | { type: 'passou'; who: RunnerWho; obstacle: LaneObstacle }
-  | { type: 'bateu'; obstacle: LaneObstacle }
-  | { type: 'tropecou'; obstacle: LaneObstacle; roll: number; need: number }
+  | { type: 'passou'; who: RunnerWho; obstacle: TrackObstacle }
+  | { type: 'bateu'; obstacle: TrackObstacle }
+  | { type: 'tropecou'; obstacle: TrackObstacle; roll: number; need: number }
   | { type: 'curva-perto'; side: Side }
   | { type: 'virou'; side: Side }
   | { type: 'bateu-curva'; side: Side; wrong: boolean }
@@ -92,7 +83,7 @@ export type RunnerEnd = 'agarrou' | 'fugiu';
 
 export interface RunnerSetup {
   /** Obstáculos do caminho (qualquer ordem). */
-  obstacles: readonly LaneObstacle[];
+  obstacles: readonly TrackObstacle[];
   /** Esquinas do caminho (ver `pathTurns`). */
   turns?: readonly Pick<PathTurn, 'at' | 'side'>[];
   /** Onde o agente nasce (fileiras desde o começo do caminho). */
@@ -101,9 +92,6 @@ export interface RunnerSetup {
   length: number;
   /** Distância inicial em hexágonos (a do tabuleiro tático). */
   hexes: number;
-  /** Faixa de cada um na largada (padrão: meio). */
-  agentLane?: Lane;
-  enemyLane?: Lane;
   /** Agilidade do garimpeiro. */
   agilidade?: number;
   /** O d20 dele em cada obstáculo. */
@@ -112,9 +100,6 @@ export interface RunnerSetup {
 
 interface Runner {
   at: number;
-  lane: Lane;
-  /** Faixa contínua (anda até `lane` em `laneSeconds` por faixa). */
-  x: number;
   action: RunnerAction;
   /** Tempo restante da ação (s) e a duração dela. */
   left: number;
@@ -131,13 +116,9 @@ interface TurnState {
   done: boolean;
 }
 
-const clampLane = (n: number): Lane => Math.max(0, Math.min(2, n)) as Lane;
-
 /** O gesto certo cobre o obstáculo? */
 export function clears(move: RunnerMove, action: RunnerAction): boolean {
-  if (move === 'pular') return action === 'pula';
-  if (move === 'deslizar') return action === 'desliza';
-  return false;
+  return move === 'pular' ? action === 'pula' : action === 'desliza';
 }
 
 /** Fileiras entre os dois no placar (hexágonos, arredondado para cima, nunca negativo). */
@@ -146,11 +127,11 @@ export function shownDistance(gapRows: number): number {
 }
 
 /**
- * A corrida. `step(dt, agentRate)` anda o relógio e devolve o que aconteceu; `move`, `jump` e
- * `slide` são o jogador (perto de uma esquina, `move` vira). O garimpeiro se vira sozinho.
+ * A corrida. `step(dt, agentRate)` anda o relógio e devolve o que aconteceu; `turn`, `jump` e
+ * `slide` são o jogador. O garimpeiro se vira sozinho.
  */
 export class RunnerRace {
-  readonly obstacles: readonly LaneObstacle[];
+  readonly obstacles: readonly TrackObstacle[];
   readonly turns: readonly Pick<PathTurn, 'at' | 'side'>[];
   readonly length: number;
   private readonly agent: Runner;
@@ -171,9 +152,9 @@ export class RunnerRace {
     this.agilidade = setup.agilidade ?? 0;
     this.rollEnemy = setup.rollEnemy;
     const gap = Math.max(0, setup.hexes) * RUNNER_RULES.rowsPerHex + RUNNER_RULES.catchRows;
-    const mk = (at: number, lane: Lane): Runner => ({ at, lane, x: lane, action: 'corre', left: 0, span: 0, done: new Set() });
-    this.agent = mk(setup.startAt, setup.agentLane ?? 1);
-    this.enemy = mk(Math.min(setup.startAt + gap, this.end - 0.5), setup.enemyLane ?? 1);
+    const mk = (at: number): Runner => ({ at, action: 'corre', left: 0, span: 0, done: new Set() });
+    this.agent = mk(setup.startAt);
+    this.enemy = mk(Math.min(setup.startAt + gap, this.end - 0.5));
     // o que já ficou para trás de cada um na largada não conta
     this.obstacles.forEach((o, i) => {
       if (o.at <= this.agent.at) this.agent.done.add(i);
@@ -207,11 +188,7 @@ export class RunnerRace {
 
   pose(who: RunnerWho): RunnerPose {
     const r = who === 'agente' ? this.agent : this.enemy;
-    return { at: r.at, lane: r.x, action: r.action, t: r.span ? 1 - r.left / r.span : 0 };
-  }
-
-  lane(who: RunnerWho): Lane {
-    return (who === 'agente' ? this.agent : this.enemy).lane;
+    return { at: r.at, action: r.action, t: r.span ? 1 - r.left / r.span : 0 };
   }
 
   /** A próxima curva do agente, se ele está na janela dela. */
@@ -224,22 +201,18 @@ export class RunnerRace {
 
   // ---------- o jogador ----------
 
-  /** Troca de faixa (−1 esquerda, +1 direita); perto de uma esquina, vira. Tropeçando, nada. */
-  move(dir: -1 | 1): boolean {
-    const a = this.agent;
-    if (this.over || a.action === 'tropeca') return false;
+  /**
+   * Vira (−1 esquerda, +1 direita). Só vale na janela de uma curva, uma vez por curva; longe dela
+   * (ou tropeçando) não faz nada: ninguém troca de faixa.
+   */
+  turn(dir: -1 | 1): boolean {
+    if (this.over || this.agent.action === 'tropeca') return false;
     const w = this.turnWindow();
-    if (w >= 0) {
-      const st = this.turnState[w];
-      if (st.chose) return false;
-      st.chose = dir < 0 ? 'esquerda' : 'direita';
-      if (st.chose === this.turns[w].side) this.pending.push({ type: 'virou', side: st.chose });
-      return true;
-    }
-    const lane = clampLane(a.lane + dir);
-    if (lane === a.lane) return false;
-    a.lane = lane;
-    this.pending.push({ type: 'faixa', who: 'agente', lane });
+    if (w < 0) return false;
+    const st = this.turnState[w];
+    if (st.chose) return false;
+    st.chose = dir < 0 ? 'esquerda' : 'direita';
+    if (st.chose === this.turns[w].side) this.pending.push({ type: 'virou', side: st.chose });
     return true;
   }
 
@@ -302,39 +275,17 @@ export class RunnerRace {
     });
   }
 
-  /**
-   * O garimpeiro olha `enemyLookahead` fileiras à frente: se a faixa dele tem carga alta (ou
-   * qualquer coisa que pede desvio), vai para a faixa livre mais perto; se o obstáculo pede pulo
-   * ou deslize, faz o gesto na hora certa.
-   */
+  /** O garimpeiro faz o gesto do próximo obstáculo a menos de meio pulo dele. */
   private steer(out: RunnerEvent[]): void {
     const e = this.enemy;
-    if (e.action === 'tropeca') return;
-    const ahead = this.obstacles.filter(
-      (o, i) => !e.done.has(i) && o.at > e.at - 0.5 && o.at <= e.at + RUNNER_RULES.enemyLookahead,
-    );
-    const blockedAt = (lane: Lane) => ahead.some((o) => o.lane === lane && o.move === 'desviar');
-    if (blockedAt(e.lane)) {
-      const options = ([0, 1, 2] as Lane[])
-        .filter((l) => !blockedAt(l))
-        .sort((a, b) => Math.abs(a - e.lane) - Math.abs(b - e.lane) || (a === 1 ? -1 : b === 1 ? 1 : 0));
-      if (options.length) {
-        e.lane = options[0];
-        out.push({ type: 'faixa', who: 'garimpeiro', lane: e.lane });
-      }
-    }
-    // gesto: a menos de meio pulo do obstáculo da faixa dele
+    if (e.action !== 'corre') return;
     const reach = (RUNNER_RULES.rowsPerSecond * RUNNER_RULES.jumpSeconds) / 2;
-    const next = ahead.find((o) => o.lane === e.lane && o.move !== 'desviar' && o.at - e.at <= reach);
-    if (next && e.action === 'corre') this.act(e, 'garimpeiro', next.move === 'pular' ? 'pula' : 'desliza');
+    const next = this.obstacles.find((o, i) => !e.done.has(i) && o.at > e.at && o.at - e.at <= reach);
+    if (next) this.act(e, 'garimpeiro', next.move === 'pular' ? 'pula' : 'desliza');
     out.push(...this.pending.splice(0));
   }
 
   private advance(r: Runner, who: RunnerWho, dt: number, rate: number, out: RunnerEvent[]): void {
-    // troca de faixa suave
-    const lanesPerSecond = 1 / RUNNER_RULES.laneSeconds;
-    const dx = r.lane - r.x;
-    r.x = Math.abs(dx) <= lanesPerSecond * dt ? r.lane : r.x + Math.sign(dx) * lanesPerSecond * dt;
     let left = dt;
     if (r.action === 'tropeca') {
       const used = Math.min(left, r.left);
@@ -358,8 +309,6 @@ export class RunnerRace {
     this.obstacles.forEach((o, i) => {
       if (r.done.has(i) || o.at <= from || o.at > r.at) return;
       r.done.add(i);
-      const lane = Math.round(r.x) as Lane;
-      if (o.lane !== lane) return;
       if (who === 'agente') {
         if (clears(o.move, acting)) out.push({ type: 'passou', who, obstacle: o });
         else {
@@ -368,12 +317,7 @@ export class RunnerRace {
         }
         return;
       }
-      // ele: carga alta já desviou (se deu; sem faixa livre, bate como o agente); pulo e deslize rolam
-      if (o.move === 'desviar') {
-        this.stumble(r, RUNNER_RULES.hitRows);
-        out.push({ type: 'tropecou', obstacle: o, roll: 0, need: 0 });
-        return;
-      }
+      // ele: o gesto sai sempre, mas rola para não tropeçar
       const roll = this.rollEnemy();
       if (roll + this.agilidade >= RUNNER_RULES.enemyDC) out.push({ type: 'passou', who, obstacle: o });
       else {
