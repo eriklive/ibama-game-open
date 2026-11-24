@@ -2080,7 +2080,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sound.play('ui.hex');
       await session.enter();
       if (!alive()) return;
-      this.say('← → troca de faixa (e vira nas curvas) · ↑ pula · ↓ desliza (ou arraste na tela)', 'info');
+      this.say('← → vira nas curvas · ↑ pula · ↓ desliza (ou arraste na tela)', 'info');
       this.chaseSprint.set({ state: 'ready', roll: null, vigor: 0, percent: 0, ms: 0 });
       this.sprintStart = () => {
         const roll = rollDie(CHASE_RULES.sprintDie);

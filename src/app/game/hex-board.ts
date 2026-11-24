@@ -363,6 +363,8 @@ export class HexBoard {
   /** Mundo por raio: blocos de chão e mata montados em volta do centro de carregamento. */
   private readonly stream: WorldStream;
   private profile: RenderProfile = RENDER_PROFILES.normal;
+  /** Na perseguição, a névoa fica onde está (`CHASE_CAMERA.viewCut` não vale): o mapa de corrida. */
+  private readonly wideChase: boolean;
   private readonly sun = new THREE.DirectionalLight(0xffffff, 2.2);
   /** Chão "low poly" que acompanha o centro de carregamento (o que fica além do raio). */
   private farGround?: THREE.Mesh;
@@ -536,8 +538,10 @@ export class HexBoard {
     private readonly map: GameMap,
     units: BoardUnit[],
     private readonly callbacks: HexBoardCallbacks,
-    extras: { walls?: HexCoord[]; enemies?: BoardEnemy[]; profile?: RenderProfile; transparent?: boolean } = {},
+    extras: { walls?: HexCoord[]; enemies?: BoardEnemy[]; profile?: RenderProfile; transparent?: boolean; wideChase?: boolean } = {},
   ) {
+    // o mapa de corrida enxerga a pista inteira atrás do agente (a névoa não fecha mais perto)
+    this.wideChase = !!extras.wideChase;
     // transparente: o mapa de corrida, desenhado por cima do tabuleiro na virada (ver `setFlip`)
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: !!extras.transparent });
     if (extras.transparent) this.renderer.setClearColor(0x000000, 0);
@@ -3182,7 +3186,8 @@ export class HexBoard {
     // A câmera enxerga no máximo `viewRadius` passos em volta do centro da tela: a névoa
     // fecha ali e o plano de corte descarta o resto (o que nem chega a ser desenhado).
     // na perseguição a câmera rasante enxergaria mata demais: a névoa fecha mais perto
-    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE * (1 - CHASE_CAMERA.viewCut * this.chaseBlend * (1 - this.vaultBlend));
+    const cut = this.wideChase ? 0 : CHASE_CAMERA.viewCut;
+    const view = this.profile.viewRadius * HEX_STEP * HEX_SIZE * (1 - cut * this.chaseBlend * (1 - this.vaultBlend));
     const fog = this.scene.fog as THREE.Fog;
     fog.far = dist + view;
     fog.near = dist + view * 0.45;
