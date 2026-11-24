@@ -208,8 +208,11 @@ interface EnemyView extends Mover {
   running?: boolean;
   /** Instante (relógio do tabuleiro) do susto com a abordagem: um pulinho no lugar. */
   startleAt?: number;
-  /** Pose de rendido: alterna pela ordem do mapa (um de pé, o seguinte ajoelhado). */
-  cuffPose: 'cuffed' | 'kneel';
+  /**
+   * Pose de rendido, escolhida quando ele se rende: alterna pela ordem de rendição (o primeiro
+   * fica de pé, o segundo ajoelhado...), para a cena nunca repetir a mesma pose lado a lado.
+   */
+  cuffPose?: 'cuffed' | 'kneel';
 }
 
 /** Diferença angular em (-π, π]. */
@@ -1127,6 +1130,10 @@ export class HexBoard {
     if (!e) return;
     e.surrendered = surrendered;
     if (surrendered) e.alert = false;
+    if (surrendered && !e.cuffPose) {
+      const before = [...this.enemies.values()].filter((o) => o.cuffPose).length;
+      e.cuffPose = before % 2 ? 'kneel' : 'cuffed';
+    }
     this.paintEnemy(e);
     this.refreshCover();
   }
@@ -1144,7 +1151,7 @@ export class HexBoard {
    * Clipe parado do inimigo: rendido fica algemado, de pé ou ajoelhado (`cuffPose`).
    */
   private enemyRestClip(e: EnemyView): ClipName {
-    return e.surrendered ? e.cuffPose : 'idle';
+    return e.surrendered ? (e.cuffPose ?? 'cuffed') : 'idle';
   }
 
   /**
@@ -2670,7 +2677,6 @@ export class HexBoard {
       gone: false,
       baseY: 0.15,
       signY: 1.05,
-      cuffPose: this.enemies.size % 2 ? 'kneel' : 'cuffed',
     });
     if (enemy.hidden) {
       const view = this.enemies.get(enemy.id)!;

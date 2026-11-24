@@ -99,13 +99,16 @@ export const TEST_CASES: readonly TestCase[] = [
   {
     id: 'rendidos',
     name: 'Rendidos',
-    hint: 'Os três suspeitos do campo de teste já rendidos e algemados, perto da equipe, uns de pé e outros ajoelhados (as duas poses de rendido).',
-    mapId: 'teste-12x12',
+    hint: 'Os dois garimpeiros do aeroporto já rendidos e algemados, perto do hangar: um de pé e o outro ajoelhado (as duas poses de rendido).',
+    mapId: 'aeroporto',
     active: 'ana',
+    agents: { ana: { col: 22, row: 21 }, bruno: { col: 21, row: 22 }, clara: { col: 23, row: 22 } },
     enemies: {
-      piloto: { hex: { col: 5, row: 5 }, status: 'surrendered' },
-      garimpeiro: { hex: { col: 7, row: 5 }, status: 'surrendered' },
-      'garimpeiro-pa': { hex: { col: 6, row: 8 }, status: 'surrendered' },
+      'garimpeiro-pa': { hex: { col: 21, row: 18 }, status: 'surrendered' },
+      garimpeiro: { hex: { col: 24, row: 19 }, status: 'surrendered' },
+      // o vigia patrulha a pista: fica mais abaixo, fora da cena
+      'vigia-pista': { hex: { col: 21, row: 30 } },
+      ...PILOTO_LONGE,
     },
     start: { kind: 'turn', agent: 'ana' },
   },
