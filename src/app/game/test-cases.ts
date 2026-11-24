@@ -25,8 +25,10 @@ export interface TestCase {
    * atrás dele;
    * `targets` abre o turno inimigo com o agente no raio de perseguição de `enemies` (em alerta),
    * que vão correr: ele escolhe qual perseguir ou deixa os dois (`decisao:alvo`).
+   * `turn` só abre o turno do agente, com a cena montada.
    */
   start:
+    | { kind: 'turn'; agent: string }
     | { kind: 'chase'; agent: string; enemy: string }
     | { kind: 'targets'; agent: string; enemies: readonly string[] };
 }
@@ -93,6 +95,22 @@ export const TEST_CASES: readonly TestCase[] = [
       ...PILOTO_LONGE,
     },
     start: { kind: 'targets', agent: 'clara', enemies: ['garimpeiro', 'garimpeiro-pa'] },
+  },
+  {
+    id: 'rendidos',
+    name: 'Rendidos',
+    hint: 'Os dois garimpeiros do aeroporto já rendidos e algemados, perto do hangar: um de pé e o outro ajoelhado (as duas poses de rendido).',
+    mapId: 'aeroporto',
+    active: 'ana',
+    agents: { ana: { col: 22, row: 21 }, bruno: { col: 21, row: 22 }, clara: { col: 23, row: 22 } },
+    enemies: {
+      'garimpeiro-pa': { hex: { col: 21, row: 18 }, status: 'surrendered' },
+      garimpeiro: { hex: { col: 24, row: 19 }, status: 'surrendered' },
+      // o vigia patrulha a pista: fica mais abaixo, fora da cena
+      'vigia-pista': { hex: { col: 21, row: 30 } },
+      ...PILOTO_LONGE,
+    },
+    start: { kind: 'turn', agent: 'ana' },
   },
 ];
 

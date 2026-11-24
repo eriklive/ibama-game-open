@@ -3761,6 +3761,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setReachable([]);
     this.say(testCase.name, 'info');
 
+    if (testCase.start.kind === 'turn') {
+      this.startTurn();
+      return;
+    }
     // dois fugindo: o turno inimigo abre com a escolha de alvo (ver `resolveTargetChoices`)
     if (testCase.start.kind === 'targets') {
       await this.wait(600);
