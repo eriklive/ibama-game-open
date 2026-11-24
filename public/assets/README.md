@@ -11,8 +11,8 @@ Todos da [Quaternius](https://quaternius.com), licença CC0 1.0, na versão grá
 | Pacote | Versão conferida | O que usamos | Vira |
 |---|---|---|---|
 | [Universal Base Characters](https://quaternius.itch.io/universal-base-characters) | Standard, baixado em 12/11/2026 | Corpos `Superhero_Female_FullBody` e `Superhero_Male_FullBody`; penteados `Hair_Buns`, `Hair_Long`, `Hair_SimpleParted`, `Hair_Buzzed`, `Hair_Beard` | `characters/<id>/<id>.glb` |
-| [Universal Animation Library](https://quaternius.itch.io/universal-animation-library) (a "1") | v3.0 Standard (16/06/2026) | Clipes `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop`, `Crouch_Idle_Loop`, `Sprint_Loop` e um trecho de `Jump_Land`, do arquivo sem root motion | `anims/humanoid-base.glb` (`idle`, `walk`, `run`, `crouch`, `sprint`, `jump`, `trip`) |
-| [Universal Animation Library 2](https://quaternius.itch.io/universal-animation-library-2) | v2.2 Standard (28/09/2026) | Trechos de `Slide_Start`, `Slide_Exit` e `Hit_Knockback` | `anims/humanoid-base.glb` (`slide`, `crash`) |
+| [Universal Animation Library](https://quaternius.itch.io/universal-animation-library) (a "1") | v3.0 Standard (16/06/2026) | Clipes `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop`, `Crouch_Idle_Loop`, `Sprint_Loop` e um trecho de `Jump_Land`, do arquivo sem root motion | `anims/humanoid-base.glb` (`idle`, `walk`, `run`, `crouch`, `sprint`, `trip`) |
+| [Universal Animation Library 2](https://quaternius.itch.io/universal-animation-library-2) | v2.2 Standard (28/09/2026) | Trechos de `NinjaJump_Start`, `NinjaJump_Land`, `Slide_Start`, `Slide_Exit` e `Hit_Knockback` | `anims/humanoid-base.glb` (`jump`, `slide`, `crash`) |
 
 A biblioteca 2 usa o mesmo esqueleto, então os clipes tocam nos nossos corpos sem retarget. Ela
 complementa a 1 com combate, parkour, lavoura e zumbis. **Não tem animação de abaixar/agachar nem

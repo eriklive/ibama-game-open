@@ -29,11 +29,10 @@ const LOOPS = { Idle_Loop: 'idle', Walk_Loop: 'walk', Jog_Fwd_Loop: 'run', Crouc
  * Um pedaço com `início === fim` congela aquela pose pelo tempo do 5º valor.
  */
 const GESTURES = {
-  // pulo de quem foge: uma passada do sprint, com as pernas abertas, congelada no ar
+  // pulo encolhido (ninja) e o pouso agachado: o pouso chega no fim, quando o pulo do jogo acaba
   jump: [
-    ['ual1', 'Sprint_Loop', 0.12, 0.2],
-    ['ual1', 'Sprint_Loop', 0.2, 0.2, 0.35],
-    ['ual1', 'Sprint_Loop', 0.2, 0.3],
+    ['ual2', 'NinjaJump_Start', 0.08, 0.6],
+    ['ual2', 'NinjaJump_Land', 0.0, 0.22],
   ],
   // deita de lado deslizando e levanta já correndo
   slide: [

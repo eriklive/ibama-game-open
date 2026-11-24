@@ -59,7 +59,7 @@ refit, **sem baixar os pacotes da Quaternius**.
   - Loops, do arquivo sem root motion da UAL 1: `Idle_Loop`, `Walk_Loop`, `Jog_Fwd_Loop`,
     `Crouch_Idle_Loop` e `Sprint_Loop`, renomeados para `idle`, `walk`, `run`, `crouch` e `sprint`.
   - Gestos do Modo Corrida, emendados de pedaços das duas bibliotecas (tabela `GESTURES`):
-    - `jump`: uma passada do `Sprint_Loop` (UAL 1) com as pernas abertas, congelada no ar;
+    - `jump`: `NinjaJump_Start` + o começo de `NinjaJump_Land` (UAL 2), pulo encolhido e pouso agachado;
     - `slide`: `Slide_Start` + `Slide_Exit` (UAL 2), deita deslizando e levanta correndo;
     - `trip`: um trecho de `Jump_Land` (UAL 1), agacha com as mãos perto do chão e se recupera;
     - `crash`: `Hit_Knockback` + `Slide_Exit` (UAL 2), bate, cai de costas e levanta correndo.
