@@ -1,0 +1,697 @@
+:host {
+  --chalk: #f3efe2;
+  --chalk-dim: rgba(243, 239, 226, 0.55);
+  --chalk-faint: rgba(243, 239, 226, 0.16);
+  --c-surrender: #f3efe2;
+  --c-roll: #f6d76b;
+  --c-flee: #f08a7a;
+  --c-talk: #8fd8ee;
+  --c-agent: #a8e29a;
+  --slate: #22392e;
+  --slate-deep: #182a21;
+  --wood: #7a4b26;
+  --wood-dark: #4a2b13;
+  --hand: 'Patrick Hand', 'Comic Sans MS', cursive;
+  --marker: 'Permanent Marker', 'Comic Sans MS', cursive;
+  --typed: 'Special Elite', 'Courier New', monospace;
+
+  position: absolute;
+  inset: 0;
+  z-index: 70;
+  display: grid;
+  place-items: center;
+  padding: calc(10px + var(--safe-top, 0px)) calc(10px + var(--safe-right, 0px))
+    calc(10px + var(--safe-bottom, 0px)) calc(10px + var(--safe-left, 0px));
+  background: rgba(6, 12, 9, 0.62);
+  backdrop-filter: blur(2px);
+  -webkit-backdrop-filter: blur(2px);
+  touch-action: none;
+  animation: backdrop-in 0.3s ease both;
+}
+:host(.closing) {
+  animation: backdrop-out 0.3s ease both;
+}
+
+/* ---------- moldura e lousa ---------- */
+
+.frame {
+  width: 100%;
+  height: 100%;
+  max-width: 980px;
+  max-height: 900px;
+  padding: 11px;
+  border-radius: 10px;
+  background:
+    repeating-linear-gradient(92deg, rgba(0, 0, 0, 0.12) 0 2px, transparent 2px 9px),
+    repeating-linear-gradient(88deg, rgba(255, 220, 170, 0.07) 0 1px, transparent 1px 13px),
+    linear-gradient(160deg, #94612f, var(--wood) 40%, #6a3f1e 75%, #8a5a2d);
+  box-shadow:
+    0 18px 40px rgba(0, 0, 0, 0.55),
+    inset 0 2px 0 rgba(255, 230, 190, 0.35),
+    inset 0 -3px 0 var(--wood-dark);
+  animation: board-in 0.45s cubic-bezier(0.2, 1.3, 0.4, 1) both;
+}
+:host(.closing) .frame {
+  animation: board-out 0.3s ease-in both;
+}
+
+.slate {
+  position: relative;
+  height: 100%;
+  border-radius: 4px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr) auto auto auto;
+  grid-template-areas: 'head' 'sketch' 'notes' 'rule' 'ledge';
+  gap: 4px 18px;
+  padding: 14px 16px 0;
+  color: var(--chalk);
+  background:
+    /* nuvens de giz apagado */
+    radial-gradient(ellipse 55% 30% at 22% 18%, rgba(255, 255, 255, 0.07), transparent 70%),
+    radial-gradient(ellipse 40% 26% at 80% 70%, rgba(255, 255, 255, 0.06), transparent 70%),
+    radial-gradient(ellipse 70% 20% at 60% 40%, rgba(255, 255, 255, 0.035), transparent 70%),
+    /* grão */
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 .09 0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"),
+    radial-gradient(ellipse at 50% 40%, var(--slate), var(--slate-deep));
+  box-shadow:
+    inset 0 0 0 2px rgba(0, 0, 0, 0.35),
+    inset 0 0 40px rgba(0, 0, 0, 0.45);
+}
+
+.defs {
+  position: absolute;
+}
+
+/* ---------- cabeçalho ---------- */
+
+.head {
+  grid-area: head;
+  position: relative;
+  padding-right: 44px;
+}
+.kicker {
+  margin: 0;
+  font-family: var(--typed);
+  font-size: 12px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--chalk-dim);
+}
+.title {
+  margin: 0;
+  font-family: var(--marker);
+  font-weight: 400;
+  font-size: clamp(26px, 7.5vmin, 40px);
+  line-height: 1.05;
+  letter-spacing: 0.01em;
+  color: var(--chalk);
+  text-shadow: 0 0 1px rgba(255, 255, 255, 0.6);
+}
+/* sublinhado a giz */
+.title::after {
+  content: '';
+  display: block;
+  width: min(220px, 60%);
+  height: 3px;
+  margin-top: 3px;
+  border-radius: 2px;
+  background: linear-gradient(90deg, var(--c-roll) 0 70%, transparent);
+  opacity: 0.8;
+  transform: rotate(-0.8deg);
+}
+.close {
+  position: absolute;
+  top: -4px;
+  right: -4px;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  background: none;
+  color: var(--chalk-dim);
+  font-family: var(--marker);
+  font-size: 34px;
+  line-height: 1;
+  cursor: pointer;
+}
+.close:hover,
+.close:focus-visible {
+  color: var(--chalk);
+}
+
+/* ---------- mapa a giz ---------- */
+
+.sketch {
+  grid-area: sketch;
+  position: relative;
+  margin: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+}
+/* fora do fluxo: o desenho se ajusta ao espaço que sobra, sem empurrar a grade */
+.map {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+}
+
+.hex {
+  fill: transparent;
+  stroke: rgba(243, 239, 226, 0.3);
+  stroke-width: 0.8;
+  stroke-linejoin: round;
+  animation: chalk-in 0.35s ease both;
+  animation-delay: calc(var(--d, 0) * 60ms);
+}
+.hex.center {
+  stroke: var(--chalk-dim);
+}
+.hex.surrender {
+  fill: rgba(243, 239, 226, 0.2);
+}
+.hex.roll {
+  fill: rgba(246, 215, 107, 0.2);
+}
+.hex.flee {
+  fill: rgba(240, 138, 122, 0.2);
+}
+.hex.out {
+  stroke-dasharray: 1.5 2;
+}
+.hex.shadow {
+  fill: rgba(0, 0, 0, 0.18);
+  stroke-dasharray: 1.5 2;
+}
+.hex.edge {
+  fill: rgba(240, 138, 122, 0.1);
+}
+.hex.talk {
+  fill: rgba(143, 216, 238, 0.24);
+}
+.hex.talk-center {
+  fill: rgba(143, 216, 238, 0.12);
+  stroke: var(--c-talk);
+}
+
+.outline {
+  fill: none;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  animation: chalk-in 0.4s ease both;
+  animation-delay: 0.35s;
+}
+.outline.surrender {
+  stroke: var(--c-surrender);
+}
+.outline.roll {
+  stroke: var(--c-roll);
+}
+.outline.flee {
+  stroke: var(--c-flee);
+}
+.outline.talk {
+  stroke: var(--c-talk);
+  stroke-width: 2.2;
+  animation:
+    chalk-in 0.4s 0.3s ease both,
+    glow 2.4s 0.8s ease-in-out infinite;
+}
+.outline.edge-line {
+  stroke: var(--c-flee);
+  stroke-dasharray: 3 3;
+}
+
+.stroke {
+  fill: none;
+  stroke: var(--chalk);
+  stroke-width: 1.6;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: draw 0.7s 0.55s cubic-bezier(0.5, 0, 0.3, 1) forwards;
+}
+.stroke.flee {
+  stroke: var(--c-flee);
+}
+.stroke.dashed {
+  /* o traço "desenhado" já usa o dasharray; o tracejado vem do marcador de fuga */
+  stroke-width: 1.8;
+}
+.stroke.agent-path {
+  stroke: var(--c-agent);
+  stroke-width: 1.8;
+}
+.stroke.wall {
+  stroke: var(--chalk);
+  stroke-width: 4;
+}
+.stroke.voice {
+  stroke: var(--c-roll);
+}
+
+.pop {
+  transform-box: fill-box;
+  transform-origin: center;
+  animation: pop 0.35s 0.45s cubic-bezier(0.2, 1.6, 0.4, 1) both;
+}
+.agent-disc {
+  fill: rgba(168, 226, 154, 0.35);
+  stroke: var(--c-agent);
+  stroke-width: 1.4;
+}
+.agent-chev {
+  fill: none;
+  stroke: var(--c-agent);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.head-c {
+  fill: rgba(243, 239, 226, 0.15);
+  stroke: var(--chalk);
+  stroke-width: 1.1;
+}
+.hat,
+.arms,
+.speed,
+.die {
+  fill: none;
+  stroke: var(--chalk);
+  stroke-width: 1.2;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.piece.surrendered .head-c,
+.piece.surrendered .hat,
+.piece.surrendered .arms {
+  stroke: var(--c-surrender);
+}
+.piece.roller .hat,
+.piece.roller .head-c,
+.die {
+  stroke: var(--c-roll);
+}
+.die-n {
+  font-family: var(--hand);
+  font-size: 3.6px;
+  fill: var(--c-roll);
+}
+.piece.runner .hat,
+.piece.runner .head-c,
+.speed {
+  stroke: var(--c-flee);
+}
+
+.label {
+  font-family: var(--hand);
+  fill: var(--chalk);
+  paint-order: stroke;
+  stroke: var(--slate);
+  stroke-width: 2.4px;
+  stroke-linejoin: round;
+  animation: chalk-in 0.4s 0.6s ease both;
+}
+.label.num {
+  font-family: var(--marker);
+  font-size: 13px;
+}
+.label.small {
+  font-size: 10px;
+}
+.label.big {
+  font-family: var(--marker);
+  font-size: 13px;
+}
+.label.surrender {
+  fill: var(--c-surrender);
+}
+.label.roll {
+  fill: var(--c-roll);
+}
+.label.flee {
+  fill: var(--c-flee);
+}
+.label.talk {
+  fill: var(--c-talk);
+}
+
+/* ---------- foto colada ---------- */
+
+.photo {
+  position: absolute;
+  right: 0;
+  top: 0;
+  z-index: 1;
+  width: min(34%, 180px);
+  padding: 5px 5px 0;
+  background: #f4f1e6;
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.5);
+  transform: rotate(4deg);
+  animation: photo-in 0.5s 0.5s cubic-bezier(0.2, 1.3, 0.4, 1) both;
+}
+.photo img {
+  display: block;
+  width: 100%;
+  aspect-ratio: 6 / 7;
+  object-fit: cover;
+  filter: saturate(0.92) contrast(1.04);
+}
+.photo figcaption {
+  font-family: var(--marker);
+  font-size: 13px;
+  line-height: 1;
+  padding: 6px 2px 7px;
+  text-align: center;
+  color: #2a2419;
+}
+.tape {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  width: 70px;
+  height: 22px;
+  translate: -50% 0;
+  rotate: -4deg;
+  background: rgba(233, 220, 176, 0.82);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  clip-path: polygon(3% 0, 97% 4%, 100% 50%, 96% 100%, 4% 96%, 0 50%);
+}
+
+/* ---------- frases ---------- */
+
+.notes {
+  grid-area: notes;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 6px;
+  font-family: var(--hand);
+  font-size: clamp(17px, 4.4vmin, 21px);
+  line-height: 1.18;
+}
+.notes li {
+  position: relative;
+  padding-left: 22px;
+  animation: chalk-in 0.35s ease both;
+  animation-delay: calc(0.5s + var(--i, 0) * 0.12s);
+}
+.notes li::before {
+  content: '';
+  position: absolute;
+  left: 3px;
+  top: 0.42em;
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--chalk-dim);
+  border-radius: 50%;
+}
+.notes .em {
+  font-weight: 400;
+  color: var(--chalk);
+  text-decoration: underline;
+  text-decoration-thickness: 2px;
+  text-underline-offset: 3px;
+  text-decoration-color: var(--chalk-dim);
+}
+.notes li.surrender::before {
+  border-color: var(--c-surrender);
+  background: rgba(243, 239, 226, 0.3);
+}
+.notes li.roll::before {
+  border-color: var(--c-roll);
+  background: rgba(246, 215, 107, 0.3);
+}
+.notes li.roll .em {
+  color: var(--c-roll);
+  text-decoration-color: var(--c-roll);
+}
+.notes li.flee::before {
+  border-color: var(--c-flee);
+  background: rgba(240, 138, 122, 0.3);
+}
+.notes li.flee .em {
+  color: var(--c-flee);
+  text-decoration-color: var(--c-flee);
+}
+.notes li.talk::before {
+  border-color: var(--c-talk);
+  background: rgba(143, 216, 238, 0.3);
+}
+.notes li.talk .em {
+  color: var(--c-talk);
+  text-decoration-color: var(--c-talk);
+}
+
+/* ---------- parapeito: giz, apagador e os botões ---------- */
+
+.ledge {
+  grid-area: ledge;
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 4px -16px 0;
+  padding: 12px 22px 16px 16px;
+  border-top: 2px solid rgba(0, 0, 0, 0.25);
+  background: linear-gradient(180deg, rgba(0, 0, 0, 0.18), rgba(0, 0, 0, 0.05));
+}
+.chalk-btn {
+  white-space: nowrap;
+  min-height: 44px;
+  padding: 0 6px;
+  border: 0;
+  background: none;
+  color: var(--chalk);
+  font-family: var(--hand);
+  font-size: 20px;
+  cursor: pointer;
+}
+.chalk-btn:disabled {
+  opacity: 0.25;
+  cursor: default;
+}
+.dots {
+  display: flex;
+  gap: 4px;
+}
+.dot {
+  width: 24px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  background: none;
+  cursor: pointer;
+  position: relative;
+}
+.dot::after {
+  content: '';
+  position: absolute;
+  inset: 10px 6px;
+  border-radius: 50%;
+  border: 2px solid var(--chalk-dim);
+}
+.dot.on::after {
+  background: var(--chalk);
+  border-color: var(--chalk);
+}
+.next {
+  flex: none;
+  min-width: 0;
+  min-height: 48px;
+  padding: 12px 16px;
+  font-size: 16px;
+  letter-spacing: 0.1em;
+  white-space: nowrap;
+}
+
+/* ---------- deitada: mapa à esquerda, frases à direita ---------- */
+
+@media (orientation: landscape) {
+  .frame {
+    max-height: 640px;
+  }
+  .slate {
+    grid-template-columns: minmax(0, 1.15fr) minmax(0, 1fr);
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+      'sketch head'
+      'sketch notes'
+      'sketch rule'
+      'ledge ledge';
+    padding-top: 16px;
+  }
+  .head {
+    align-self: end;
+  }
+  .photo {
+    top: auto;
+    right: auto;
+    left: 0;
+    bottom: 6%;
+    width: min(38%, 190px);
+    transform: rotate(-3deg);
+  }
+  .notes {
+    align-self: start;
+    align-content: start;
+    gap: 10px;
+    padding-top: 8px;
+  }
+}
+@media (orientation: landscape) and (max-height: 430px) {
+  .frame {
+    padding: 8px;
+  }
+  .slate {
+    padding: 10px 14px 0;
+  }
+  .title {
+    font-size: 26px;
+  }
+  .notes {
+    font-size: 16px;
+    gap: 6px;
+  }
+  .ledge {
+    padding: 4px 14px 6px;
+  }
+  .photo {
+    width: min(40%, 170px);
+  }
+  .photo figcaption {
+    font-size: 12px;
+    padding: 4px 2px 5px;
+  }
+}
+
+/* ---------- animações ---------- */
+
+@keyframes backdrop-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes backdrop-out {
+  to {
+    opacity: 0;
+  }
+}
+@keyframes board-in {
+  from {
+    opacity: 0;
+    transform: translateY(24px) scale(0.94) rotate(-1.2deg);
+  }
+}
+@keyframes board-out {
+  to {
+    opacity: 0;
+    transform: translateY(18px) scale(0.96);
+  }
+}
+@keyframes chalk-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes pop {
+  from {
+    opacity: 0;
+    transform: scale(0.3);
+  }
+}
+@keyframes photo-in {
+  from {
+    opacity: 0;
+    transform: translate(30px, -20px) rotate(14deg) scale(1.1);
+  }
+}
+@keyframes glow {
+  50% {
+    opacity: 0.55;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  :host,
+  .frame,
+  .hex,
+  .outline,
+  .stroke,
+  .pop,
+  .label,
+  .photo,
+  .notes li {
+    animation: none !important;
+  }
+  .stroke {
+    stroke-dashoffset: 0;
+  }
+}
+
+/* ---------- uma tela só: frases curtas com a faixa num selo ---------- */
+
+.notes {
+  font-size: clamp(19px, 5vmin, 23px);
+}
+.notes li.has-chip {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  padding-left: 0;
+}
+.notes li.has-chip::before {
+  display: none;
+}
+.chip {
+  flex: none;
+  min-width: 3.4em;
+  padding: 0 6px;
+  border: 2px solid var(--chalk-dim);
+  border-radius: 6px;
+  font-family: var(--marker);
+  font-size: 0.8em;
+  line-height: 1.5;
+  text-align: center;
+}
+li.surrender .chip {
+  border-color: var(--c-surrender);
+  background: rgba(243, 239, 226, 0.18);
+}
+li.roll .chip {
+  border-color: var(--c-roll);
+  color: var(--c-roll);
+  background: rgba(246, 215, 107, 0.14);
+}
+li.flee .chip {
+  border-color: var(--c-flee);
+  color: var(--c-flee);
+  background: rgba(240, 138, 122, 0.14);
+}
+li.talk .chip {
+  border-color: var(--c-talk);
+  color: var(--c-talk);
+  background: rgba(143, 216, 238, 0.14);
+}
+.rule {
+  grid-area: rule;
+  margin: 0;
+  font-family: var(--typed);
+  font-size: 13px;
+  letter-spacing: 0.04em;
+  color: var(--chalk-dim);
+}
+.ledge.single {
+  justify-content: flex-end;
+}

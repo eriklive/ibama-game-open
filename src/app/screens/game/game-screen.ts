@@ -102,6 +102,8 @@ import {
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { IntroTarget, STRUCTURE_TOP, introTargets } from '../../game/mission-intro';
 import { IntroMark, MissionIntro } from '../../ui/mission-intro/mission-intro';
+import { LESSONS, LessonId, insideScreen, lessonDue, markSeen, readSeen } from '../../game/tactical-board';
+import { TacticalBoard } from '../../ui/tactical-board/tactical-board';
 import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
 import {
   GROUP_RULES,
@@ -262,7 +264,7 @@ const reducedMotion = (): boolean =>
 
 @Component({
   selector: 'app-game-screen',
-  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel, ChaseOverlay, ApproachTablet, MissionIntro],
+  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel, ChaseOverlay, ApproachTablet, MissionIntro, TacticalBoard],
   templateUrl: './game-screen.html',
   styleUrl: './game-screen.css',
   host: { '(document:keydown)': 'onKey($event)', '(window:resize)': 'onViewResize()' },
@@ -277,6 +279,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly sound = inject(Sound);
   private stopPad?: () => void;
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
+  private readonly tacticalBoard = viewChild(TacticalBoard);
   private board?: HexBoard;
   private timers: ReturnType<typeof setTimeout>[] = [];
   /** Quantos seguram o slow da perseguição agora (decisões e rolagens); > 0: tudo desacelera. */
@@ -298,7 +301,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Carga baixa: bloqueia passagem; esconde da visão só quem está colado nela. */
   private readonly lowCover = this.map ? lowCoverHexes(this.map) : new Set<string>();
   /** Só há perseguição nos mapas com Modo Corrida; nos outros, quem corre só foge. */
-  private readonly hasChase = hasRunner(this.map?.id);
+  protected readonly hasChase = hasRunner(this.map?.id);
   /** Portas comuns (ver `door.ts`): fechadas, bloqueiam passagem e visão como parede. */
   protected readonly doors = signal<ReadonlyMap<string, Door>>(this.initialDoors());
   private readonly closedDoors = computed(
@@ -875,6 +878,52 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     then?.();
   }
 
+  // ---------- lousa tática (tutorial, passo 2) ----------
+
+  protected readonly lessons = LESSONS;
+  /** Lição aberta na lousa (ver `game/tactical-board.ts`). */
+  protected readonly lesson = signal<LessonId | null>(null);
+  private readonly lessonsSeen = readSeen();
+  private lessonTicker?: ReturnType<typeof setInterval>;
+
+  /**
+   * Abre a lição na primeira vez que a situação aparece: um garimpeiro (vigiando ou em fuga)
+   * dentro da tela, ou o primeiro suspeito rendido. Só com o jogador livre para agir (escolhendo
+   * o destino), nunca no meio de uma animação, da abertura, do menu ou de outro painel.
+   */
+  private checkLessons(): void {
+    const board = this.board;
+    if (!board || this.destroyed || this.lesson() || this.intro() || this.menuOpen()) return;
+    if (this.phase() !== 'moving-choice' || this.approaching() || this.interrogation() || this.search()) return;
+    const canvas = this.canvasRef().nativeElement;
+    const w = canvas.clientWidth;
+    const h = canvas.clientHeight;
+    const due = lessonDue({
+      seen: this.lessonsSeen,
+      suspectOnScreen: this.enemies().some(
+        (e) => (e.status === 'patrol' || e.status === 'alert') && insideScreen(board.pieceOnScreen(e.id), w, h),
+      ),
+      anySurrendered: this.surrenderedEnemies().length > 0,
+    });
+    if (due) this.lesson.set(due);
+  }
+
+  /** **Entendi** (ou ×): a lição fica marcada como vista e não abre sozinha de novo. */
+  protected closeLesson(): void {
+    const id = this.lesson();
+    if (id) {
+      this.lessonsSeen.add(id);
+      markSeen(id);
+    }
+    this.lesson.set(null);
+  }
+
+  /** Menu: rever uma lição da lousa. */
+  protected reviewLesson(id: LessonId): void {
+    this.toggleMenu();
+    this.lesson.set(id);
+  }
+
   /** Menu: rever a abertura no meio da partida (volta para quem está na vez). */
   protected replayIntro(): void {
     this.toggleMenu();
@@ -1222,6 +1271,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const testCase = findTestCase(this.route.snapshot.queryParamMap.get('caso'));
     if (testCase?.mapId === this.map.id) void this.runTestCase(testCase);
     else this.beginMatch();
+    this.lessonTicker = setInterval(() => this.checkLessons(), 400);
     this.stopPad = this.gamepad.listen({
       button: (b) => this.padButton(b),
       move: (dir) => this.moveCursor(dir),
@@ -1237,6 +1287,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     clearTimeout(this.noticeTimer);
     clearTimeout(this.speechTimer);
     clearInterval(this.statsTicker);
+    clearInterval(this.lessonTicker);
     removeEventListener('resize', this.onDoorResize);
     removeEventListener('resize', this.onInterrogationResize);
     removeEventListener('resize', this.onIntroResize);
@@ -1484,6 +1535,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.runner.input(cmd);
         return;
       }
+    }
+    if (this.lesson()) {
+      if (ev.key === 'Enter' || ev.key === 'ArrowRight') this.tacticalBoard()?.next();
+      else if (ev.key === 'ArrowLeft') this.tacticalBoard()?.prev();
+      else if (ev.key === 'Escape') this.tacticalBoard()?.close();
+      else return;
+      ev.preventDefault();
+      return;
     }
     if (this.intro()) {
       if (ev.key === 'Enter') this.beginMission();
@@ -3754,6 +3813,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // Modo Corrida: ✕ pula, ○ desliza (□ continua sendo a corrida)
     if (this.runner && this.runnerOn() && (b === 'cross' || b === 'circle')) {
       this.runner.input(b === 'cross' ? 'up' : 'down');
+      return;
+    }
+    // lousa tática: ✕ avança (ou fecha na última página), ○ fecha
+    if (this.lesson()) {
+      if (b === 'cross') this.tacticalBoard()?.next();
+      else if (b === 'circle') this.tacticalBoard()?.close();
       return;
     }
     // abertura da missão: ✕ inicia, ○ pula

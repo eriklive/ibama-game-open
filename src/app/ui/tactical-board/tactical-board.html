@@ -1,0 +1,200 @@
+<div class="frame">
+  <div class="slate">
+    <!-- giz: traço com falhas e tremido, usado em tudo o que se risca no mapa -->
+    <svg class="defs" width="0" height="0" aria-hidden="true">
+      <defs>
+        <filter id="lousa-chalk" x="-10%" y="-10%" width="120%" height="120%">
+          <feTurbulence
+            type="fractalNoise"
+            baseFrequency="0.22"
+            numOctaves="2"
+            seed="4"
+            result="noise"
+          />
+          <feDisplacementMap
+            in="SourceGraphic"
+            in2="noise"
+            scale="3.5"
+            xChannelSelector="R"
+            yChannelSelector="G"
+            result="rough"
+          />
+          <feColorMatrix
+            in="noise"
+            type="matrix"
+            values="0 0 0 0 0  0 0 0 0 0  0 0 0 0 0  0 0 0 -2.2 1.95"
+            result="holes"
+          />
+          <feComposite in="rough" in2="holes" operator="in" />
+        </filter>
+        <marker
+          id="lousa-arrow"
+          viewBox="0 0 10 10"
+          refX="6"
+          refY="5"
+          markerWidth="5"
+          markerHeight="5"
+          orient="auto-start-reverse"
+        >
+          <path
+            d="M1 1L8 5L1 9"
+            fill="none"
+            stroke="context-stroke"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          />
+        </marker>
+      </defs>
+    </svg>
+
+    <header class="head">
+      <p class="kicker">Lousa tática · {{ current().kicker }}</p>
+      <h2 class="title">{{ current().title }}</h2>
+      <button
+        type="button"
+        class="close"
+        (click)="close()"
+        aria-label="Fechar a lousa"
+        data-testid="lousa-close"
+      >
+        ×
+      </button>
+    </header>
+
+    <figure class="sketch" [class.with-photo]="!!current().photo">
+      @let m = current().map;
+      @for (k of [page()]; track k) {
+        <svg
+          class="map"
+          [attr.viewBox]="m.viewBox"
+          [attr.preserveAspectRatio]="
+            landscape() && current().photo ? 'xMaxYMid meet' : 'xMidYMid meet'
+          "
+          role="img"
+          [attr.aria-label]="'Mapa visto de cima: ' + current().title"
+        >
+          <g class="chalk" filter="url(#lousa-chalk)">
+            <g [attr.transform]="scale">
+              @for (h of m.hexes; track $index) {
+                <polygon [attr.points]="h.points" [attr.class]="'hex ' + h.cls" [style.--d]="h.d" />
+              }
+              @for (o of m.outlines; track $index) {
+                <path [attr.d]="o.d" [attr.class]="'outline ' + o.cls" />
+              }
+              @for (s of m.strokes; track $index) {
+                <path
+                  [attr.d]="s.d"
+                  [attr.class]="'stroke ' + s.cls"
+                  pathLength="1"
+                  [attr.marker-end]="s.arrow ? 'url(#lousa-arrow)' : null"
+                />
+              }
+              @for (p of m.pieces; track $index) {
+                <g
+                  [attr.class]="'piece ' + p.kind"
+                  [attr.transform]="
+                    'translate(' + p.x + ' ' + p.y + ') scale(' + (m.pieceScale ?? 1.6) + ')'
+                  "
+                >
+                  <g class="pop">
+                    @switch (p.kind) {
+                      @case ('agent') {
+                        <circle r="5.6" class="agent-disc" />
+                        <path d="M-3.2 -1.2L0 -4L3.2 -1.2M-3.2 2L0 -0.8L3.2 2" class="agent-chev" />
+                      }
+                      @default {
+                        <circle cy="0.6" r="3.2" class="head-c" />
+                        <path
+                          d="M-6.4 -1.6Q0 -3.2 6.4 -1.6M-3.4 -2.2Q-3.2 -6.6 0 -6.8Q3.2 -6.6 3.4 -2.2"
+                          class="hat"
+                        />
+                        @if (p.kind === 'surrendered') {
+                          <path d="M-3.6 2.6L-7 -5.6M3.6 2.6L7 -5.6" class="arms" />
+                        }
+                        @if (p.kind === 'runner') {
+                          <path d="M-8 1H-13M-8.5 4H-12M-8 -2H-11" class="speed" />
+                        }
+                        @if (p.kind === 'roller') {
+                          <g transform="translate(9.5 -6)">
+                            <path d="M0 -5L4.6 3L-4.6 3Z" class="die" />
+                            <text y="2" class="die-n" text-anchor="middle">20</text>
+                          </g>
+                        }
+                      }
+                    }
+                  </g>
+                </g>
+              }
+              @for (l of m.labels; track $index) {
+                <text
+                  [attr.x]="l.x"
+                  [attr.y]="l.y"
+                  [attr.class]="'label ' + l.cls"
+                  [attr.text-anchor]="l.anchor ?? 'start'"
+                >
+                  {{ l.text }}
+                </text>
+              }
+            </g>
+          </g>
+        </svg>
+      }
+      @if (current().photo; as ph) {
+        <div class="photo">
+          <span class="tape" aria-hidden="true"></span>
+          <img [src]="ph.src" [alt]="'Foto: ' + ph.caption" draggable="false" />
+          <figcaption>{{ ph.caption }}</figcaption>
+        </div>
+      }
+    </figure>
+
+    <ul class="notes" role="list">
+      @for (n of current().notes; track $index) {
+        <li [attr.class]="(n.tone ?? '') + (n.chip ? ' has-chip' : '')" [style.--i]="$index">
+          @if (n.chip) {
+            <span class="chip">{{ n.chip }}</span>
+          }
+          <span class="txt">
+            @for (part of parts(n.text); track $index) {
+              <span [class.em]="part.em">{{ part.t }}</span>
+            }
+          </span>
+        </li>
+      }
+    </ul>
+    @if (current().rule; as rule) {
+      <p class="rule">{{ rule }}</p>
+    }
+
+    <footer class="ledge" [class.single]="pages().length === 1">
+      @if (pages().length > 1) {
+        <button
+          type="button"
+          class="chalk-btn back"
+          (click)="prev()"
+          [disabled]="page() === 0"
+          data-testid="lousa-prev"
+        >
+          ‹ Voltar
+        </button>
+        <div class="dots" role="tablist" aria-label="Páginas">
+          @for (p of pages(); track $index) {
+            <button
+              type="button"
+              role="tab"
+              class="dot"
+              [class.on]="$index === page()"
+              [attr.aria-selected]="$index === page()"
+              [attr.aria-label]="'Página ' + ($index + 1) + ': ' + p.title"
+              (click)="go($index)"
+            ></button>
+          }
+        </div>
+      }
+      <button type="button" appMainButton class="next" (click)="next()" data-testid="lousa-next">
+        {{ last() ? 'Entendi!' : 'Próximo ›' }}
+      </button>
+    </footer>
+  </div>
+</div>
