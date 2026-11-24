@@ -23,9 +23,10 @@
  *    distância é quanto ele está à frente. Chegou a 0: **agarra** (rende na hora e fica
  *    **abalado**, +2 no próximo interrogatório). Ele chegou ao fim: **foge**. Só há perseguição
  *    nos mapas com Modo Corrida; nos outros, quem corre só foge.
- *    - **corrida** (`resolveSprint`): uma vez por perseguição, o jogador pode dar um gás. Rola
+ *    - **corrida** (`resolveSprint`): o jogador pode dar um gás quantas vezes quiser. Rola
  *      teste de vigor, d20 + vigor: o total é quanto (%) o agente fica mais rápido por
- *      `sprintSeconds`. Só ele acelera; o garimpeiro segue no ritmo dele.
+ *      `sprintSeconds`. Acabou o gás, `sprintCooldownSeconds` de recarga e pode rolar outro d20.
+ *      Só ele acelera; o garimpeiro segue no ritmo dele.
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
  *    `decisao:alvo` (escolher um). Terminada a primeira, o outro é oferecido aos agentes que
@@ -63,6 +64,8 @@ export const CHASE_RULES = {
   sprintMin: 1,
   /** Corrida: quanto tempo (s, relógio real) a velocidade maior dura. */
   sprintSeconds: 5,
+  /** Corrida: recarga (s) depois que o gás acaba, até poder rolar outro d20. */
+  sprintCooldownSeconds: 3,
   /** Corrida: entrada e saída suaves da velocidade (ms), antes e depois dos `sprintSeconds`. */
   sprintRampMs: 350,
   /** Agarrou: bônus nas rolagens do próximo interrogatório do suspeito abalado. */

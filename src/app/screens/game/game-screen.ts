@@ -1855,7 +1855,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.say(`${who} persegue ${enemy.name}!`, 'alert');
     board.setChaseCamera(agentId, enemyId);
 
-    // corrida (gás): o mesmo botão de sempre, uma vez por perseguição
+    // corrida (gás): o mesmo botão de sempre, de novo a cada recarga
     let sprintAt = 0;
     let sprintPct = 0;
     const boost = () => (sprintPct ? sprintRate(sprintPct, performance.now() - sprintAt) : 1);
@@ -1890,7 +1890,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     session.hud();
     try {
       // a câmera desce e encosta (como sempre); aí as peças viram
-      await this.wait(900);
+      await this.wait(600);
       if (!alive()) return;
       this.runnerOn.set(true);
       void this.sound.chaseStart(Math.max(0, n - 1));
@@ -1913,6 +1913,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
           this.chaseSprint.set(to);
           return true;
         };
+        const cooldownMs = CHASE_RULES.sprintCooldownSeconds * 1000;
+        const cooldown: SprintView = { ...active, state: 'cooldown', ms: cooldownMs };
         this.timers.push(
           setTimeout(() => {
             if (!swap(rolling, active)) return;
@@ -1921,14 +1923,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
             this.gamepad.rumble(0.4, 0.3, 200);
             this.say(`${who} deu o gás: +${percent}% de velocidade por ${CHASE_RULES.sprintSeconds} s!`, 'alert');
           }, SPRINT_DIE_MS + 150),
-          setTimeout(() => swap(active, { ...active, state: 'used' }), SPRINT_DIE_MS + 150 + ms),
+          setTimeout(() => swap(active, cooldown), SPRINT_DIE_MS + 150 + ms),
+          // recarregou: pode rolar outro d20
+          setTimeout(() => {
+            if (swap(cooldown, { state: 'ready', roll: null, vigor, percent: 0, ms: 0 })) this.sound.play('ui.confirmar');
+          }, SPRINT_DIE_MS + 150 + ms + cooldownMs),
         );
       };
       const over = await session.run();
       this.chaseSprint.set(null);
       this.sprintStart = undefined;
       if (!alive() || !over) return;
-      await this.wait(500);
+      await this.wait(300);
       if (!alive()) return;
       // onde a corrida os deixou, no tabuleiro
       const at = session.tacticalResult();
@@ -2004,18 +2010,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     } else this.say(`${this.enemy(enemyId)!.name} escapou de ${this.nameOf(agentId)}.`, 'alert');
     this.refreshVision();
     this.sound.chaseEnd();
-    await this.wait(1400);
+    await this.wait(1000);
     if (!alive()) return;
     this.board?.setChaseCamera(null);
     this.chaseHud.set(null);
-    await this.wait(800);
+    await this.wait(500);
   }
 
-  /** Botão **Correr!** (toque, C, □): uma vez por perseguição, com os dois correndo. */
+  /** Botão **Correr!** (toque, C, □): com os dois correndo, de novo a cada recarga. */
   protected sprint(): void {
     const start = this.sprintStart;
     if (this.chaseSprint()?.state !== 'ready' || !start) return;
-    this.sprintStart = undefined;
     start();
   }
 

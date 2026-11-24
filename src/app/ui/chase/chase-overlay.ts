@@ -1,5 +1,5 @@
 import { Component, input, output } from '@angular/core';
-import type { Side } from '../../game/chase';
+import { CHASE_RULES, type Side } from '../../game/chase';
 import { D20 } from '../dice/d20';
 
 /** Placar da perseguição: distância até ele e quanto da rota travada já foi. */
@@ -12,18 +12,19 @@ export interface ChaseHud {
 }
 
 /**
- * Corrida da perseguição (uma vez por perseguição): `ready` pode correr; `rolling` o d20 está no
- * ar; `active` a velocidade maior vale (`percent`, por `ms`); `used` já correu.
+ * Corrida da perseguição (quantas vezes quiser): `ready` pode correr; `rolling` o d20 está no ar;
+ * `active` a velocidade maior vale (`percent`, por `ms`); `cooldown` recarregando (por `ms`) até
+ * poder rolar outro d20.
  */
 export interface SprintView {
-  state: 'ready' | 'rolling' | 'active' | 'used';
+  state: 'ready' | 'rolling' | 'active' | 'cooldown';
   /** Face do d20 (já sorteada); `null` antes de rolar. */
   roll: number | null;
   /** Modificador de vigor do agente, somado ao d20. */
   vigor: number;
   /** d20 + vigor: quanto (%) o agente fica mais rápido. */
   percent: number;
-  /** Quanto tempo (ms) a velocidade maior ainda dura, para a barrinha do botão. */
+  /** Quanto dura (ms) a fase atual (`active` ou `cooldown`), para a barrinha do botão. */
   ms: number;
 }
 
@@ -65,7 +66,7 @@ export class ChaseOverlay {
       case 'active':
         return `+${sp.percent}% de velocidade (${this.sprintRoll(sp)})`;
       default:
-        return 'já deu o gás';
+        return 'recuperando o fôlego…';
     }
   }
 
@@ -77,7 +78,7 @@ export class ChaseOverlay {
 
   protected sprintLabel(sp: SprintView): string {
     return sp.state === 'ready'
-      ? 'Correr: teste de vigor, d20 + vigor, o total vira o bônus de velocidade por 5 segundos'
+      ? `Correr: teste de vigor, d20 + vigor, o total vira o bônus de velocidade por ${CHASE_RULES.sprintSeconds} segundos`
       : `Correr: ${this.sprintSub(sp)}`;
   }
 
