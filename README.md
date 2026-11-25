@@ -19,7 +19,9 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
    confirmar — ou use o botão **Confirmar**. Dá para andar várias vezes no mesmo turno
    enquanto sobrar movimento; o custo é o número de passos.
 6. Quando o movimento acaba, a vez passa sozinha; **Passar a vez** encerra antes.
-7. Toque numa peça no tabuleiro ou num retrato no topo para ver aquele personagem. Quem
+7. Toque numa peça no tabuleiro ou num retrato no topo para ver aquele personagem. Tocar uma
+   vez num objeto interagível (o avião, os suprimentos, um garimpeiro rendido) também leva a
+   câmera até ele, deixando-o no centro da tela (`HexBoard.focusArea`). Quem
    está na vez ganha um anel amarelo e o retrato fica destacado como **Na vez**. Cada retrato
    mostra o vigor e a intimidação do agente em campo (em verde quando o grupo soma o bônus);
    o de quem está na vez mostra também o alcance da abordagem.

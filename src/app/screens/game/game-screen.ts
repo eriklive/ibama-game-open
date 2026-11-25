@@ -1271,7 +1271,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.pickCharacter(id),
         onClueTap: () => this.tapClue(),
-        onTargetTap: (id) => this.tapTarget(id),
+        onTargetTap: (id) => {
+          this.tapTarget(id);
+          this.centerOnTarget(id);
+        },
       },
       {
         profile: this.renderSettings.profile(),
@@ -2297,6 +2300,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * ficar colado — e o segundo toque (no alvo ou no Confirmar) anda até lá e já abre a ação. NPC
    * rendido sem interação só mostra o balão "Nenhuma interação".
    */
+  /** Primeiro toque num alvo (o avião, os suprimentos, um NPC rendido): a câmera vai até ele. */
+  private centerOnTarget(id: string): void {
+    if (id.startsWith(NPC_TARGET)) {
+      const e = this.enemies().find((x) => NPC_TARGET + x.id === id);
+      if (e) this.board?.focusArea([e.hex]);
+      return;
+    }
+    const t = (this.map?.burnables ?? []).find((b) => b.id === id);
+    if (t) this.board?.focusArea(t.hexes);
+  }
+
   private tapTarget(id: string): void {
     if (this.phase() !== 'moving-choice' || this.approaching() || this.grouping()) return;
     if (this.burning()) {
