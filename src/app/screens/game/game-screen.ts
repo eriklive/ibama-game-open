@@ -264,6 +264,13 @@ const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
 
 /** Alvo que se toca direto no tabuleiro para interagir (ver `GameScreen.tapTargetOf`). */
+/** Prefixo do id de alvo das portas fechadas (`porta:<col,row>`). */
+const DOOR_TARGET = 'porta:';
+/** Id de alvo do quadro de chaves. */
+const KEY_TARGET = 'quadro-chaves';
+/** Prefixo do id de alvo dos móveis com algo percebido (`movel:<id do item escondido>`). */
+const SPOT_TARGET = 'movel:';
+
 interface TapTarget {
   id: string;
   /** Dá para agir daqui (colado no alvo). */
@@ -418,19 +425,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const hex = this.pad() ? this.cursor() : null;
       this.board?.setCursor(hex);
     });
-    // losango amarelo nas portas fechadas coladas no agente da vez (tocar nelas abre o menu)
+    // o que se toca direto (o avião, os suprimentos, as portas fechadas, o quadro de chaves, o
+    // móvel com algo percebido) ganha o contorno pulsante; refaz quando um deles muda de estado
     effect(() => {
-      const free = !this.approaching() && !this.burning() && !this.grouping() && !this.selected();
-      const keys = free ? this.nearDoors().filter((d) => !isOpen(d)).map((d) => hexKey(d.hex)) : [];
-      this.board?.setDoorHints(keys);
+      const list = this.tapTargetList();
+      this.board?.setTargetOutlines(list);
     });
     // rendidos tocáveis, como o avião: com interação, contorno amarelo; sem, o balão "Nenhuma interação"
     effect(() => {
       const list = this.npcTargets();
       this.board?.setNpcTargets(list);
     });
-    // os queimáveis (o avião, os suprimentos) não têm aura no chão: o próprio modelo ganha um contorno
-    // que pulsa, e só quando dá para tocar nele (a escolha da vez, sem outro modo aberto)
+    // os alvos tocáveis (o avião, os suprimentos, as portas…) não têm aura no chão: o próprio modelo
+    // ganha um contorno que pulsa, e só quando dá para tocar nele (a escolha da vez, sem outro modo aberto)
     effect(() => {
       const free =
         this.phase() === 'moving-choice' && !this.search() && !this.aiming() &&
@@ -1296,7 +1303,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // os queimáveis não levam ícone de chama nem aura: um contorno pulsante no modelo, que se toca
     // de qualquer lugar (vai até lá e abre a ação, ver `tapTarget`)
     this.board.setBurnTargets([]);
-    this.board.setTargetOutlines(this.map.burnables ?? []);
+    this.board.setTargetOutlines(this.tapTargetList());
     this.board.setNpcTargets(this.npcTargets());
     this.board.setDoors(this.doors(), true);
     this.refreshVision();
@@ -2256,12 +2263,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.pickRally(hex, true);
       return;
     }
-    // porta fechada: colado nela, abre o menu; de longe, avisa
+    // porta fechada: como tocar no contorno dela (colado, abre o menu; de longe, marca o caminho)
     const door = hex && this.doors().get(hexKey(hex));
     if (door && !isOpen(door)) {
-      if (this.viewingOther()) this.focusCharacter(this.active().id);
-      if (this.nearDoors().includes(door)) this.openDoorMenu(door);
-      else this.say('Chegue colado na porta para interagir com ela', 'info');
+      this.tapTarget(DOOR_TARGET + hexKey(door.hex));
       return;
     }
     if (this.viewingOther()) this.focusCharacter(this.active().id);
@@ -2288,6 +2293,40 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * movimento que precisa sobrar depois de chegar (conversar gasta a primeira pergunta).
    */
   private tapTargetOf(id: string): TapTarget | null {
+    if (id.startsWith(DOOR_TARGET)) {
+      const key = id.slice(DOOR_TARGET.length);
+      const door = this.doors().get(key);
+      if (!door || isOpen(door)) return null;
+      return {
+        id,
+        near: (h) => nextToDoor(h, door.hex),
+        spare: 0,
+        far: 'Chegue colado na porta para interagir com ela',
+        act: () => this.openDoorMenu(this.doors().get(key) ?? null),
+      };
+    }
+    if (id === KEY_TARGET) {
+      const panel = this.map?.keyPanel;
+      if (!panel || this.hasKey()) return null;
+      return {
+        id,
+        near: (h) => nextToPanel(h, panel),
+        spare: 0,
+        far: 'Chegue colado no quadro de chaves para mexer nele',
+        act: () => void this.touchKeyPanel(),
+      };
+    }
+    if (id.startsWith(SPOT_TARGET)) {
+      const item = this.spotTargets().find((h) => SPOT_TARGET + h.id === id);
+      if (!item) return null;
+      return {
+        id,
+        near: (h) => canReach(h, item.spot),
+        spare: SEARCH_RULES.inspectCost,
+        far: `Chegue colado na ${item.furniture} para inspecionar`,
+        act: () => this.startInspect(),
+      };
+    }
     if (id.startsWith(NPC_TARGET)) {
       const e = this.enemies().find((x) => NPC_TARGET + x.id === id && x.status === 'surrendered');
       if (!e || !hasDialogue(npcClass(e.npc))) return null;
@@ -2313,6 +2352,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    */
   /** Primeiro toque num alvo (o avião, os suprimentos, um NPC rendido): a câmera vai até ele. */
   private centerOnTarget(id: string): void {
+    const spot = this.tapTargetList().find((t) => t.id === id);
+    if (spot && !(this.map?.burnables ?? []).some((b) => b.id === id)) {
+      this.board?.focusArea(spot.hexes);
+      return;
+    }
     if (id.startsWith(NPC_TARGET)) {
       const e = this.enemies().find((x) => NPC_TARGET + x.id === id);
       if (e) this.board?.focusArea([e.hex]);
@@ -2422,10 +2466,35 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly armedTarget = computed<TapTarget | null>(() => {
     const aim = this.aimedTarget();
     if (!aim || !sameHex(aim.hex, this.selected()) || this.phase() !== 'moving-choice') return null;
-    // lê os inimigos e os queimados aqui: o alvo pode sumir (queimou, deixou de estar rendido)
+    // lê aqui o que faz o alvo sumir (queimou, deixou de estar rendido, a porta abriu, a chave saiu)
     this.enemies();
     this.burned();
+    this.doors();
+    this.hasKey();
+    this.spotTargets();
     return this.tapTargetOf(aim.id);
+  });
+
+  /** Móveis com algo percebido e ainda não achado: dá para tocar neles e inspecionar. */
+  private readonly spotTargets = computed<HiddenItem[]>(() => {
+    const noticed = this.noticed();
+    const found = this.found();
+    return (this.map?.hidden ?? []).filter((h) => noticed.has(h.id) && !found.has(h.id));
+  });
+
+  /**
+   * Tudo o que se toca direto no tabuleiro, com o contorno pulsante (ver `HexBoard.setTargetOutlines`):
+   * os queimáveis ainda inteiros, as portas fechadas, o quadro de chaves (enquanto a chave estiver
+   * lá) e os móveis com algo percebido. Os NPCs rendidos vão à parte (`setNpcTargets`).
+   */
+  protected readonly tapTargetList = computed<{ id: string; hexes: HexCoord[] }[]>(() => {
+    const burned = this.burned();
+    const list = (this.map?.burnables ?? []).filter((b) => !burned.has(b.id)).map((b) => ({ id: b.id, hexes: [...b.hexes] }));
+    for (const [key, d] of this.doors()) if (!isOpen(d)) list.push({ id: DOOR_TARGET + key, hexes: [d.hex] });
+    const panel = this.map?.keyPanel;
+    if (panel && !this.hasKey()) list.push({ id: KEY_TARGET, hexes: [panel.spot] });
+    for (const h of this.spotTargets()) list.push({ id: SPOT_TARGET + h.id, hexes: [h.spot] });
+    return list;
   });
 
   /** A ação de um alvo colado no agente: o avião abre o menu de inspecionar; o resto, o "Queimar". */

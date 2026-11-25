@@ -33,7 +33,6 @@ interface Leaf {
   leaf: THREE.Mesh;
   lock: THREE.Object3D;
   planks: THREE.Object3D;
-  hint: THREE.Object3D;
   /** Para que lado a folha abre (+1 ou −1): longe de quem empurrou por último. */
   side: number;
   angle: number;
@@ -53,7 +52,6 @@ interface Leaf {
 export class DoorViews {
   readonly group = new THREE.Group();
   private readonly leaves = new Map<string, Leaf>();
-  private readonly hints = new Set<string>();
 
   constructor(doors: readonly HexCoord[], structures: readonly HexRect[], size: number) {
     const wood = new THREE.MeshStandardMaterial({ color: 0x9a6a3e, roughness: 0.85 });
@@ -70,13 +68,6 @@ export class DoorViews {
       metalness: 0.8,
     });
     const plank = new THREE.MeshStandardMaterial({ color: 0x5b3d24, roughness: 0.95 });
-    const yellow = new THREE.MeshBasicMaterial({ color: 0xffd23f });
-    const ringMat = new THREE.MeshBasicMaterial({
-      color: 0xffd23f,
-      side: THREE.DoubleSide,
-      transparent: true,
-      opacity: 0.75,
-    });
 
     for (const hex of doors) {
       const rect = structures.find((r) => inStructure(hex, r));
@@ -161,15 +152,6 @@ export class DoorViews {
       }
       holder.add(planks);
 
-      // indicador de interação: losango amarelo girando sobre a porta
-      const hint = new THREE.Group();
-      const diamond = new THREE.Mesh(new THREE.OctahedronGeometry(0.22), yellow);
-      const ring = new THREE.Mesh(new THREE.RingGeometry(0.3, 0.37, 32), ringMat);
-      hint.add(diamond, ring);
-      hint.position.copy(center).setY(LEAF_HEIGHT + 1.05);
-      hint.visible = false;
-      this.group.add(hint);
-
       this.leaves.set(key, {
         key,
         center,
@@ -179,7 +161,6 @@ export class DoorViews {
         leaf,
         lock,
         planks,
-        hint,
         side: 1,
         angle: 0,
         vel: 0,
@@ -262,14 +243,16 @@ export class DoorViews {
     }
   }
 
-  /** Portas com o indicador de interação aceso. */
-  setHints(keys: Iterable<string>): void {
-    this.hints.clear();
-    for (const k of keys) this.hints.add(k);
-    for (const l of this.leaves.values()) l.hint.visible = this.hints.has(l.key);
+  /**
+   * Peças que mostram a porta fechada (a folha e as tábuas da bloqueada): o que ganha o contorno
+   * de "dá para tocar", como o avião (ver `HexBoard.setTargetOutlines`).
+   */
+  modelsOf(key: string): THREE.Object3D[] {
+    const l = this.leaves.get(key);
+    return l ? [l.leaf, l.planks] : [];
   }
 
-  update(dt: number, t: number, camera: THREE.Camera): void {
+  update(dt: number): void {
     for (const l of this.leaves.values()) {
       const acc = l.k * (l.target - l.angle) - l.c * l.vel;
       l.vel += acc * dt;
@@ -280,13 +263,6 @@ export class DoorViews {
         l.vel *= -0.35;
       }
       l.pivot.rotation.y = l.angle;
-      if (l.hint.visible) {
-        l.hint.position.y = LEAF_HEIGHT + 1.05 + Math.sin(t * 3) * 0.1;
-        l.hint.children[0].rotation.y = t * 2;
-        const ring = l.hint.children[1];
-        ring.lookAt(camera.position);
-        ring.scale.setScalar(1 + (Math.sin(t * 4) + 1) * 0.12);
-      }
     }
   }
 }

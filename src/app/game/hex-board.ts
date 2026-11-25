@@ -1403,11 +1403,6 @@ export class HexBoard {
     this.structureKey = '';
   }
 
-  /** Portas com o indicador de interação (o losango amarelo). */
-  setDoorHints(keys: Iterable<string>): void {
-    this.doorViews?.setHints(keys);
-  }
-
   /** Empurra a folha da porta a partir do agente (ela abre para o outro lado). */
   pushDoor(door: HexCoord, unitId: string, mode: DoorPush): void {
     const u = this.units.get(unitId);
@@ -2448,12 +2443,13 @@ export class HexBoard {
     }
   }
 
-  /** Modelos (avião e carga) que ocupam esses hexágonos. */
+  /** Modelos (avião, carga e móveis, folha da porta) que ocupam esses hexágonos. */
   private modelsOn(hexes: readonly HexCoord[]): Set<THREE.Object3D> {
     const models = new Set<THREE.Object3D>();
     const planeKeys = new Set((this.map.plane ?? []).map(hexKey));
     for (const h of hexes) {
       const key = hexKey(h);
+      for (const m of this.doorViews?.modelsOf(key) ?? []) models.add(m);
       if (planeKeys.has(key) && this.planeModel) models.add(this.planeModel);
       const cargo = this.cargoModels.get(key);
       if (cargo) models.add(cargo);
@@ -2462,7 +2458,8 @@ export class HexBoard {
   }
 
   /**
-   * Alvos que dá para tocar direto (o avião, os suprimentos): cada peça do modelo ganha uma
+   * Alvos que dá para tocar direto (o avião, os suprimentos, as portas fechadas, o quadro de
+   * chaves, o móvel com algo percebido): cada peça do modelo ganha uma
    * casca um pouco maior, só com as faces de trás, que aparece como um contorno pulsante em
    * volta da silhueta. Tocar no modelo chama `onTargetTap`. Alvos que pegam fogo perdem o
    * contorno (ver `ignite`).
@@ -4062,7 +4059,7 @@ export class HexBoard {
     }
 
     this.updateFires(t);
-    this.doorViews?.update(dt, t, this.camera);
+    this.doorViews?.update(dt);
     for (const [id, sp] of this.speeches) if (t >= sp.until) this.silence(id);
 
     if (this.clue?.sprite.visible) {
