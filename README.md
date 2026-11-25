@@ -619,7 +619,7 @@ região e, no que é interativo, uma **cortina** de luz baixa que some para cima
 | Alcance de movimento | azul-claro (o do cursor), contorno branco | baixa | — |
 | Visão dos inimigos | véu vermelho | não | — |
 | Queimar (avião, suprimentos) | brasa | sim | aquela aura inteira acende e a cortina cresce |
-| Conversar (rendido com diálogo) | âmbar | sim | idem |
+| Conversar (rendido com diálogo) | âmbar, parado (sem pulso) | não | o véu fica mais forte |
 | Rendido sem diálogo | âmbar apagado | não | — |
 
 As camadas se somam: um hexágono do alcance dentro de uma aura de queimar fica com o véu da brasa, e o

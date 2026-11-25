@@ -109,9 +109,12 @@ const AURAS = {
   /** Em volta do que se pode queimar (o avião, os suprimentos): brasa. */
   burn: { color: 0xff5a26, edge: 0xffc08a, fill: 0.8, rim: 1, wall: 1, wallOpacity: 0.8, breathe: { speed: 3.2, amount: 0.15 } },
   burnHot: { color: 0xff6a33, edge: 0xffd2a8, fill: 1, rim: 1, wall: 1.3, wallOpacity: 0.95, breathe: { speed: 4.5, amount: 0.12 } },
-  /** Em volta do suspeito rendido com diálogo: âmbar. */
-  talk: { color: 0xffa83a, edge: 0xffe8b8, fill: 0.8, rim: 1, wall: 1, wallOpacity: 0.8, breathe: { speed: 3.9, amount: 0.15 } },
-  talkHot: { color: 0xffb347, edge: 0xfff0d0, fill: 1, rim: 1, wall: 1.3, wallOpacity: 0.95, breathe: { speed: 4.5, amount: 0.12 } },
+  /**
+   * Em volta do suspeito rendido com diálogo: âmbar, parado (sem cortina nem respiração; quem chama
+   * para o toque é o contorno amarelo no próprio modelo, ver `setNpcTargets`).
+   */
+  talk: { color: 0xffa83a, edge: 0xffe8b8, fill: 0.8, rim: 1 },
+  talkHot: { color: 0xffb347, edge: 0xfff0d0, fill: 1, rim: 1 },
   /** Rendido sem diálogo: âmbar apagado, parado. */
   talkMuted: { color: 0xa79a80, edge: 0xc9bea6, fill: 0.35, rim: 0.5 },
 } satisfies Record<string, AuraStyle>;
