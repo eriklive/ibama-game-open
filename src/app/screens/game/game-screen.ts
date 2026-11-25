@@ -479,7 +479,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** O que a interface põe por cima do tabuleiro (cartões, placar, botões), em coordenadas da janela. */
   private hudRects(): DOMRect[] {
-    return [...document.querySelectorAll<HTMLElement>('.game .corner, .game .goal, .game .agents, .game .tools, .game .suspects, .game .actions > *')].map(
+    return [...document.querySelectorAll<HTMLElement>('.game .corner, .game .goal, .game .agents, .game .tools, .game .actions > *')].map(
       (e) => e.getBoundingClientRect(),
     );
   }
@@ -499,24 +499,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       fled: es.filter((e) => e.status === 'fled').length,
     };
   });
-
-  /** Resumo da pilha de suspeitos: só os estados que têm alguém. */
-  protected readonly enemySummary = computed(() => {
-    const c = this.enemyCounts();
-    return [
-      c.alert && `${c.alert} em fuga!`,
-      c.patrol && `${c.patrol} vigiando`,
-      c.surrendered && `${c.surrendered} ${c.surrendered === 1 ? 'rendido' : 'rendidos'}`,
-      c.fled && `${c.fled} ${c.fled === 1 ? 'fugiu' : 'fugiram'}`,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-  });
-  /** A pilha de suspeitos aberta em lista. */
-  protected readonly suspectsOpen = signal(false);
-  protected toggleSuspects(): void {
-    this.suspectsOpen.update((v) => !v);
-  }
 
   /** Pré-visualizando a abordagem (zonas pintadas, aguardando confirmação). */
   protected readonly approaching = signal(false);
@@ -580,13 +562,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     };
     requestAnimationFrame(tick);
   }
-  protected readonly statusLabel: Record<EnemyState['status'], string> = {
-    patrol: 'vigiando',
-    alert: 'em fuga!',
-    surrendered: 'rendido',
-    fled: 'fugiu',
-    hidden: 'escondido',
-  };
   /** Suspeitos que a equipe conhece (os escondidos só entram depois de revelados). */
   protected readonly knownEnemies = computed(() => this.enemies().filter(known));
 
@@ -1575,7 +1550,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   // ---------- perseguição (ver `chase.ts`) ----------
 
-  /** Teclado na perseguição: ↑ pula o caixote, G grita; Esc deixa fugir. */
+  /** Teclado: Modo Corrida, lousa tática, abertura, escolha de alvo e perseguição (C dá o gás; Esc deixa fugir). */
   protected onKey(ev: KeyboardEvent): void {
     // Modo Corrida: setas (ou WASD) trocam de faixa, pulam e deslizam
     if (this.runner && this.runnerOn()) {
@@ -1620,8 +1595,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Atributos de perseguição do agente: os da ficha (o grupo não soma). */
   private chaseStats(id: string): ChaseStats {
     const loadout = this.roster.loadout(id);
-    const { vigor, iniciativa, agilidade } = loadout.attributes;
-    return { vigor, iniciativa, agilidade };
+    const { vigor, iniciativa } = loadout.attributes;
+    return { vigor, iniciativa };
   }
 
   /**
@@ -2134,7 +2109,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Segura o slow da perseguição (as escolhas do jogador e o dado que vem delas): enquanto
+   * Segura o slow da perseguição (a escolha de alvo e o dado que vem dela): enquanto
    * alguém segurar, a música, a animação, os passos e o zoom ficam desacelerados. Devolve quem
    * solta (uma vez só). O último a soltar volta tudo ao normal depois de `SLOW_GRACE_MS`, se
    * ninguém segurar de novo antes.
@@ -2432,6 +2407,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private actOn(target: Burnable): void {
     if (target.inspect) this.openPlaneMenu();
     else this.startBurn();
+  }
+
+  /** Os retratos de quem não está em foco ficam empilhados; abrem ao toque. */
+  protected readonly agentsOpen = signal(false);
+  protected tapAgent(c: Character): void {
+    if (c.id !== this.focused().id && !this.agentsOpen()) {
+      this.agentsOpen.set(true);
+      return;
+    }
+    this.agentsOpen.set(false);
+    this.pickCharacter(c.id);
   }
 
   /** Toque numa peça ou num retrato: o mesmo que `focusCharacter`, com o som do cartão. */
@@ -2804,9 +2790,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     passes: (roll: number) => boolean,
     autoMs?: number,
   ): Promise<{ roll: number; pass: boolean } | null> {
-    // só as escolhas do jogador desaceleram: o dado da equipe que vem logo depois de uma (a
-    // iniciativa depois da escolha de alvo) emenda no mesmo slow; os do garimpeiro só quando
-    // quem chama segura o slow (a porta dele, ver `doorAhead` em `chaseSteps`)
+    // só a escolha de alvo desacelera: o dado da equipe que vem logo depois dela (a iniciativa)
+    // emenda no mesmo slow
     const release = view.side !== 'enemy' && this.slowActive() ? this.holdSlow() : undefined;
     try {
       return await this.rollD20Sheet(view, passes, autoMs);

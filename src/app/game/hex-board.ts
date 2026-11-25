@@ -375,7 +375,6 @@ export interface HexBoardCallbacks {
   onClueTap?(): void;
   /** Toque direto num alvo com contorno (o avião, os suprimentos): ver `setTargetOutlines`. */
   onTargetTap?(id: string): void;
-  /** Na escolha do caixote (perseguição): tocou no caixote (`pular`) ou na faixa da volta. */
 }
 
 /**
@@ -452,15 +451,13 @@ export class HexBoard {
   private chaseLast: { unitId: string; enemyId?: string; look?: THREE.Vector3 } | null = null;
   private chaseBlend = 0;
   /**
-   * Slow da curva (ver `setChaseSlowmo`): 0 normal, 1 no fundo. Anda em rampa linear, com os
+   * Slow da escolha de alvo (ver `setChaseSlowmo`): 0 normal, 1 no fundo. Anda em rampa linear, com os
    * tempos da fita da música, e dá a velocidade da animação de quem corre e o zoom.
    */
   private slowmo = 0;
   private slowmoGoal = 0;
   private readonly chaseDir = new THREE.Vector3(0, 0, 1);
 
-  /** Modelo de cada agente (o fantasma da escolha do caixote é uma cópia dele). */
-  private readonly unitModels = new Map<string, ModelDef>();
   /** Afastamento atual da cena (1 = padrão); acompanha `cine.zoom` devagar (ver `setCineZoom`). */
   private cineZoom = 1;
   /** Estado das portas comuns: fechadas, mantêm o telhado e escondem o interior. */
@@ -493,9 +490,9 @@ export class HexBoard {
   private readonly npcArmedMat = this.skinOutline(0.1, 0.9);
   /** Balões passageiros sobre um alvo ("Nenhuma interação"), ver `flashTargetLabel`. */
   private readonly flashes = new Map<string, { fx: Pick<AimFx, 'label' | 'labelTop' | 'labelLow' | 'avoid'>; until: number; span: number }>();
-  /** Contorno de "dá para tocar": fino, branco e suave. */
+  /** Contorno de "dá para tocar": fino, amarelo e suave. */
   private readonly outlineMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
+    color: 0xffd23a,
     side: THREE.BackSide,
     transparent: true,
     depthWrite: false,
@@ -1735,7 +1732,7 @@ export class HexBoard {
   /**
    * Slow da perseguição: `true` desacelera o agente e o inimigo (animação e passos caem para
    * `CHASE_SLOWMO.rate`, como a fita da música) e a câmera fecha um pouco; `false` volta rápido
-   * e abre a câmera. Quem decide quando é a tela (decisões e rolagens seguram o slow).
+   * e abre a câmera. Quem decide quando é a tela (a escolha de alvo e a iniciativa que vem dela).
    */
   setChaseSlowmo(on: boolean): void {
     this.slowmoGoal = on ? 1 : 0;
@@ -2513,7 +2510,7 @@ export class HexBoard {
 
   /**
    * Alvo tocado uma vez (o caminho até ele já está marcado, o segundo toque anda até lá): o
-   * contorno dele engrossa e vira amarelo intenso. `null` volta todos ao branco fino.
+   * contorno dele engrossa e vira amarelo intenso. `null` volta todos ao amarelo fino.
    */
   setArmedTarget(id: string | null): void {
     if (id === this.armedTarget) return;
@@ -3424,10 +3421,7 @@ export class HexBoard {
       pieceOnly: [dot, nub], yaw: 0,
     };
     this.units.set(unit.id, view);
-    if (unit.model) {
-      this.unitModels.set(unit.id, unit.model);
-      this.attachModel(view, unit.model);
-    }
+    if (unit.model) this.attachModel(view, unit.model);
   }
 
   /** Troca o miolo da peça pelo personagem animado, que fica de pé sobre o disco. */
@@ -4033,7 +4027,7 @@ export class HexBoard {
     field.flush();
 
     if (this.outlinesOn && this.outlined.size) {
-      // branco suave que respira devagar: dá para tocar
+      // amarelo suave que respira devagar: dá para tocar
       const k = 0.5 + Math.sin(t * 2.5) * 0.5;
       this.outlineMat.opacity = 0.2 + k * 0.25;
       // tocado uma vez: amarelo que pulsa rápido e forte, quase branco no pico

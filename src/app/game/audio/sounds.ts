@@ -860,7 +860,7 @@ export const SOUNDS: Readonly<Record<SoundId, (e: AudioEngine, t: number) => voi
     e.noise({ t, type: 'bandpass', f: 3000, Q: 1, dur: 0.03, gain: 0.18, bus: 'ui' });
     e.tone({ t, f: 1000, dur: 0.03, gain: 0.03, bus: 'ui' });
   },
-  // relógio da escolha no caixote: tique-taque de 1 s (4 batidas, a última mais aguda)
+  // relógio do aviso de curva no Modo Corrida: tique-taque de 1 s (4 batidas, a última mais aguda)
   'ui.relogio': (e, t) =>
     [0, 0.25, 0.5, 0.75].forEach((dt, i) => {
       e.noise({ t: t + dt, type: 'bandpass', f: i % 2 ? 2600 : 3400, Q: 6, dur: 0.025, gain: 0.22, bus: 'ui' });

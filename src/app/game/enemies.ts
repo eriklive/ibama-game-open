@@ -134,7 +134,7 @@ export interface EnemySpawn {
   hidden?: boolean;
   /** Id do inimigo escondido que este suspeito pode entregar no interrogatório. */
   reveals?: string;
-  /** Agilidade na perseguição (sem uso por ora: as curvas não rolam mais; ver `chase.ts`). Sem ela, 0. */
+  /** Agilidade no Modo Corrida: soma no d20 dele em cada obstáculo (ver `runner.ts`). Sem ela, 0. */
   agilidade?: number;
 }
 
@@ -158,7 +158,7 @@ export interface EnemyState {
   npc?: string;
   /** Inimigo escondido que este pode entregar (ver `EnemySpawn.reveals`). */
   reveals?: string;
-  /** Agilidade na perseguição (ver `EnemySpawn.agilidade`). */
+  /** Agilidade no Modo Corrida (ver `EnemySpawn.agilidade`). */
   agilidade?: number;
   /**
    * Abalado: foi agarrado numa perseguição e se rendeu. O próximo interrogatório dele tem +2
