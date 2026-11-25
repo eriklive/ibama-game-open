@@ -314,6 +314,18 @@ inspecionar), **a qualquer momento e quantas vezes quiser**. Se a classe do susp
 (o segurança), o papel aparece **bloqueado** ("sem diálogo") e a aura fica apagada, sem cortina nem pulso.
 Quem não se rendeu não conversa.
 
+- **Toque direto no rendido** (o mesmo sistema do avião): quem tem o que falar ganha um **contorno
+  amarelo** pulsante no próprio modelo (acompanha a pose de algemado). Tocar nele, colado, abre a
+  conversa; de longe, marca o caminho mais curto até a aura (contorno grosso, fantasma do agente no
+  destino, pontos correndo e o balão "Toque de novo para ir · N passos") e o segundo toque anda até lá e
+  já abre a conversa. O caminho precisa deixar sobrando o movimento da primeira pergunta; sem isso, o
+  caminho aparece em cinza com "Longe demais para interagir". Quem **não tem interação** fica sem
+  contorno e, ao toque, mostra o balão cinza **"Nenhuma interação"** sobre a cabeça. O hexágono do
+  rendido também vale como tocar nele. No tabuleiro: `setNpcTargets` (alvos `npc:<id>`) e
+  `flashTargetLabel` (balão passageiro, reaproveitável para outros alvos); na tela, `tapTargetOf` diz
+  de onde cada alvo age e o que acontece. Caso de teste: **Rendidos: tocar para conversar**
+  (`?caso=rendidos-interacao`).
+
 - **Close-up:** a câmera faz o mesmo enquadramento da inspeção e das portas (desce para 30° e chega
   perto), mas de lado para a dupla: agente em pé e suspeito na pose de rendido, na faixa de cima
   da tela. Faixas pretas, vinheta, a HUD sai e a papelada entra com o "slap". Encerrar volta a câmera.

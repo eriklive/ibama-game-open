@@ -112,6 +112,21 @@ export const TEST_CASES: readonly TestCase[] = [
     },
     start: { kind: 'turn', agent: 'ana' },
   },
+  {
+    id: 'rendidos-interacao',
+    name: 'Rendidos: tocar para conversar',
+    hint: 'Os dois garimpeiros rendidos têm o que falar (contorno amarelo: toque para ir até eles e conversar); o vigia da pista, rendido e calado, só mostra "Nenhuma interação".',
+    mapId: 'aeroporto',
+    active: 'ana',
+    agents: { ana: { col: 22, row: 21 }, bruno: { col: 21, row: 22 }, clara: { col: 23, row: 22 } },
+    enemies: {
+      'garimpeiro-pa': { hex: { col: 21, row: 18 }, status: 'surrendered' },
+      garimpeiro: { hex: { col: 24, row: 19 }, status: 'surrendered' },
+      'vigia-pista': { hex: { col: 20, row: 21 }, status: 'surrendered' },
+      ...PILOTO_LONGE,
+    },
+    start: { kind: 'turn', agent: 'ana' },
+  },
 ];
 
 export const findTestCase = (id: string | null | undefined): TestCase | undefined =>

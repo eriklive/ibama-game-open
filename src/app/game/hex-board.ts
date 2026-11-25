@@ -216,6 +216,9 @@ interface EnemyView extends Mover {
   cuffPose?: 'cuffed' | 'kneel';
 }
 
+/** Prefixo do id de alvo dos NPCs rendidos tocáveis (`npc:<id do inimigo>`, ver `setNpcTargets`). */
+export const NPC_TARGET = 'npc:';
+
 /** Diferença angular em (-π, π]. */
 const angleDelta = (from: number, to: number): number =>
   Math.atan2(Math.sin(to - from), Math.cos(to - from));
@@ -472,7 +475,21 @@ export class HexBoard {
    * Alvos tocáveis (o avião, os suprimentos): os modelos (para o toque) e os contornos que
    * pulsam em volta deles, mostrando que dá para tocar.
    */
-  private readonly outlined = new Map<string, { models: THREE.Object3D[]; hulls: THREE.Mesh[] }>();
+  private readonly outlined = new Map<
+    string,
+    { models: THREE.Object3D[]; hulls: THREE.Mesh[]; /** Criado só para o alvo (sai junto com ele). */ owned?: THREE.Object3D[] }
+  >();
+  /**
+   * NPCs rendidos tocáveis (ver `setNpcTargets`), pelo id do inimigo: `talk` = tem interação
+   * (contorno amarelo); sem, só o toque. `rig` lembra se o contorno já pegou o modelo 3D.
+   */
+  private readonly npcTargets = new Map<string, { talk: boolean; rig: boolean }>();
+  /** Contorno do NPC com interação: amarelo, fino e suave, acompanhando a animação (ver `skinOutline`). */
+  private readonly npcOutlineMat = this.skinOutline(0.05, 0.7);
+  /** Contorno do NPC tocado uma vez: mais grosso e intenso, como o do avião armado. */
+  private readonly npcArmedMat = this.skinOutline(0.1, 0.9);
+  /** Balões passageiros sobre um alvo ("Nenhuma interação"), ver `flashTargetLabel`. */
+  private readonly flashes = new Map<string, { fx: Pick<AimFx, 'label' | 'labelTop' | 'labelLow' | 'avoid'>; until: number; span: number }>();
   /** Contorno de "dá para tocar": fino, branco e suave. */
   private readonly outlineMat = new THREE.MeshBasicMaterial({
     color: 0xffffff,
@@ -2439,7 +2456,7 @@ export class HexBoard {
    * contorno (ver `ignite`).
    */
   setTargetOutlines(targets: readonly { id: string; hexes: readonly HexCoord[] }[]): void {
-    for (const id of [...this.outlined.keys()]) this.dropOutline(id);
+    for (const id of [...this.outlined.keys()]) if (!id.startsWith(NPC_TARGET)) this.dropOutline(id);
     const thick = 0.08; // espessura do contorno, em unidades do mundo
     const size = new THREE.Vector3();
     const center = new THREE.Vector3();
@@ -2501,6 +2518,10 @@ export class HexBoard {
     for (const [tid, o] of this.outlined) {
       const on = tid === id;
       for (const h of o.hulls) {
+        if (h.userData['npc']) {
+          h.material = on ? this.npcArmedMat : this.npcOutlineMat;
+          continue;
+        }
         const pose = h.userData[on ? 'thick' : 'thin'] as { scale: THREE.Vector3; position: THREE.Vector3 };
         h.scale.copy(pose.scale);
         h.position.copy(pose.position);
@@ -2594,13 +2615,7 @@ export class HexBoard {
     // balão sobre o alvo: "Toque de novo para ir · 3 passos". Se o alto do alvo cai debaixo da
     // interface (cartões, placar), o balão desce pelo alvo até a frente dele (o lado de baixo da tela)
     const label = this.labelSprite(aim.label, locked ? 'locked' : 'aim');
-    const labelTop = new THREE.Vector3(center.x, box.max.y + 0.35, center.z);
-    const toCam = new THREE.Vector3(this.camera.position.x - center.x, 0, this.camera.position.z - center.z);
-    if (toCam.lengthSq() < 1e-6) toCam.set(0, 0, 1);
-    toCam.normalize();
-    const size = box.getSize(new THREE.Vector3());
-    const reach = (Math.abs(toCam.x) * size.x + Math.abs(toCam.z) * size.z) / 2;
-    const labelLow = new THREE.Vector3(center.x + toCam.x * reach, box.min.y + 0.4, center.z + toCam.z * reach);
+    const { labelTop, labelLow } = this.labelSpots(box);
     label.position.copy(labelTop);
     this.labelScene.add(label);
 
@@ -2664,7 +2679,7 @@ export class HexBoard {
    * debaixo da interface (`avoid`) ou sai da tela, desce pelo alvo até a frente dele. Na
    * horizontal, fica sempre inteiro dentro da tela (a ponta continua apontando para o alvo).
    */
-  private placeAimLabel(fx: AimFx): void {
+  private placeAimLabel(fx: Pick<AimFx, 'label' | 'labelTop' | 'labelLow' | 'avoid'>): void {
     const canvas = this.renderer.domElement.getBoundingClientRect();
     if (!canvas.width || !canvas.height) return;
     this.camera.updateMatrixWorld();
@@ -2717,6 +2732,179 @@ export class HexBoard {
     return Math.abs(Math.sin(t * 6)) * 0.07;
   }
 
+  /**
+   * Onde vai o balão de um alvo: em cima dele (`labelTop`) ou, se ali fica debaixo da interface,
+   * descendo até a frente dele, no chão (`labelLow`). Ver `placeAimLabel`.
+   */
+  private labelSpots(box: THREE.Box3): { labelTop: THREE.Vector3; labelLow: THREE.Vector3 } {
+    const center = box.getCenter(new THREE.Vector3());
+    const labelTop = new THREE.Vector3(center.x, box.max.y + 0.35, center.z);
+    const toCam = new THREE.Vector3(this.camera.position.x - center.x, 0, this.camera.position.z - center.z);
+    if (toCam.lengthSq() < 1e-6) toCam.set(0, 0, 1);
+    toCam.normalize();
+    const size = box.getSize(new THREE.Vector3());
+    const reach = (Math.abs(toCam.x) * size.x + Math.abs(toCam.z) * size.z) / 2;
+    const labelLow = new THREE.Vector3(center.x + toCam.x * reach, box.min.y + 0.4, center.z + toCam.z * reach);
+    return { labelTop, labelLow };
+  }
+
+  /**
+   * Balão passageiro sobre um alvo tocável (ex.: "Nenhuma interação" no NPC rendido sem nada a
+   * dizer): aparece em cinza, fica ~`ms` (2 s) e some aos poucos. Um novo balão no mesmo alvo troca o
+   * anterior. `avoid` faz o balão desviar da interface, como o do alvo tocado.
+   */
+  flashTargetLabel(id: string, text: string, opts: { ms?: number; avoid?: () => readonly DOMRect[] } = {}): void {
+    const target = this.outlined.get(id);
+    if (!target) return;
+    this.dropFlash(id);
+    const box = new THREE.Box3();
+    for (const m of target.models) box.expandByObject(m);
+    if (box.isEmpty()) return;
+    const label = this.labelSprite(text, 'muted');
+    label.material.transparent = true;
+    const spots = this.labelSpots(box);
+    label.position.copy(spots.labelTop);
+    this.labelScene.add(label);
+    const span = opts.ms ?? 2000;
+    const fx = { label, ...spots, avoid: opts.avoid };
+    this.flashes.set(id, { fx, until: performance.now() + span, span });
+    this.placeAimLabel(fx);
+  }
+
+  private dropFlash(id: string): void {
+    const f = this.flashes.get(id);
+    if (!f) return;
+    this.flashes.delete(id);
+    this.labelScene.remove(f.fx.label);
+    f.fx.label.material.map?.dispose();
+    f.fx.label.material.dispose();
+  }
+
+  /** Balões passageiros: seguem desviando da interface e somem no fim (os últimos 300 ms). */
+  private updateFlashes(): void {
+    if (!this.flashes.size) return;
+    const now = performance.now();
+    for (const [id, f] of this.flashes) {
+      const left = f.until - now;
+      if (left <= 0) {
+        this.dropFlash(id);
+        continue;
+      }
+      f.fx.label.material.opacity = Math.min(1, left / 300);
+      this.placeAimLabel(f.fx);
+    }
+  }
+
+  /**
+   * NPCs rendidos que dá para tocar (como o avião, ver `setTargetOutlines`): o id do alvo é
+   * `npc:<id do inimigo>` (`onTargetTap`). Com interação (`talk`), o modelo ganha um contorno
+   * amarelo que acompanha a animação e engrossa quando tocado uma vez (`setTargetAim`); sem
+   * interação, não tem contorno, mas o toque vale do mesmo jeito (a tela mostra o balão com
+   * `flashTargetLabel`). Quem sai da lista perde o toque e o contorno.
+   */
+  setNpcTargets(targets: readonly { id: string; talk: boolean }[]): void {
+    const want = new Map(targets.map((t) => [t.id, t.talk]));
+    for (const id of [...this.npcTargets.keys()]) {
+      if (want.has(id)) continue;
+      this.npcTargets.delete(id);
+      this.dropFlash(NPC_TARGET + id);
+      this.dropOutline(NPC_TARGET + id);
+    }
+    for (const [id, talk] of want) {
+      const e = this.enemies.get(id);
+      const had = this.npcTargets.get(id);
+      if (!e || (had && had.talk === talk && had.rig === !!e.rig)) continue;
+      this.buildNpcTarget(e, talk);
+    }
+  }
+
+  /** Monta (ou refaz) o toque e o contorno de um NPC rendido. */
+  private buildNpcTarget(e: EnemyView, talk: boolean): void {
+    const key = NPC_TARGET + e.id;
+    const armed = this.armedTarget === key;
+    this.dropOutline(key);
+    this.npcTargets.set(e.id, { talk, rig: !!e.rig });
+    // área de toque: um cilindro do tamanho do personagem (não desenha, mas o raio o acerta)
+    const height = Math.max(0.6, e.signY - 0.45 - BASE_TOP);
+    const hitbox = new THREE.Mesh(
+      new THREE.CylinderGeometry(0.42, 0.42, height, 10),
+      new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false, transparent: true, opacity: 0 }),
+    );
+    hitbox.position.y = BASE_TOP + height / 2;
+    hitbox.renderOrder = -2;
+    e.group.add(hitbox);
+    const hulls: THREE.Mesh[] = [];
+    if (talk) {
+      const root = e.rig?.object ?? e.group;
+      const meshes: THREE.Mesh[] = [];
+      root.traverse((o) => {
+        const m = o as THREE.Mesh;
+        if (m.isMesh && m !== hitbox && !m.userData['outline'] && (e.rig || m.visible) && m !== e.shadow) meshes.push(m);
+      });
+      for (const mesh of meshes) {
+        const skin = mesh as THREE.SkinnedMesh;
+        let hull: THREE.Mesh;
+        if (skin.isSkinnedMesh) {
+          // mesma malha e mesmo esqueleto: o contorno se mexe junto com o clipe
+          const s = new THREE.SkinnedMesh(skin.geometry, this.npcOutlineMat);
+          s.bindMode = skin.bindMode;
+          s.bind(skin.skeleton, skin.bindMatrix);
+          hull = s;
+        } else {
+          hull = new THREE.Mesh(mesh.geometry, this.npcOutlineMat);
+        }
+        hull.frustumCulled = false;
+        hull.castShadow = hull.receiveShadow = false;
+        hull.renderOrder = -1;
+        hull.userData['outline'] = true;
+        hull.userData['npc'] = true;
+        hull.visible = this.outlinesOn;
+        hull.raycast = () => {};
+        mesh.add(hull);
+        hulls.push(hull);
+      }
+    }
+    this.outlined.set(key, { models: [hitbox], hulls, owned: [hitbox] });
+    if (armed) {
+      this.armedTarget = null;
+      this.setArmedTarget(key);
+    }
+  }
+
+  /**
+   * Contorno que acompanha a pose (personagens com esqueleto): a casca só com as faces de trás é
+   * empurrada `thick` unidades para fora, pela normal, depois da animação (o contorno do avião
+   * cresce pela escala, que não serve para um corpo que se mexe).
+   */
+  private skinOutline(thick: number, opacity: number): THREE.MeshBasicMaterial {
+    const m = new THREE.MeshBasicMaterial({
+      color: 0xffd23a,
+      side: THREE.BackSide,
+      transparent: true,
+      depthWrite: false,
+      toneMapped: false,
+      opacity,
+    });
+    m.onBeforeCompile = (shader) => {
+      shader.uniforms['outlineThick'] = { value: thick };
+      shader.vertexShader = shader.vertexShader
+        .replace('#include <common>', '#include <common>\nuniform float outlineThick;')
+        .replace(
+          '#include <project_vertex>',
+          `#include <project_vertex>
+          #if defined( USE_SKINNING )
+            vec3 outlineN = normalize( normalMatrix * objectNormal );
+          #else
+            vec3 outlineN = normalize( normalMatrix * normal );
+          #endif
+          mvPosition.xyz += outlineN * outlineThick;
+          gl_Position = projectionMatrix * mvPosition;`,
+        );
+    };
+    m.customProgramCacheKey = () => 'skin-outline';
+    return m;
+  }
+
   /** Acende ou apaga os contornos dos alvos (o toque neles só vale aceso). */
   showTargetOutlines(on: boolean): void {
     if (this.outlinesOn === on) return;
@@ -2729,6 +2917,10 @@ export class HexBoard {
     if (!o) return;
     if (this.aimFx?.key.startsWith(`${id}|`)) this.clearAimFx();
     for (const h of o.hulls) h.removeFromParent();
+    for (const x of o.owned ?? []) {
+      x.removeFromParent();
+      (x as THREE.Mesh).geometry?.dispose();
+    }
     this.outlined.delete(id);
   }
 
@@ -3106,6 +3298,9 @@ export class HexBoard {
     e.flagSprite.visible = false;
     rig.play(this.enemyRestClip(e), 0);
     rig.setCuffed(e.surrendered);
+    // rendido tocável: o contorno passa da peça simples para o modelo
+    const npc = this.npcTargets.get(e.id);
+    if (npc) this.buildNpcTarget(e, npc.talk);
     // o destaque aquece de novo com o personagem animado (ver `warmSpotlight`)
     this.spotWarmDue = true;
   }
@@ -3839,13 +4034,17 @@ export class HexBoard {
       const k = 0.5 + Math.sin(t * 2.5) * 0.5;
       this.outlineMat.opacity = 0.2 + k * 0.25;
       // tocado uma vez: amarelo que pulsa rápido e forte, quase branco no pico
+      this.npcOutlineMat.opacity = 0.55 + k * 0.35;
       if (this.armedTarget) {
         const a = 0.5 + Math.sin(t * 7) * 0.5;
         this.armedOutlineMat.opacity = 0.75 + a * 0.25;
         this.armedOutlineMat.color.setRGB(1, 0.78 + a * 0.18, 0.1 + a * 0.35);
+        this.npcArmedMat.opacity = this.armedOutlineMat.opacity;
+        this.npcArmedMat.color.copy(this.armedOutlineMat.color);
       }
       this.updateAimFx(t);
     }
+    this.updateFlashes();
 
     if (this.aura) {
       const glow = 0.5 + Math.sin(t * 1.6) * 0.12;
@@ -3874,7 +4073,7 @@ export class HexBoard {
     this.updateSpotlight();
     if (this.spotWarmDue && !this.spot) this.warmSpotlight();
     this.spotlight.render(dt);
-    if (this.labels.size || this.aimFx) {
+    if (this.labels.size || this.aimFx || this.flashes.size) {
       this.renderer.autoClear = false;
       this.renderer.render(this.labelScene, this.camera);
       this.renderer.autoClear = true;
@@ -3936,7 +4135,7 @@ export class HexBoard {
   }
 
   /** Etiqueta de um suspeito no modo de abordagem ("se rende" em verde, "rola" em amarelo, "corre" em laranja). */
-  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee' | 'aim' | 'locked'): THREE.Sprite {
+  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee' | 'aim' | 'locked' | 'muted'): THREE.Sprite {
     const font = 'bold 40px "Special Elite", "Courier New", monospace';
     const c = document.createElement('canvas');
     const g = c.getContext('2d');
@@ -3953,7 +4152,7 @@ export class HexBoard {
     c.height = 64 + tip;
     if (g) {
       g.fillStyle =
-        tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : tone === 'aim' ? '#ffd23a' : tone === 'locked' ? '#c4c7cc' : '#c4621a';
+        tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : tone === 'aim' ? '#ffd23a' : tone === 'locked' || tone === 'muted' ? '#c4c7cc' : '#c4621a';
       g.beginPath();
       g.roundRect(0, 0, width, 64, 12);
       g.moveTo(width / 2 - tip, 64);
@@ -3961,7 +4160,7 @@ export class HexBoard {
       g.lineTo(width / 2 + tip, 64);
       g.fill();
       g.font = font;
-      g.fillStyle = tone === 'aim' ? '#2a2100' : tone === 'locked' ? '#26282b' : '#ffffff';
+      g.fillStyle = tone === 'aim' ? '#2a2100' : tone === 'locked' || tone === 'muted' ? '#26282b' : '#ffffff';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
       g.fillText(text, (width + icon) / 2, 34);
@@ -4178,6 +4377,17 @@ export class HexBoard {
       const below = target && worldToHex(target.point.x, target.point.z, HEX_SIZE);
       if (target && !(below && sameHex(below, this.selected))) {
         this.callbacks.onTargetTap(target.id);
+        return;
+      }
+      // NPC rendido tocável: o hexágono dele também vale como tocar nele
+      const floor = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
+      const under = floor && worldToHex(floor.x, floor.z, HEX_SIZE);
+      const npc = under && [...this.npcTargets.keys()].find((id) => {
+        const e = this.enemies.get(id);
+        return e && !e.gone && sameHex(e.hex, under);
+      });
+      if (npc) {
+        this.callbacks.onTargetTap(NPC_TARGET + npc);
         return;
       }
     }
