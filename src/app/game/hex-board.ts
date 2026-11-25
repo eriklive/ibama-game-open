@@ -879,6 +879,18 @@ export class HexBoard {
     this.clampGoal();
   }
 
+  /**
+   * Leva a câmera até o centro de um objeto que ocupa vários hexágonos (o avião, os suprimentos)
+   * ou de um só (um NPC). Como `focus`, não mexe na câmera travada da inspeção nem da abertura.
+   */
+  focusArea(hexes: readonly HexCoord[]): void {
+    if (!hexes.length || this.inspect || this.intro) return;
+    const c = new THREE.Vector3();
+    for (const h of hexes) c.add(this.worldOf(h));
+    this.camGoal.copy(c.divideScalar(hexes.length));
+    this.clampGoal();
+  }
+
   /** Mostra (ou esconde, com `null`) o cursor do controle. */
   setCursor(hex: HexCoord | null): void {
     this.cursor = hex && this.tiles.has(hexKey(hex)) ? hex : null;
