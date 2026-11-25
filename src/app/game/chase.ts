@@ -8,8 +8,8 @@
  *    podem ir atrás (`chaseCandidates`). Quem já correu nesta rodada inimiga não vai de novo.
  *    **Voz de prisão:** quem foge de uma abordagem não espera o turno inimigo: foge na hora,
  *    ainda no turno de quem abordou, e a fila é outra (`arrestQueue`): primeiro rola quem
- *    abordou; se hesitar, os outros agentes, do mais perto do suspeito ao mais longe, um por
- *    vez, até alguém arrancar (ou o jogador deixar fugir). Com vários fugindo, um por vez.
+ *    abordou; se hesitar, os outros agentes no raio de abordagem dele (`ArrestEscort`), do
+ *    mais perto do suspeito ao mais longe, um por vez, até alguém arrancar (ou o jogador deixar fugir). Com vários fugindo, um por vez.
  * 2. **Iniciativa.** Só o agente rola: d20 + iniciativa, pelo menos `initiativeDC` (8), sem
  *    depender do garimpeiro (`initiativeCheck`). Passou: sai correndo. Falhou: hesita e o
  *    garimpeiro foge normal. O garimpeiro não rola nada novo: o teste de fuga da faixa amarela da
@@ -37,6 +37,7 @@ import { Door, DoorState, isOpen } from './door';
 import {
   HexArea,
   HexCoord,
+  hexDistance,
   hexesInRange,
   hexKey,
   hexNeighbors,
@@ -124,11 +125,27 @@ export function chaseCandidates(
   return out.sort((x, y) => x.path.length - y.path.length);
 }
 
+/** Raio de abordagem de quem deu a voz de prisão: só os agentes dentro dele vão de reforço. */
+export interface ArrestEscort {
+  /** Onde estava quem abordou. */
+  from: HexCoord;
+  /** Raio de abordagem dele (hexágonos). */
+  range: number;
+  /** O que corta a linha de visão (parede, porta fechada); sem isto, só a distância conta. */
+  walls?: ReadonlySet<string>;
+}
+
+/** O agente em `hex` está no raio de abordagem de quem deu a voz de prisão. */
+export const inEscort = (hex: HexCoord, e: ArrestEscort): boolean =>
+  hexDistance(e.from, hex) <= e.range && (!e.walls || lineOfSight(e.from, hex, e.walls));
+
 /**
  * Fila da voz de prisão: quem rola a iniciativa para ir atrás de um suspeito que fugiu de uma
- * abordagem, na ordem. Primeiro o agente que abordou (`leaderId`); depois todos os outros, do
- * mais perto do suspeito ao mais longe. Não há limite de raio: basta ter caminho andando até
- * ele. Quem está em `alreadyChased` fica de fora.
+ * abordagem, na ordem. Primeiro o agente que abordou (`leaderId`); depois os outros que estão
+ * no raio de abordagem dele (`escort`: até `range` hexágonos de onde ele deu a voz, com linha de
+ * visão), do mais perto do suspeito ao mais longe. Quem abordou não tem limite: basta ter
+ * caminho andando até o suspeito. Sem `escort`, todos entram. Quem está em `alreadyChased`
+ * fica de fora.
  */
 export function arrestQueue(
   target: HexCoord,
@@ -137,6 +154,7 @@ export function arrestQueue(
   area: HexArea,
   blocked: ReadonlySet<string>,
   alreadyChased: ReadonlySet<string> = new Set(),
+  escort?: ArrestEscort,
 ): ChaseCandidate[] {
   const targetKey = hexKey(target);
   const free = new Set(blocked);
@@ -144,6 +162,7 @@ export function arrestQueue(
   const out: ChaseCandidate[] = [];
   for (const a of agents) {
     if (alreadyChased.has(a.id)) continue;
+    if (a.id !== leaderId && escort && !inEscort(a.hex, escort)) continue;
     const reach = reachableHexes(a.hex, area.hexes.length, area, free);
     if (reach.has(targetKey)) out.push({ id: a.id, path: pathTo(reach, target) });
   }
