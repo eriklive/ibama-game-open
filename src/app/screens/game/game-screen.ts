@@ -580,7 +580,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   } | null>(null);
   private chaseOfferDone?: (agentId: string | null) => void;
   /** Fuga da voz de prisão que roda quando o auto de abordagem fecha (ver `approachFlight`). */
-  /** Voz de prisão pendente: quem abordou, o raio de abordagem dele (só quem está nele vai de reforço) e quem foge. */
+  /** Voz de prisão pendente: quem abordou, o alcance do grito dele (só quem está nele vai de reforço) e quem foge. */
   private flight: { agentId: string; escort: ArrestEscort; enemies: string[] } | null = null;
   /** Já correram nesta rodada (fugiram na hora da abordagem): no turno inimigo, não correm de novo. */
   private readonly ranThisRound = new Set<string>();
@@ -3510,7 +3510,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // voz de prisão: quem não se rendeu foge na hora, depois do auto (o mais perto de quem abordou primeiro)
     this.flight = {
       agentId: this.active().id,
-      escort: { from, range: this.activeApproach().surrenderRange, walls: this.walls() },
+      escort: { from, range: this.activeApproach().radius, walls: this.walls() },
       enemies: [...flee].sort((a, b) => hexDistance(from, a.hex) - hexDistance(from, b.hex)).map((e) => e.id),
     };
     this.refreshVision();

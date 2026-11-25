@@ -113,7 +113,7 @@ describe('arrestQueue (voz de prisão)', () => {
     expect(arrestQueue(h(10, 8), 'chefe', [agents[1]], area, new Set()).map((c) => c.id)).toEqual(['b']);
   });
 
-  it('com o raio de abordagem de quem abordou, só vai de reforço quem está nele', () => {
+  it('com o alcance do grito de quem abordou, só vai de reforço quem está nele', () => {
     const agents = [
       { id: 'chefe', hex: h(10, 12) },
       { id: 'junto', hex: h(10, 14) },
@@ -124,7 +124,7 @@ describe('arrestQueue (voz de prisão)', () => {
       'chefe',
       'junto',
     ]);
-    // quem abordou rola mesmo fora do próprio raio (ele já andou); o reforço segue a régua
+    // quem abordou rola mesmo longe de onde gritou; o reforço segue o alcance
     const moved = { from: h(4, 4), range: 3 };
     expect(arrestQueue(h(10, 2), 'chefe', agents, area, new Set(), new Set(), moved).map((c) => c.id)).toEqual(['chefe']);
   });

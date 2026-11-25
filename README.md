@@ -518,8 +518,9 @@ borda. O que já está no jogo:
    **Voz de prisão:** quem foge de uma abordagem não espera o turno inimigo. Ao fechar o auto de
    abordagem, ele foge na hora, ainda no turno de quem abordou. O primeiro a rolar é o agente que
    abordou (carimbo "Voz de prisão"; basta ter caminho até ele, sem limite de raio). Se ele
-   hesitar, rolam um por vez os outros agentes que estão no **raio de abordagem** de quem deu a
-   voz (contado de onde ele abordou, com linha de visão; quem está fora dele não vai), do mais
+   hesitar, rolam um por vez os outros agentes que estão no **alcance do grito** de quem deu a
+   voz (as três faixas da abordagem, contadas de onde ele abordou, com linha de visão; quem está
+   fora dele não vai), do mais
    perto do suspeito ao mais longe (carimbo "Reforço"), até alguém arrancar ou o jogador deixar
    fugir; ninguém foi, ele corre para a borda como no turno inimigo. Com vários fugindo, eles fogem em sequência (o mais perto
    de quem abordou primeiro), sempre depois de terminar a perseguição do anterior; quem arrancou
