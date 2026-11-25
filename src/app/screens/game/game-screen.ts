@@ -102,17 +102,7 @@ import {
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { IntroTarget, STRUCTURE_TOP, introTargets } from '../../game/mission-intro';
 import { IntroMark, MissionIntro } from '../../ui/mission-intro/mission-intro';
-import {
-  LESSONS,
-  LessonId,
-  insideScreen,
-  lessonDue,
-  lessonsToSkip,
-  markSeen,
-  readSeen,
-  readShowLessons,
-  writeShowLessons,
-} from '../../game/tactical-board';
+import { LESSONS, LessonId, insideScreen, lessonDue, markSeen, readSeen } from '../../game/tactical-board';
 import { TacticalBoard } from '../../ui/tactical-board/tactical-board';
 import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
 import {
@@ -912,20 +902,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Lição aberta na lousa (ver `game/tactical-board.ts`). */
   protected readonly lesson = signal<LessonId | null>(null);
   private readonly lessonsSeen = readSeen();
-  /** Lições já mostradas nesta partida (com **Exibir tutoriais** ligada, cada uma abre uma vez por partida). */
-  private lessonsThisMatch = new Set<LessonId>();
-  /** **Exibir tutoriais** (menu): desligada por padrão, guardada no navegador. */
-  protected readonly showLessons = signal(readShowLessons());
   private lessonTicker?: ReturnType<typeof setInterval>;
 
-  protected setShowLessons(on: boolean): void {
-    this.showLessons.set(on);
-    writeShowLessons(on);
-  }
-
   /**
-   * Abre a lição na primeira vez que a situação aparece (ou, com **Exibir tutoriais** ligada, na
-   * primeira vez de cada partida): um garimpeiro (vigiando ou em fuga)
+   * Abre a lição na primeira vez que a situação aparece: um garimpeiro (vigiando ou em fuga)
    * dentro da tela, ou o primeiro suspeito rendido. Só com o jogador livre para agir (escolhendo
    * o destino), nunca no meio de uma animação, da abertura, do menu ou de outro painel.
    */
@@ -937,7 +917,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
     const due = lessonDue({
-      seen: lessonsToSkip(this.showLessons(), this.lessonsSeen, this.lessonsThisMatch),
+      seen: this.lessonsSeen,
       suspectOnScreen: this.enemies().some(
         (e) => (e.status === 'patrol' || e.status === 'alert') && insideScreen(board.pieceOnScreen(e.id), w, h),
       ),
@@ -946,15 +926,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (due) this.lesson.set(due);
   }
 
-  /**
-   * **Entendi** (ou ×): a lição fica marcada como vista e não abre sozinha de novo nesta partida
-   * (nem nas próximas, se **Exibir tutoriais** estiver desligada).
-   */
+  /** **Entendi** (ou ×): a lição fica marcada como vista e não abre sozinha de novo. */
   protected closeLesson(): void {
     const id = this.lesson();
     if (id) {
       this.lessonsSeen.add(id);
-      this.lessonsThisMatch.add(id);
       markSeen(id);
     }
     this.lesson.set(null);
@@ -3840,7 +3816,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected restart(): void {
-    this.lessonsThisMatch = new Set();
     this.resetMatch();
     this.beginMatch();
   }

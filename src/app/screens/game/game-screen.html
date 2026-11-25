@@ -158,18 +158,6 @@
           </ul>
         }
       </div>
-      <fieldset class="menu-group">
-        <legend>Tutoriais</legend>
-        <label class="menu-option" [class.checked]="showLessons()" data-testid="menu-show-lessons">
-          <input type="checkbox" [checked]="showLessons()" (change)="setShowLessons($any($event.target).checked)" />
-          <span class="menu-option-text">
-            <span class="menu-option-label">Exibir tutoriais</span>
-            <span class="menu-option-hint">
-              @if (showLessons()) { A lousa tática aparece em toda partida } @else { A lousa tática só aparece na primeira vez }
-            </span>
-          </span>
-        </label>
-      </fieldset>
       @if (hasIntro()) {
         <button type="button" class="menu-restart" (click)="replayIntro()" data-testid="menu-intro">Rever objetivos da missão</button>
       }
