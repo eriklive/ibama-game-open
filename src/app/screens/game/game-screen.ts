@@ -429,6 +429,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const target = free ? this.armedTarget() : null;
       const aim = this.aimedTarget();
       const cost = this.selectedCost();
+      // tocado de longe demais: o mesmo caminho e fantasma, em cinza e com cadeado
+      const far = free ? this.lockedTarget() : null;
       this.board?.setTargetAim(
         target && aim
           ? {
@@ -439,7 +441,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
               label: `Toque de novo para ir · ${cost} ${cost === 1 ? 'passo' : 'passos'}`,
               avoid: () => this.hudRects(),
             }
-          : null,
+          : far
+            ? {
+                id: far.id,
+                unitId: this.active().id,
+                dest: far.hex,
+                path: far.path,
+                label: 'Longe demais para interagir',
+                locked: true,
+                avoid: () => this.hudRects(),
+              }
+            : null,
       );
     });
     // cartão em foco no interrogatório (controle): o foco do teclado acompanha
@@ -1221,9 +1233,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const map = this.map;
     const from = this.positions().get(this.active().id);
     if (!map || !from || this.phase() !== 'moving-choice') return new Map();
+    return reachableHexes(from, this.movesLeft(), this.area, this.moveBlocked());
+  });
+  /** Hexágonos por onde o personagem da vez não passa (os outros, paredes, inimigos). */
+  private readonly moveBlocked = computed(() => {
     const group = this.group();
     const leader = this.active().id;
-    const blocked = new Set([
+    return new Set([
       // no grupo, o líder passa por entre os companheiros (eles andam junto)
       ...[...this.positions()]
         .filter(([id]) => id !== leader && !(group.has(leader) && group.has(id)))
@@ -1231,7 +1247,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       ...this.solid(),
       ...this.onBoardEnemies().map((e) => hexKey(e.hex)),
     ]);
-    return reachableHexes(from, this.movesLeft(), this.area, blocked);
   });
   /** Destinos que dá para escolher: o alcance menos os hexágonos com agentes. */
   private readonly destinations = computed(() => {
@@ -2255,6 +2270,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     if (this.viewingOther()) this.focusCharacter(this.active().id);
+    this.farTarget.set(null);
     if (hex && this.destinations().has(hexKey(hex))) {
       // segundo toque no mesmo hexágono confirma o movimento
       if (sameHex(hex, this.selected())) {
@@ -2288,6 +2304,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.viewingOther()) this.focusCharacter(this.active().id);
     if (canBurn(from, target)) {
       this.aimedTarget.set(null);
+      this.farTarget.set(null);
       this.actOn(target);
       return;
     }
@@ -2305,9 +2322,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     if (!best) {
       this.sound.play('ui.invalido');
-      this.say(`Chegue colado n${target.name} para interagir`, 'info');
+      this.selected.set(null);
+      this.aimedTarget.set(null);
+      this.board?.setSelected(null);
+      // sem movimento para chegar: mostra mesmo assim, em cinza, o caminho até ficar colado
+      const far = this.farRoute(from, target);
+      if (far) this.farTarget.set({ id: target.id, from: hexKey(from), ...far });
+      else this.say(`Chegue colado n${target.name} para interagir`, 'info');
       return;
     }
+    this.farTarget.set(null);
     if (sameHex(best, this.selected())) {
       void this.confirm();
       return;
@@ -2321,6 +2345,33 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.haptics.vibrate(AIM_PATTERN);
     this.board?.setSelected(this.selected(), this.selectedPath());
   }
+
+  /**
+   * Caminho mais curto até ficar colado no alvo sem o limite de movimento (o hexágono de chegada
+   * e os passos até ele), ou `null` se não há como chegar.
+   */
+  private farRoute(from: HexCoord, target: Burnable): { hex: HexCoord; path: HexCoord[] } | null {
+    const occupied = new Set([...this.positions().values()].map(hexKey));
+    const all = reachableHexes(from, Number.MAX_SAFE_INTEGER, this.area, this.moveBlocked());
+    let best: { coord: HexCoord; cost: number } | null = null;
+    for (const [key, node] of all) {
+      if (occupied.has(key) || !canBurn(node.coord, target)) continue;
+      if (!best || node.cost < best.cost) best = node;
+    }
+    return best ? { hex: best.coord, path: pathTo(all, best.coord) } : null;
+  }
+
+  /**
+   * Alvo tocado de longe demais (o movimento não alcança): o caminho até ele fica marcado em
+   * cinza, com o balão "Longe demais para interagir". Vale enquanto o agente não sair do lugar.
+   */
+  private readonly farTarget = signal<{ id: string; from: string; hex: HexCoord; path: HexCoord[] } | null>(null);
+  protected readonly lockedTarget = computed(() => {
+    const far = this.farTarget();
+    if (!far || this.phase() !== 'moving-choice' || this.selected()) return null;
+    if (hexKey(this.positions().get(this.active().id) ?? { col: NaN, row: NaN }) !== far.from) return null;
+    return (this.map?.burnables ?? []).some((t) => t.id === far.id && !this.burned().has(t.id)) ? far : null;
+  });
 
   /** Alvo escolhido por toque e o hexágono colado nele para onde o agente vai andar. */
   private readonly aimedTarget = signal<{ id: string; hex: HexCoord } | null>(null);
