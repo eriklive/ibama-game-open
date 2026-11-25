@@ -123,8 +123,10 @@ button:disabled { cursor: not-allowed; }
   text-align: left;
   transform: rotate(var(--tilt, 0deg));
   opacity: .92;
-  transition: transform .15s, opacity .15s, translate .15s;
 }
+.agents:not(.open) .photo:not(.hero) { margin-top: -30px; }
+.agents:not(.open) .photo.hero + .photo { margin-top: 0; }
+.photo { transition: margin-top .15s, transform .15s, opacity .15s, translate .15s; }
 .photo:hover { translate: 4px 0; opacity: 1; }
 .photo:active { transform: rotate(0) scale(.97); }
 .photo-img { flex: none; width: 34px; height: 38px; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }

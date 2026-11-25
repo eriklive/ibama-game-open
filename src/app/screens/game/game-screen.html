@@ -19,11 +19,8 @@
     <app-tactical-board [lesson]="l" [zones]="activeApproach()" [hasChase]="hasChase" (closed)="closeLesson()" />
   }
 
-  <!-- Topo: voltar e menu soltos; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
+  <!-- Topo: menu solto; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
   <div class="corner">
-    <button type="button" class="paper-btn back" (click)="exit()" aria-label="Voltar ao início">
-      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-    </button>
     <button
       type="button"
       class="paper-btn menu-btn"
@@ -205,7 +202,7 @@
 
   <!-- Coluna da esquerda: quem está selecionado no topo (grande e animado), os outros em faixas, e as ferramentas -->
   <div class="left">
-    <nav class="agents" aria-label="Agentes">
+    <nav class="agents" [class.open]="agentsOpen()" aria-label="Agentes">
       @for (c of orderedAgents(); track c.id; let i = $index) {
         <button
           type="button"
@@ -214,9 +211,9 @@
           [class.on-turn]="onTurn(c)"
           [style.--tilt]="tilts[i % tilts.length] + 'deg'"
           [attr.aria-pressed]="c.id === focused().id"
-          [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + (isCaptain(c) ? ', Capitão' : ', Agente') + '. Vigor ' + signed(fieldStats(c).vig) + ', intimidação ' + signed(fieldStats(c).int) + ', alcance da abordagem ' + fieldStats(c).range + '. Toque para ver no tabuleiro.'"
+          [attr.aria-label]="c.name + (onTurn(c) ? ', na vez' : ', espera') + (inGroup(c) ? ', no grupo' : '') + (isCaptain(c) ? ', Capitão' : ', Agente') + '. Vigor ' + signed(fieldStats(c).vig) + ', intimidação ' + signed(fieldStats(c).int) + ', alcance da abordagem ' + fieldStats(c).range + (c.id === focused().id || agentsOpen() ? '. Toque para ver no tabuleiro.' : '. Toque para abrir a lista de agentes.')"
           [attr.data-testid]="'chip-' + c.id"
-          (click)="pickCharacter(c.id)">
+          (click)="tapAgent(c)">
           <span class="photo-img" [style.background]="hexColor(c)">
             <svg viewBox="0 0 24 24" aria-hidden="true" [style.fill]="shade(c)"><circle cx="12" cy="9" r="4.5" /><path d="M3 24c0-6 4-9.5 9-9.5s9 3.5 9 9.5z" /></svg>
           </span>
@@ -293,7 +290,7 @@
           <span class="pin" aria-hidden="true"></span>
           <span class="pile-head">
             <span>Suspeitos</span>
-            <span class="pile-mark" [class.close]="suspectsOpen()">{{ suspectsOpen() ? 'fechar' : '×' + knownEnemies().length }}</span>
+            <span class="pile-mark" [class.close]="suspectsOpen()">{{ suspectsOpen() ? 'fechar' : '' }}</span>
           </span>
           <span class="pile-summary">{{ enemySummary() }}</span>
         </button>

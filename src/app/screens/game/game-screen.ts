@@ -2391,6 +2391,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     else this.startBurn();
   }
 
+  /** Os retratos de quem não está em foco ficam empilhados; abrem ao toque. */
+  protected readonly agentsOpen = signal(false);
+  protected tapAgent(c: Character): void {
+    if (c.id !== this.focused().id && !this.agentsOpen()) {
+      this.agentsOpen.set(true);
+      return;
+    }
+    this.agentsOpen.set(false);
+    this.pickCharacter(c.id);
+  }
+
   /** Toque numa peça ou num retrato: o mesmo que `focusCharacter`, com o som do cartão. */
   protected pickCharacter(id: string): void {
     if (id !== this.focusedId()) this.sound.play('ui.retrato');
