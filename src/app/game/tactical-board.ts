@@ -55,6 +55,44 @@ export function markSeen(
   }
 }
 
+/** Chave no `localStorage` da opção **Exibir tutoriais** ("1" ligada; padrão desligada). */
+export const SHOW_LESSONS_KEY = 'ibama.lousa.exibir';
+
+/**
+ * **Exibir tutoriais**: desligada (padrão), cada lousa abre sozinha só na primeira vez de todas;
+ * ligada, volta a abrir em toda partida, uma vez por partida, quando a situação aparece.
+ */
+export function readShowLessons(storage: Pick<Storage, 'getItem'> | null = safeStorage()): boolean {
+  try {
+    return storage?.getItem(SHOW_LESSONS_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+export function writeShowLessons(
+  on: boolean,
+  storage: Pick<Storage, 'setItem'> | null = safeStorage(),
+): void {
+  try {
+    storage?.setItem(SHOW_LESSONS_KEY, on ? '1' : '0');
+  } catch {
+    // sem armazenamento: vale só nesta sessão
+  }
+}
+
+/**
+ * Lições que não devem abrir sozinhas agora: com **Exibir tutoriais** ligada, só as já vistas
+ * nesta partida; desligada, também as vistas em qualquer partida anterior.
+ */
+export function lessonsToSkip(
+  show: boolean,
+  seenEver: ReadonlySet<LessonId>,
+  seenThisMatch: ReadonlySet<LessonId>,
+): Set<LessonId> {
+  return show ? new Set(seenThisMatch) : new Set([...seenEver, ...seenThisMatch]);
+}
+
 function safeStorage(): Storage | null {
   try {
     return typeof localStorage === 'undefined' ? null : localStorage;

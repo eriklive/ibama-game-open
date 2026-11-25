@@ -16,7 +16,7 @@
 
   <!-- Lousa tática (tutorial): a regra desenhada a giz, com o mapa visto de cima (ver game/tactical-board.ts) -->
   @if (lesson(); as l) {
-    <app-tactical-board [lesson]="l" [zones]="activeApproach()" [hasChase]="hasChase" (closed)="closeLesson()" />
+    <app-tactical-board [lesson]="l" [zones]="activeApproach()" [hasChase]="hasChase" [showLessons]="showLessons()" (showLessonsChange)="setShowLessons($event)" (closed)="closeLesson()" />
   }
 
   <!-- Topo: menu solto; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
@@ -158,6 +158,18 @@
           </ul>
         }
       </div>
+      <fieldset class="menu-group">
+        <legend>Tutoriais</legend>
+        <label class="menu-option" [class.checked]="showLessons()" data-testid="menu-show-lessons">
+          <input type="checkbox" [checked]="showLessons()" (change)="setShowLessons($any($event.target).checked)" />
+          <span class="menu-option-text">
+            <span class="menu-option-label">Exibir tutoriais</span>
+            <span class="menu-option-hint">
+              @if (showLessons()) { A lousa tática aparece em toda partida } @else { A lousa tática só aparece na primeira vez }
+            </span>
+          </span>
+        </label>
+      </fieldset>
       @if (hasIntro()) {
         <button type="button" class="menu-restart" (click)="replayIntro()" data-testid="menu-intro">Rever objetivos da missão</button>
       }

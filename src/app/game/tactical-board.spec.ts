@@ -5,11 +5,15 @@ import {
   approachBands,
   chalkCenter,
   chalkHexes,
+  LessonId,
   insideScreen,
   lessonDue,
+  lessonsToSkip,
   markSeen,
   readSeen,
+  readShowLessons,
   regionOutline,
+  writeShowLessons,
 } from './tactical-board';
 
 function memory(initial: Record<string, string> = {}) {
@@ -55,6 +59,25 @@ describe('lousa tática', () => {
     markSeen('abordagem', s);
     expect(readSeen(s)).toEqual(new Set(['interrogatorio', 'abordagem']));
     expect(readSeen(null).size).toBe(0);
+  });
+
+  it('Exibir tutoriais vem desligada e fica guardada', () => {
+    const data = new Map<string, string>();
+    const s = { getItem: (k: string) => data.get(k) ?? null, setItem: (k: string, v: string) => void data.set(k, v) };
+    expect(readShowLessons(s)).toBe(false);
+    writeShowLessons(true, s);
+    expect(readShowLessons(s)).toBe(true);
+    writeShowLessons(false, s);
+    expect(readShowLessons(s)).toBe(false);
+    expect(readShowLessons(null)).toBe(false);
+  });
+
+  it('desligada, pula o que já foi visto; ligada, só o visto nesta partida', () => {
+    const ever = new Set<LessonId>(['abordagem', 'interrogatorio']);
+    const match = new Set<LessonId>(['interrogatorio']);
+    expect(lessonsToSkip(false, ever, new Set())).toEqual(ever);
+    expect(lessonsToSkip(true, ever, new Set()).size).toBe(0);
+    expect(lessonsToSkip(true, ever, match)).toEqual(match);
   });
 
   it('só conta como na tela quem está dentro da folga das bordas', () => {
