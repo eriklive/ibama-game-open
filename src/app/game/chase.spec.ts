@@ -113,6 +113,32 @@ describe('arrestQueue (voz de prisão)', () => {
     expect(arrestQueue(h(10, 8), 'chefe', [agents[1]], area, new Set()).map((c) => c.id)).toEqual(['b']);
   });
 
+  it('com o alcance do grito de quem abordou, só vai de reforço quem está nele', () => {
+    const agents = [
+      { id: 'chefe', hex: h(10, 12) },
+      { id: 'junto', hex: h(10, 14) },
+      { id: 'longe', hex: h(10, 17) },
+    ];
+    const escort = { from: h(10, 12), range: 3 };
+    expect(arrestQueue(h(10, 2), 'chefe', agents, area, new Set(), new Set(), escort).map((c) => c.id)).toEqual([
+      'chefe',
+      'junto',
+    ]);
+    // quem abordou rola mesmo longe de onde gritou; o reforço segue o alcance
+    const moved = { from: h(4, 4), range: 3 };
+    expect(arrestQueue(h(10, 2), 'chefe', agents, area, new Set(), new Set(), moved).map((c) => c.id)).toEqual(['chefe']);
+  });
+
+  it('parede entre quem abordou e o agente tira ele do reforço', () => {
+    const agents = [
+      { id: 'chefe', hex: h(10, 12) },
+      { id: 'atras', hex: h(10, 14) },
+    ];
+    const walls = new Set([hexKey(h(10, 13))]);
+    const escort = { from: h(10, 12), range: 3, walls };
+    expect(arrestQueue(h(10, 2), 'chefe', agents, area, new Set(), new Set(), escort).map((c) => c.id)).toEqual(['chefe']);
+  });
+
   it('sem caminho até o suspeito, não entra na fila', () => {
     const ring = new Set(hexNeighbors(h(10, 8)).map(hexKey));
     expect(arrestQueue(h(10, 8), 'chefe', [{ id: 'chefe', hex: h(10, 12) }], area, ring)).toEqual([]);

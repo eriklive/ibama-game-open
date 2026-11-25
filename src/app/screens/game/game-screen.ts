@@ -19,6 +19,7 @@ import {
   Side,
   agentSight,
   arrestQueue,
+  type ArrestEscort,
   chaseCandidates,
   targetChoices,
   initiativeChance,
@@ -579,7 +580,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   } | null>(null);
   private chaseOfferDone?: (agentId: string | null) => void;
   /** Fuga da voz de prisão que roda quando o auto de abordagem fecha (ver `approachFlight`). */
-  private flight: { agentId: string; enemies: string[] } | null = null;
+  /** Voz de prisão pendente: quem abordou, o alcance do grito dele (só quem está nele vai de reforço) e quem foge. */
+  private flight: { agentId: string; escort: ArrestEscort; enemies: string[] } | null = null;
   /** Já correram nesta rodada (fugiram na hora da abordagem): no turno inimigo, não correm de novo. */
   private readonly ranThisRound = new Set<string>();
   /** Agarrados na fuga da abordagem: ficam abalados até o fim do turno inimigo seguinte. */
@@ -1651,7 +1653,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         const enemy = this.enemy(id);
         if (!enemy || enemy.status !== 'alert') continue;
         this.ranThisRound.add(id);
-        const went = await this.runArrestQueue(enemy, flight.agentId, epoch, ran);
+        const went = await this.runArrestQueue(enemy, flight.agentId, flight.escort, epoch, ran);
         if (!alive()) return;
         if (!went) await this.flee(this.enemy(id)!, epoch);
         if (!alive()) return;
@@ -1668,7 +1670,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * da vez, iniciativa e, se arrancar, a perseguição. Hesitou: o próximo. Devolve se houve
    * perseguição (`false`: ninguém foi). Quem arrancou entra em `ran`.
    */
-  private async runArrestQueue(enemy: EnemyState, leaderId: string, epoch: number, ran: Set<string>): Promise<boolean> {
+  private async runArrestQueue(
+    enemy: EnemyState,
+    leaderId: string,
+    escort: ArrestEscort,
+    epoch: number,
+    ran: Set<string>,
+  ): Promise<boolean> {
     const board = this.board!;
     // quem já rolou para este (ou já correu atrás de outro) fica de fora
     if (!this.hasChase) return false;
@@ -1676,7 +1684,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (;;) {
       if (this.destroyed || this.epoch !== epoch) return true;
       const now = this.enemy(enemy.id) ?? enemy;
-      const queue = arrestQueue(now.hex, leaderId, this.chaseAgents(), this.area, this.enemyWalls(), tried);
+      const queue = arrestQueue(now.hex, leaderId, this.chaseAgents(), this.area, this.enemyWalls(), tried, escort);
       const [next] = queue;
       if (!next) return false;
       board.focusHex(now.hex);
@@ -3502,6 +3510,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // voz de prisão: quem não se rendeu foge na hora, depois do auto (o mais perto de quem abordou primeiro)
     this.flight = {
       agentId: this.active().id,
+      escort: { from, range: this.activeApproach().radius, walls: this.walls() },
       enemies: [...flee].sort((a, b) => hexDistance(from, a.hex) - hexDistance(from, b.hex)).map((e) => e.id),
     };
     this.refreshVision();
