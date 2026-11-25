@@ -213,14 +213,6 @@
           }
         </div>
       }
-      <label class="show-lessons" data-testid="lousa-show-lessons">
-        <input
-          type="checkbox"
-          [checked]="showLessons()"
-          (change)="showLessonsChange.emit($any($event.target).checked)"
-        />
-        <span>Exibir tutoriais</span>
-      </label>
       <button type="button" appMainButton class="next" (click)="next()" data-testid="lousa-next">
         {{ last() ? 'Entendi!' : 'Próximo ›' }}
       </button>

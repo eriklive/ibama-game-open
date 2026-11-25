@@ -914,7 +914,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly lessonsSeen = readSeen();
   /** Lições já mostradas nesta partida (com **Exibir tutoriais** ligada, cada uma abre uma vez por partida). */
   private lessonsThisMatch = new Set<LessonId>();
-  /** **Exibir tutoriais** (menu e lousa): desligada por padrão, guardada no navegador. */
+  /** **Exibir tutoriais** (menu): desligada por padrão, guardada no navegador. */
   protected readonly showLessons = signal(readShowLessons());
   private lessonTicker?: ReturnType<typeof setInterval>;
 

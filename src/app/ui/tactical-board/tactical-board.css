@@ -500,25 +500,6 @@
   background: var(--chalk);
   border-color: var(--chalk);
 }
-.show-lessons {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 44px;
-  margin-left: auto;
-  color: var(--chalk);
-  font-family: var(--hand);
-  font-size: 17px;
-  white-space: nowrap;
-  cursor: pointer;
-}
-.show-lessons input {
-  width: 20px;
-  height: 20px;
-  margin: 0;
-  accent-color: var(--chalk);
-  cursor: pointer;
-}
 .next {
   flex: none;
   min-width: 0;

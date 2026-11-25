@@ -247,9 +247,6 @@ export class TacticalBoard {
   readonly zones = input<ApproachZones>(BASE_APPROACH);
   /** O mapa tem Modo Corrida: quem foge vira perseguição. Sem ele, quem corre só foge. */
   readonly hasChase = input(true);
-  /** **Exibir tutoriais**: a mesma opção do menu, também na lousa. */
-  readonly showLessons = input(false);
-  readonly showLessonsChange = output<boolean>();
   /** Fechou (Entendi ou ×), depois da animação de saída. */
   readonly closed = output<void>();
 

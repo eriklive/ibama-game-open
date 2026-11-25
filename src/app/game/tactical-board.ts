@@ -55,7 +55,7 @@ export function markSeen(
   }
 }
 
-/** Chave no `localStorage` da opção **Exibir tutoriais** ("1" ligada; padrão desligada). */
+/** Chave no `localStorage` da opção **Exibir tutoriais** do menu ("1" ligada; padrão desligada). */
 export const SHOW_LESSONS_KEY = 'ibama.lousa.exibir';
 
 /**

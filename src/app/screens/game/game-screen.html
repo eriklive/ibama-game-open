@@ -16,7 +16,7 @@
 
   <!-- Lousa tática (tutorial): a regra desenhada a giz, com o mapa visto de cima (ver game/tactical-board.ts) -->
   @if (lesson(); as l) {
-    <app-tactical-board [lesson]="l" [zones]="activeApproach()" [hasChase]="hasChase" [showLessons]="showLessons()" (showLessonsChange)="setShowLessons($event)" (closed)="closeLesson()" />
+    <app-tactical-board [lesson]="l" [zones]="activeApproach()" [hasChase]="hasChase" (closed)="closeLesson()" />
   }
 
   <!-- Topo: menu solto; o bilhete guarda o turno e os objetivos (compactos, abrem ao toque) -->
