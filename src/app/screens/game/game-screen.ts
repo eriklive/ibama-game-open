@@ -33,7 +33,7 @@ import { RunnerEvent } from '../../game/runner';
 import { hasRunner, runnerStart } from '../../game/runner-maps';
 import { RunnerSession } from '../../game/runner-session';
 import { ChaseHud, ChaseOverlay, SPRINT_DIE_MS, SprintView, TargetPrompt } from '../../ui/chase/chase-overlay';
-import { CloseUpInsets, HexBoard, SECONDS_PER_HEX } from '../../game/hex-board';
+import { CloseUpInsets, HexBoard, NPC_TARGET, SECONDS_PER_HEX } from '../../game/hex-board';
 import { Sound } from '../../game/sound.service';
 import { zoneAt } from '../../game/audio/ambience';
 import { surfaceAt } from '../../game/audio/footsteps';
@@ -131,9 +131,9 @@ import {
   NoteKind,
   PoolUsage,
   askQuestion,
-  auraHexes,
   dialogueOptions,
   hasDialogue,
+  inAura,
   hasTalked,
   itemClue,
   noteKind,
@@ -261,6 +261,18 @@ const RUNNER_KEYS: Record<string, 'left' | 'right' | 'up' | 'down'> = {
 
 const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/** Alvo que se toca direto no tabuleiro para interagir (ver `GameScreen.tapTargetOf`). */
+interface TapTarget {
+  id: string;
+  /** Dá para agir daqui (colado no alvo). */
+  near(h: HexCoord): boolean;
+  /** Movimento que precisa sobrar depois de chegar. */
+  spare: number;
+  /** Aviso quando não há caminho até ele. */
+  far: string;
+  act(): void;
+}
 
 @Component({
   selector: 'app-game-screen',
@@ -409,13 +421,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const keys = free ? this.nearDoors().filter((d) => !isOpen(d)).map((d) => hexKey(d.hex)) : [];
       this.board?.setDoorHints(keys);
     });
-    // aura de interrogatório em volta dos suspeitos rendidos com diálogo (some no close-up)
+    // rendidos tocáveis, como o avião: com interação, contorno amarelo; sem, o balão "Nenhuma interação"
     effect(() => {
-      const show = this.phase() !== 'interrogating' && this.phase() !== 'door' && this.phase() !== 'plane' && this.phase() !== 'over';
-      const { talk, muted } = this.auraKeys();
-      const here = this.positions().get(this.active().id);
-      const hot = this.canTalk() && here && show ? [hexKey(here)] : [];
-      this.board?.setInterrogationAura(show ? talk : [], hot, show ? muted : []);
+      const list = this.npcTargets();
+      this.board?.setNpcTargets(list);
     });
     // os queimáveis (o avião, os suprimentos) não têm aura no chão: o próprio modelo ganha um contorno
     // que pulsa, e só quando dá para tocar nele (a escolha da vez, sem outro modo aberto)
@@ -672,15 +681,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Todo rendido ganha a aura (a dos que não têm diálogo fica apagada). */
   private readonly surrenderedEnemies = computed(() => this.enemies().filter((e) => e.status === 'surrendered'));
-  /** Hexágonos da aura: dos rendidos com diálogo (`talk`) e dos sem diálogo (`muted`). */
-  private readonly auraKeys = computed(() => {
-    const ring = (e: EnemyState) => auraHexes(e.hex, this.area, this.solid()).map(hexKey);
-    const es = this.surrenderedEnemies();
-    return {
-      talk: es.filter((e) => hasDialogue(npcClass(e.npc))).flatMap(ring),
-      muted: es.filter((e) => !hasDialogue(npcClass(e.npc))).flatMap(ring),
-    };
-  });
+  /** Rendidos que se tocam no tabuleiro (`talk` = tem interação, ganha o contorno amarelo). */
+  private readonly npcTargets = computed(
+    () => this.surrenderedEnemies().map((e) => ({ id: e.id, talk: hasDialogue(npcClass(e.npc)) })),
+    { equal: (a, b) => a.length === b.length && a.every((x, i) => x.id === b[i].id && x.talk === b[i].talk) },
+  );
   /**
    * Rendido em cuja aura o agente da vez está: a ação de conversa aparece (bloqueada, se ele não
    * tem diálogo). Dá para conversar quantas vezes quiser.
@@ -1284,6 +1289,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // de qualquer lugar (vai até lá e abre a ação, ver `tapTarget`)
     this.board.setBurnTargets([]);
     this.board.setTargetOutlines(this.map.burnables ?? []);
+    this.board.setNpcTargets(this.npcTargets());
     this.board.setDoors(this.doors(), true);
     this.refreshVision();
     // `?caso=` abre direto num caso de teste (o menu usa isso para trocar de mapa)
@@ -2263,9 +2269,33 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /**
-   * Alvo tocado direto no tabuleiro (o avião, os suprimentos). Colado nele, abre a ação (o menu
-   * do avião ou o "Queimar"); de longe, escolhe o caminho mais curto até ficar colado — e o
-   * segundo toque (no alvo ou no Confirmar) anda até lá e já abre a ação.
+   * O que se toca direto no tabuleiro para interagir: o avião, os suprimentos e os NPCs rendidos
+   * com interação (`npc:<id>`). `near` diz de onde dá para agir (colado no alvo); `spare` é o
+   * movimento que precisa sobrar depois de chegar (conversar gasta a primeira pergunta).
+   */
+  private tapTargetOf(id: string): TapTarget | null {
+    if (id.startsWith(NPC_TARGET)) {
+      const e = this.enemies().find((x) => NPC_TARGET + x.id === id && x.status === 'surrendered');
+      if (!e || !hasDialogue(npcClass(e.npc))) return null;
+      return {
+        id,
+        near: (h) => inAura(h, e.hex),
+        spare: INTERROGATION_RULES.moveCost,
+        far: `Chegue perto de ${e.name} para conversar`,
+        act: () => void this.startInterrogation(e.id),
+      };
+    }
+    const t = (this.map?.burnables ?? []).find((b) => b.id === id && !this.burned().has(b.id));
+    return t
+      ? { id, near: (h) => canBurn(h, t), spare: 0, far: `Chegue colado n${t.name} para interagir`, act: () => this.actOn(t) }
+      : null;
+  }
+
+  /**
+   * Alvo tocado direto no tabuleiro (o avião, os suprimentos, um NPC rendido). Colado nele, abre
+   * a ação (o menu do avião, o "Queimar", a conversa); de longe, escolhe o caminho mais curto até
+   * ficar colado — e o segundo toque (no alvo ou no Confirmar) anda até lá e já abre a ação. NPC
+   * rendido sem interação só mostra o balão "Nenhuma interação".
    */
   private tapTarget(id: string): void {
     if (this.phase() !== 'moving-choice' || this.approaching() || this.grouping()) return;
@@ -2273,24 +2303,34 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.cancelBurn();
       return;
     }
-    const target = (this.map?.burnables ?? []).find((t) => t.id === id && !this.burned().has(t.id));
     const from = this.positions().get(this.active().id);
-    if (!target || !from) return;
+    if (!from) return;
+    const target = this.tapTargetOf(id);
+    if (!target) {
+      // rendido sem nada a dizer (o tabuleiro só manda rendidos): balão sobre ele, sem andar
+      if (id.startsWith(NPC_TARGET)) {
+        if (this.viewingOther()) this.focusCharacter(this.active().id);
+        this.sound.play('ui.invalido');
+        this.board?.flashTargetLabel(id, 'Nenhuma interação', { avoid: () => this.hudRects() });
+      }
+      return;
+    }
     if (this.viewingOther()) this.focusCharacter(this.active().id);
-    if (canBurn(from, target)) {
+    if (target.near(from)) {
       this.aimedTarget.set(null);
       this.farTarget.set(null);
-      this.actOn(target);
+      target.act();
       return;
     }
     const reach = this.reach();
+    const budget = this.movesLeft() - target.spare;
     let best: HexCoord | null = null;
     let bestCost = Infinity;
     for (const key of this.destinations()) {
       const [col, row] = key.split(',').map(Number);
       const h = { col, row };
       const cost = reach.get(key)?.cost ?? Infinity;
-      if (cost < bestCost && canBurn(h, target)) {
+      if (cost < bestCost && cost <= budget && target.near(h)) {
         best = h;
         bestCost = cost;
       }
@@ -2303,7 +2343,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       // sem movimento para chegar: mostra mesmo assim, em cinza, o caminho até ficar colado
       const far = this.farRoute(from, target);
       if (far) this.farTarget.set({ id: target.id, from: hexKey(from), ...far });
-      else this.say(`Chegue colado n${target.name} para interagir`, 'info');
+      else this.say(target.far, 'info');
       return;
     }
     this.farTarget.set(null);
@@ -2325,12 +2365,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Caminho mais curto até ficar colado no alvo sem o limite de movimento (o hexágono de chegada
    * e os passos até ele), ou `null` se não há como chegar.
    */
-  private farRoute(from: HexCoord, target: Burnable): { hex: HexCoord; path: HexCoord[] } | null {
+  private farRoute(from: HexCoord, target: TapTarget): { hex: HexCoord; path: HexCoord[] } | null {
     const occupied = new Set([...this.positions().values()].map(hexKey));
     const all = reachableHexes(from, Number.MAX_SAFE_INTEGER, this.area, this.moveBlocked());
     let best: { coord: HexCoord; cost: number } | null = null;
     for (const [key, node] of all) {
-      if (occupied.has(key) || !canBurn(node.coord, target)) continue;
+      if (occupied.has(key) || !target.near(node.coord)) continue;
       if (!best || node.cost < best.cost) best = node;
     }
     return best ? { hex: best.coord, path: pathTo(all, best.coord) } : null;
@@ -2345,7 +2385,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const far = this.farTarget();
     if (!far || this.phase() !== 'moving-choice' || this.selected()) return null;
     if (hexKey(this.positions().get(this.active().id) ?? { col: NaN, row: NaN }) !== far.from) return null;
-    return (this.map?.burnables ?? []).some((t) => t.id === far.id && !this.burned().has(t.id)) ? far : null;
+    return this.tapTargetOf(far.id) ? far : null;
   });
 
   /** Alvo escolhido por toque e o hexágono colado nele para onde o agente vai andar. */
@@ -2354,10 +2394,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Alvo tocado uma vez cujo caminho ainda está marcado (o destino não mudou): some o Confirmar
    * e o tabuleiro mostra que o agente vai andar até lá, com o balão pedindo o segundo toque.
    */
-  protected readonly armedTarget = computed<Burnable | null>(() => {
+  protected readonly armedTarget = computed<TapTarget | null>(() => {
     const aim = this.aimedTarget();
     if (!aim || !sameHex(aim.hex, this.selected()) || this.phase() !== 'moving-choice') return null;
-    return (this.map?.burnables ?? []).find((t) => t.id === aim.id && !this.burned().has(t.id)) ?? null;
+    // lê os inimigos e os queimados aqui: o alvo pode sumir (queimou, deixou de estar rendido)
+    this.enemies();
+    this.burned();
+    return this.tapTargetOf(aim.id);
   });
 
   /** A ação de um alvo colado no agente: o avião abre o menu de inspecionar; o resto, o "Queimar". */
@@ -2425,9 +2468,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.aimedTarget.set(null);
     if (!(await this.perceive(paths))) return;
     this.afterMove();
-    const goal = aim && (this.map?.burnables ?? []).find((t) => t.id === aim.id && !this.burned().has(t.id));
+    const goal = aim && this.tapTargetOf(aim.id);
     const here = this.positions().get(id);
-    if (goal && here && this.phase() === 'moving-choice' && canBurn(here, goal)) this.actOn(goal);
+    if (goal && here && this.phase() === 'moving-choice' && goal.near(here)) goal.act();
   }
 
   /** Anda com um ou mais agentes ao mesmo tempo, conferindo a visão dos inimigos a cada passo. */
@@ -3124,8 +3167,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * de entrada da classe (ou a de retomada, se já conversaram). As perguntas são as que ele tem
    * guardadas na memória: as feitas aparecem marcadas; as pendentes, inclusive réplicas, seguem.
    */
-  protected async startInterrogation(): Promise<void> {
-    const e = this.talkTarget()?.enemy;
+  protected async startInterrogation(enemyId?: string): Promise<void> {
+    const here = this.positions().get(this.active().id);
+    const e = enemyId
+      ? this.enemies().find((x) => x.id === enemyId && x.status === 'surrendered' && !!here && inAura(here, x.hex))
+      : this.talkTarget()?.enemy;
     const cls = npcClass(e?.npc);
     if (!e || !hasDialogue(cls) || this.phase() !== 'moving-choice' || !this.board) return;
     if (this.movesLeft() < INTERROGATION_RULES.moveCost) {

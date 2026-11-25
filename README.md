@@ -309,11 +309,24 @@ As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testada
 
 ### Modo diálogo (interrogatório)
 
-Todo suspeito **rendido** ganha uma **aura** de 1 hexágono. Com o agente da vez nela, aparece o papel
+Todo suspeito **rendido** tem um **raio de conversa** de 1 hexágono (sem nada pintado no chão: quem
+mostra que dá para conversar é o contorno amarelo no modelo). Com o agente da vez nele, aparece o papel
 **Conversar** (□ no controle, quando não há ninguém para abordar, nada para queimar nem para
 inspecionar), **a qualquer momento e quantas vezes quiser**. Se a classe do suspeito não tem diálogo
-(o segurança), o papel aparece **bloqueado** ("sem diálogo") e a aura fica apagada, sem cortina nem pulso.
+(o segurança), o papel aparece **bloqueado** ("sem diálogo").
 Quem não se rendeu não conversa.
+
+- **Toque direto no rendido** (o mesmo sistema do avião): quem tem o que falar ganha um **contorno
+  amarelo** pulsante no próprio modelo (acompanha a pose de algemado). Tocar nele, colado, abre a
+  conversa; de longe, marca o caminho mais curto até a aura (contorno grosso, fantasma do agente no
+  destino, pontos correndo e o balão "Toque de novo para ir · N passos") e o segundo toque anda até lá e
+  já abre a conversa. O caminho precisa deixar sobrando o movimento da primeira pergunta; sem isso, o
+  caminho aparece em cinza com "Longe demais para interagir". Quem **não tem interação** fica sem
+  contorno e, ao toque, mostra o balão cinza **"Nenhuma interação"** sobre a cabeça. O hexágono do
+  rendido também vale como tocar nele. No tabuleiro: `setNpcTargets` (alvos `npc:<id>`) e
+  `flashTargetLabel` (balão passageiro, reaproveitável para outros alvos); na tela, `tapTargetOf` diz
+  de onde cada alvo age e o que acontece. Caso de teste: **Rendidos: tocar para conversar**
+  (`?caso=rendidos-interacao`).
 
 - **Close-up:** a câmera faz o mesmo enquadramento da inspeção e das portas (desce para 30° e chega
   perto), mas de lado para a dupla: agente em pé e suspeito na pose de rendido, na faixa de cima
@@ -606,8 +619,6 @@ região e, no que é interativo, uma **cortina** de luz baixa que some para cima
 | Alcance de movimento | azul-claro (o do cursor), contorno branco | baixa | — |
 | Visão dos inimigos | véu vermelho | não | — |
 | Queimar (avião, suprimentos) | brasa | sim | aquela aura inteira acende e a cortina cresce |
-| Conversar (rendido com diálogo) | âmbar | sim | idem |
-| Rendido sem diálogo | âmbar apagado | não | — |
 
 As camadas se somam: um hexágono do alcance dentro de uma aura de queimar fica com o véu da brasa, e o
 contorno azul continua passando por fora de tudo. Os hexágonos dos aliados contam como dentro do
