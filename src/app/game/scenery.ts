@@ -703,7 +703,7 @@ export function buildCover(kind: CoverKind, seed: number): THREE.Group {
   const rnd = seeded(seed);
   const g = new THREE.Group();
   if (kind === 'lowCrate') {
-    // caixote de meia altura: dois caixotes lado a lado, sem nada em cima (dá para pular)
+    // caixote de meia altura: dois caixotes lado a lado, sem nada em cima (cobertura baixa)
     const s = 0.62;
     ([[-0.33, -0.08], [0.35, 0.1]] as const).forEach(([x, z], i) => {
       const c = woodenCrate(s);

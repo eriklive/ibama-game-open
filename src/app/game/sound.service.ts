@@ -160,7 +160,7 @@ export class Sound {
     this.ambience.setApproach(true);
   }
 
-  /** Caixote, porta ou escolha: a fita cai para o ultra slow (`true`) ou volta (`false`). */
+  /** Escolha de alvo: a fita cai para o ultra slow (`true`) ou volta (`false`). */
   chaseSlow(on: boolean): void {
     this.music?.setRate(on ? CHASE_MUSIC.slowRate : 1, on ? CHASE_MUSIC.slowRamp : CHASE_MUSIC.resumeRamp);
   }
