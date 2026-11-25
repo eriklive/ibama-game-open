@@ -568,24 +568,16 @@
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
       </button>
     } @else if (selected() && phase() === 'moving-choice') {
-      <!-- com um alvo tocado (o avião, os suprimentos), diz para onde vai: "Ir até o avião" -->
-      <button
-        type="button"
-        class="stamp confirm long"
-        [class.aim]="armedTarget()"
-        [attr.aria-label]="armedTarget() ? 'Ir até ' + armedTarget()!.name + ' (' + selectedCost() + (selectedCost() === 1 ? ' passo)' : ' passos)') : null"
-        (click)="confirm()">
-        <span class="stamp-ring">
-          @if (armedTarget(); as t) {
-            <span class="stamp-small">ir até · {{ selectedCost() }} {{ selectedCost() === 1 ? 'passo' : 'passos' }}</span>
-            <span class="stamp-text">{{ t.short }}</span>
-          } @else {
+      <!-- com um alvo tocado (o avião, os suprimentos), não há botão: o balão sobre o alvo pede o segundo toque -->
+      @if (!armedTarget()) {
+        <button type="button" class="stamp confirm long" (click)="confirm()">
+          <span class="stamp-ring">
             <span class="stamp-small">{{ selectedCost() }} {{ selectedCost() === 1 ? 'passo' : 'passos' }}</span>
             <span class="stamp-text">Confirmar</span>
-          }
-        </span>
-        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-      </button>
+          </span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+        </button>
+      }
       <button type="button" class="paper side" (click)="cancel()">
         <span class="stencil">Cancelar</span>
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }

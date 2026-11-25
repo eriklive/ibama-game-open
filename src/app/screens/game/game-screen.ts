@@ -437,6 +437,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
               dest: aim.hex,
               path: this.selectedPath(),
               label: `Toque de novo para ir · ${cost} ${cost === 1 ? 'passo' : 'passos'}`,
+              avoid: () => this.hudRects(),
             }
           : null,
       );
@@ -455,7 +456,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     });
   }
 
-  /** Símbolo do botão do controle para uma ação (✕, ○, □, △ no DualShock 4). */
+  /** O que a interface põe por cima do tabuleiro (cartões, placar, botões), em coordenadas da janela. */
+  private hudRects(): DOMRect[] {
+    return [...document.querySelectorAll<HTMLElement>('.game .corner, .game .goal, .game .agents, .game .tools, .game .suspects, .game .actions > *')].map(
+      (e) => e.getBoundingClientRect(),
+    );
+  }
+
+    /** Símbolo do botão do controle para uma ação (✕, ○, □, △ no DualShock 4). */
   protected glyph(action: PadAction): string {
     const p = this.pad();
     return p ? glyphFor(p.kind, action) : '';
@@ -2317,8 +2325,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Alvo escolhido por toque e o hexágono colado nele para onde o agente vai andar. */
   private readonly aimedTarget = signal<{ id: string; hex: HexCoord } | null>(null);
   /**
-   * Alvo tocado uma vez cujo caminho ainda está marcado (o destino não mudou): o Confirmar vira
-   * "Ir até o avião" e o tabuleiro mostra que o agente vai andar até lá.
+   * Alvo tocado uma vez cujo caminho ainda está marcado (o destino não mudou): some o Confirmar
+   * e o tabuleiro mostra que o agente vai andar até lá, com o balão pedindo o segundo toque.
    */
   protected readonly armedTarget = computed<Burnable | null>(() => {
     const aim = this.aimedTarget();
