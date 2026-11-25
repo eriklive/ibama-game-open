@@ -470,9 +470,9 @@ export class HexBoard {
    * pulsam em volta deles, mostrando que dá para tocar.
    */
   private readonly outlined = new Map<string, { models: THREE.Object3D[]; hulls: THREE.Mesh[] }>();
-  /** Contorno de "dá para tocar": fino, branco e suave. */
+  /** Contorno de "dá para tocar": fino, amarelo e suave. */
   private readonly outlineMat = new THREE.MeshBasicMaterial({
-    color: 0xffffff,
+    color: 0xffd23a,
     side: THREE.BackSide,
     transparent: true,
     depthWrite: false,
@@ -2490,7 +2490,7 @@ export class HexBoard {
 
   /**
    * Alvo tocado uma vez (o caminho até ele já está marcado, o segundo toque anda até lá): o
-   * contorno dele engrossa e vira amarelo intenso. `null` volta todos ao branco fino.
+   * contorno dele engrossa e vira amarelo intenso. `null` volta todos ao amarelo fino.
    */
   setArmedTarget(id: string | null): void {
     if (id === this.armedTarget) return;
@@ -3829,7 +3829,7 @@ export class HexBoard {
     field.flush();
 
     if (this.outlinesOn && this.outlined.size) {
-      // branco suave que respira devagar: dá para tocar
+      // amarelo suave que respira devagar: dá para tocar
       const k = 0.5 + Math.sin(t * 2.5) * 0.5;
       this.outlineMat.opacity = 0.2 + k * 0.25;
       // tocado uma vez: amarelo que pulsa rápido e forte, quase branco no pico
