@@ -470,7 +470,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** O que a interface põe por cima do tabuleiro (cartões, placar, botões), em coordenadas da janela. */
   private hudRects(): DOMRect[] {
-    return [...document.querySelectorAll<HTMLElement>('.game .corner, .game .goal, .game .agents, .game .tools, .game .suspects, .game .actions > *')].map(
+    return [...document.querySelectorAll<HTMLElement>('.game .corner, .game .goal, .game .agents, .game .tools, .game .actions > *')].map(
       (e) => e.getBoundingClientRect(),
     );
   }
@@ -490,24 +490,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       fled: es.filter((e) => e.status === 'fled').length,
     };
   });
-
-  /** Resumo da pilha de suspeitos: só os estados que têm alguém. */
-  protected readonly enemySummary = computed(() => {
-    const c = this.enemyCounts();
-    return [
-      c.alert && `${c.alert} em fuga!`,
-      c.patrol && `${c.patrol} vigiando`,
-      c.surrendered && `${c.surrendered} ${c.surrendered === 1 ? 'rendido' : 'rendidos'}`,
-      c.fled && `${c.fled} ${c.fled === 1 ? 'fugiu' : 'fugiram'}`,
-    ]
-      .filter(Boolean)
-      .join(' · ');
-  });
-  /** A pilha de suspeitos aberta em lista. */
-  protected readonly suspectsOpen = signal(false);
-  protected toggleSuspects(): void {
-    this.suspectsOpen.update((v) => !v);
-  }
 
   /** Pré-visualizando a abordagem (zonas pintadas, aguardando confirmação). */
   protected readonly approaching = signal(false);
@@ -571,13 +553,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     };
     requestAnimationFrame(tick);
   }
-  protected readonly statusLabel: Record<EnemyState['status'], string> = {
-    patrol: 'vigiando',
-    alert: 'em fuga!',
-    surrendered: 'rendido',
-    fled: 'fugiu',
-    hidden: 'escondido',
-  };
   /** Suspeitos que a equipe conhece (os escondidos só entram depois de revelados). */
   protected readonly knownEnemies = computed(() => this.enemies().filter(known));
 

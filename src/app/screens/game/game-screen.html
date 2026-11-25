@@ -271,43 +271,6 @@
     }
   </div>
 
-  <!-- Suspeitos: uma pilha de fichas que abre em lista -->
-  @if (knownEnemies().length) {
-    <div class="suspects" data-testid="foes">
-      <div class="pile-wrap">
-        @if (!suspectsOpen() && knownEnemies().length > 1) {
-          <span class="sheet back" aria-hidden="true"></span>
-          <span class="sheet mid" aria-hidden="true"></span>
-        }
-        <button
-          type="button"
-          class="pile"
-          [class.alert]="enemyCounts().alert > 0"
-          [attr.aria-expanded]="suspectsOpen()"
-          [attr.aria-label]="'Suspeitos: ' + enemySummary() + '. Toque para ' + (suspectsOpen() ? 'fechar' : 'abrir') + ' a lista.'"
-          data-testid="foes-toggle"
-          (click)="toggleSuspects()">
-          <span class="pin" aria-hidden="true"></span>
-          <span class="pile-head">
-            <span>Suspeitos</span>
-            <span class="pile-mark" [class.close]="suspectsOpen()">{{ suspectsOpen() ? 'fechar' : '' }}</span>
-          </span>
-          <span class="pile-summary">{{ enemySummary() }}</span>
-        </button>
-      </div>
-      @if (suspectsOpen()) {
-        <ul class="suspect-list" aria-label="Lista de suspeitos">
-          @for (e of knownEnemies(); track e.id; let i = $index) {
-            <li [class]="'suspect ' + e.status" [style.--tilt]="-tilts[i % tilts.length] + 'deg'">
-              <span class="suspect-name">{{ e.name }}</span>
-              <span class="suspect-status">{{ statusLabel[e.status] }}@if (talked(e.id)) { · conversou}</span>
-            </li>
-          }
-        </ul>
-      }
-    </div>
-  }
-
   <!-- Menu da porta: a câmera gira e aproxima; as ações ficam em fichas na direita -->
   @if (phase() === 'door' && openDoor(); as door) {
     <button type="button" class="door-back" [disabled]="doorBusy()" (click)="closeDoorMenu()" aria-label="Voltar ao tabuleiro" data-testid="door-back">
