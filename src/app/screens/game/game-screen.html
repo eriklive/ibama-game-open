@@ -161,9 +161,30 @@
       @if (hasIntro()) {
         <button type="button" class="menu-restart" (click)="replayIntro()" data-testid="menu-intro">Rever objetivos da missão</button>
       }
-      @for (l of lessons; track l.id) {
-        <button type="button" class="menu-restart" (click)="reviewLesson(l.id)" [attr.data-testid]="'menu-lousa-' + l.id">Lousa tática: {{ l.label.toLowerCase() }}</button>
-      }
+      <div class="menu-sub">
+        <button
+          type="button"
+          class="menu-sub-toggle"
+          [class.open]="tutorialsOpen()"
+          (click)="tutorialsOpen.set(!tutorialsOpen())"
+          [attr.aria-expanded]="tutorialsOpen()"
+          aria-controls="tutorials"
+          data-testid="tutorials-toggle">
+          Tutoriais <span class="menu-sub-arrow" aria-hidden="true">›</span>
+        </button>
+        @if (tutorialsOpen()) {
+          <ul id="tutorials" class="menu-sub-list" role="list" data-testid="tutorials">
+            @for (l of lessons; track l.id) {
+              <li>
+                <button type="button" class="menu-case" (click)="reviewLesson(l.id)" [attr.data-testid]="'menu-lousa-' + l.id">
+                  <span class="menu-option-label">{{ l.label }}</span>
+                  <span class="menu-option-hint">Lousa tática</span>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      </div>
       <button type="button" class="menu-restart" (click)="toggleMenu(); restart()" data-testid="menu-restart">Recomeçar a partida</button>
       <button type="button" class="menu-close" (click)="toggleMenu()">Fechar</button>
     </section>

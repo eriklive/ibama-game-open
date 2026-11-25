@@ -368,6 +368,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Submenu "Casos de teste" (situações prontas, ver `test-cases.ts`). */
   protected readonly testCases = TEST_CASES;
   protected readonly testCasesOpen = signal(false);
+  /** Submenu "Tutoriais" do menu: as lições da lousa tática, para rever. */
+  protected readonly tutorialsOpen = signal(false);
 
   protected toggleMenu(): void {
     this.menuOpen.update((v) => !v);
@@ -939,6 +941,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Menu: rever uma lição da lousa. */
   protected reviewLesson(id: LessonId): void {
     this.toggleMenu();
+    this.tutorialsOpen.set(false);
     this.lesson.set(id);
   }
 

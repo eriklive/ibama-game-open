@@ -15,7 +15,10 @@ import { INTERROGATION_RULES } from './interrogation';
  * - **Abordagem**: abre quando o primeiro garimpeiro entra na tela. Mostra as faixas do grito
  *   (rende, rola, foge), o que acontece em cada uma e que quem foge vira perseguição.
  * - **Interrogatório**: abre quando o primeiro suspeito se rende. Mostra o raio de conversa em
- *   volta do rendido: com o agente da vez dentro dele, dá para conversar.
+ *   volta do rendido e o toque nele: um toque marca o caminho até o raio, o segundo anda até lá e
+ *   abre a conversa (já dentro do raio, um toque basta).
+ *
+ * As lições ficam no submenu **Tutoriais** do menu do jogo, para rever.
  *
  * Aqui ficam as regras puras (quando abrir, o que foi visto, a geometria do giz); a lousa em si
  * está em `ui/tactical-board`.
