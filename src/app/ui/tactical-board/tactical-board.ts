@@ -181,7 +181,10 @@ function ringsMap(z: ApproachZones): ChalkMap {
   };
 }
 
-/** Interrogatório, página 1: o raio de conversa em volta do rendido. */
+/**
+ * Interrogatório, página 1: o raio de conversa em volta do rendido. O agente não precisa parar
+ * nele: o 1º toque no rendido marca o caminho até o raio e o 2º anda até lá e abre a conversa.
+ */
 function talkMap(): ChalkMap {
   const R = 4;
   const all = chalkHexes(R);
@@ -210,7 +213,8 @@ function talkMap(): ChalkMap {
     ],
     strokes: [{ d: path(walk), cls: 'agent-path', arrow: true }],
     labels: [
-      { x: stop.x + 16, y: stop.y + 16, text: 'pare aqui', cls: 'small talk', anchor: 'middle' },
+      { x: 0, y: -20, text: 'toque aqui', cls: 'small talk', anchor: 'middle' },
+      { x: stop.x + 16, y: stop.y + 16, text: 'chega aqui', cls: 'small talk', anchor: 'middle' },
       { x: agent.x, y: agent.y + 15, text: 'agente', cls: 'small', anchor: 'middle' },
     ],
     pieces: [{ kind: 'surrendered', x: 0, y: 0 }],
@@ -271,9 +275,10 @@ export class TacticalBoard {
               text: 'Todo rendido tem um *raio de conversa*',
               tone: 'talk',
             },
-            { text: 'Pare o agente dentro dele: aparece *Conversar*' },
-            { text: `A 1ª pergunta gasta *${TALK.moveCost} de movimento*` },
+            { chip: '1 toque', text: 'Toque no rendido: *o caminho* até o raio fica marcado' },
+            { chip: '2 toques', text: 'Toque de novo: o agente vai e *a conversa abre*' },
           ],
+          rule: `Já dentro do raio, um toque basta · a 1ª pergunta gasta ${TALK.moveCost} de movimento`,
         },
       ];
     }

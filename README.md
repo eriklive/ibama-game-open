@@ -462,6 +462,11 @@ No **Modo Corrida** o mapa de corrida pré-renderiza 90 e enxerga 60 hexágonos 
 (`runnerProfile`), e a névoa não fecha mais perto na câmera rasante: o horizonte inteiro da pista
 aparece e o garimpeiro nunca some na névoa. A densidade de pixels e as sombras são as do modo.
 
+O submenu **Tutoriais** reabre as lousas táticas (**Abordagem** e **Interrogatório**), que também abrem
+sozinhas na primeira vez que a situação aparece (`game/tactical-board.ts`). A do interrogatório
+mostra o toque no rendido: um toque marca o caminho até o raio de conversa, o segundo anda até lá e
+abre a conversa.
+
 O menu também mostra quantos blocos estão carregados e se ainda há algum sendo montado. Como tudo é
 desenhado em poucas malhas instanciadas — o chão da missão (cor, brilho e flutuação por hexágono),
 e cada bloco de 12 × 12 hexágonos do mundo (chão, contornos, troncos, copas, pinheiros e sulcos) —,
