@@ -123,8 +123,10 @@ button:disabled { cursor: not-allowed; }
   text-align: left;
   transform: rotate(var(--tilt, 0deg));
   opacity: .92;
-  transition: transform .15s, opacity .15s, translate .15s;
 }
+.agents:not(.open) .photo:not(.hero) { margin-top: -30px; }
+.agents:not(.open) .photo.hero + .photo { margin-top: 0; }
+.photo { transition: margin-top .15s, transform .15s, opacity .15s, translate .15s; }
 .photo:hover { translate: 4px 0; opacity: 1; }
 .photo:active { transform: rotate(0) scale(.97); }
 .photo-img { flex: none; width: 34px; height: 38px; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; }
@@ -184,59 +186,6 @@ button:disabled { cursor: not-allowed; }
 .tool-icon { width: 34px; height: 34px; fill: none; stroke: var(--ink-paper); stroke-width: 2.2; stroke-linecap: round; stroke-linejoin: round; }
 .tool .stencil { font-size: 12px; }
 .tool .typed { font-size: 9px; color: var(--muted-paper); }
-
-/* ---------- suspeitos: pilha que abre em lista ---------- */
-.suspects {
-  position: absolute;
-  right: calc(14px + var(--safe-right));
-  top: calc(66px + var(--safe-top));
-  width: 128px;
-  display: flex; flex-direction: column; gap: 8px;
-}
-.pile-wrap { position: relative; }
-.sheet { position: absolute; inset: 0; box-shadow: var(--drop); }
-.sheet.back { background: #d9cfb4; transform: translate(4px, 6px) rotate(4deg); }
-.sheet.mid { background: #e5dbc0; transform: translate(2px, 3px) rotate(-3deg); }
-.pile {
-  position: relative;
-  width: 100%; min-height: 48px;
-  padding: 9px 10px 5px;
-  background: var(--paper);
-  box-shadow: var(--drop);
-  transform: rotate(1deg);
-  display: flex; flex-direction: column; align-items: stretch; text-align: left;
-}
-.pile:active { transform: rotate(0) translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35); }
-.pile.alert { outline: 3px solid var(--red); outline-offset: -1px; }
-.pin {
-  position: absolute; left: 50%; top: -6px;
-  width: 12px; height: 12px; margin-left: -6px; border-radius: 6px;
-  background: var(--red); box-shadow: 0 2px 0 var(--red-dark);
-}
-.pile-head {
-  display: flex; justify-content: space-between; align-items: baseline;
-  font-size: 11px; letter-spacing: 1px; text-transform: uppercase; color: var(--muted-paper);
-}
-.pile-mark { font-family: var(--stencil); font-weight: 700; font-size: 14px; letter-spacing: 0; color: var(--ink-paper); }
-.pile-head:has(.close) { letter-spacing: 0; gap: 6px; }
-.pile-mark.close { font-size: 11px; }
-.pile-summary { font-family: var(--marker); font-size: 13px; line-height: 1.2; color: var(--red-text); }
-
-.suspect-list { list-style: none; margin: 0 0 0 -32px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.suspect {
-  padding: 6px 8px 4px;
-  background: var(--paper);
-  box-shadow: var(--drop);
-  transform: rotate(var(--tilt, 0deg));
-  display: flex; justify-content: space-between; align-items: baseline; gap: 6px;
-  animation: slap .2s ease-out both;
-}
-.suspect-name { font-size: 13px; }
-.suspect-status { font-family: var(--marker); font-size: 12px; color: var(--red-text); white-space: nowrap; }
-.suspect.alert { outline: 3px solid var(--red); outline-offset: -1px; }
-.suspect.surrendered .suspect-status { color: var(--green-ok); }
-.suspect.fled { opacity: .7; }
-.suspect.fled .suspect-name { text-decoration: line-through; text-decoration-thickness: 2px; text-decoration-color: var(--red); }
 
 .objective { display: flex; gap: 5px; align-items: baseline; font-size: 12px; line-height: 1.2; }
 .objective .tick {
@@ -420,11 +369,11 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 /* segurar para abordar: o contorno do papel vira um anel que se fecha */
 
 /* ---------- abordagem: o tablet é a tela de confirmação; a HUD sai de trás da lente dele ---------- */
-.approach-mode .corner, .approach-mode .goal, .approach-mode .left, .approach-mode .suspects,
+.approach-mode .corner, .approach-mode .goal, .approach-mode .left,
 .approach-mode .actions, .approach-mode .telegram, .approach-mode .end-op { visibility: hidden; }
 
 /* ---------- inspeção em close-up: só o agente, o móvel e o d20 ---------- */
-.focus-mode .corner, .focus-mode .goal, .focus-mode .left, .focus-mode .suspects, .focus-mode .actions,
+.focus-mode .corner, .focus-mode .goal, .focus-mode .left, .focus-mode .actions,
 .focus-mode .telegram, .focus-mode .check, .focus-mode .end-op { visibility: hidden; }
 .focus-stage { position: absolute; inset: 0; pointer-events: none; z-index: 4; animation: fade-in .3s ease-out both; }
 .focus-stage::before {
@@ -647,7 +596,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 @media (min-width: 700px) and (min-height: 600px) {
   /* o zoom de 1,25 também alarga o bilhete: descontar para não passar por cima da coluna da esquerda */
   .goal { width: clamp(190px, calc((100vw - 440px) / 1.25), 340px); }
-  .corner, .goal, .left, .suspects, .actions, .telegram, .check, .end-op, .aim-actions { zoom: 1.25; }
+  .corner, .goal, .left, .actions, .telegram, .check, .end-op, .aim-actions { zoom: 1.25; }
 }
 
 /* ---------- controle (DualShock 4) ---------- */
@@ -764,7 +713,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 
 /* menu da porta: a papelada da HUD sai de cena; as ações entram como fichas na direita */
 .game.rolling .goal { visibility: hidden; }
-.game:is(.door-focus, .chase-mode) :is(.corner, .goal, .left, .suspects, .actions, .end-op) { opacity: 0; pointer-events: none; }
+.game:is(.door-focus, .chase-mode) :is(.corner, .goal, .left, .actions, .end-op) { opacity: 0; pointer-events: none; }
 .game.door-focus .telegram {
   left: calc((100% - var(--door-w)) / 2);
   max-width: min(260px, calc(100% - var(--door-w) - 28px - var(--safe-left)));
