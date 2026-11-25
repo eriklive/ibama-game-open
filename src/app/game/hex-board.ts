@@ -329,6 +329,11 @@ export interface TargetAim {
   path: readonly HexCoord[];
   label: string;
   /**
+   * Longe demais (o movimento não alcança): caminho e fantasma em cinza, balão cinza com
+   * cadeado, sem o contorno amarelo nem o saltinho de quem vai sair.
+   */
+  locked?: boolean;
+  /**
    * O que a interface põe por cima do tabuleiro (cartões, placar, botões), em coordenadas da
    * janela: o balão desce pelo alvo até sair de baixo disso (ver `placeAimLabel`).
    */
@@ -349,6 +354,8 @@ interface AimFx {
   labelTop: THREE.Vector3;
   labelLow: THREE.Vector3;
   avoid?: () => readonly DOMRect[];
+  /** Longe demais: tudo em cinza e o agente não saltita. */
+  locked: boolean;
   /** `prefers-reduced-motion`: nada corre nem saltita. */
   calm: boolean;
 }
@@ -489,6 +496,7 @@ export class HexBoard {
   /** Efeitos do alvo tocado uma vez (ver `setTargetAim`). */
   private aimFx: AimFx | null = null;
   private aimDotTex?: THREE.Texture;
+  private aimDotLockedTex?: THREE.Texture;
   /** Contornos acesos (a tela apaga nos close-ups e quando não é a vez de escolher). */
   private outlinesOn = false;
   /** Incêndios acesos: chamas, fumaça e luz que tremula, e os materiais trocados pelos queimados. */
@@ -2508,10 +2516,10 @@ export class HexBoard {
    * vira para o alvo e saltita no lugar. `null` apaga tudo.
    */
   setTargetAim(aim: TargetAim | null): void {
-    const key = aim ? `${aim.id}|${aim.unitId}|${hexKey(aim.dest)}|${aim.path.map(hexKey).join(';')}|${aim.label}` : '';
+    const key = aim ? `${aim.id}|${aim.unitId}|${hexKey(aim.dest)}|${aim.path.map(hexKey).join(';')}|${aim.label}|${aim.locked ? 1 : 0}` : '';
     if (key === (this.aimFx?.key ?? '')) return;
     this.clearAimFx();
-    this.setArmedTarget(aim?.id ?? null);
+    this.setArmedTarget(aim && !aim.locked ? aim.id : null);
     const target = aim && this.outlined.get(aim.id);
     const u = aim && this.units.get(aim.unitId);
     if (!aim || !target || !u) return;
@@ -2526,8 +2534,9 @@ export class HexBoard {
     };
 
     // fantasma: cópia translúcida do agente, parado no destino e de frente para o alvo
+    const locked = !!aim.locked;
     const ghostMat = new THREE.MeshBasicMaterial({
-      color: 0xffe27a,
+      color: locked ? 0xa3a7ad : 0xffe27a,
       transparent: true,
       opacity: 0.4,
       depthWrite: false,
@@ -2563,10 +2572,16 @@ export class HexBoard {
         [0.35, 'rgba(255,226,110,0.95)'],
         [1, 'rgba(255,200,40,0)'],
       ]);
+      this.aimDotLockedTex ??= this.glowTexture([
+        [0, 'rgba(235,236,238,1)'],
+        [0.35, 'rgba(170,174,180,0.9)'],
+        [1, 'rgba(130,134,140,0)'],
+      ]);
+      const dotTex = locked ? this.aimDotLockedTex : this.aimDotTex;
       const count = Math.max(3, Math.min(40, Math.round(length * 1.6)));
       for (let i = 0; i < count; i++) {
         const dot = new THREE.Sprite(
-          new THREE.SpriteMaterial({ map: this.aimDotTex, transparent: true, depthWrite: false, toneMapped: false }),
+          new THREE.SpriteMaterial({ map: dotTex, transparent: true, depthWrite: false, toneMapped: false }),
         );
         dot.scale.setScalar(0.42);
         dot.renderOrder = 5;
@@ -2578,7 +2593,7 @@ export class HexBoard {
 
     // balão sobre o alvo: "Toque de novo para ir · 3 passos". Se o alto do alvo cai debaixo da
     // interface (cartões, placar), o balão desce pelo alvo até a frente dele (o lado de baixo da tela)
-    const label = this.labelSprite(aim.label, 'aim');
+    const label = this.labelSprite(aim.label, locked ? 'locked' : 'aim');
     const labelTop = new THREE.Vector3(center.x, box.max.y + 0.35, center.z);
     const toCam = new THREE.Vector3(this.camera.position.x - center.x, 0, this.camera.position.z - center.z);
     if (toCam.lengthSq() < 1e-6) toCam.set(0, 0, 1);
@@ -2604,6 +2619,7 @@ export class HexBoard {
       labelTop,
       labelLow,
       avoid: aim.avoid,
+      locked,
       calm: reducedMotionQuery(),
     };
     this.placeAimLabel(this.aimFx);
@@ -2697,7 +2713,7 @@ export class HexBoard {
 
   /** Saltinho no lugar do agente que vai andar até o alvo tocado (pronto para sair). */
   private readyBounce(id: string, t: number): number {
-    if (this.aimFx?.unitId !== id || this.aimFx.calm) return 0;
+    if (this.aimFx?.unitId !== id || this.aimFx.calm || this.aimFx.locked) return 0;
     return Math.abs(Math.sin(t * 6)) * 0.07;
   }
 
@@ -3920,21 +3936,24 @@ export class HexBoard {
   }
 
   /** Etiqueta de um suspeito no modo de abordagem ("se rende" em verde, "rola" em amarelo, "corre" em laranja). */
-  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee' | 'aim'): THREE.Sprite {
+  private labelSprite(text: string, tone: 'surrender' | 'roll' | 'flee' | 'aim' | 'locked'): THREE.Sprite {
     const font = 'bold 40px "Special Elite", "Courier New", monospace';
     const c = document.createElement('canvas');
     const g = c.getContext('2d');
     const pad = 22;
     const tip = 14;
+    // "longe demais": cadeado à esquerda do texto
+    const icon = tone === 'locked' ? 40 : 0;
     let width = 240;
     if (g) {
       g.font = font;
-      width = Math.ceil(g.measureText(text).width) + pad * 2;
+      width = Math.ceil(g.measureText(text).width) + pad * 2 + icon;
     }
     c.width = width;
     c.height = 64 + tip;
     if (g) {
-      g.fillStyle = tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : tone === 'aim' ? '#ffd23a' : '#c4621a';
+      g.fillStyle =
+        tone === 'surrender' ? '#2f7a3e' : tone === 'roll' ? '#8a6d0f' : tone === 'aim' ? '#ffd23a' : tone === 'locked' ? '#c4c7cc' : '#c4621a';
       g.beginPath();
       g.roundRect(0, 0, width, 64, 12);
       g.moveTo(width / 2 - tip, 64);
@@ -3942,10 +3961,11 @@ export class HexBoard {
       g.lineTo(width / 2 + tip, 64);
       g.fill();
       g.font = font;
-      g.fillStyle = tone === 'aim' ? '#2a2100' : '#ffffff';
+      g.fillStyle = tone === 'aim' ? '#2a2100' : tone === 'locked' ? '#26282b' : '#ffffff';
       g.textAlign = 'center';
       g.textBaseline = 'middle';
-      g.fillText(text, width / 2, 34);
+      g.fillText(text, (width + icon) / 2, 34);
+      if (icon) this.drawLock(g, pad, 14, g.fillStyle as string);
     }
     const tex = new THREE.CanvasTexture(c);
     tex.colorSpace = THREE.SRGBColorSpace;
@@ -3958,6 +3978,29 @@ export class HexBoard {
     // a ponta do balão fica em cima da cabeça
     sprite.center.set(0.5, 0);
     return sprite;
+  }
+
+  /** Cadeado fechado (alça + corpo com o buraco da chave) num quadrado de ~30 px a partir de (x, y). */
+  private drawLock(g: CanvasRenderingContext2D, x: number, y: number, color: string): void {
+    g.save();
+    g.strokeStyle = g.fillStyle = color;
+    g.lineWidth = 4.5;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(x + 7, y + 15);
+    g.lineTo(x + 7, y + 10);
+    g.arc(x + 15, y + 10, 8, Math.PI, 0);
+    g.lineTo(x + 23, y + 15);
+    g.stroke();
+    g.beginPath();
+    g.roundRect(x + 2, y + 14, 26, 21, 4);
+    g.fill();
+    g.globalCompositeOperation = 'destination-out';
+    g.beginPath();
+    g.arc(x + 15, y + 22.5, 3, 0, Math.PI * 2);
+    g.fill();
+    g.fillRect(x + 13.75, y + 23, 2.5, 6);
+    g.restore();
   }
 
   /** Anel da onda de voz; devolve a onda em andamento (ou `null` quando acabou). */
