@@ -131,7 +131,6 @@ import {
   NoteKind,
   PoolUsage,
   askQuestion,
-  auraHexes,
   dialogueOptions,
   hasDialogue,
   inAura,
@@ -421,14 +420,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       const free = !this.approaching() && !this.burning() && !this.grouping() && !this.selected();
       const keys = free ? this.nearDoors().filter((d) => !isOpen(d)).map((d) => hexKey(d.hex)) : [];
       this.board?.setDoorHints(keys);
-    });
-    // aura de interrogatório em volta dos suspeitos rendidos com diálogo (some no close-up)
-    effect(() => {
-      const show = this.phase() !== 'interrogating' && this.phase() !== 'door' && this.phase() !== 'plane' && this.phase() !== 'over';
-      const { talk, muted } = this.auraKeys();
-      const here = this.positions().get(this.active().id);
-      const hot = this.canTalk() && here && show ? [hexKey(here)] : [];
-      this.board?.setInterrogationAura(show ? talk : [], hot, show ? muted : []);
     });
     // rendidos tocáveis, como o avião: com interação, contorno amarelo; sem, o balão "Nenhuma interação"
     effect(() => {
@@ -720,15 +711,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     () => this.surrenderedEnemies().map((e) => ({ id: e.id, talk: hasDialogue(npcClass(e.npc)) })),
     { equal: (a, b) => a.length === b.length && a.every((x, i) => x.id === b[i].id && x.talk === b[i].talk) },
   );
-  /** Hexágonos da aura: dos rendidos com diálogo (`talk`) e dos sem diálogo (`muted`). */
-  private readonly auraKeys = computed(() => {
-    const ring = (e: EnemyState) => auraHexes(e.hex, this.area, this.solid()).map(hexKey);
-    const es = this.surrenderedEnemies();
-    return {
-      talk: es.filter((e) => hasDialogue(npcClass(e.npc))).flatMap(ring),
-      muted: es.filter((e) => !hasDialogue(npcClass(e.npc))).flatMap(ring),
-    };
-  });
   /**
    * Rendido em cuja aura o agente da vez está: a ação de conversa aparece (bloqueada, se ele não
    * tem diálogo). Dá para conversar quantas vezes quiser.

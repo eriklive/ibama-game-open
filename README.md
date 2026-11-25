@@ -308,10 +308,11 @@ As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testada
 
 ### Modo diálogo (interrogatório)
 
-Todo suspeito **rendido** ganha uma **aura** de 1 hexágono. Com o agente da vez nela, aparece o papel
+Todo suspeito **rendido** tem um **raio de conversa** de 1 hexágono (sem nada pintado no chão: quem
+mostra que dá para conversar é o contorno amarelo no modelo). Com o agente da vez nele, aparece o papel
 **Conversar** (□ no controle, quando não há ninguém para abordar, nada para queimar nem para
 inspecionar), **a qualquer momento e quantas vezes quiser**. Se a classe do suspeito não tem diálogo
-(o segurança), o papel aparece **bloqueado** ("sem diálogo") e a aura fica apagada, sem cortina nem pulso.
+(o segurança), o papel aparece **bloqueado** ("sem diálogo").
 Quem não se rendeu não conversa.
 
 - **Toque direto no rendido** (o mesmo sistema do avião): quem tem o que falar ganha um **contorno
@@ -619,8 +620,6 @@ região e, no que é interativo, uma **cortina** de luz baixa que some para cima
 | Alcance de movimento | azul-claro (o do cursor), contorno branco | baixa | — |
 | Visão dos inimigos | véu vermelho | não | — |
 | Queimar (avião, suprimentos) | brasa | sim | aquela aura inteira acende e a cortina cresce |
-| Conversar (rendido com diálogo) | âmbar, parado (sem pulso) | não | o véu fica mais forte |
-| Rendido sem diálogo | âmbar apagado | não | — |
 
 As camadas se somam: um hexágono do alcance dentro de uma aura de queimar fica com o véu da brasa, e o
 contorno azul continua passando por fora de tudo. Os hexágonos dos aliados contam como dentro do
