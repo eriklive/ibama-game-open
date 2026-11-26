@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { commonDoors } from './door';
-import { HexCoord, hexDistance, hexKey, reachableHexes } from './hex';
+import { HexCoord, hexDistance, hexKey, hexNeighbors, reachableHexes } from './hex';
 import {
-  COVER_HEIGHT, DOOR_REVEAL, HexRect, MAPS, STRUCTURE_SIGHT, doorsOf, structureRect, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
+  COVER_HEIGHT, DOOR_REVEAL, HexRect, MAPS, STRUCTURE_SIGHT, doorWall, doorsOf, structureRect, blockedHexes, lowCoverHexes, parseLayout, playArea, stepsToStructure, structureView,
 } from './maps';
 
 describe('parseLayout', () => {
@@ -236,5 +236,34 @@ describe('aeroporto: avião trancado e quadro de chaves', () => {
   it('o avião não se queima direto: tem menu de inspecionar', () => {
     expect(map.burnables!.find((b) => b.id === 'aviao')?.inspect).toBe(true);
     expect(map.burnables!.find((b) => b.id === 'suprimentos')?.inspect).toBeUndefined();
+  });
+});
+
+describe('doorWall: trecho reto de parede da porta (giro da câmera)', () => {
+  const map = MAPS.find((m) => m.id === 'aeroporto')!;
+  const keys = (hs: HexCoord[]) => hs.map(hexKey).sort();
+
+  it('porta da lateral da casa: a parede inteira, de esquina a esquina', () => {
+    const rows = [26, 27, 28, 29, 30, 31, 32];
+    expect(keys(doorWall(map, { col: 29, row: 29 }))).toEqual(keys(rows.map((row) => ({ col: 29, row }))));
+  });
+
+  it('porta da divisória: para antes das paredes de fora', () => {
+    const rows = [27, 28, 29, 30, 31];
+    expect(keys(doorWall(map, { col: 35, row: 29 }))).toEqual(keys(rows.map((row) => ({ col: 35, row }))));
+  });
+
+  it('porta dos fundos do hangar: a fileira inteira da parede do fundo', () => {
+    const wall = doorWall(map, { col: 14, row: 4 });
+    expect(wall.every((h) => h.row === 4)).toBe(true);
+    expect(wall.length).toBe(22);
+  });
+
+  it('todo hexágono de fora colado na parede da porta da casa conta, não só o da frente da porta', () => {
+    const wall = new Set(doorWall(map, { col: 29, row: 29 }).map(hexKey));
+    for (let row = 26; row <= 32; row++) {
+      const hex = { col: 28, row };
+      expect([hex, ...hexNeighbors(hex)].some((h) => wall.has(hexKey(h)))).toBe(true);
+    }
   });
 });
