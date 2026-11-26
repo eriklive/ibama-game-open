@@ -69,14 +69,29 @@ describe('aeroporto: casa do Caseiro Jô', () => {
     expect(reachableHexes(start, 999, area, doorShut).has(hexKey(room2))).toBe(false);
   });
 
-  it('Jô fica parado, de costas para a porta, e vê a porta do cômodo 2', () => {
+  it('Jô fica parado, de costas para a porta, e vê quem chega à porta do cômodo 2', () => {
     const state = spawnEnemy(jo);
     expect(stationary(state)).toBe(true);
     const seen = new Set(visionHexes(state, area, blockedHexes(map), undefined, undefined, lowCoverHexes(map)).map(hexKey));
     // de costas para a entrada: nada entre a porta do oeste e ele
-    for (const h of [{ col: 29, row: 29 }, { col: 30, row: 29 }, { col: 31, row: 29 }]) expect(seen.has(hexKey(h))).toBe(false);
-    // mas quem passa pela porta do meio sem rendê-lo é visto
-    expect(seen.has('35,29')).toBe(true);
+    for (const h of [{ col: 29, row: 29 }, { col: 30, row: 29 }]) expect(seen.has(hexKey(h))).toBe(false);
+    // mas quem passa pela porta do meio sem rendê-lo é visto: só se chega a ela pelos dois
+    // hexágonos colados nela, do lado da sala, e ele vê os dois
+    const door = { col: 35, row: 29 };
+    const approach = hexNeighbors(door).filter((h) => h.col === 34);
+    expect(approach.map(hexKey).sort()).toEqual(['34,29', '34,30']);
+    for (const h of approach) {
+      expect(solid.has(hexKey(h))).toBe(false);
+      expect(seen.has(hexKey(h))).toBe(true);
+    }
+  });
+
+  it('o quarto (cômodo 2) fica com névoa até abrir a porta da divisória, que começa trancada', () => {
+    const fog = map.structures!.find((s) => s.kind === 'house')!.fog!;
+    expect(fog.length).toBe(1);
+    expect(fog[0].room).toEqual(item.room);
+    expect(hexKey(fog[0].door)).toBe('35,29');
+    expect(map.doorStates?.['35,29']?.state).toBe('trancada');
   });
 
   it('o armário fica no cômodo 2, encostado na parede do fundo, e dá para chegar ao lado dele', () => {

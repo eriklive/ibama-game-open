@@ -1,7 +1,18 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { METER, heightOf } from './character-model';
-import { PropInfo, buildBed, buildCabinet, buildDiningTable, buildKeyBoard, buildNightstand, northWallGap, southWallGap } from './prop-models';
+import {
+  PropInfo,
+  buildBed,
+  buildCabinet,
+  buildDiningTable,
+  buildKeyBoard,
+  buildNightstand,
+  buildShelves,
+  buildTvRack,
+  northWallGap,
+  southWallGap,
+} from './prop-models';
 
 /** Malhas que vão para a placa de vídeo (material visível), sem contar as escondidas. */
 const drawn = (g: THREE.Object3D): THREE.Mesh[] => {
@@ -78,10 +89,38 @@ describe('móveis da casa', () => {
     const size = sizeOf(g);
     expect(meters(size.y)).toBeGreaterThan(0.75);
     expect(meters(size.y)).toBeLessThan(1.1);
-    // maior que a antiga (60 × 75 cm): passa de 1,2 m no comprimento, com o banco
-    expect(meters(size.x)).toBeGreaterThan(1.2);
-    // cabe no hexágono (1,5 m de ponta a ponta)
+    // passa de 1,2 m no comprimento (norte–sul) e, com o banco, cabe no hexágono na largura
+    expect(meters(size.z)).toBeGreaterThan(1.2);
     expect(size.x).toBeLessThan(2.2);
+  });
+
+  it('mesa comprida: o comprimento pedido, no sentido norte–sul (+Z)', () => {
+    const size = sizeOf(buildDiningTable(2.9, 0.65));
+    expect(meters(size.z)).toBeCloseTo(2.9, 1);
+    expect(size.x).toBeLessThan(2.2);
+  });
+
+  it('prateleiras: encostadas na parede do fundo (−Z), altas, e variam com a semente', () => {
+    const back = northWallGap(36, 0.18) - 0.02;
+    const g = buildShelves(back, 1);
+    expect(drawn(g)).toHaveLength(1);
+    const box = new THREE.Box3().setFromObject(g);
+    expect(box.min.z).toBeGreaterThanOrEqual(-back - 1e-6);
+    expect(box.min.z).toBeLessThan(-back + 0.1);
+    expect(meters(box.max.y)).toBeGreaterThan(1.5);
+    // a semente muda a arrumação dos andares
+    const positions = (seed: number) => (drawn(buildShelves(back, seed))[0].geometry.getAttribute('position').array as Float32Array).join();
+    expect(positions(1)).not.toBe(positions(2));
+  });
+
+  it('rack da TV: baixo, encostado na divisória (+X), com o quadro de avião na parede acima', () => {
+    const back = 1.5 - 0.09 - 0.02;
+    const g = buildTvRack(back, 0.4);
+    expect(drawn(g)).toHaveLength(1);
+    const box = new THREE.Box3().setFromObject(g);
+    expect(box.max.x).toBeLessThanOrEqual(back + 1e-6);
+    // o quadro fica bem acima do rack (que é baixo)
+    expect(meters(box.max.y)).toBeGreaterThan(1.6);
   });
 
   it('cama de solteiro: cabeceira encostada na parede (+Z), baixa e do tamanho de uma cama', () => {

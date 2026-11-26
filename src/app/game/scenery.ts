@@ -1,7 +1,17 @@
 import * as THREE from 'three';
 import { HexCoord, hexKey, hexToWorld } from './hex';
 import { METER } from './character-model';
-import { buildBed, buildCabinet, buildDiningTable, buildKeyBoard, buildNightstand, northWallGap, southWallGap } from './prop-models';
+import {
+  buildBed,
+  buildCabinet,
+  buildDiningTable,
+  buildKeyBoard,
+  buildNightstand,
+  buildShelves,
+  buildTvRack,
+  northWallGap,
+  southWallGap,
+} from './prop-models';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
@@ -324,8 +334,158 @@ function slice(geo: THREE.BufferGeometry, start: number, count: number): THREE.B
   return out;
 }
 
-/** Uma janela da casa: no meio do caminho entre os centros de dois hexágonos vizinhos da mesma parede. */
-export type HouseWindow = [HexCoord, HexCoord];
+/** Névoa de um cômodo: o grupo (na cena) e o passo da animação (`amount` 1 = cheia, 0 = sumiu). */
+export interface RoomFog {
+  group: THREE.Group;
+  update(t: number, amount: number): void;
+  /** Libera as texturas (geometrias e materiais saem com o `traverse` da cena). */
+  dispose(): void;
+}
+
+/** Textura de névoa: manchas brancas e macias sobre um véu contínuo (sem furos), repete nos dois sentidos. */
+function fogTexture(): THREE.CanvasTexture {
+  const S = 128;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = S;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
+    ctx.fillRect(0, 0, S, S);
+    let r = 7;
+    const rnd = () => (r = (r * 9301 + 49297) % 233280) / 233280;
+    for (let i = 0; i < 26; i++) {
+      const x = rnd() * S;
+      const y = rnd() * S;
+      const rad = 14 + rnd() * 30;
+      // cada mancha desenhada também do outro lado da borda, para a textura emendar
+      for (const dx of [-S, 0, S]) {
+        for (const dy of [-S, 0, S]) {
+          const g = ctx.createRadialGradient(x + dx, y + dy, 0, x + dx, y + dy, rad);
+          g.addColorStop(0, 'rgba(255, 255, 255, 0.55)');
+          g.addColorStop(1, 'rgba(255, 255, 255, 0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(x + dx - rad, y + dy - rad, rad * 2, rad * 2);
+        }
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(canvas);
+  tex.wrapS = THREE.RepeatWrapping;
+  tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.SRGBColorSpace;
+  return tex;
+}
+
+/** Máscara das bordas da névoa: branca no meio, apagando perto das paredes (sem a cara de placa). */
+function fogEdgeTexture(): THREE.CanvasTexture {
+  const S = 64;
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = S;
+  const ctx = canvas.getContext('2d');
+  if (ctx) {
+    const img = ctx.createImageData(S, S);
+    for (let y = 0; y < S; y++) {
+      for (let x = 0; x < S; x++) {
+        const edge = Math.min(x, y, S - 1 - x, S - 1 - y) / (S * 0.08);
+        const v = Math.round(255 * (0.45 + 0.55 * Math.min(1, edge) ** 1.5));
+        img.data.set([v, v, v, 255], (y * S + x) * 4);
+      }
+    }
+    ctx.putImageData(img, 0, 0);
+  }
+  return new THREE.CanvasTexture(canvas);
+}
+
+/**
+ * Névoa dentro de um cômodo da casa (`room`: os hexágonos de piso, sem as paredes): camadas
+ * horizontais translúcidas, do chão até uns 2 m, que vão à deriva devagar, e uma cortina em pé
+ * rente a cada parede. Vista de cima, as camadas somadas tapam o que há no cômodo. Não projeta
+ * sombra nem bloqueia nada.
+ */
+export function buildRoomFog(room: { cols: [number, number]; rows: [number, number] }, size: number): RoomFog {
+  const group = new THREE.Group();
+  const colX = (col: number) => hexToWorld({ col, row: 0 }, size).x;
+  const rowZ = (row: number) => hexToWorld({ col: 0, row }, size).z + (Math.sqrt(3) * size) / 4;
+  // de face a face das paredes em volta (as colunas e fileiras de parede vizinhas ao cômodo)
+  const x0 = colX(room.cols[0] - 1) + WALL_THICKNESS / 2;
+  const x1 = colX(room.cols[1] + 1) - WALL_THICKNESS / 2;
+  const z0 = rowZ(room.rows[0] - 1) + WALL_THICKNESS / 2;
+  const z1 = rowZ(room.rows[1] + 1) - WALL_THICKNESS / 2;
+  const base = fogTexture();
+  const edges = fogEdgeTexture();
+  const maps: THREE.Texture[] = [];
+  const geo = new THREE.PlaneGeometry(x1 - x0, z1 - z0);
+  geo.rotateX(-Math.PI / 2);
+  const n = 7;
+  const top = HOUSE_WALL_HEIGHT * 0.78;
+  const layer = (geometry: THREE.BufferGeometry, i: number, opacity: number, x: number, y: number, z: number, bob: boolean) => {
+    const map = base.clone();
+    maps.push(map);
+    map.repeat.set(1.2 + (i % 3) * 0.35, 1 + ((i + 1) % 3) * 0.3);
+    map.rotation = i * 0.9;
+    const material = new THREE.MeshBasicMaterial({
+      map,
+      alphaMap: edges,
+      color: 0xc8d2d8,
+      transparent: true,
+      opacity,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+    });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.position.set(x, y, z);
+    mesh.renderOrder = 2;
+    group.add(mesh);
+    return { mesh, material, opacity, y, bob, speed: (i % 2 ? 1 : -1) * (0.012 + i * 0.003) };
+  };
+  // camadas deitadas, até uns 2 m (acima do armário), abaixo do alto da parede: a parede
+  // continua aparecendo; as de cima um pouco mais densas: de cima, o cômodo some
+  const layers = Array.from({ length: n }, (_, i) =>
+    layer(geo, i, 0.5 + (0.3 * i) / (n - 1), (x0 + x1) / 2, 0.12 + (i / (n - 1)) * (top - 0.12), (z0 + z1) / 2, true),
+  );
+  // e uma cortina em pé rente a cada parede: de lado (ou com a parede da frente recolhida),
+  // o que está colado nela também some
+  const cx = (x0 + x1) / 2;
+  const cz = (z0 + z1) / 2;
+  const sides: [number, number, number, number][] = [
+    [x1 - x0, cx, z0 + 0.05, 0],
+    [x1 - x0, cx, z1 - 0.05, 0],
+    [z1 - z0, x0 + 0.05, cz, Math.PI / 2],
+    [z1 - z0, x1 - 0.05, cz, Math.PI / 2],
+  ];
+  sides.forEach(([w, x, z, turn], i) => {
+    const curtain = new THREE.PlaneGeometry(w, top);
+    curtain.rotateY(turn);
+    layers.push(layer(curtain, n + i, 0.85, x, top / 2, z, false));
+  });
+  return {
+    group,
+    update(t: number, amount: number): void {
+      const shown = amount > 0;
+      for (const l of layers) {
+        l.mesh.visible = shown;
+        if (!shown) continue;
+        l.material.opacity = l.opacity * amount;
+        l.material.map!.offset.set(t * l.speed, t * l.speed * 0.6);
+        // ao se desfazer, a névoa sobe e se espalha um pouco
+        const rise = (1 - amount) * 0.6;
+        l.mesh.position.y = l.y + rise + (l.bob ? Math.sin(t * 0.5 + l.y) * 0.04 : 0);
+      }
+    },
+    dispose(): void {
+      for (const map of maps) map.dispose();
+      base.dispose();
+      edges.dispose();
+    },
+  };
+}
+
+/**
+ * Uma janela da casa: no meio do caminho entre os centros de dois hexágonos vizinhos da mesma
+ * parede. O terceiro valor, se houver, é a largura em metros (sem ele, `WINDOW_WIDTH`): janela
+ * larga vira uma fileira de vãos de uns 80 cm, cada um com o seu par de folhas.
+ */
+export type HouseWindow = [HexCoord, HexCoord, number?];
 
 /** Janela: 80 cm de largura, peitoril a 0,95 m e verga a 2,0 m do chão. */
 const WINDOW_WIDTH = 0.8 * METER;
@@ -421,10 +581,10 @@ export function buildHouse(
   const key = (v: THREE.Vector2) => `${v.x.toFixed(3)},${v.y.toFixed(3)}`;
   const dir = (a: THREE.Vector2, b: THREE.Vector2) => b.clone().sub(a).normalize();
 
-  const openings = windows.map(([p, q]) => {
+  const openings = windows.map(([p, q, meters]) => {
     const a = hexToWorld(p, size);
     const b = hexToWorld(q, size);
-    return new THREE.Vector2((a.x + b.x) / 2, (a.z + b.z) / 2);
+    return { at: new THREE.Vector2((a.x + b.x) / 2, (a.z + b.z) / 2), width: meters ? meters * METER : WINDOW_WIDTH };
   });
   const W = WALL_THICKNESS;
   const root = new THREE.Object3D();
@@ -434,26 +594,34 @@ export function buildHouse(
     const p = { x: holder.position.x + Math.sin(r) * 0.4, z: holder.position.z + Math.cos(r) * 0.4 };
     return p.x > x0 && p.x < x1 && p.z > zBack && p.z < zFront ? 1 : -1;
   };
-  const windowFrame = (wall: string, holder: THREE.Object3D, s: number): void => {
-    const w = WINDOW_WIDTH;
+  const windowFrame = (wall: string, holder: THREE.Object3D, s: number, width: number): void => {
     const h = WINDOW_TOP - WINDOW_SILL;
     const cy = (WINDOW_SILL + WINDOW_TOP) / 2;
     const f = 0.07;
-    // batentes, verga e o peitoril (sai um pouco para os dois lados)
-    for (const x of [-1, 1]) box(wall, 'trim', f, h, W + 0.05, s + x * (w / 2 - f / 2), cy, 0, holder);
-    box(wall, 'trim', w, f, W + 0.05, s, WINDOW_TOP - f / 2, 0, holder);
-    box(wall, 'trim', w + 0.14, 0.05, W + 0.16, s, WINDOW_SILL, 0, holder);
-    // as duas folhas de tábua, abertas para dentro e encostadas quase rente à parede
+    // janela larga: vãos de uns 80 cm lado a lado, separados por montantes
+    const bays = Math.max(1, Math.round(width / WINDOW_WIDTH));
+    const w = width / bays;
+    // batentes (e montantes), verga e o peitoril (sai um pouco para os dois lados)
+    for (let i = 0; i <= bays; i++) {
+      const inset = i === 0 ? f / 2 : i === bays ? -f / 2 : 0;
+      box(wall, 'trim', f, h, W + 0.05, s - width / 2 + i * w + inset, cy, 0, holder);
+    }
+    box(wall, 'trim', width, f, W + 0.05, s, WINDOW_TOP - f / 2, 0, holder);
+    box(wall, 'trim', width + 0.14, 0.05, W + 0.16, s, WINDOW_SILL, 0, holder);
+    // em cada vão, as duas folhas de tábua, abertas para dentro e encostadas quase rente à parede
     const leafW = w / 2 - 0.01;
     const face = inward(holder);
-    for (const x of [-1, 1]) {
-      const hinge = new THREE.Object3D();
-      hinge.position.set(s + x * (w / 2), cy, face * (W / 2 + 0.03));
-      hinge.rotation.y = -x * face * 0.45;
-      holder.add(hinge);
-      const leaf = box(wall, 'shutter', leafW, h - 0.04, 0.035, x * (leafW / 2), 0, 0, hinge);
-      for (const y of [-0.3, 0.3]) box(wall, 'trim', leafW - 0.05, 0.06, 0.06, 0, y * h, 0, leaf);
-      box(wall, 'trim', 0.04, 0.03, 0.05, x * (leafW / 2 - 0.06), 0, face * 0.04, leaf);
+    for (let i = 0; i < bays; i++) {
+      const c = s - width / 2 + (i + 0.5) * w;
+      for (const x of [-1, 1]) {
+        const hinge = new THREE.Object3D();
+        hinge.position.set(c + x * (w / 2), cy, face * (W / 2 + 0.03));
+        hinge.rotation.y = -x * face * 0.45;
+        holder.add(hinge);
+        const leaf = box(wall, 'shutter', leafW, h - 0.04, 0.035, x * (leafW / 2), 0, 0, hinge);
+        for (const y of [-0.3, 0.3]) box(wall, 'trim', leafW - 0.05, 0.06, 0.06, 0, y * h, 0, leaf);
+        box(wall, 'trim', 0.04, 0.03, 0.05, x * (leafW / 2 - 0.06), 0, face * 0.04, leaf);
+      }
     }
   };
   for (const { a, b, wall } of segs) {
@@ -465,21 +633,20 @@ export function buildHouse(
     // janelas neste trecho (distância a partir do meio, ao longo da parede)
     const along = dir(a, b);
     const cuts = openings
-      .map((o) => ({ o, s: o.clone().sub(a).dot(along) - length / 2 }))
-      .filter(({ o, s }) => Math.abs(s) < length / 2 && a.clone().addScaledVector(along, s + length / 2).distanceTo(o) < 1e-3)
-      .map(({ s }) => s)
-      .sort((p, q) => p - q);
+      .map(({ at, width }) => ({ at, width, s: at.clone().sub(a).dot(along) - length / 2 }))
+      .filter(({ at, s }) => Math.abs(s) < length / 2 && a.clone().addScaledVector(along, s + length / 2).distanceTo(at) < 1e-3)
+      .sort((p, q) => p.s - q.s);
     const piece = (from: number, to: number, y0: number, y1: number) => {
       if (to - from > 1e-3 && y1 - y0 > 1e-3) box(wall, 'plank', to - from, y1 - y0, W, (from + to) / 2, (y0 + y1) / 2, 0, holder);
     };
     let from = -length / 2;
-    for (const s of cuts) {
-      const l = s - WINDOW_WIDTH / 2;
-      const r = s + WINDOW_WIDTH / 2;
+    for (const { s, width } of cuts) {
+      const l = s - width / 2;
+      const r = s + width / 2;
       piece(from, l, 0, H);
       piece(l, r, 0, WINDOW_SILL);
       piece(l, r, WINDOW_TOP, H);
-      windowFrame(wall, holder, s);
+      windowFrame(wall, holder, s, width);
       from = r;
     }
     piece(from, length / 2, 0, H);
@@ -808,13 +975,16 @@ export type CoverKind =
   | 'supplies'
   | 'keys'
   | 'bed'
-  | 'nightstand';
+  | 'nightstand'
+  | 'shelves'
+  | 'tv';
 
 /**
  * Monta a carga de um hexágono. `seed` varia a arrumação (giro, quantas peças, quais
- * pilhas são mais altas) sem mudar a altura total de cada tipo. O armário (`shelf`), a cama
- * (`bed`) e o quadro de chaves (`keys`) encostam na parede (do fundo da casa, da frente da casa
- * e do fundo do hangar); `col` (a coluna do hexágono)
+ * pilhas são mais altas) sem mudar a altura total de cada tipo. O armário (`shelf`) e as
+ * prateleiras (`shelves`), a cama (`bed`) e o quadro de chaves (`keys`) encostam na parede (do
+ * fundo da casa, da frente da casa e do fundo do hangar); o rack da TV (`tv`), na divisória a
+ * leste; `col` (a coluna do hexágono)
  * acerta a distância até a parede do fundo, que muda entre colunas pares e ímpares.
  */
 export function buildCover(kind: CoverKind, seed: number, col = 0): THREE.Group {
@@ -829,6 +999,9 @@ export function buildCover(kind: CoverKind, seed: number, col = 0): THREE.Group 
   if (kind === 'bed') return buildBed(southWallGap(col, WALL_THICKNESS) - 0.02);
   if (kind === 'nightstand') return buildNightstand(-0.45, southWallGap(col, WALL_THICKNESS) - 0.4);
   if (kind === 'keys') return buildKeyBoard(northWallGap(col, WALL_THICKNESS));
+  if (kind === 'shelves') return buildShelves(northWallGap(col, WALL_THICKNESS) - 0.02, seed);
+  // na divisória (centro da coluna de parede, 1,5 hexágono a leste), a TV virada para a mesa
+  if (kind === 'tv') return buildTvRack(1.5 - WALL_THICKNESS / 2 - 0.02, 0.4);
   if (kind === 'supplies') return supplyPile(seed);
   const rnd = seeded(seed);
   const g = new THREE.Group();
