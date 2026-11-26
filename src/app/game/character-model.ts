@@ -11,8 +11,8 @@ import { buildCuffClips } from './cuff-poses';
  * `tools/assets/build-anims.mjs`). Os loops tocam no relógio (`play`); os gestos do Modo Corrida
  * (`jump`, `slide`, `trip`, `crash`) são percorridos no tempo da regra (`scrub`). `cuffed` e `kneel`
  * (suspeito algemado, de pé e ajoelhado) não vêm do arquivo: são montados por código a partir do
- * `idle` (`cuff-poses.ts`). `kick` (o arrombamento, percorrido com `scrub`) e `look` (olha de um lado
- * para o outro, em loop) vêm de clipes CC0 avulsos (`tools/assets/cc0-clips`).
+ * `idle` (`cuff-poses.ts`). `kick` (uma joelhada) e `look` (olha de um lado para o outro, em loop) vêm
+ * de clipes CC0 avulsos (`tools/assets/cc0-clips`); o arrombamento não usa o `kick` (ver `LegPose`).
  */
 export type ClipName =
   | 'idle'
@@ -128,6 +128,32 @@ export const restPose = (): Pose =>
 const X_AXIS = new THREE.Vector3(1, 0, 0);
 const poseTurn = new THREE.Quaternion();
 
+/**
+ * Perna direita posta à mão no espaço do corpo (`CharacterRig.leg`), para gestos que o `idle` não
+ * pode atrapalhar (o chute do arrombamento). Os ângulos (rad) giram em volta do eixo lateral do
+ * corpo, a partir da perna do bind pose (reta para baixo, pé para a frente), e não do clipe:
+ * - `hip` > 0 levanta a coxa para a frente (flexão do quadril; ~1,6 = coxa na horizontal);
+ * - `knee` > 0 dobra o joelho (a canela vai para trás da coxa);
+ * - `ankle` > 0 puxa a ponta do pé para cima.
+ * `weight` mistura do clipe (0) até a pose (1), osso a osso.
+ *
+ * A camada local (`POSE_BONES`) gira cada osso no próprio eixo X, que na perna dos corpos da UAL
+ * não é o eixo do joelho (na canela ele fica ~45° fora, e o `idle` já deixa a perna de trás
+ * torta): serve para ajustes pequenos, não para levar o joelho ao peito.
+ */
+export interface LegPose {
+  weight: number;
+  hip: number;
+  knee: number;
+  ankle: number;
+}
+export const restLeg = (): LegPose => ({ weight: 0, hip: 0, knee: 0, ankle: 0 });
+const LEG_BONES = ['thigh_r', 'calf_r', 'foot_r'] as const;
+const legTurn = new THREE.Quaternion();
+const legGoal = new THREE.Quaternion();
+const legParent = new THREE.Quaternion();
+const legRoot = new THREE.Quaternion();
+
 /** Quanto da cor de `tint` entra no material (0 = nada, 1 = cor cheia). */
 const TINT_STRENGTH = 0.6;
 
@@ -171,13 +197,19 @@ export class CharacterRig {
   private current: THREE.AnimationAction | null = null;
   /**
    * Camada procedural por cima do clipe (em radianos, aplicada depois do mixer; ver
-   * `POSE_BONES`): a biblioteca de clipes não tem chute, então o arrombamento monta o golpe à
-   * mão (pernas, tronco e braços).
+   * `POSE_BONES`): o arrombamento monta o golpe à mão (perna de apoio, tronco e braços; a perna
+   * do chute vai em `leg`), e a posição de largada de quem foge também.
    */
   readonly pose: Pose = restPose();
   private readonly bones: Partial<Record<PoseKey, THREE.Object3D>> = {};
   /** Ângulos aplicados no último quadro: desfeitos antes do mixer (osso sem trilha no clipe não acumula). */
   private readonly applied: Partial<Record<PoseKey, number>> = {};
+  /** Perna direita no espaço do corpo, por cima de tudo (ver `LegPose`). */
+  readonly leg: LegPose = restLeg();
+  /** Ossos da perna, com a orientação de cada um no bind pose, no espaço do corpo. */
+  private readonly legBones: { bone: THREE.Object3D; bind: THREE.Quaternion }[] = [];
+  /** Rotações locais que o clipe deu à perna no último quadro (devolvidas antes do mixer). */
+  private legSaved: THREE.Quaternion[] | null = null;
   /** Argolas e corrente da algema (criadas no primeiro `setCuffed(true)`). */
   private cuffs: { rings: THREE.Mesh[]; link: THREE.Mesh } | null = null;
 
@@ -195,6 +227,12 @@ export class CharacterRig {
     for (const [key, name] of Object.entries(POSE_BONES) as [PoseKey, string][]) {
       const bone = object.getObjectByName(name);
       if (bone) this.bones[key] = bone;
+    }
+    // aqui o esqueleto ainda está no bind pose e a raiz sem giro: o mundo é o espaço do corpo
+    object.updateMatrixWorld(true);
+    const legBones = LEG_BONES.map((n) => object.getObjectByName(n));
+    if (legBones.every((b) => b?.parent)) {
+      for (const bone of legBones) this.legBones.push({ bone: bone!, bind: bone!.getWorldQuaternion(new THREE.Quaternion()) });
     }
   }
 
@@ -321,6 +359,28 @@ export class CharacterRig {
     this.cuffs.link.visible = on;
   }
 
+  /**
+   * Põe a perna direita na pose `leg`: cada osso vai para a orientação do bind pose girada em
+   * volta do eixo lateral do corpo (a soma dos ângulos até ele: a canela gira junto com a coxa),
+   * misturada com a do clipe por `weight`. Os giros do clipe são guardados e voltam no próximo
+   * quadro, antes do mixer.
+   */
+  private placeLeg(): void {
+    const { weight, hip, knee, ankle } = this.leg;
+    const angles = [-hip, -hip + knee, -hip + knee - ankle];
+    this.legSaved = this.legBones.map((b) => b.bone.quaternion.clone());
+    this.object.getWorldQuaternion(legRoot);
+    this.legBones.forEach((b, i) => {
+      const parent = b.bone.parent!;
+      parent.updateWorldMatrix(true, false);
+      parent.getWorldQuaternion(legParent);
+      legGoal.copy(legRoot).multiply(legTurn.setFromAxisAngle(X_AXIS, angles[i])).multiply(b.bind);
+      legGoal.premultiply(legParent.invert());
+      b.bone.quaternion.slerp(legGoal, Math.min(1, weight));
+      b.bone.updateMatrixWorld();
+    });
+  }
+
   /** Estica a corrente da algema entre as argolas, na pose deste quadro. */
   private placeCuffLink(): void {
     const c = this.cuffs!;
@@ -339,6 +399,10 @@ export class CharacterRig {
       this.bones[k]?.quaternion.multiply(poseTurn.setFromAxisAngle(X_AXIS, -this.applied[k]!));
       delete this.applied[k];
     }
+    if (this.legSaved) {
+      this.legBones.forEach((b, i) => b.bone.quaternion.copy(this.legSaved![i]));
+      this.legSaved = null;
+    }
     this.mixer.update(dt);
     for (const key in this.pose) {
       const k = key as PoseKey;
@@ -348,6 +412,7 @@ export class CharacterRig {
       bone.quaternion.multiply(poseTurn.setFromAxisAngle(X_AXIS, angle));
       this.applied[k] = angle;
     }
+    if (this.leg.weight > 0 && this.legBones.length) this.placeLeg();
     if (this.cuffs?.link.visible) this.placeCuffLink();
   }
 
