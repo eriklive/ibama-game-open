@@ -34,7 +34,7 @@ import {
 } from './interrogation';
 import { MAPS } from './maps';
 import { objectiveState } from './mission';
-import { needsNoticeRoll } from './search';
+import { needsPropRoll } from './search';
 import { KEY_PANEL_ID, KEY_TAKEN, PLANE_LOCKED } from './plane';
 import { GUN_OWNER, MORE_PEOPLE, NPC_CLASSES, isMorePeople, npcClass } from './npc-dialogue';
 
@@ -289,12 +289,6 @@ describe('confissão que entrega o esconderijo', () => {
     'Olha, é melhor falar agora. Se a gente achar, complica pra você.',
   ];
   const aeroporto = MAPS.find((m) => m.id === 'aeroporto')!;
-  const arma = aeroporto.hidden!.find((h) => h.id === 'arma')!;
-  // entrando no quarto de trás (o cômodo da prateleira)
-  const path = [
-    { col: 35, row: 29 },
-    { col: 36, row: 29 },
-  ];
   const investigar = aeroporto.objectives!.find((o) => o.id === 'investigar-casa')!;
   const progress = (noticed: ReadonlySet<string>) => ({
     enemies: [],
@@ -303,7 +297,7 @@ describe('confissão que entrega o esconderijo', () => {
     burned: new Set<string>(),
   });
 
-  it('o caseiro confessa (em qualquer nível): a arma conta como percebida e pula a percepção', () => {
+  it('o caseiro confessa (em qualquer nível): a arma conta como percebida e o zoom no armário não rola percepção', () => {
     for (let level = 0; level < 3; level++) {
       let m = EMPTY_MEMORY;
       let last;
@@ -315,12 +309,12 @@ describe('confissão que entrega o esconderijo', () => {
       expect(out.notices, `nível ${level}`).toBe('arma');
       const noticed = noticedAfter(new Set(), out);
       expect(noticed.has('arma')).toBe(true);
-      expect(needsNoticeRoll(arma, 'ana', path, noticed, new Set())).toBe(false);
+      expect(needsPropRoll('arma', 'ana', noticed.has('arma'), new Set())).toBe(false);
       expect(objectiveState(investigar, progress(noticed))).toBe('done');
     }
   });
 
-  it('sem confissão, tudo como antes: rola percepção ao entrar e o objetivo segue aberto', () => {
+  it('sem confissão, tudo como antes: o zoom no armário rola percepção e o objetivo segue aberto', () => {
     const lies = ARMA_CASA.reduce(
       (acc, q) => {
         const r = ask(caseiro, acc.m, q, 20);
@@ -334,10 +328,10 @@ describe('confissão que entrega o esconderijo', () => {
       noticed = noticedAfter(noticed, o);
     }
     expect(noticed.size).toBe(0);
-    expect(needsNoticeRoll(arma, 'ana', path, noticed, new Set())).toBe(true);
-    // quem já rolou ali não rola de novo; fora do cômodo, não rola
-    expect(needsNoticeRoll(arma, 'ana', path, noticed, new Set(['arma:ana']))).toBe(false);
-    expect(needsNoticeRoll(arma, 'ana', [{ col: 33, row: 29 }], noticed, new Set())).toBe(false);
+    expect(needsPropRoll('arma', 'ana', noticed.has('arma'), new Set())).toBe(true);
+    // quem já rolou ali não rola de novo; os outros agentes ainda rolam
+    expect(needsPropRoll('arma', 'ana', noticed.has('arma'), new Set(['arma:ana']))).toBe(false);
+    expect(needsPropRoll('arma', 'bruno', noticed.has('arma'), new Set(['arma:ana']))).toBe(true);
     expect(objectiveState(investigar, progress(noticed))).toBe('open');
   });
 });
@@ -489,7 +483,7 @@ describe('perguntas que surgem (e somem) com pistas da missão', () => {
     expect(res.map((a) => a.closing)).toEqual([
       null,
       null,
-      'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
+      'Claro. A arma entrou sozinha e foi se esconder no armário.',
     ]);
     expect(res[2].unlocked).toBeNull();
     expect(res[2].outcome.clue).toBeUndefined();

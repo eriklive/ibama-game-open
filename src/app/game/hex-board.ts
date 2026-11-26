@@ -6,6 +6,7 @@ import { CharacterRig, ClipName, METER, ModelDef } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
+import { PropInfo } from './prop-models';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
@@ -280,6 +281,29 @@ const INSPECT_CAM = {
 } as const;
 
 /**
+ * Zoom num móvel (ver `HexBoard.propCloseUp`): a câmera fica de frente para ele, quase na
+ * altura dos olhos, e chega até a caixa de foco do móvel caber (com folga) no que a papelada
+ * não cobre, um pouco acima do meio.
+ */
+const PROP_CAM = {
+  /** Inclinação (de frente, quase na horizontal). */
+  pitch: THREE.MathUtils.degToRad(12),
+  /** Giro para longe do lado em que o agente está (ele não tapa a vista). */
+  turn: THREE.MathUtils.degToRad(8),
+  /** Folga em volta da caixa de foco. */
+  margin: 1.1,
+  /** Faixa livre de cima (fração da altura da tela) e distância mínima. */
+  top: 0.06,
+  minDist: 1.2,
+  /**
+   * Quem está na frente do móvel some no zoom: mais de `clearance` à frente dele e até `aside`
+   * além da largura dele, de lado (unidades do mundo).
+   */
+  clearance: 0.4,
+  aside: 1.6,
+} as const;
+
+/**
  * Close-up no próprio tabuleiro (ver `HexBoard.closeUp`): `object` mira entre um objeto e o
  * agente (inspeção do móvel); `pair` enquadra o agente e outra pessoa em pé, de lado
  * (interrogatório). `insets` diz quanto da tela a papelada cobre (frações da altura, embaixo,
@@ -302,7 +326,9 @@ export interface CloseUpInsets {
 interface CloseUpView {
   target: THREE.Vector3;
   dir: THREE.Vector3;
-  frame: 'object' | 'pair';
+  /** `prop`: zoom num móvel (ver `propCloseUp`), com `fit` (largura e altura a enquadrar). */
+  frame: 'object' | 'pair' | 'prop';
+  fit?: { w: number; h: number };
   insets: CloseUpInsets;
   /** Pontos (mundo) que a câmera precisa enxergar: o agente e o objeto / a pessoa. */
   subjects: THREE.Vector3[];
@@ -371,10 +397,13 @@ export interface HexBoardCallbacks {
   onHexTap(hex: HexCoord | null): void;
   /** Toque numa peça de personagem (ou no hexágono em que ela está). */
   onUnitTap(id: string): void;
-  /** Toque na lupa (ou no móvel debaixo dela). */
-  onClueTap?(): void;
   /** Toque direto num alvo com contorno (o avião, os suprimentos): ver `setTargetOutlines`. */
   onTargetTap?(id: string): void;
+  /**
+   * Toque no zoom de um móvel (ver `propCloseUp`): `item` na peça destacável (a chave do avião,
+   * a arma), `other` no resto do móvel.
+   */
+  onPropTap?(part: 'item' | 'other'): void;
 }
 
 /**
@@ -464,11 +493,19 @@ export class HexBoard {
   private doorStates: ReadonlyMap<string, Door> = new Map();
   /** Falas em balão sobre a cabeça dos inimigos (some sozinha em `until`, no relógio do tabuleiro). */
   private readonly speeches = new Map<string, { sprite: THREE.Sprite; until: number }>();
-  /** Pista de algo escondido: uma lupa flutuando sobre o móvel percebido. */
-  private clue?: { sprite: THREE.Sprite; hex: HexCoord };
   /** Modelo do avião e da carga por hexágono: o que escurece quando pega fogo. */
   private planeModel?: THREE.Object3D;
   private readonly cargoModels = new Map<string, THREE.Object3D>();
+  /** Móveis com zoom (o quadro de chaves, o armário), por hexágono: ver `propCloseUp`. */
+  private readonly props = new Map<string, PropInfo>();
+  /** O móvel em zoom agora (os toques vão para `onPropTap`). */
+  private propOpen: PropInfo | null = null;
+  /** Peças destacadas (a percepção passou): brilham e pulsam. */
+  private readonly glowing = new Set<PropInfo>();
+  /** Peça sendo pega: sobe e some (ver `takePropItem`). */
+  private taking: { info: PropInfo; t0: number; y: number } | null = null;
+  /** Personagens escondidos por taparem a vista do zoom no móvel. */
+  private readonly propHidden = new Set<string>();
   /** Alvos da missão (queimar): um ícone de chama flutua sobre cada um até ele queimar. */
   private readonly targets = new Map<string, { sprite: THREE.Sprite; center: THREE.Vector3; height: number }>();
   /**
@@ -908,7 +945,7 @@ export class HexBoard {
    *
    * O agente `agentId` vira para o `target` (e `faceEnemy`, para o agente). Enquanto durar, o
    * jogador não mexe na câmera (arrastar, pinça, roda e controle são ignorados) e o tabuleiro
-   * só aceita toque na lupa. `endCloseUp` volta, suave, para a câmera de sempre.
+   * ignora os toques. `endCloseUp` volta, suave, para a câmera de sempre.
    */
   closeUp(agentId: string, target: HexCoord | THREE.Object3D, opts: CloseUpOptions = {}): void {
     const u = this.units.get(agentId);
@@ -972,7 +1009,127 @@ export class HexBoard {
   endCloseUp(): void {
     if (!this.inspect) return;
     this.inspect = null;
+    this.propOpen = null;
     if (reducedMotionQuery()) this.inspectBlend = 0;
+  }
+
+  /**
+   * Zoom num móvel (o quadro de chaves, o armário do caseiro): a câmera fica de frente para
+   * ele, quase na altura dos olhos, e aproxima até a caixa de foco caber no que a papelada não
+   * cobre (`insets`). Gira um pouco para longe do agente `agentId`, e quem ainda tapar a vista
+   * some enquanto durar. Como em `closeUp`, a câmera fica travada; os toques no móvel vão para
+   * `onPropTap`. Devolve `false` se o hexágono não tem móvel com zoom.
+   */
+  propCloseUp(agentId: string, hex: HexCoord, insets: CloseUpInsets = { bottom: 0, right: 0 }): boolean {
+    const model = this.cargoModels.get(hexKey(hex));
+    const info = this.props.get(hexKey(hex));
+    const u = this.units.get(agentId);
+    if (!model || !info || !u) return false;
+    model.updateWorldMatrix(true, true);
+    const box = info.focus.clone().applyMatrix4(model.matrixWorld);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const facing = info.facing.clone().transformDirection(model.matrixWorld).setY(0).normalize();
+    const side = new THREE.Vector3(-facing.z, 0, facing.x);
+    const agent = this.worldOf(u.hex);
+    const away = -(Math.sign(agent.clone().sub(center).dot(side)) || 1);
+    const dir = facing.clone().multiplyScalar(Math.cos(PROP_CAM.turn)).addScaledVector(side, away * Math.sin(PROP_CAM.turn));
+    this.inspect = {
+      target: center,
+      dir,
+      frame: 'prop',
+      fit: { w: Math.abs(size.x * side.x) + Math.abs(size.z * side.z), h: size.y },
+      insets,
+      subjects: [center],
+      rooms: new Set(this.structures.filter((st) => inStructure(hex, st.rect)).map((st) => st.object)),
+      hideOccluders: true,
+    };
+    this.propOpen = info;
+    this.occlusionClock = 0;
+    this.inspectLast = this.inspect;
+    if (reducedMotionQuery()) this.inspectBlend = 1;
+    u.yaw = Math.atan2(center.x - agent.x, center.z - agent.z);
+    this.pointers.clear();
+    this.tapStart = null;
+    this.pinchDist = 0;
+    return true;
+  }
+
+  /** Liga (ou apaga) o destaque da peça do móvel em `hex`: contorno amarelo e brilho que pulsam. */
+  setPropHighlight(hex: HexCoord, on: boolean): void {
+    const info = this.props.get(hexKey(hex));
+    if (!info) return;
+    info.glow.visible = on && info.item.visible;
+    if (info.glow.visible) this.glowing.add(info);
+    else this.unglow(info);
+  }
+
+  private unglow(info: PropInfo): void {
+    this.glowing.delete(info);
+    info.glow.visible = false;
+    (info.item.material as THREE.MeshStandardMaterial).emissive.setRGB(0, 0, 0);
+  }
+
+  /** A peça do móvel em `hex` foi pega: sobe um pouco, encolhe e some (sem animação, some já). */
+  takePropItem(hex: HexCoord): void {
+    const info = this.props.get(hexKey(hex));
+    if (!info || !info.item.visible) return;
+    this.unglow(info);
+    if (reducedMotionQuery()) {
+      info.item.visible = false;
+      return;
+    }
+    this.taking = { info, t0: performance.now(), y: info.item.position.y };
+  }
+
+  /** Recomeço: as peças voltam para os móveis, sem destaque. */
+  resetProps(): void {
+    this.finishTaking();
+    for (const info of this.props.values()) {
+      this.unglow(info);
+      info.item.visible = true;
+    }
+  }
+
+  /** Anima a peça sendo pega e o pulso do destaque (a cada quadro). */
+  private updateProps(t: number): void {
+    if (this.taking) {
+      const k = Math.min(1, (performance.now() - this.taking.t0) / 520);
+      const item = this.taking.info.item;
+      item.position.y = this.taking.y + Math.sin(k * Math.PI * 0.5) * 0.25;
+      item.scale.setScalar(1 - k * k * 0.85);
+      if (k >= 1) this.finishTaking();
+    }
+    if (!this.glowing.size) return;
+    const a = 0.5 + Math.sin(t * 5) * 0.5;
+    for (const info of this.glowing) {
+      const glow = info.glow.material as THREE.MeshBasicMaterial;
+      glow.opacity = 0.55 + a * 0.45;
+      glow.color.setRGB(1, 0.8 + a * 0.15, 0.15 + a * 0.4);
+      (info.item.material as THREE.MeshStandardMaterial).emissive.setRGB(0.16 + a * 0.2, 0.12 + a * 0.15, 0.01);
+    }
+  }
+
+  private finishTaking(): void {
+    const tk = this.taking;
+    if (!tk) return;
+    this.taking = null;
+    tk.info.item.visible = false;
+    tk.info.item.position.y = tk.y;
+    tk.info.item.scale.setScalar(1);
+  }
+
+  /**
+   * No zoom de um móvel, o personagem `group` está na frente dele, dentro do quadro (de lado,
+   * até um pouco além da largura do móvel): some enquanto durar, para o móvel ficar limpo.
+   */
+  private blocksProp(group: THREE.Object3D): boolean {
+    const v = this.inspect;
+    if (v?.frame !== 'prop' || !v.fit || this.inspectBlend < 0.15) return false;
+    const rel = group.position.clone().sub(v.target).setY(0);
+    const dir = v.dir.clone().setY(0).normalize();
+    const side = new THREE.Vector3(-dir.z, 0, dir.x);
+    return rel.dot(dir) > PROP_CAM.clearance && Math.abs(rel.dot(side)) < v.fit.w / 2 + PROP_CAM.aside;
   }
 
   /** Muda o que a papelada cobre durante o close-up (ao girar o celular, por exemplo). */
@@ -2286,8 +2443,10 @@ export class HexBoard {
       const tile = this.tiles.get(hexKey(c));
       if (!tile) continue;
       tile.baseColor.set(0xa8987a);
-      const model = buildCover(c.kind, c.col * 31 + c.row * 17);
+      const model = buildCover(c.kind, c.col * 31 + c.row * 17, c.col);
       this.cargoModels.set(hexKey(c), model);
+      const prop = model.userData['prop'] as PropInfo | undefined;
+      if (prop) this.props.set(hexKey(c), prop);
       this.field.attach(tile, this.housed(c, model));
     }
     for (const h of this.map.props ?? []) {
@@ -2403,26 +2562,6 @@ export class HexBoard {
     return seeThroughDoors(doors, this.doorStates);
   }
 
-  /**
-   * Pista de algo escondido: uma lupa flutua sobre o hexágono (o móvel em que alguém
-   * reparou). `null` tira a pista.
-   */
-  setClue(hex: HexCoord | null): void {
-    if (!hex) {
-      if (this.clue) this.clue.sprite.visible = false;
-      return;
-    }
-    if (!this.clue) {
-      const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: this.clueTexture(), depthTest: false }));
-      sprite.scale.set(0.8, 0.8, 1);
-      sprite.renderOrder = 10;
-      this.scene.add(sprite);
-      this.clue = { sprite, hex };
-    }
-    this.clue.hex = { ...hex };
-    this.clue.sprite.visible = true;
-  }
-
   // ---------- fogo (missão: queimar o avião e os suprimentos) ----------
 
   /**
@@ -2479,10 +2618,14 @@ export class HexBoard {
         const meshes: THREE.Mesh[] = [];
         model.traverse((o) => {
           const m = o as THREE.Mesh;
+          if (m.userData['noOutline']) return;
           if (m.isMesh && !(m as THREE.InstancedMesh).isInstancedMesh && !(m as THREE.SkinnedMesh).isSkinnedMesh) meshes.push(m);
         });
-        for (const mesh of meshes) {
-          const geo = mesh.geometry;
+        // malha juntada (o quadro de chaves, o armário): o contorno sai só das peças da silhueta
+        const pieces = meshes.flatMap((mesh) =>
+          ((mesh.userData['outlineParts'] as THREE.BufferGeometry[] | undefined) ?? [mesh.geometry]).map((geo) => ({ mesh, geo })),
+        );
+        for (const { mesh, geo } of pieces) {
           if (!geo.boundingBox) geo.computeBoundingBox();
           const box = geo.boundingBox!;
           box.getSize(size);
@@ -3138,32 +3281,6 @@ export class HexBoard {
       if (!target.sprite.visible) continue;
       target.sprite.position.set(target.center.x, target.height + Math.sin(t * 2.6) * 0.1, target.center.z);
     }
-  }
-
-  /** Lupa amarela num círculo escuro (desenhada num canvas). */
-  private clueTexture(): THREE.Texture {
-    const c = document.createElement('canvas');
-    c.width = c.height = 128;
-    const g = c.getContext('2d');
-    if (g) {
-      g.fillStyle = '#0b1d24';
-      g.beginPath();
-      g.arc(64, 64, 58, 0, Math.PI * 2);
-      g.fill();
-      g.strokeStyle = '#ffd43b';
-      g.lineWidth = 12;
-      g.lineCap = 'round';
-      g.beginPath();
-      g.arc(56, 54, 24, 0, Math.PI * 2);
-      g.stroke();
-      g.beginPath();
-      g.moveTo(74, 72);
-      g.lineTo(96, 96);
-      g.stroke();
-    }
-    const tex = new THREE.CanvasTexture(c);
-    tex.colorSpace = THREE.SRGBColorSpace;
-    return tex;
   }
 
   private addScenery(object: THREE.Object3D): void {
@@ -3847,14 +3964,26 @@ export class HexBoard {
       const mid = c.pair.top + band / 2;
       this.viewShift.y += (0.5 - mid) * this.canvas.clientHeight * e;
       this.viewShift.x += (v.insets.right / 2) * this.canvas.clientWidth * e;
+    } else if (v.frame === 'prop' && v.fit) {
+      // aproxima até a caixa de foco caber (altura e largura) no que a papelada não cobre
+      const band = Math.max(0.3, 1 - v.insets.bottom - PROP_CAM.top);
+      const wide = Math.max(0.35, 1 - v.insets.right);
+      const tanH = Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+      const byHeight = (v.fit.h * PROP_CAM.margin) / band / (2 * tanH);
+      const byWidth = (v.fit.w * PROP_CAM.margin) / wide / (Math.max(this.camera.aspect, 0.3) * 2 * tanH);
+      near = Math.max(PROP_CAM.minDist, byHeight, byWidth);
+      const mid = PROP_CAM.top + band / 2;
+      this.viewShift.y += (0.5 - mid) * this.canvas.clientHeight * e;
+      this.viewShift.x += (v.insets.right / 2) * this.canvas.clientWidth * e;
     } else {
       const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
       near = c.dist * Math.min(portrait, c.portraitMax);
     }
+    const pitch = v.frame === 'prop' ? PROP_CAM.pitch : c.pitch;
     const pos = v.target
       .clone()
-      .addScaledVector(v.dir, Math.cos(c.pitch) * near)
-      .setY(v.target.y + Math.sin(c.pitch) * near);
+      .addScaledVector(v.dir, Math.cos(pitch) * near)
+      .setY(v.target.y + Math.sin(pitch) * near);
     this.camera.position.lerp(pos, e);
     look.lerp(v.target, e);
     return THREE.MathUtils.lerp(dist, near, e);
@@ -3941,7 +4070,8 @@ export class HexBoard {
 
     for (const u of this.units.values()) {
       const active = u.id === this.activeId;
-      u.group.visible = u.shadow.visible = this.stream.inLoadRadius(u.group.position.x, u.group.position.z);
+      u.group.visible = u.shadow.visible =
+        this.stream.inLoadRadius(u.group.position.x, u.group.position.z) && !this.blocksProp(u.group);
       if (u.rig) {
         // personagem com modelo: fica de pé sobre o hexágono (acompanha a flutuação do caminho)
         // e vira suavemente para onde vai; quem está na vez é marcado só pelo anel
@@ -4035,6 +4165,7 @@ export class HexBoard {
     // só o que mudou neste quadro vai para a placa de vídeo
     field.flush();
 
+    this.updateProps(t);
     if (this.outlinesOn && this.outlined.size) {
       // amarelo suave que respira devagar: dá para tocar
       const k = 0.5 + Math.sin(t * 2.5) * 0.5;
@@ -4061,14 +4192,6 @@ export class HexBoard {
     this.updateFires(t);
     this.doorViews?.update(dt);
     for (const [id, sp] of this.speeches) if (t >= sp.until) this.silence(id);
-
-    if (this.clue?.sprite.visible) {
-      const tile = this.tiles.get(hexKey(this.clue.hex));
-      const p = tile ?? this.worldOf(this.clue.hex);
-      this.clue.sprite.position.set(p.x, (tile?.y ?? 0) + 1.9 + Math.sin(t * 3) * 0.08, p.z);
-      // pulsa para mostrar que dá para tocar
-      this.clue.sprite.scale.setScalar(0.8 + Math.max(0, Math.sin(t * 4)) * 0.12);
-    }
 
     this.updateCamera(dt);
     this.updateTreeFade(dt);
@@ -4355,19 +4478,22 @@ export class HexBoard {
       -((clientY - rect.top) / rect.height) * 2 + 1,
     );
     this.raycaster.setFromCamera(ndc, this.camera);
-    // na vista de inspeção só a lupa (ou o móvel) responde, mesmo com o resto travado
+    // no close-up só o móvel em zoom responde, mesmo com o resto travado
     if (this.moving || (!this.inputEnabled && !this.inspect)) return;
 
-    // a lupa (ou o móvel debaixo dela) vem antes de tudo
-    if (this.clue?.sprite.visible && this.callbacks.onClueTap) {
-      const onSprite = this.raycaster.intersectObject(this.clue.sprite, false).length > 0;
-      const ground = this.raycaster.ray.intersectPlane(new THREE.Plane(new THREE.Vector3(0, 1, 0), 0), new THREE.Vector3());
-      const onFurniture = !!ground && sameHex(worldToHex(ground.x, ground.z, HEX_SIZE), this.clue.hex);
-      if (onSprite || onFurniture) {
-        this.callbacks.onClueTap();
+    // zoom num móvel: a peça destacável (pela área de toque, um pouco maior que ela) ou o resto
+    const prop = this.inspect?.frame === 'prop' ? this.propOpen : null;
+    if (prop) {
+      if (prop.item.visible && !this.taking && this.raycaster.intersectObject(prop.hit, false).length) {
+        this.callbacks.onPropTap?.('item');
         return;
       }
+      const body = prop.item.parent;
+      const hits = body ? this.raycaster.intersectObject(body, true) : [];
+      if (hits.some((h) => h.object !== prop.hit && h.object.visible && !h.object.userData['outline'])) this.callbacks.onPropTap?.('other');
+      return;
     }
+
     if (this.inspect) return;
     // peças primeiro: tocar perto da peça (ou no hexágono dela) seleciona o personagem
     const hitboxes = [...this.units.values()].map((u) => u.hitbox);

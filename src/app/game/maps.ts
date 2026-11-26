@@ -70,11 +70,12 @@ export interface GameMap {
    * lá dentro fica escondido enquanto o telhado estiver no lugar.
    */
   structures?: Structure[];
-  /** Coisas escondidas: aparecem com um teste de percepção e se acham inspecionando o móvel. */
+  /** Coisas escondidas: tocar no móvel aproxima a câmera; a percepção destaca a peça, que se pega com um toque. */
   hidden?: HiddenItem[];
   /**
-   * Quadro de chaves com a chave do avião (hexágono `K` do esboço, colado na parede). Mexer nele
-   * rola percepção para achar a chave; sem a chave o avião fica trancado (ver `plane.ts`).
+   * Quadro de chaves com a chave do avião (hexágono `K` do esboço, colado na parede). Tocar nele
+   * aproxima a câmera e rola percepção para destacar a chave; sem a chave o avião fica trancado
+   * (ver `plane.ts`).
    */
   keyPanel?: KeyPanel;
   /** O que a equipe pode queimar (o avião, os suprimentos do garimpo). */
@@ -122,7 +123,7 @@ export const CHARACTERS: Character[] = [
  * papelão (altas) · `S` sacos no palete e `G` gaiolas vazias (baixas) · `b` caixote de meia
  * altura (baixo) · `f` galões e botijão (só decoração, passa).
  *
- * Móveis: `m` mesa (baixa, como os sacos) · `P` prateleira encostada na parede (alta)
+ * Móveis: `m` mesa (baixa, como os sacos) · `P` armário encostado na parede do leste (alto)
  *
  * `R` suprimentos do garimpo (pilha alta de caixas, galões e mangueiras: dá para queimar)
  *
@@ -217,7 +218,7 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  * A leste da pista, numa clareira, fica a **casa** dos garimpeiros (colunas 29–41, fileiras
  * 26–32): dois cômodos de 5 × 5 separados por uma divisória com porta. Entra-se pela porta
  * do oeste, que dá para a pista. No cômodo 1 o caseiro Jô come de costas para a entrada,
- * na mesa (`m`); no cômodo 2, a prateleira (`P`) na parede do leste esconde uma arma.
+ * na mesa (`m`); no cômodo 2, o armário do caseiro (`P`) na parede do leste esconde uma arma.
  *
  * O avião fica **trancado**; a chave está no quadro de chaves (`K`), na parede do fundo.
  *
@@ -335,7 +336,11 @@ export const MAPS: GameMap[] = [
       {
         id: 'arma',
         name: 'arma',
-        furniture: 'prateleira',
+        furniture: 'armário',
+        title: 'Armário do caseiro',
+        at: 'no armário',
+        clutter: 'Potes, latas, roupa dobrada e uma capa de chuva.',
+        glimpse: 'numa coronha de madeira ao lado da capa de chuva',
         spot: { col: 40, row: 29 },
         seized: 'Arma apreendida!',
         room: { cols: [36, 40], rows: [27, 31] },
@@ -355,7 +360,7 @@ export const MAPS: GameMap[] = [
       { id: 'queimar-aviao', text: 'Queimar o avião', burn: 'aviao', primary: true, unlocksEnd: true },
       { id: 'queimar-suprimentos', text: 'Queimar os suprimentos do garimpo', burn: 'suprimentos', primary: true },
       { id: 'render-jo', text: 'Render o Caseiro Jô', surrender: 'jo' },
-      // a casa vem primeiro; achar a arma na prateleira (percepção) abre o passo seguinte
+      // a casa vem primeiro; perceber a arma no armário (percepção) abre o passo seguinte
       { id: 'investigar-casa', text: 'Investigar a casa', notice: 'arma' },
       { id: 'apreender-arma', text: 'Apreender a arma escondida', find: 'arma', after: 'investigar-casa' },
     ],

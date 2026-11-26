@@ -404,6 +404,13 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .aim-actions .side .stencil { font-size: 13px; }
 .stamp.inspect-stamp .stamp-text { font-size: 12px; }
 .inspect-slip.pass strong { color: var(--green-ok); }
+/* zoom no móvel: sem vinheta pesada (o móvel enche a tela) e o d20 pequeno no canto de cima */
+.prop-stage::before { background: radial-gradient(ellipse 70% 70% at 50% 45%, transparent 70%, rgba(8, 10, 8, .55) 100%); }
+.focus-die.prop-die { left: calc(16px + var(--safe-left)); top: calc(30px + var(--safe-top)); width: 120px; height: 120px; transform: none; }
+.prop-slip { width: 160px; }
+.aim-actions .prop-take { position: absolute; right: 108px; bottom: 0; width: 136px; }
+.prop-take:not(:focus-visible) { opacity: 0; }
+.prop-take:not(:focus) { pointer-events: none; }
 
 /* inspecionar pelo teclado: o botão só aparece quando recebe o foco */
 /* (o toque segue valendo enquanto ele tem o foco: no iOS o :focus-visible cai no próprio toque,
@@ -853,7 +860,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 
 /* ---------- avião trancado, quadro de chaves e fala embaixo da tela ---------- */
 .key-btn { width: 84px; }
-.key-slip { background: var(--postit); right: 108px; width: 150px; }
 .plane-note {
   margin: 0; padding: 8px 10px;
   background: var(--paper-light); box-shadow: var(--drop);

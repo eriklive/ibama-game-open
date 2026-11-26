@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import { HexCoord, hexKey, hexToWorld } from './hex';
 import { METER } from './character-model';
+import { buildCabinet, buildKeyBoard, eastWallGap, northWallGap } from './prop-models';
 
 /**
  * Cenário montado por código: o hangar (paredes retas de chapa ondulada, portão,
@@ -693,12 +694,14 @@ export type CoverKind = 'crates' | 'lowCrate' | 'boxes' | 'sacks' | 'cages' | 't
 
 /**
  * Monta a carga de um hexágono. `seed` varia a arrumação (giro, quantas peças, quais
- * pilhas são mais altas) sem mudar a altura total de cada tipo.
+ * pilhas são mais altas) sem mudar a altura total de cada tipo. O armário (`shelf`) e o quadro
+ * de chaves (`keys`) encostam na parede (do leste e do fundo); `col` (a coluna do hexágono)
+ * acerta a distância até a parede do fundo, que muda entre colunas pares e ímpares.
  */
-export function buildCover(kind: CoverKind, seed: number): THREE.Group {
+export function buildCover(kind: CoverKind, seed: number, col = 0): THREE.Group {
   if (kind === 'table') return diningTable();
-  if (kind === 'shelf') return shelf(seed);
-  if (kind === 'keys') return keyBoard();
+  if (kind === 'shelf') return buildCabinet(eastWallGap(WALL_THICKNESS));
+  if (kind === 'keys') return buildKeyBoard(northWallGap(col, WALL_THICKNESS));
   if (kind === 'supplies') return supplyPile(seed);
   const rnd = seeded(seed);
   const g = new THREE.Group();
@@ -802,61 +805,6 @@ function diningTable(): THREE.Group {
   const rag = solid(new THREE.BoxGeometry(0.22, 0.01, 0.18), m.rag, 0.18, y + 0.005, 0.28);
   rag.rotation.y = 0.4;
   g.add(rag);
-  return g;
-}
-
-/**
- * Prateleira de tábuas encostada na parede do leste (+X), com potes, latas e um pano dobrado
- * — o que está escondido ali não aparece.
- */
-function shelf(seed: number): THREE.Group {
-  const rnd = seeded(seed);
-  const m = cargo();
-  const g = new THREE.Group();
-  const x = 0.42;
-  const h = 1.15;
-  const w = 1.0;
-  const d = 0.36;
-  for (const z of [-1, 1]) g.add(solid(new THREE.BoxGeometry(d, h, 0.05), m.woodDark, x, h / 2, (z * w) / 2));
-  g.add(solid(new THREE.BoxGeometry(0.03, h, w), m.woodDark, x + d / 2, h / 2, 0));
-  const boards = [0.06, 0.42, 0.78, h];
-  for (const y of boards) g.add(solid(new THREE.BoxGeometry(d, 0.04, w), m.wood, x, y, 0));
-  // miudezas em cada prateleira
-  boards.slice(0, 3).forEach((y, i) => {
-    for (let k = 0; k < 3; k++) {
-      const z = -0.32 + k * 0.32 + (rnd(i * 5 + k) - 0.5) * 0.1;
-      const pick = rnd(20 + i * 5 + k);
-      if (pick < 0.4) g.add(solid(new THREE.CylinderGeometry(0.07, 0.07, 0.18, 10), m.jar, x, y + 0.11, z));
-      else if (pick < 0.75) g.add(solid(new THREE.CylinderGeometry(0.06, 0.06, 0.12, 10), m.tin, x, y + 0.08, z));
-      else g.add(solid(new THREE.BoxGeometry(0.22, 0.08, 0.22), m.rag, x, y + 0.06, z));
-    }
-  });
-  return g;
-}
-
-/**
- * Quadro de chaves encostado na parede do fundo (norte, -Z): uma tábua com fileiras de
- * ganchos e chaves penduradas, uma delas com etiqueta vermelha.
- */
-function keyBoard(): THREE.Group {
-  const m = cargo();
-  const g = new THREE.Group();
-  const z = -0.42;
-  g.add(solid(new THREE.BoxGeometry(0.95, 0.8, 0.05), m.woodDark, 0, 1.0, z));
-  for (const y of [0.78, 1.16]) g.add(solid(new THREE.BoxGeometry(0.88, 0.03, 0.04), m.wood, 0, y, z + 0.04));
-  const metal = m.tin;
-  for (const [row, y] of [[0, 1.2], [1, 0.82]] as const) {
-    for (let k = 0; k < 5; k++) {
-      const x = -0.36 + k * 0.18;
-      g.add(solid(new THREE.CylinderGeometry(0.015, 0.015, 0.05, 6), metal, x, y + 0.14, z + 0.06));
-      const key = solid(new THREE.BoxGeometry(0.035, 0.16, 0.012), metal, x, y, z + 0.07);
-      g.add(key);
-      // a chave do avião: etiqueta vermelha
-      if (row === 1 && k === 2) g.add(solid(new THREE.BoxGeometry(0.09, 0.07, 0.015), new THREE.MeshStandardMaterial({ color: 0xc23a2e }), x, y - 0.1, z + 0.08));
-    }
-  }
-  // base: mesinha de chapa sob o quadro, só para ocupar o hexágono
-  g.add(solid(new THREE.BoxGeometry(0.95, 0.5, 0.3), m.woodDark, 0, 0.25, z + 0.17));
   return g;
 }
 

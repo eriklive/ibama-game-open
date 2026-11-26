@@ -10,9 +10,10 @@ import { HexCoord, hexDistance } from './hex';
  *   ver `lockedClue`). Não precisa tocar em `olhar dentro`.
  * - `olhar dentro` sem a chave confirma que está trancado (e a equipe passa a reconhecer a chave
  *   no quadro: `tried`). Com a chave, abre.
- * - Mexer no quadro de chaves rola percepção — a não ser que a equipe já saiba qual é a chave
- *   (alguém tentou o avião, ou o piloto contou). Passando, o agente vê a chave do avião e escolhe
- *   pegar ou deixar; quem viu e deixou lembra disso (ver `witnessLine`).
+ * - Tocar no quadro de chaves aproxima a câmera e rola percepção (uma vez por agente) — a não
+ *   ser que a equipe já saiba qual é a chave (alguém tentou o avião, alguém já a viu, ou o piloto
+ *   contou). Vendo a chave (`seesKey`), ela ganha o destaque; sem ver, continua lá e se pega com
+ *   um toque, só não se destaca. Quem viu e deixou lá lembra disso (ver `witness`).
  */
 
 /** Id do quadro de chaves (entra em `noticed` quando a equipe sabe qual é a chave). */
@@ -52,11 +53,11 @@ export const nextToPanel = (agent: HexCoord, panel: KeyPanel): boolean => hexDis
  */
 export const keyKnown = (s: PlaneState): boolean => s.tried || s.told || s.seenBy.length > 0;
 
-/** Mexer no quadro rola percepção: ainda não reconhece a chave e este agente não tentou antes. */
+/** O zoom no quadro rola percepção: ainda não reconhece a chave e este agente não tentou antes. */
 export const needsKeyRoll = (s: PlaneState, who: string, rolled: ReadonlySet<string>): boolean =>
   !s.hasKey && !keyKnown(s) && !rolled.has(who);
 
-/** O agente, mexendo no quadro, vê a chave do avião. */
+/** O agente, olhando o quadro de perto, vê a chave do avião (ela ganha o destaque). */
 export const seesKey = (s: PlaneState, passedRoll: boolean): boolean => !s.hasKey && (keyKnown(s) || passedRoll);
 
 /** Quem viu a chave e deixou lá (o primeiro a ver), para comentar quando o avião estiver trancado. */
