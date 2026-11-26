@@ -605,7 +605,7 @@
           type="button"
           class="paper keyboard-only"
           appTalkButton
-          [attr.aria-label]="'Conversar com ' + t.enemy.name + ' (rendido). A primeira pergunta de cada conversa gasta ' + interrogationRules.moveCost + ' de movimento'"
+          [attr.aria-label]="'Conversar com ' + t.enemy.name + ' (rendido). ' + (interrogationRules.moveCost ? 'A primeira pergunta de cada conversa gasta ' + interrogationRules.moveCost + ' de movimento' : 'Conversar não gasta movimento')"
           data-testid="talk"
           (click)="startInterrogation()">
           {{ t.enemy.name }}

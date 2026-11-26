@@ -2275,6 +2275,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const who = spotted(enemy, agents, this.area, this.walls(), this.lowCover);
     if (!who) return false;
     const agent = agents.get(who)!;
+    // quem foi visto não se abaixa mais na cobertura
+    this.seenAgents.add(who);
+    this.board?.setSeenAgents(this.seenAgents);
     // vira para quem viu
     this.updateEnemy(enemyId, { status: 'alert', facing: facingBetween(enemy.hex, agent) });
     this.board?.setEnemyFacing(enemyId, facingBetween(enemy.hex, agent));
@@ -2285,6 +2288,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.say(`${enemy.name} avistou ${this.nameOf(who)}! Vai correr para a borda.`, 'alert');
     return true;
   }
+
+  /** Agentes já avistados por algum inimigo na partida (não se abaixam na cobertura). */
+  private readonly seenAgents = new Set<string>();
 
   /** Confere todos os inimigos (usado a cada passo de um agente). */
   private checkAllSpotted(agents: ReadonlyMap<string, HexCoord>): void {
@@ -3954,6 +3960,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.caughtThisRound.clear();
     this.noticed.set(new Set());
     this.found.set(new Set());
+    this.seenAgents.clear();
+    this.board?.setSeenAgents(this.seenAgents);
     this.noticeRolled.clear();
     this.clearChecks();
     this.dropProp();
