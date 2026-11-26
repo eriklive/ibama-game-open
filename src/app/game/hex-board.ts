@@ -453,6 +453,8 @@ export class HexBoard {
   private readonly occluders = new Map<THREE.Object3D, OccluderFade>();
   /** Paredes das estruturas (sem telhado nem interior), candidatas a esmaecer na vista normal. */
   private readonly wallMeshes: THREE.Object3D[] = [];
+  /** Peças dos telhados, que esmaecem como as paredes enquanto o telhado está no lugar. */
+  private readonly roofMeshes: { mesh: THREE.Object3D; roof: THREE.Object3D }[] = [];
   private treeFadeClock = 0;
   private occlusionClock = 0;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
@@ -2408,6 +2410,9 @@ export class HexBoard {
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
       this.structures.push({ rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
+      roof?.traverse((o) => {
+        if ((o as THREE.Mesh).isMesh) this.roofMeshes.push({ mesh: o, roof });
+      });
       for (const child of built.children) {
         if (child === roof || child === lamps) continue;
         child.traverse((o) => {
@@ -3784,11 +3789,16 @@ export class HexBoard {
 
   /**
    * Vista normal: paredes das estruturas (hangar, casa) que cruzam a linha entre a câmera e
-   * um personagem (agente ou inimigo à vista). O telhado tem regra própria (`structureView`).
+   * um personagem (agente ou inimigo à vista). O telhado que ainda está no lugar (ver
+   * `structureView`) também esmaece quando tapa alguém do lado de fora — a câmera rasante da
+   * perseguição, por exemplo, passa por cima dele. Com o telhado no lugar o interior nem é
+   * desenhado, então esmaecê-lo não entrega quem está escondido lá dentro.
    */
   private wallBlockers(): Set<THREE.Object3D> {
     const blockers = new Set<THREE.Object3D>();
-    if (!this.wallMeshes.length) return blockers;
+    const targets = [...this.wallMeshes];
+    for (const r of this.roofMeshes) if (r.roof.visible) targets.push(r.mesh);
+    if (!targets.length) return blockers;
     const origin = this.camera.position;
     for (const p of this.characterPoints(true)) {
       const dir = p.clone().sub(origin);
@@ -3796,7 +3806,7 @@ export class HexBoard {
       this.raycaster.set(origin, dir.divideScalar(len));
       this.raycaster.near = 0;
       this.raycaster.far = len - 0.4;
-      for (const hit of this.raycaster.intersectObjects(this.wallMeshes, false)) blockers.add(hit.object);
+      for (const hit of this.raycaster.intersectObjects(targets, false)) blockers.add(hit.object);
     }
     this.raycaster.far = Infinity;
     return blockers;
