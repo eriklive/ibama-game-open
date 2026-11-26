@@ -58,9 +58,9 @@ import { KEY_PANEL_ID, KEY_TAKEN, PLANE_LOCKED } from './plane';
  * `hiddenWhen` de quem depende dela.
  *
  **Respostas que entregam um esconderijo:** `notices: '<id>'` num desfecho (o id de um item em
- * `hidden` do mapa) faz o esconderijo contar como já percebido: no zoom do móvel a peça já vem
- * destacada, sem rolar percepção, e objetivos `notice` desse item ficam cumpridos. Achar o item
- * ainda pede o toque nele. Ex.: o caseiro confessa "Tem sim, tá no quartinho de trás." → `arma`.
+ * `hidden` do mapa, ou o quadro de chaves) faz o móvel contar como já percebido: ele ganha o
+ * contorno sem ninguém rolar percepção, e objetivos `notice` desse item ficam cumpridos. Achar o
+ * item ainda pede o toque nele, no zoom do móvel. Ex.: o caseiro confessa "Tem sim, tá no quartinho de trás." → `arma`.
  *
  * `resume` é a fala curta de quando o agente volta a conversar (sem ela, repete a de entrada).
  */
@@ -142,16 +142,22 @@ const WHOSE_GUN_CASEIRO: RolledQuestion = {
  */
 const WHERE_KEY = { requires: PLANE_LOCKED, hiddenWhen: KEY_TAKEN } as const;
 
-/** Os ajudantes do hangar não sabem onde está a chave (resposta fixa). */
+/**
+ * Os ajudantes do hangar não sabem onde está a chave, mas mandam olhar no quadro do fundo do
+ * hangar (resposta fixa). Só a fala: o quadro continua precisando ser percebido (ou o piloto contar).
+ */
 const whereKeyUnknown: FixedQuestion = {
   ...WHERE_KEY,
   ask: 'Onde está a chave?',
-  answer: { say: 'Não sei não.', note: 'Diz não saber da chave do avião.' },
+  answer: {
+    say: 'Sei não, doutor. Mas olha no quadro lá no fundo do hangar.',
+    note: 'Não sabe da chave do avião, mas manda olhar no quadro do fundo do hangar.',
+  },
 };
 
 /**
  * O piloto sabe, e pode mentir: pergunta, réplica e tréplica têm uma verdade só ("No painel ali
- * atrás"). Cedendo, a equipe passa a reconhecer a chave no quadro dos fundos (`notices`).
+ * atrás"). Cedendo, o quadro dos fundos conta como percebido e ganha o contorno (`notices`).
  */
 const WHERE_KEY_PILOTO: RolledQuestion = {
   ...WHERE_KEY,
@@ -161,7 +167,7 @@ const WHERE_KEY_PILOTO: RolledQuestion = {
     say: 'No painel ali atrás.',
     note: 'A chave do avião está no painel (quadro de chaves) dos fundos do hangar.',
     confess: true,
-    // entrega o quadro: ninguém precisa rolar percepção para reconhecer a chave
+    // entrega o quadro: ele ganha o contorno sem ninguém rolar percepção
     notices: KEY_PANEL_ID,
   },
   followUp: {

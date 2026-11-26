@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { spawnEnemy, stationary, visionHexes } from './enemies';
 import { hexKey, reachableHexes } from './hex';
 import { MAPS, blockedHexes, lowCoverHexes, playArea, structureRect } from './maps';
-import { SEARCH_RULES, beats, canReach, chance, entersRoom, needsPropRoll } from './search';
+import { SEARCH_RULES, beats, canReach, chance, entersRoom, needsNoticeRoll } from './search';
 
 describe('testes de d20', () => {
   it('passa só quem tira mais que o alvo', () => {
@@ -14,11 +14,15 @@ describe('testes de d20', () => {
     expect(chance(SEARCH_RULES.notice)).toBeCloseTo(0.7);
   });
 
-  it('zoom no móvel: rola percepção uma vez por agente, e não rola se a equipe já reconhece a peça', () => {
-    expect(needsPropRoll('arma', 'ana', false, new Set())).toBe(true);
-    expect(needsPropRoll('arma', 'ana', false, new Set(['arma:ana']))).toBe(false);
-    expect(needsPropRoll('arma', 'bruno', false, new Set(['arma:ana']))).toBe(true);
-    expect(needsPropRoll('arma', 'bruno', true, new Set())).toBe(false);
+  it('percepção ao entrar no cômodo: uma vez por agente, e não rola se o móvel já foi percebido', () => {
+    const item = { id: 'chave-aviao', room: { cols: [12, 31], rows: [5, 8] } as { cols: [number, number]; rows: [number, number] } };
+    const path = [{ col: 21, row: 9 }, { col: 21, row: 8 }];
+    expect(needsNoticeRoll(item, 'ana', path, new Set(), new Set())).toBe(true);
+    expect(needsNoticeRoll(item, 'ana', path, new Set(), new Set(['chave-aviao:ana']))).toBe(false);
+    expect(needsNoticeRoll(item, 'bruno', path, new Set(), new Set(['chave-aviao:ana']))).toBe(true);
+    expect(needsNoticeRoll(item, 'bruno', path, new Set(['chave-aviao']), new Set())).toBe(false);
+    // andando só fora do fundo do hangar, não rola
+    expect(needsNoticeRoll(item, 'ana', [{ col: 21, row: 10 }, { col: 21, row: 9 }], new Set(), new Set())).toBe(false);
   });
 
   it('entrar no cômodo: algum passo do caminho dentro do retângulo', () => {

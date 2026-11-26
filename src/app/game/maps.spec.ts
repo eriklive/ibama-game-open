@@ -213,6 +213,21 @@ describe('aeroporto: avião trancado e quadro de chaves', () => {
     expect(blockedHexes(map).has(hexKey(panel.spot))).toBe(true);
   });
 
+  it('a percepção do quadro rola no fundo do hangar: quem chega colado nele passou pela zona', () => {
+    const panel = map.keyPanel!;
+    const { cols, rows } = panel.room;
+    expect(cols[0]).toBeGreaterThan(hangar.cols[0]);
+    expect(cols[1]).toBeLessThan(hangar.cols[1]);
+    expect(rows[0]).toBeGreaterThan(hangar.rows[0]);
+    const solid = new Set([...blockedHexes(map), ...lowCoverHexes(map)]);
+    const reach = reachableHexes(map.starts[0], 999, playArea(map), solid);
+    const sides = [...reach.values()].map((r) => r.coord).filter((h) => hexDistance(h, panel.spot) === 1);
+    expect(sides.length).toBeGreaterThan(0);
+    for (const h of sides) {
+      expect(h.col >= cols[0] && h.col <= cols[1] && h.row >= rows[0] && h.row <= rows[1], `${h.col},${h.row}`).toBe(true);
+    }
+  });
+
   it('o avião não se queima direto: tem menu de inspecionar', () => {
     expect(map.burnables!.find((b) => b.id === 'aviao')?.inspect).toBe(true);
     expect(map.burnables!.find((b) => b.id === 'suprimentos')?.inspect).toBeUndefined();

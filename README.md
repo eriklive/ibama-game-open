@@ -237,16 +237,16 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
   turno inimigo, mas o cone de visão dele cobre a porta do cômodo 2: entre por trás e **aborde** (a até 2
   hexágonos ele se rende). A porta do meio está **trancada** (ver [Portas](#portas)); quem passa por ela
   sem rendê-lo é avistado.
-- **Cômodo 2:** o **armário do caseiro** (1,85 m, um pouco mais alto que os agentes, encostado na parede
-  do leste, com as portas abertas) tem o contorno amarelo pulsante dos alvos tocáveis. Ver
+- **Cômodo 2:** ao andar por ele (mesmo só de passagem), cada agente rola **percepção** uma vez. Passando,
+  repara no **armário do caseiro** (1,85 m, um pouco mais alto que os agentes, encostado na parede do leste,
+  com as portas abertas), que ganha o contorno amarelo pulsante dos alvos tocáveis. Ver
   [Zoom nos móveis](#zoom-nos-móveis-quadro-de-chaves-e-armário).
-- Se os três agentes falharem na percepção, a arma não se destaca — mas continua lá, e dá para pegá-la
-  tocando nela.
+- Se os três agentes falharem na percepção, o armário não se destaca e a arma fica sem ser encontrada — a não
+  ser que o Jô confesse.
 
 Os **objetivos** da missão ficam num bilhete embaixo da pilha de suspeitos. Da casa, de início, aparece só
-**Investigar a casa**: quando alguém repara na arma no zoom do armário (percepção), ele fica cumprido (✓) e
-surge o passo seguinte, **Apreender a arma escondida**, cumprido ao tocar na arma e pegá-la (pegar sem ter
-percebido cumpre os dois). Também há **Render o Caseiro
+**Investigar a casa**: quando alguém repara no armário (percepção), ele fica cumprido (✓) e surge o passo
+seguinte, **Apreender a arma escondida**, cumprido ao tocar na arma, no zoom do armário, e pegá-la. Também há **Render o Caseiro
 Jô**. Passos assim usam `after` no objetivo (só aparece depois do objetivo com aquele id); `notice` cumpre ao
 reparar num esconderijo. As regras dos testes ficam em `SEARCH_RULES` (`src/app/game/search.ts`); a casa, o esconderijo
 e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
@@ -354,9 +354,8 @@ Quem não se rendeu não conversa.
   (fecho `closing`: sem cartão, sem rolagem, sem resposta). Se ceder, confessa que é dele: a pista `dono-arma` faz a pergunta sumir de quem ainda não a fez (quem já fez continua
   vendo o cartão como "Perguntado"). Responder "não sei" não fecha a pergunta para os outros.
 - **Confissão que entrega o esconderijo:** se o caseiro confessar em "Tem arma na casa?" ("Tem sim, tá
-  no quartinho de trás."), a arma do armário conta como **já percebida**: no zoom do armário ela já vem
-  destacada, sem rolar percepção, e **Investigar a casa** fica cumprido. Apreender a arma ainda pede o
-  toque nela. No dado, é `notices: '<id do esconderijo>'` na resposta.
+  no quartinho de trás."), o armário conta como **já percebido**: ganha o contorno sem ninguém rolar
+  percepção, e **Investigar a casa** fica cumprido. Apreender a arma ainda pede o toque nela. No dado, é `notices: '<id do esconderijo>'` na resposta.
 - **Custo:** a **primeira pergunta de cada conversa gasta 1 de movimento** (entrar e
   sair sem perguntar não gasta) e a vez continua. Ficam em `INTERROGATION_RULES` (`moveCost`,
   `endsTurn`).
@@ -408,14 +407,15 @@ O avião do hangar está **trancado**; a chave fica no **quadro de chaves**, na 
 - **Avião:** colado nele, aparece **Inspecionar** (no lugar de Queimar). O menu (como o das portas) tem
   **Olhar dentro** e **Queimar**. Sem a chave, o menu já abre com o carimbo **Trancado**, e isso basta para
   liberar, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave). Olhar
-  dentro só dá um leve zoom out e o aviso "O avião está trancado" (e a equipe passa a reconhecer a chave no quadro).
-- **Diálogos:** os dois ajudantes do hangar (garimpeiros) respondem "Não sei não.". O piloto pode mentir
-  (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e, cedendo, diz
-  **"No painel ali atrás."**, o que faz a equipe reconhecer a chave no quadro.
-- **Quadro de chaves:** pendurado na parede do fundo, sobre uma bancada de ferramentas, com o contorno
-  amarelo pulsante enquanto a chave estiver lá. Ver [Zoom nos móveis](#zoom-nos-móveis-quadro-de-chaves-e-armário).
-  A percepção não rola se alguém já tentou o avião, se o piloto contou ou se alguém já viu a chave lá: ela já
-  vem destacada.
+  dentro só dá um leve zoom out e o aviso "O avião está trancado".
+- **Diálogos:** os dois ajudantes do hangar (garimpeiros) não sabem da chave, mas dão a dica: "Sei não,
+  doutor. Mas olha no quadro lá no fundo do hangar." (só a fala: o quadro não se destaca por isso). O piloto
+  pode mentir (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e,
+  cedendo, diz **"No painel ali atrás."**, o que faz o quadro ganhar o contorno sem ninguém rolar percepção.
+- **Quadro de chaves:** pendurado na parede do fundo, sobre uma bancada de ferramentas. Quem anda pelo
+  **fundo do hangar** (da parede do fundo até a frente do avião, `keyPanel.room`) rola **percepção** uma vez;
+  passando, o quadro ganha o contorno amarelo pulsante (enquanto a chave estiver lá). Falhando os três, ele não
+  se destaca — só o piloto contando. Ver [Zoom nos móveis](#zoom-nos-móveis-quadro-de-chaves-e-armário).
 - **Quem viu e deixou:** ao olhar dentro do avião trancado, esse agente comenta embaixo da tela, com o avatar
   dele: "Eu vi uma chave no quadro dos fundos."
 
@@ -425,23 +425,24 @@ O **quadro de chaves** do hangar e o **armário do caseiro** são móveis 3D na 
 reais em metros: quadro de 70 × 50 cm a 1,15 m do chão, bancada de 90 cm; armário de 1,0 × 0,45 × 1,85 m),
 montados em `game/prop-models.ts`.
 
-- **Tocar no móvel** (como no avião: colado, abre; de longe, marca o caminho e o segundo toque anda até lá)
-  aproxima a câmera: ela fica **de frente** para o móvel, quase na altura dos olhos, e enquadra o móvel no
+- **Percepção primeiro:** o móvel só fica tocável depois de percebido — a percepção passiva (d20, passa com
+  **mais que 6**, uma vez por agente) ao andar pelo cômodo dele, ou um suspeito que conta (o piloto, o caseiro).
+  Só então ganha o contorno amarelo pulsante. Quem rola e não passa não destaca nada.
+- **Tocar no móvel** percebido (como no avião: colado, abre; de longe, marca o caminho e o segundo toque anda
+  até lá) aproxima a câmera: ela fica **de frente** para o móvel, quase na altura dos olhos, e enquadra o móvel no
   que a papelada não cobre (`HexBoard.propCloseUp`). Quem estiver na frente do móvel some enquanto durar.
   A HUD some; ficam o bilhete e **Fechar** (○ / Esc). Não gasta movimento.
-- **Percepção:** ao abrir, o agente rola um **d20** (no canto de cima; passa com **mais que 6**), uma vez por
-  agente em cada móvel. Passando, a peça — a **chave do avião** (etiqueta vermelha, entre outras etiquetas
-  coloridas) ou a **espingarda** (de pé no canto, ao lado da capa de chuva) — ganha o **destaque** de
-  interagível: contorno amarelo e brilho que pulsam. A equipe passa a reconhecê-la (para os outros agentes,
-  já vem destacada). Falhando, a peça **continua interagível**, só não se destaca.
+- **A peça destacada:** no zoom, a **chave do avião** (etiqueta vermelha, entre outras etiquetas coloridas)
+  ou a **espingarda** (de pé no canto, ao lado da capa de chuva) aparece com o **destaque** de interagível:
+  contorno amarelo e brilho que pulsam.
 - **Tocar na peça** pega (✕ no controle; pelo teclado, o botão **Pegar** aparece com o Tab): a peça sobe e
   some do móvel, e o bilhete confirma ("Chave do avião com a equipe.", "Arma apreendida!"). Tocar no resto
   do móvel só diz o que tem ali.
 - **Poucas chamadas de desenho:** cada móvel é **uma malha só** (tábuas, ganchos, as outras chaves, potes,
   roupas… juntados numa geometria com a cor em cada vértice) **mais a peça destacável**. O contorno pulsante
   do alvo sai só das peças da silhueta (`outlineParts`).
-- **Casos de teste:** no menu, "Quadro de chaves" e "Armário do caseiro" já começam com um agente colado no
-  móvel.
+- **Casos de teste:** no menu, "Quadro de chaves" (a equipe na frente do avião, logo antes do fundo do hangar)
+  e "Armário do caseiro" (a equipe no quarto de trás): é só andar para rolar a percepção.
 
 ### Mundo semiaberto: área da missão
 

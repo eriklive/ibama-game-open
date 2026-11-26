@@ -70,12 +70,12 @@ export interface GameMap {
    * lá dentro fica escondido enquanto o telhado estiver no lugar.
    */
   structures?: Structure[];
-  /** Coisas escondidas: tocar no móvel aproxima a câmera; a percepção destaca a peça, que se pega com um toque. */
+  /** Coisas escondidas: a percepção ao entrar no cômodo destaca o móvel; tocar nele aproxima a câmera e a peça se pega com um toque. */
   hidden?: HiddenItem[];
   /**
-   * Quadro de chaves com a chave do avião (hexágono `K` do esboço, colado na parede). Tocar nele
-   * aproxima a câmera e rola percepção para destacar a chave; sem a chave o avião fica trancado
-   * (ver `plane.ts`).
+   * Quadro de chaves com a chave do avião (hexágono `K` do esboço, colado na parede). Só fica
+   * tocável depois que alguém repara nele (percepção no fundo do hangar) ou o piloto conta; tocar
+   * aproxima a câmera, com a chave destacada. Sem a chave o avião fica trancado (ver `plane.ts`).
    */
   keyPanel?: KeyPanel;
   /** O que a equipe pode queimar (o avião, os suprimentos do garimpo). */
@@ -331,7 +331,8 @@ export const MAPS: GameMap[] = [
       { kind: 'house', rect: { cols: [29, 41], rows: [26, 32] } },
     ],
     // o quadro de chaves, no fundo do hangar (parede norte), com a chave do avião
-    keyPanel: { spot: { col: 20, row: 5 } },
+    // (percepção: quem anda pelo fundo do hangar, até a frente do avião, repara nele)
+    keyPanel: { spot: { col: 20, row: 5 }, room: { cols: [12, 31], rows: [5, 8] } },
     hidden: [
       {
         id: 'arma',
@@ -340,7 +341,7 @@ export const MAPS: GameMap[] = [
         title: 'Armário do caseiro',
         at: 'no armário',
         clutter: 'Potes, latas, roupa dobrada e uma capa de chuva.',
-        glimpse: 'numa coronha de madeira ao lado da capa de chuva',
+        glimpse: 'Uma coronha de madeira, ao lado da capa de chuva.',
         spot: { col: 40, row: 29 },
         seized: 'Arma apreendida!',
         room: { cols: [36, 40], rows: [27, 31] },

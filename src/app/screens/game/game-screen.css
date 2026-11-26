@@ -386,10 +386,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   border-block: calc(26px + var(--safe-top)) solid #0c0d0b;
   border-bottom-width: calc(26px + var(--safe-bottom));
 }
-.focus-die {
-  position: absolute; left: 50%; top: calc(26px + var(--safe-top));
-  width: 200px; height: 200px; transform: translateX(-50%);
-}
 /* inspeção: os botões ficam onde ficam nos outros modos (bilhete, carimbo e Cancelar) */
 .aim-actions {
   position: absolute; z-index: 5;
@@ -404,9 +400,8 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .aim-actions .side .stencil { font-size: 13px; }
 .stamp.inspect-stamp .stamp-text { font-size: 12px; }
 .inspect-slip.pass strong { color: var(--green-ok); }
-/* zoom no móvel: sem vinheta pesada (o móvel enche a tela) e o d20 pequeno no canto de cima */
+/* zoom no móvel: sem vinheta pesada (o móvel enche a tela) */
 .prop-stage::before { background: radial-gradient(ellipse 70% 70% at 50% 45%, transparent 70%, rgba(8, 10, 8, .55) 100%); }
-.focus-die.prop-die { left: calc(16px + var(--safe-left)); top: calc(30px + var(--safe-top)); width: 120px; height: 120px; transform: none; }
 .prop-slip { width: 160px; }
 .aim-actions .prop-take { position: absolute; right: 108px; bottom: 0; width: 136px; }
 .prop-take:not(:focus-visible) { opacity: 0; }

@@ -80,8 +80,8 @@ export interface Outcome {
   /** Pista que esta resposta registra na missão (pode liberar perguntas em outros NPCs). */
   clue?: string;
   /**
-   * Esconderijo (id de `HiddenItem`) que esta resposta entrega: conta como já percebido (no zoom
-   * do móvel a peça já vem destacada, sem rolar percepção). Achar ainda pede o toque nela.
+   * Móvel (id de `HiddenItem`, ou o quadro de chaves) que esta resposta entrega: conta como já
+   * percebido (ganha o contorno sem rolar percepção). Achar ainda pede o toque na peça, no zoom.
    */
   notices?: string;
 }

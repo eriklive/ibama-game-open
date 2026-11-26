@@ -6,9 +6,7 @@ import {
   leftKey,
   lockedClue,
   lookInside,
-  needsKeyRoll,
   nextToPanel,
-  seesKey,
   witness,
 } from './plane';
 
@@ -21,33 +19,6 @@ describe('quadro de chaves', () => {
     expect(nextToPanel({ col: 20, row: 8 }, panel)).toBe(false);
   });
 
-  it('rola percepção, uma vez por agente, se ninguém sabe qual é a chave', () => {
-    expect(needsKeyRoll(s(), 'ana', new Set())).toBe(true);
-    expect(needsKeyRoll(s(), 'ana', new Set(['ana']))).toBe(false);
-    expect(needsKeyRoll(s(), 'bruno', new Set(['ana']))).toBe(true);
-  });
-
-  it('não rola se alguém já tentou o avião ou se o piloto contou', () => {
-    expect(needsKeyRoll(s({ tried: true }), 'ana', new Set())).toBe(false);
-    expect(needsKeyRoll(s({ told: true }), 'ana', new Set())).toBe(false);
-  });
-
-  it('quem viu a chave e deixou lá faz a equipe reconhecê-la', () => {
-    const st = s({ seenBy: ['clara'] });
-    expect(needsKeyRoll(st, 'bruno', new Set())).toBe(false);
-    expect(seesKey(st, false)).toBe(true);
-  });
-
-  it('com a chave na mão, não há o que rolar nem ver', () => {
-    expect(needsKeyRoll(s({ hasKey: true }), 'ana', new Set())).toBe(false);
-    expect(seesKey(s({ hasKey: true, tried: true }), true)).toBe(false);
-  });
-
-  it('vê a chave passando no teste, ou direto se já sabe qual é', () => {
-    expect(seesKey(s(), true)).toBe(true);
-    expect(seesKey(s(), false)).toBe(false);
-    expect(seesKey(s({ tried: true }), false)).toBe(true);
-  });
 });
 
 describe('avião trancado', () => {
@@ -75,7 +46,7 @@ describe('inspecionar o avião', () => {
   it('sem a chave, só abrir o menu já registra que está trancado (libera as perguntas da chave)', () => {
     // vale antes de alguém tocar em "olhar dentro"
     expect(lockedClue(s())).toBe(PLANE_LOCKED);
-    expect(lockedClue(s({ tried: true }))).toBe(PLANE_LOCKED);
+    expect(lockedClue(s({ seenBy: ['ana'] }))).toBe(PLANE_LOCKED);
   });
 
   it('com a chave na mão, não há pista de trancado', () => {

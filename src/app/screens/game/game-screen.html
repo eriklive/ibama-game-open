@@ -659,42 +659,25 @@
   </div>
 
   <!--
-    Zoom num móvel (o quadro de chaves, o armário): câmera de frente para ele, a HUD some.
-    O d20 da percepção rola no alto; passando, a peça ganha o destaque. A peça se pega tocando
-    nela (no teclado, o botão "Pegar"); "Fechar" volta ao tabuleiro.
+    Zoom num móvel já percebido (o quadro de chaves, o armário): câmera de frente para ele, a HUD
+    some e a peça aparece destacada. Ela se pega tocando nela (no teclado, o botão "Pegar");
+    "Fechar" volta ao tabuleiro.
   -->
   @if (prop(); as pv) {
-    <div class="focus-stage prop-stage" data-testid="prop-focus">
-      @if (pv.roll; as r) {
-        <!-- uma rolagem por lance -->
-        @for (n of [r.throw]; track n) {
-          <app-d20 class="focus-die prop-die" aria-hidden="true" [tone]="r.pass === null ? 'gold' : r.pass ? 'pass' : 'fail'" (rolled)="propDieRolled($event)" />
-        }
-      }
-    </div>
+    <div class="focus-stage prop-stage" data-testid="prop-focus"></div>
     <div class="aim-actions">
-      <div class="slip inspect-slip prop-slip" [class.pass]="pv.highlight || pv.taken" role="status" aria-live="polite" data-testid="prop-hint">
+      <div class="slip inspect-slip prop-slip" [class.pass]="pv.taken" role="status" aria-live="polite" data-testid="prop-hint">
         <strong>{{ pv.title }}</strong>
         @if (pv.taken) {
           <span data-testid="prop-result">{{ pv.note }}</span>
-        } @else if (!pv.ready) {
-          <span>Percepção · {{ pv.who }}</span>
-          <span class="small">d20 · mais que {{ searchRules.notice }}</span>
         } @else {
-          @if (pv.roll?.result !== undefined && pv.roll?.result !== null) {
-            <span class="small" data-testid="prop-roll">Percepção: tirou {{ pv.roll!.result }} · {{ pv.roll!.pass ? 'percebeu' : 'não percebeu' }}</span>
-          }
-          @if (pv.highlight) {
-            <span data-testid="prop-seen">{{ pv.who }} reparou {{ pv.glimpse }}. Toque nela para pegar.</span>
-          } @else if (!pv.note) {
-            <span>Nada chama a atenção. Toque no que quiser pegar.</span>
-          }
+          <span data-testid="prop-seen">{{ pv.glimpse }} Toque nela para pegar.</span>
           @if (pv.note) {
-            <span data-testid="prop-note">{{ pv.note }}</span>
+            <span class="small" data-testid="prop-note">{{ pv.note }}</span>
           }
         }
       </div>
-      @if (pv.ready && !pv.taken) {
+      @if (!pv.taken) {
         <!-- pelo teclado: pegar sem tocar na peça -->
         <button type="button" class="paper keyboard-only prop-take" data-testid="prop-take" (click)="takeProp()"
           [attr.aria-label]="'Pegar ' + pv.item">
@@ -703,12 +686,12 @@
         </button>
       }
       @if (pv.taken) {
-        <button type="button" class="stamp confirm" #propClose data-testid="prop-close" (click)="closeProp()" [disabled]="!pv.ready">
+        <button type="button" class="stamp confirm" #propClose data-testid="prop-close" (click)="closeProp()">
           <span class="stamp-ring"><span class="stamp-text">Fechar</span></span>
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
         </button>
       } @else {
-        <button type="button" class="paper side" #propClose data-testid="prop-close" (click)="closeProp()" [disabled]="!pv.ready">
+        <button type="button" class="paper side" #propClose data-testid="prop-close" (click)="closeProp()">
           <span class="stencil">Fechar</span>
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
         </button>

@@ -5,12 +5,11 @@ import { HexRect, inStructure } from './maps';
  * Testes de dados fora do movimento: todos com 1d20, e passa quem tira **mais que** o número
  * da regra.
  *
- * - `notice` (percepção): tocar num móvel com zoom (o armário de um esconderijo, o quadro de
- *   chaves) aproxima a câmera e rola percepção, uma vez por agente em cada móvel. Passando, a
- *   peça escondida (a arma, a chave do avião) ganha o destaque de "dá para pegar" e a equipe
- *   passa a reconhecê-la. Falhando, a peça continua lá e dá para pegá-la com um toque — só não
- *   se destaca entre o resto. Se a equipe já sabe (alguém percebeu, um suspeito contou), o
- *   destaque vem sem rolar.
+ * - `notice` (percepção passiva): quem anda pelo cômodo de um móvel com algo escondido (o armário
+ *   do caseiro, o fundo do hangar com o quadro de chaves) rola percepção uma vez. Passando, repara
+ *   no móvel: ele ganha o contorno pulsante dos alvos tocáveis e a equipe passa a poder abri-lo
+ *   (zoom, com a peça — a arma, a chave do avião — destacada). Falhando, nada se destaca. Um
+ *   suspeito que conta (o caseiro, o piloto) também faz o móvel contar como percebido.
  */
 export const SEARCH_RULES = {
   die: 20,
@@ -30,12 +29,12 @@ export interface HiddenItem {
   at: string;
   /** O que se vê tocando no resto do móvel ("Potes, latas e roupa dobrada."). */
   clutter: string;
-  /** No que o agente repara quando a percepção passa ("numa coronha de madeira…"). */
+  /** O que se destaca no zoom do móvel ("Uma coronha de madeira…"). */
   glimpse: string;
   spot: HexCoord;
   /** Aviso quando é achado ("Arma apreendida!"). */
   seized: string;
-  /** Cômodo do esconderijo (colunas e fileiras, inclusive). */
+  /** Cômodo em que se rola percepção ao entrar (colunas e fileiras, inclusive). */
   room: HexRect;
 }
 
@@ -53,8 +52,16 @@ export const entersRoom = (path: readonly HexCoord[], room: HexRect): boolean =>
 export const canReach = (agent: HexCoord, spot: HexCoord): boolean => hexDistance(agent, spot) === 1;
 
 /**
- * Precisa rolar percepção no zoom do móvel `id`: a equipe ainda não reconhece a peça (`known`)
- * e o agente `who` não tentou nesse móvel (`rolled` guarda `móvel:agente`).
+ * Precisa rolar percepção: o agente `who` entrou (pelo `path`) no cômodo do móvel `id`, ainda
+ * não rolou ali e ninguém reparou nele. Já percebido — por um teste ou porque alguém contou
+ * (um suspeito que confessa, ver `Outcome.notices` em `interrogation.ts`) — não rola mais.
  */
-export const needsPropRoll = (id: string, who: string, known: boolean, rolled: ReadonlySet<string>): boolean =>
-  !known && !rolled.has(`${id}:${who}`);
+export function needsNoticeRoll(
+  item: { id: string; room: HexRect },
+  who: string,
+  path: readonly HexCoord[],
+  noticed: ReadonlySet<string>,
+  rolled: ReadonlySet<string>,
+): boolean {
+  return !noticed.has(item.id) && !rolled.has(`${item.id}:${who}`) && entersRoom(path, item.room);
+}
