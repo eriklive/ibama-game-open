@@ -19,10 +19,12 @@ const DIRS = 12;
  * seguindo a silhueta inteira do alvo na tela (sem as emendas das peças por dentro).
  *
  * Cada alvo tem cópias das suas malhas na camada `OUTLINE_LAYER` (ver `HexBoard.setTargetOutlines`),
- * com `mask` (alvo comum, canal vermelho) ou `armedMask` (tocado uma vez, canal verde). A cada
- * quadro:
- * 1. a máscara: só essas cópias, numa textura do tamanho da tela (o resto da cena fica de fora,
- *    então o contorno aparece mesmo com algo na frente do alvo);
+ * com `mask` (alvo comum, canal vermelho) ou `armedMask` (tocado uma vez, canal verde). As
+ * estruturas fechadas (telhado no lugar) também têm cópias do telhado e das paredes nessa camada,
+ * com `occluder`, que só tapa. A cada quadro:
+ * 1. a máscara: só essas cópias, numa textura do tamanho da tela, com profundidade (o resto da
+ *    cena fica de fora, então o contorno aparece mesmo com uma árvore ou a carga na frente do
+ *    alvo; o que o telhado ou as paredes de uma estrutura fechada cobrem fica sem contorno);
  * 2. a composição na tela, só no retângulo dos alvos: fora da silhueta, perto dela, amarelo;
  *    um pouco mais longe, o traço escuro.
  */
@@ -31,6 +33,8 @@ export class TargetOutline {
   readonly mask = new THREE.MeshBasicMaterial({ color: 0xff0000, fog: false, toneMapped: false, side: THREE.DoubleSide });
   /** Material da cópia do alvo tocado uma vez. */
   readonly armedMask = new THREE.MeshBasicMaterial({ color: 0x00ff00, fog: false, toneMapped: false, side: THREE.DoubleSide });
+  /** Material da cópia do telhado e das paredes de uma estrutura fechada: só profundidade, tapa o que está atrás. */
+  readonly occluder = new THREE.MeshBasicMaterial({ colorWrite: false, fog: false, side: THREE.DoubleSide });
   private target?: THREE.WebGLRenderTarget;
   private readonly quad: THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMaterial>;
   private readonly quadScene = new THREE.Scene();
@@ -236,14 +240,17 @@ export class TargetOutline {
     }
   }
 
-  /** Máscara na resolução da tela (com filtro linear: as bordas do contorno saem suaves). */
+  /**
+   * Máscara na resolução da tela (com filtro linear: as bordas do contorno saem suaves), com
+   * profundidade para o telhado e as paredes taparem o que fica atrás deles.
+   */
   private maskTarget(w: number, h: number): THREE.WebGLRenderTarget {
     const mw = w;
     const mh = h;
     if (!this.target || this.target.width !== mw || this.target.height !== mh) {
       this.target?.dispose();
       this.target = new THREE.WebGLRenderTarget(mw, mh, {
-        depthBuffer: false,
+        depthBuffer: true,
         minFilter: THREE.LinearFilter,
         magFilter: THREE.LinearFilter,
       });
@@ -255,6 +262,7 @@ export class TargetOutline {
     this.target?.dispose();
     this.mask.dispose();
     this.armedMask.dispose();
+    this.occluder.dispose();
     this.quad.geometry.dispose();
     this.quad.material.dispose();
   }

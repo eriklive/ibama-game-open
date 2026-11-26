@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorsOf, inStructure, playArea, structureView } from './maps';
+import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorWall, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, reachableHexes, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
@@ -520,6 +520,11 @@ export class HexBoard {
   private readonly wallMeshes: THREE.Object3D[] = [];
   /** Peças dos telhados, que esmaecem como as paredes enquanto o telhado está no lugar. */
   private readonly roofMeshes: { mesh: THREE.Object3D; roof: THREE.Object3D }[] = [];
+  /**
+   * Cópias do telhado e das paredes das estruturas na camada do contorno (ver `TargetOutline`):
+   * com o telhado no lugar, o alvo que ele (ou a parede) cobre fica sem contorno.
+   */
+  private readonly shellOccluders: { copy: THREE.Mesh; mesh: THREE.Object3D; roof: THREE.Object3D }[] = [];
   private treeFadeClock = 0;
   private occlusionClock = 0;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
@@ -670,6 +675,8 @@ export class HexBoard {
   private activeId: string | null = null;
   /** Giro (rad, em volta de +Y) da câmera para ver de frente a porta ao lado do agente da vez. */
   private doorYaw = 0;
+  /** Trecho reto de parede de cada porta (chaves dos hexágonos), ver `doorRun`. */
+  private readonly doorRuns = new Map<string, Set<string>>();
   private focusId: string | null = null;
   private moving = false;
   private inputEnabled = true;
@@ -2847,14 +2854,30 @@ export class HexBoard {
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
       this.structures.push({ kind, rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
+      const shell: THREE.Mesh[] = [];
       roof?.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) this.roofMeshes.push({ mesh: o, roof });
+        if (!(o as THREE.Mesh).isMesh) return;
+        this.roofMeshes.push({ mesh: o, roof });
+        shell.push(o as THREE.Mesh);
       });
       for (const child of built.children) {
         if (child === roof || child === lamps) continue;
         child.traverse((o) => {
-          if ((o as THREE.Mesh).isMesh) this.wallMeshes.push(o);
+          if (!(o as THREE.Mesh).isMesh) return;
+          this.wallMeshes.push(o);
+          shell.push(o as THREE.Mesh);
         });
+      }
+      // cópias que tapam o contorno enquanto o telhado está no lugar (filhas das peças)
+      for (const mesh of roof ? shell : []) {
+        const copy = new THREE.Mesh(mesh.geometry, this.targetOutline.occluder);
+        copy.layers.set(OUTLINE_LAYER);
+        copy.castShadow = copy.receiveShadow = false;
+        // antes dos alvos na máscara: a profundidade já está lá quando eles são desenhados
+        copy.renderOrder = -10;
+        copy.userData['outline'] = true;
+        mesh.add(copy);
+        this.shellOccluders.push({ copy, mesh, roof: roof! });
       }
       this.addScenery(built);
     }
@@ -4370,6 +4393,12 @@ export class HexBoard {
     return true;
   }
 
+  /** A peça (ou um pai dela) está esmaecida, mais transparente que opaca (ver `updateOccluders`). */
+  private fadedOut(object: THREE.Object3D): boolean {
+    for (let o: THREE.Object3D | null = object; o; o = o.parent) if ((this.occluders.get(o)?.alpha ?? 1) <= 0.5) return true;
+    return false;
+  }
+
   /** Fim do fade: materiais originais de volta, cópias descartadas, visível conforme o raio carregado. */
   private releaseFade(object: THREE.Object3D): void {
     const e = this.occluders.get(object);
@@ -4388,7 +4417,8 @@ export class HexBoard {
     const meshes: OccluderFade['meshes'] = [];
     object.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
+      // as cópias do contorno (camada própria) ficam como estão
+      if (!mesh.isMesh || mesh.userData['outline']) return;
       const original = mesh.material;
       const base = new Map<THREE.Material, number>();
       const clone = (m: THREE.Material): THREE.Material => {
@@ -4485,23 +4515,28 @@ export class HexBoard {
   }
 
   /**
-   * Agente da vez num hexágono vizinho de uma porta: a câmera gira um pouco para o lado em que
-   * ele está, para a porta não ficar de quina (as portas das paredes laterais somem de frente).
+   * Agente da vez junto do trecho reto de parede de uma porta (a porta ou qualquer hexágono da
+   * mesma parede, ver `doorRun`): a câmera gira um pouco para o lado em que ele está, para a
+   * porta não ficar de quina (as portas das paredes laterais somem de frente).
    */
   private doorYawGoal(): number {
     const u = this.activeId ? this.units.get(this.activeId) : undefined;
     if (!u) return 0;
     const near = new Set([u.hex, ...hexNeighbors(u.hex)].map(hexKey));
-    // casa: um giro só, da porta de entrada até sair, que mostra as portas e os cômodos
+    const byWall = (key: string): boolean => {
+      for (const k of this.doorRun(key)) if (near.has(k)) return true;
+      return false;
+    };
+    // casa: um giro só, de toda a parede da porta de entrada até sair, que mostra as portas e os cômodos
     for (const st of this.structures) {
       if (st.kind !== 'house') continue;
-      if (inStructure(u.hex, st.rect) || st.doors.some((d) => near.has(hexKey(d)))) return HOUSE_CAMERA_YAW;
+      if (inStructure(u.hex, st.rect) || st.doors.some((d) => byWall(hexKey(d)))) return HOUSE_CAMERA_YAW;
     }
     const doors = this.doorViews;
     if (!doors) return 0;
     let best: { yaw: number; d: number } | null = null;
     for (const key of doors.keys()) {
-      if (!near.has(key)) continue;
+      if (!byWall(key)) continue;
       const center = doors.centerOf(key)!;
       const normal = doors.normalOf(key)!;
       const away = u.group.position.clone().sub(center).setY(0);
@@ -4514,6 +4549,17 @@ export class HexBoard {
       if (!best || d < best.d) best = { yaw, d };
     }
     return best?.yaw ?? 0;
+  }
+
+  /** Trecho reto de parede da porta (chaves dos hexágonos), ver `doorWall`. */
+  private doorRun(key: string): Set<string> {
+    let run = this.doorRuns.get(key);
+    if (!run) {
+      const [col, row] = key.split(',').map(Number);
+      run = new Set(doorWall(this.map, { col, row }).map(hexKey));
+      this.doorRuns.set(key, run);
+    }
+    return run;
   }
 
   /** Põe a câmera inclinada `pitchDeg` sobre `target`, afastada conforme `zoom`; devolve a distância. */
@@ -4717,6 +4763,9 @@ export class HexBoard {
       // respira devagar: dá para tocar; o tocado uma vez pulsa rápido, quase branco no pico
       const t = this.clock.elapsedTime;
       const hulls = [...this.outlined.values()].flatMap((o) => o.hulls);
+      // estrutura fechada tapa o contorno; aberta, ou a peça esmaecida (tapando alguém, ou a
+      // estrutura no close-up), não
+      for (const o of this.shellOccluders) o.copy.visible = o.roof.visible && !this.fadedOut(o.mesh);
       this.targetOutline.render(hulls, 0.5 + Math.sin(t * 2.5) * 0.5, this.armedTarget ? 0.5 + Math.sin(t * 7) * 0.5 : 0);
     }
     if (this.labels.size || this.aimFx || this.flashes.size) {
