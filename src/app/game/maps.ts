@@ -33,9 +33,15 @@ export interface Structure {
   /**
    * Janelas da casa (só aparência: a parede continua bloqueando passagem e visão). Cada uma
    * fica no meio do caminho entre os centros de dois hexágonos de parede da mesma parede
-   * (vizinhos, no fundo e na frente, para cair na linha da parede).
+   * (vizinhos, no fundo e na frente, para cair na linha da parede). O terceiro valor, se houver,
+   * é a largura em metros (sem ele, 80 cm).
    */
-  windows?: [HexCoord, HexCoord][];
+  windows?: [HexCoord, HexCoord, number?][];
+  /**
+   * Cômodos cheios de névoa (só aparência): a névoa tapa o que há dentro até alguém abrir a
+   * porta `door` (ou um agente já estar lá dentro) e então se desfaz de vez.
+   */
+  fog?: { room: HexRect; door: HexCoord }[];
 }
 
 export interface GameMap {
@@ -130,9 +136,10 @@ export const CHARACTERS: Character[] = [
  * papelão (altas) · `S` sacos no palete e `G` gaiolas vazias (baixas) · `b` caixote de meia
  * altura (baixo) · `f` galões e botijão (só decoração, passa).
  *
- * Móveis: `m` mesa (baixa, como os sacos) · `P` armário encostado na parede do fundo (alto) ·
- * `L` cama de solteiro com a cabeceira na parede da frente (baixa) · `n` mesinha de cabeceira
- * com abajur (baixa)
+ * Móveis: `m` mesa (baixa, como os sacos; uma coluna de `m` seguidos vira uma mesa comprida) ·
+ * `P` armário encostado na parede do fundo (alto) · `E` prateleiras abertas encostadas na parede
+ * do fundo (altas) · `L` cama de solteiro com a cabeceira na parede da frente (baixa) · `n`
+ * mesinha de cabeceira com abajur (baixa) · `t` rack da TV encostado na divisória a leste (baixo)
  *
  * `R` suprimentos do garimpo (pilha alta de caixas, galões e mangueiras: dá para queimar)
  *
@@ -152,11 +159,11 @@ export function parseLayout(
   const kinds: Record<string, Ground> = {
     '.': 'grass', T: 'grass', '#': 'floor', _: 'floor', D: 'floor', A: 'floor', '=': 'runway', ':': 'apron', '~': 'dirt',
     B: 'floor', b: 'floor', M: 'floor', S: 'floor', G: 'floor', f: 'floor', m: 'floor', P: 'floor', R: 'floor', K: 'floor',
-    L: 'floor', n: 'floor',
+    L: 'floor', n: 'floor', E: 'floor', t: 'floor',
   };
   const coverKinds: Record<string, CoverKind> = {
     B: 'crates', b: 'lowCrate', M: 'boxes', S: 'sacks', G: 'cages', m: 'table', P: 'shelf', R: 'supplies', K: 'keys',
-    L: 'bed', n: 'nightstand',
+    L: 'bed', n: 'nightstand', E: 'shelves', t: 'tv',
   };
   layout.forEach((line, row) => {
     if (line.length !== cols) throw new Error(`Linha ${row} do mapa tem ${line.length} colunas (esperado: ${cols})`);
@@ -193,6 +200,8 @@ export const COVER_HEIGHT: Record<CoverKind, 'high' | 'low'> = {
   keys: 'high',
   bed: 'low',
   nightstand: 'low',
+  shelves: 'high',
+  tv: 'low',
 };
 
 const coverOf = (map: GameMap, height: 'high' | 'low'): HexCoord[] =>
@@ -231,9 +240,12 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  * A leste da pista, numa clareira, fica a **casa** dos garimpeiros (colunas 29–41, fileiras
  * 26–32): dois cômodos de 5 × 5 separados por uma divisória com porta. Entra-se pela porta
  * do oeste, que dá para a pista. No cômodo 1 (a sala) o caseiro Jô come de costas para a
- * entrada, na mesa (`m`); há uma janela na parede da frente. O cômodo 2 é o quarto: o armário
- * do caseiro (`P`), na parede do fundo, esconde uma arma; a cama (`L`) e a mesinha com o
- * abajur (`n`) ficam na parede da frente, e a janela, na parede do leste.
+ * entrada, na mesa comprida (`m`, no meio da sala), olhando para a TV (`t`, num rack encostado
+ * na divisória, com um aviãozinho de brinquedo e um quadro de avião); há uma janela larga na
+ * parede da frente. O cômodo 2 é o quarto, tomado pela névoa até alguém abrir a porta da
+ * divisória: o armário do caseiro (`P`), na parede do fundo, entre duas prateleiras (`E`),
+ * esconde uma arma; a cama (`L`) e a mesinha com o abajur (`n`) ficam na parede da frente, e
+ * a janela larga, na parede do leste.
  *
  * O avião fica **trancado**; a chave está no quadro de chaves (`K`), na parede do fundo.
  *
@@ -271,10 +283,10 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TT.T..TT..TTTTT..T.~~~~~~.TT..T...T.T...T.TT',
   'TT.....T..TTTTT....~~~~~~...................',
   'TTTTTTTT..TTTTTTT..~~~~~~....#############..',
-  'TTTTTTTT..TT..T....~~~~~~.TT.#_____#__P__#..',
-  'TTTT.............T.~~~~~~.T..#_____#_____#..',
-  'TTTTT.T........TTT.~~~~~~....D___m_D_____#..',
-  'TT........T..TTTTT.~~~~~~....#_____#_____#..',
+  'TTTTTTTT..TT..T....~~~~~~.TT.#_____#E_P_E#..',
+  'TTTT.............T.~~~~~~.T..#__m_t#_____#..',
+  'TTTTT.T........TTT.~~~~~~....D__m__D_____#..',
+  'TT........T..TTTTT.~~~~~~....#__m__#_____#..',
   'T........TTT...TT..~~~~~~.TTB#_____#__Ln_#..',
   '..........TTT....T.~~~~~~.TTB#############..',
   '.........TTTT...TT.~~~~~~.T.................',
@@ -346,12 +358,15 @@ export const MAPS: GameMap[] = [
       {
         kind: 'house',
         rect: { cols: [29, 41], rows: [26, 32] },
+        // janelas largas, de uns dois hexágonos (três vãos de 80 cm)
         windows: [
           // quarto: no fundo (parede do leste), no meio dela
-          [{ col: 41, row: 28 }, { col: 41, row: 30 }],
+          [{ col: 41, row: 28 }, { col: 41, row: 30 }, 2.4],
           // sala: na parede da frente (sul)
-          [{ col: 31, row: 32 }, { col: 32, row: 32 }],
+          [{ col: 31, row: 32 }, { col: 32, row: 32 }, 2.4],
         ],
+        // o quarto fica tomado pela névoa até alguém abrir a porta da divisória
+        fog: [{ room: { cols: [36, 40], rows: [27, 31] }, door: { col: 35, row: 29 } }],
       },
     ],
     // o quadro de chaves, no fundo do hangar (parede norte), com a chave do avião
@@ -440,7 +455,7 @@ export const MAPS: GameMap[] = [
         model: MODELS.garimpeiro,
         // mora na casa e cuida dela
         npc: 'caseiro',
-        patrol: [{ col: 32, row: 29 }],
+        patrol: [{ col: 31, row: 29 }],
         facing: { col: 33, row: 29 },
         // mais velho, pego no meio da refeição
         agilidade: -2,

@@ -6,8 +6,19 @@ import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './chara
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import { wallFloorShape } from './house-plan';
-import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
-import { PropInfo } from './prop-models';
+import {
+  HANGAR_INTERIOR,
+  HANGAR_ROOF,
+  HOUSE_ROOF,
+  RoomFog,
+  buildCover,
+  buildFuelProps,
+  buildHangar,
+  buildHouse,
+  buildPlane,
+  buildRoomFog,
+} from './scenery';
+import { PropInfo, buildDiningTable } from './prop-models';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
@@ -23,6 +34,8 @@ import { BASE_PITCH, INTRO, ScreenEllipse, easeInOutCubic, introZoom } from './m
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
+/** Segundos para a névoa de um cômodo se desfazer depois que a porta abre. */
+const ROOM_FOG_CLEAR = 1.6;
 const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa uma fresta entre os hexágonos
 
 /** Peças com modelo 3D: velocidade da corrida entre hexágonos (3,6 m/s ≈ 2,8 hex/s). */
@@ -577,6 +590,11 @@ export class HexBoard {
   /** Modelo do avião e da carga por hexágono: o que escurece quando pega fogo. */
   private planeModel?: THREE.Object3D;
   private readonly cargoModels = new Map<string, THREE.Object3D>();
+  /**
+   * Névoa dos cômodos (o quarto do Jô): some de vez quando a porta `door` abre ou um agente
+   * já está lá dentro; `amount` cai de 1 a 0 no desfazer.
+   */
+  private readonly roomFogs: { room: HexRect; door: string; fog: RoomFog; amount: number; clear: boolean }[] = [];
   /** Móveis com zoom (o quadro de chaves, o armário), por hexágono: ver `propCloseUp`. */
   private readonly props = new Map<string, PropInfo>();
   /** O móvel em zoom agora (os toques vão para `onPropTap`). */
@@ -1624,6 +1642,17 @@ export class HexBoard {
   setDoors(doors: ReadonlyMap<string, Door>, instant = false): void {
     this.doorViews?.setStates(doors, instant);
     this.doorStates = doors;
+    // a porta do cômodo com névoa abriu: a névoa se desfaz (e não volta). Sem animação (a
+    // partida recomeçou, um caso de teste carregou), a névoa segue a porta como ela está
+    for (const f of this.roomFogs) {
+      const door = doors.get(f.door);
+      const open = !!door && isOpen(door);
+      if (instant) {
+        f.clear = open;
+        f.amount = open ? 0 : 1;
+        f.fog.update(0, f.amount);
+      } else if (open) f.clear = true;
+    }
     this.refreshCover();
     // abrir ou fechar uma porta muda o que se vê da estrutura: reavalia no próximo quadro
     this.structureKey = '';
@@ -2812,7 +2841,7 @@ export class HexBoard {
     const wallKeys = new Set(walls.map(hexKey));
     const doorKeys = new Set((this.map.doors ?? []).map(hexKey));
     const split = new Set<string>();
-    for (const { kind, rect, windows } of this.map.structures ?? []) {
+    for (const { kind, rect, windows, fog } of this.map.structures ?? []) {
       const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE, doorKeys, windows);
       if (kind === 'house') {
         const nodes = [...walls, ...(this.map.doors ?? [])].filter((h) => inStructure(h, rect));
@@ -2831,6 +2860,18 @@ export class HexBoard {
         });
       }
       this.addScenery(built);
+      // névoa dos cômodos: fica no interior (some com o telhado no lugar), fora do cenário
+      // (não esmaece com as paredes nem entra no corte do raio carregado)
+      const st = this.structures[this.structures.length - 1];
+      for (const { room, door } of fog ?? []) {
+        const roomFog = buildRoomFog(room, HEX_SIZE);
+        this.scene.add(roomFog.group);
+        st.interior.push(roomFog.group);
+        const state = this.doorStates.get(hexKey(door));
+        const clear = !!state && isOpen(state);
+        this.roomFogs.push({ room, door: hexKey(door), fog: roomFog, amount: clear ? 0 : 1, clear });
+        roomFog.update(0, clear ? 0 : 1);
+      }
     }
     const common = commonDoors(this.map.doors ?? []);
     if (common.length && this.structures.length) {
@@ -2909,12 +2950,41 @@ export class HexBoard {
     return done;
   }
 
-  /** Carga do hangar (cobertura) e decoração solta; cada peça sobe junto com o seu hexágono. */
+  /**
+   * Carga do hangar (cobertura) e decoração solta; cada peça sobe junto com o seu hexágono.
+   * Uma coluna de hexágonos de mesa seguidos vira uma mesa comprida só, presa ao primeiro deles.
+   */
   private buildCargo(): void {
+    const kindAt = new Map((this.map.cover ?? []).map((c) => [hexKey(c), c.kind]));
+    const isTable = (col: number, row: number) => kindAt.get(hexKey({ col, row })) === 'table';
+    const tables = new Map<string, THREE.Object3D>();
     for (const c of this.map.cover ?? []) {
       const tile = this.tiles.get(hexKey(c));
       if (!tile) continue;
       tile.baseColor.set(0xa8987a);
+      if (c.kind === 'table') {
+        // o resto da mesa comprida: o modelo é o do primeiro hexágono da coluna
+        if (isTable(c.col, c.row - 1)) {
+          let row = c.row - 1;
+          while (isTable(c.col, row - 1)) row--;
+          const table = tables.get(hexKey({ col: c.col, row }));
+          if (table) this.cargoModels.set(hexKey(c), table);
+          continue;
+        }
+        let n = 1;
+        while (isTable(c.col, c.row + n)) n++;
+        const step = (HEX_STEP * HEX_SIZE) / METER;
+        // o prato fica na frente do hexágono a oeste do meio da mesa (onde o caseiro senta)
+        const mid = this.worldOf({ col: c.col, row: c.row + (n - 1) / 2 });
+        const seat = (this.worldOf({ col: c.col - 1, row: c.row + Math.floor((n - 1) / 2) }).z - mid.z) / METER;
+        const table = buildDiningTable(Math.max(1.25, n * 0.75 * step), n > 1 ? seat : 0);
+        table.position.z = ((n - 1) / 2) * HEX_STEP * HEX_SIZE;
+        const holder = new THREE.Group().add(table);
+        tables.set(hexKey(c), holder);
+        this.cargoModels.set(hexKey(c), holder);
+        this.field.attach(tile, this.housed(c, holder));
+        continue;
+      }
       const model = buildCover(c.kind, c.col * 31 + c.row * 17, c.col);
       this.cargoModels.set(hexKey(c), model);
       const prop = model.userData['prop'] as PropInfo | undefined;
@@ -3021,6 +3091,12 @@ export class HexBoard {
     if (key === this.structureKey) return;
     this.structureKey = key;
     const agents = [...this.units.values()].map((u) => u.hex);
+    // agente já dentro do cômodo com névoa (começou lá, por exemplo): sem névoa
+    for (const f of this.roomFogs) {
+      if (f.clear || !agents.some((a) => inStructure(a, f.room))) continue;
+      f.clear = true;
+      f.amount = 0;
+    }
     for (const st of this.structures) {
       const view = structureView(st.rect, agents, this.seeThrough(st.doors));
       if (st.roof) st.roof.visible = view.roof;
@@ -4522,6 +4598,10 @@ export class HexBoard {
     const sc = this.ring && this.ringBlend > 0.5 ? this.ring.target : this.camTarget;
     this.stream.update(sc.x, sc.z, STREAM_BUDGET_MS);
     this.updateStructure();
+    for (const f of this.roomFogs) {
+      if (f.clear && f.amount > 0) f.amount = Math.max(0, f.amount - dt / ROOM_FOG_CLEAR);
+      if (f.amount > 0 || f.fog.group.children[0]?.visible) f.fog.update(t, f.amount);
+    }
 
     for (const u of this.units.values()) {
       const active = u.id === this.activeId;

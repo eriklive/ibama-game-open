@@ -473,62 +473,198 @@ const shadeMat = (): THREE.MeshStandardMaterial =>
   (shadeMaterial ??= new THREE.MeshStandardMaterial({ color: 0xf1e2b8, emissive: 0xffc768, emissiveIntensity: 0.55, roughness: 0.7 }));
 
 /**
- * Mesa da sala, de tábuas grossas: 1,25 × 0,8 m, 76 cm de altura, com um banco do outro lado.
- * O almoço do caseiro (prato esmaltado com arroz, feijão e um pedaço de carne, garfo e
- * caneca) fica no lado oeste (−X), de quem come olhando para o leste; no meio, uma panela
- * tampada e a garrafa térmica; um pano de prato dobrado na ponta.
+ * Mesa comprida da sala, de tábuas grossas: `L` × 0,85 m (comprimento em metros, no sentido
+ * norte–sul, +Z), 76 cm de altura, com um banco comprido do outro lado (leste). O almoço do
+ * caseiro (prato esmaltado com arroz, feijão e um pedaço de carne, garfo e caneca) fica no lado
+ * oeste (−X), na altura `seat` (metros a partir do meio da mesa, em Z), de quem come olhando
+ * para o leste; perto dele, uma panela tampada e a garrafa térmica. Nas pontas, um pano de
+ * prato dobrado e, na mesa comprida, uma pilha de pratos e um rádio de pilha.
  */
-export function buildDiningTable(): THREE.Group {
+export function buildDiningTable(L = 1.25, seat = 0): THREE.Group {
   const g = new THREE.Group();
   const p = new Parts();
-  const L = 1.25;
-  const D = 0.8;
+  const D = 0.85;
   const H = 0.76;
   const t = 0.045;
   // tampo: quatro tábuas no comprimento, de tons um pouco diferentes
   const tones = [C.plankLight, C.plank, 0xab7c48, C.plankLight];
-  tones.forEach((tone, i) => p.box(L, t, D / 4 - 0.006, tone, 0, H - t / 2, -D / 2 + D / 8 + (i * D) / 4, undefined, { outline: true }));
-  // saia embaixo do tampo e as pernas, levemente afinadas
-  for (const z of [-1, 1]) p.box(L - 0.16, 0.1, 0.025, C.plankDark, 0, H - t - 0.05, z * (D / 2 - 0.07));
-  for (const x of [-1, 1]) p.box(0.025, 0.1, D - 0.16, C.plankDark, x * (L / 2 - 0.08), H - t - 0.05, 0);
-  for (const x of [-1, 1]) {
-    for (const z of [-1, 1]) p.add(new THREE.CylinderGeometry(m(0.03), m(0.025), m(H - t), 4, 1), C.plankDark, x * (L / 2 - 0.08), (H - t) / 2, z * (D / 2 - 0.07), [0, Math.PI / 4, 0]);
-    // travessa baixa entre as pernas de cada cabeceira
-    p.box(0.03, 0.04, D - 0.16, C.plankDark, x * (L / 2 - 0.08), 0.16, 0);
+  tones.forEach((tone, i) => p.box(D / 4 - 0.006, t, L, tone, -D / 2 + D / 8 + (i * D) / 4, H - t / 2, 0, undefined, { outline: true }));
+  // saia embaixo do tampo e as pernas, levemente afinadas (a mesa comprida tem um par no meio)
+  for (const x of [-1, 1]) p.box(0.025, 0.1, L - 0.16, C.plankDark, x * (D / 2 - 0.07), H - t - 0.05, 0);
+  for (const z of [-1, 1]) p.box(D - 0.16, 0.1, 0.025, C.plankDark, 0, H - t - 0.05, z * (L / 2 - 0.08));
+  const legs = L > 1.8 ? [-1, 0, 1] : [-1, 1];
+  for (const z of legs) {
+    const lz = z * (L / 2 - 0.08);
+    for (const x of [-1, 1]) p.add(new THREE.CylinderGeometry(m(0.03), m(0.025), m(H - t), 4, 1), C.plankDark, x * (D / 2 - 0.07), (H - t) / 2, lz, [0, Math.PI / 4, 0]);
+    // travessa baixa entre as pernas de cada par
+    p.box(D - 0.16, 0.04, 0.03, C.plankDark, 0, 0.16, lz);
   }
-  p.box(L - 0.16, 0.04, 0.03, C.plankDark, 0, 0.16, 0);
-  // banco do outro lado (leste): assento de tábua e dois pés de cavalete
-  const bx = L / 2 + 0.22;
-  p.box(0.3, 0.04, 0.95, C.plank, bx, 0.45, 0, undefined, { outline: true });
-  for (const z of [-1, 1]) {
-    p.box(0.26, 0.43, 0.04, C.plankDark, bx, 0.215, z * 0.36);
-  }
-  p.box(0.04, 0.05, 0.7, C.plankDark, bx, 0.12, 0);
+  p.box(0.03, 0.04, L - 0.16, C.plankDark, 0, 0.16, 0);
+  // banco comprido do outro lado (leste): assento de tábua e pés de cavalete
+  const bx = D / 2 + 0.3;
+  const bl = L - 0.3;
+  p.box(0.3, 0.04, bl, C.plank, bx, 0.45, 0, undefined, { outline: true });
+  for (const z of legs) p.box(0.26, 0.43, 0.04, C.plankDark, bx, 0.215, z * (bl / 2 - 0.12));
+  p.box(0.04, 0.05, bl - 0.24, C.plankDark, bx, 0.12, 0);
 
   const y = H;
-  // prato esmaltado (branco de borda azul) com a comida
-  const px = -0.36;
-  const pz = 0.05;
+  // prato esmaltado (branco de borda azul) com a comida, na frente de quem come
+  const px = -0.22;
+  const pz = seat;
   p.cyl(0.13, 0.1, 0.025, 0xf2f0e8, px, y + 0.0125, pz, undefined, 16);
   p.cyl(0.131, 0.131, 0.006, 0x2f5fa0, px, y + 0.024, pz, undefined, 16);
   p.dome(0.075, 0xf4efe2, px - 0.03, y + 0.022, pz - 0.03); // arroz
-  p.dome(0.055, 0x4a2a1c, px + 0.05, y + 0.022, pz + 0.03); // feijão
-  p.box(0.07, 0.025, 0.05, 0x7a3b22, px + 0.0, y + 0.035, pz + 0.07, [0, 0.4, 0]); // carne
-  p.box(0.012, 0.006, 0.17, C.steel, px - 0.17, y + 0.003, pz + 0.01); // garfo
+  p.dome(0.055, 0x4a2a1c, px + 0.03, y + 0.022, pz + 0.05); // feijão
+  p.box(0.05, 0.025, 0.07, 0x7a3b22, px + 0.07, y + 0.035, pz, [0, 0.4, 0]); // carne
+  p.box(0.012, 0.006, 0.17, C.steel, px - 0.02, y + 0.003, pz + 0.18); // garfo
   // caneca de alumínio com asa
-  p.cyl(0.04, 0.038, 0.09, 0xb9c0c4, -0.2, y + 0.045, -0.24, undefined, 12);
-  p.ring(0.025, 0.006, 0xb9c0c4, -0.2, y + 0.05, -0.29, [0, Math.PI / 2, 0]);
+  p.cyl(0.04, 0.038, 0.09, 0xb9c0c4, -0.24, y + 0.045, pz - 0.26, undefined, 12);
+  p.ring(0.025, 0.006, 0xb9c0c4, -0.29, y + 0.05, pz - 0.26);
   // panela de alumínio tampada, com os cabos
-  p.cyl(0.13, 0.12, 0.12, 0xa9b0b4, 0.1, y + 0.06, -0.05, undefined, 16);
-  p.cyl(0.135, 0.135, 0.015, 0x9aa1a5, 0.1, y + 0.128, -0.05, undefined, 16);
-  p.cyl(0.02, 0.02, 0.025, C.black, 0.1, y + 0.145, -0.05, undefined, 8);
-  for (const s of [-1, 1]) p.box(0.06, 0.015, 0.03, C.black, 0.1 + s * 0.16, y + 0.1, -0.05);
+  const nz = pz - 0.55;
+  p.cyl(0.13, 0.12, 0.12, 0xa9b0b4, 0.05, y + 0.06, nz, undefined, 16);
+  p.cyl(0.135, 0.135, 0.015, 0x9aa1a5, 0.05, y + 0.128, nz, undefined, 16);
+  p.cyl(0.02, 0.02, 0.025, C.black, 0.05, y + 0.145, nz, undefined, 8);
+  for (const s of [-1, 1]) p.box(0.03, 0.015, 0.06, C.black, 0.05, y + 0.1, nz + s * 0.16);
   // garrafa térmica vermelha
-  p.cyl(0.055, 0.055, 0.26, C.toolRed, 0.38, y + 0.13, 0.2, undefined, 12);
-  p.cyl(0.045, 0.05, 0.06, 0xe9e2c9, 0.38, y + 0.29, 0.2, undefined, 12);
-  // pano de prato dobrado
-  p.box(0.22, 0.012, 0.16, C.rag, 0.42, y + 0.006, -0.22, [0, 0.25, 0]);
-  p.box(0.22, 0.004, 0.025, 0xe9e2c9, 0.42, y + 0.013, -0.22, [0, 0.25, 0]);
+  p.cyl(0.055, 0.055, 0.26, C.toolRed, 0.2, y + 0.13, pz + 0.4, undefined, 12);
+  p.cyl(0.045, 0.05, 0.06, 0xe9e2c9, 0.2, y + 0.29, pz + 0.4, undefined, 12);
+  // pano de prato dobrado numa ponta
+  const ez = L / 2 - 0.2;
+  p.box(0.16, 0.012, 0.22, C.rag, 0.18, y + 0.006, -ez, [0, 0.25, 0]);
+  p.box(0.025, 0.004, 0.22, 0xe9e2c9, 0.18, y + 0.013, -ez, [0, 0.25, 0]);
+  // na outra ponta, uma pilha de pratos e um rádio de pilha
+  if (L > 1.8) {
+    for (let i = 0; i < 3; i++) p.cyl(0.11, 0.09, 0.02, 0xf2f0e8, -0.15, y + 0.01 + i * 0.022, ez - 0.05, undefined, 14);
+    p.box(0.2, 0.12, 0.08, C.black, 0.15, y + 0.06, ez - 0.02, [0, 0.3, 0]);
+    p.cyl(0.003, 0.003, 0.25, C.steel, 0.2, y + 0.24, ez, [0, 0, 0.4], 4);
+  }
+  g.add(body(p));
+  return g;
+}
+
+/**
+ * Prateleiras abertas de tábua encostadas na parede do fundo (norte, −Z), com a frente para
+ * +Z: 90 cm de largura, 32 cm de fundo, 1,7 m de altura, quatro andares. `back` é a distância
+ * do centro do hexágono até a face da parede (unidades do mundo). `seed` varia a ordem do que
+ * fica em cada andar (livros e revistas, latas, caixas, corda e botas), para que duas
+ * prateleiras não fiquem iguais.
+ */
+export function buildShelves(back: number, seed: number): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const W = 0.9;
+  const D = 0.32;
+  const H = 1.7;
+  const t = 0.025;
+  const bz = -back / METER;
+  const cz = bz + D / 2;
+  // laterais (sem fundo: um X de sarrafo atrás segura o móvel) e os andares
+  for (const x of [-1, 1]) p.box(t, H, D, C.plank, x * (W / 2 - t / 2), H / 2, cz, undefined, { outline: true });
+  for (const a of [-1, 1]) p.box(0.02, Math.hypot(W, H) - 0.15, 0.02, C.plankDark, 0, H / 2, bz + 0.012, [0, 0, a * Math.atan2(W, H)]);
+  const levels = [0.08, 0.5, 0.92, 1.34, H - t / 2];
+  for (const y of levels) p.box(W - 2 * t, t, D, C.plankLight, 0, y, cz, undefined, { outline: true });
+  // sorteio fixo pela semente
+  let r = Math.abs(Math.floor(seed)) % 233280;
+  const rnd = () => (r = (r * 9301 + 49297) % 233280) / 233280;
+  const fill = [
+    // livros e revistas em pé, de cores diferentes, e uma pilha deitada
+    (y: number) => {
+      let x = -W / 2 + t + 0.03;
+      for (const color of [0x7d2f2a, 0x34507a, 0xd9be7c, 0x3f5a3a, 0x9a6b3e, 0xb3302a]) {
+        const h = 0.18 + rnd() * 0.08;
+        p.box(0.035, h, 0.2, color, x, y + h / 2, cz + 0.02);
+        x += 0.045;
+      }
+      p.box(0.24, 0.03, 0.2, 0xe9e2c9, x + 0.14, y + 0.015, cz + 0.02, [0, 0.15, 0]);
+    },
+    // latas e potes
+    (y: number) => {
+      for (const [x, color] of [[-0.3, C.tin], [-0.2, C.jar], [-0.08, C.tin], [0.1, C.glass], [0.22, C.tin]] as const) {
+        p.cyl(0.045, 0.045, 0.13, color, x, y + 0.065, cz + (rnd() - 0.5) * 0.08, undefined, 10);
+      }
+    },
+    // caixa de papelão e uma caixa de ferramentas vermelha
+    (y: number) => {
+      p.box(0.34, 0.22, 0.26, 0xc79b62, -0.2, y + 0.11, cz, [0, (rnd() - 0.5) * 0.2, 0]);
+      p.box(0.3, 0.14, 0.18, C.toolRed, 0.2, y + 0.07, cz + 0.02);
+      p.box(0.12, 0.02, 0.03, C.black, 0.2, y + 0.15, cz + 0.02);
+    },
+    // rolo de corda, um galão azul e um par de botas de borracha
+    (y: number) => {
+      p.ring(0.09, 0.03, 0xd9be7c, -0.25, y + 0.03, cz, [Math.PI / 2, 0, 0]);
+      p.box(0.16, 0.24, 0.12, 0x2f6fb0, 0.02, y + 0.12, cz);
+      p.cyl(0.02, 0.02, 0.04, C.black, 0.06, y + 0.26, cz, undefined, 8);
+      for (const x of [0.22, 0.32]) p.box(0.09, 0.26, 0.2, C.black, x, y + 0.13, cz);
+    },
+  ];
+  const order = fill.map((f) => ({ f, k: rnd() })).sort((a, b) => a.k - b.k);
+  order.forEach(({ f }, i) => f(levels[i] + t / 2));
+  g.add(body(p));
+  return g;
+}
+
+/**
+ * Rack baixo da TV encostado numa divisória a leste (+X), com a frente para −X (para a sala):
+ * 1 m de largura, 50 cm de fundo, 55 cm de altura. Em cima, uma TV de tubo com antena de
+ * "chifre", virada `turn` radianos (em volta do eixo vertical) para quem come na mesa, e um
+ * aviãozinho de brinquedo num pezinho; na parede, acima, um quadro de avião. `back` é a
+ * distância do centro do hexágono até a face da parede (unidades do mundo).
+ */
+export function buildTvRack(back: number, turn = 0): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const W = 1.0;
+  const D = 0.5;
+  const H = 0.55;
+  const t = 0.025;
+  const bx = back / METER;
+  const cx = bx - D / 2;
+  // rack: tampo, base, laterais e, embaixo, um aparelho de vídeo e umas fitas
+  p.box(D, t, W, C.plankLight, cx, H - t / 2, 0, undefined, { outline: true });
+  p.box(D, t, W, C.plank, cx, 0.06, 0);
+  for (const z of [-1, 1]) p.box(D, H, t, C.plankDark, cx, H / 2, z * (W / 2 - t / 2), undefined, { outline: true });
+  p.box(0.32, 0.08, 0.4, C.black, cx, 0.12, -0.2);
+  [0x24272a, 0x7d2f2a, 0x24272a, 0x34507a].forEach((color, i) => p.box(0.18, 0.1, 0.025, color, cx, 0.125, 0.12 + i * 0.04));
+  // TV de tubo: caixa funda, tela escura com reflexo, botões e a antena (tudo girado junto)
+  const spin = new THREE.Euler(0, turn, 0);
+  const tvc = new THREE.Vector3(bx - 0.27, 0, -0.12);
+  /** Peça da TV: `x` para a frente (−X é a tela), `z` de lado, no espaço da TV. */
+  const tvBox = (d: number, h: number, w: number, color: number, x: number, y: number, z: number) => {
+    const q = new THREE.Vector3(x, 0, z).applyEuler(spin).add(tvc);
+    p.box(d, h, w, color, q.x, y, q.z, [0, turn, 0], { outline: true });
+  };
+  tvBox(0.32, 0.4, 0.5, 0x3a3d40, 0, H + 0.2, 0);
+  tvBox(0.02, 0.3, 0.38, 0x1d2a33, -0.16, H + 0.22, -0.03);
+  tvBox(0.01, 0.07, 0.12, 0x5d7a8a, -0.17, H + 0.3, -0.1);
+  tvBox(0.02, 0.03, 0.03, C.steel, -0.16, H + 0.14, 0.2);
+  tvBox(0.02, 0.03, 0.03, C.red, -0.16, H + 0.07, 0.2);
+  const top = new THREE.Vector3(0.05, 0, 0).applyEuler(spin).add(tvc);
+  p.dome(0.04, C.black, top.x, H + 0.4, top.z);
+  for (const s of [-1, 1]) p.cyl(0.005, 0.005, 0.4, C.steel, top.x, H + 0.58, top.z + s * 0.09, [s * 0.5, 0, 0], 4);
+  // aviãozinho de brinquedo (monomotor branco de faixa vermelha, nariz para a sala) num pezinho
+  const ax = cx - 0.02;
+  const az = 0.33;
+  const ay = H + 0.16;
+  p.cyl(0.008, 0.03, 0.14, C.black, ax, H + 0.07, az, undefined, 8);
+  p.cyl(0.025, 0.018, 0.26, 0xf2f0e8, ax, ay, az, [0, 0, Math.PI / 2 - 0.12], 10);
+  p.box(0.07, 0.01, 0.28, 0xf2f0e8, ax + 0.01, ay + 0.012, az);
+  p.box(0.05, 0.012, 0.275, C.red, ax + 0.012, ay + 0.016, az);
+  p.box(0.04, 0.008, 0.12, 0xf2f0e8, ax + 0.12, ay + 0.03, az);
+  p.box(0.05, 0.07, 0.008, C.red, ax + 0.12, ay + 0.06, az);
+  p.box(0.005, 0.08, 0.012, C.black, ax - 0.135, ay - 0.01, az);
+  // quadro de avião na parede: moldura, céu, nuvem e um bimotor branco visto de lado
+  const wx = bx - 0.012;
+  const fy = 1.55;
+  const fz = -0.05;
+  p.box(0.02, 0.44, 0.64, C.plankDark, wx, fy, fz, undefined, { outline: true });
+  p.box(0.022, 0.36, 0.56, 0x7fb3d9, wx - 0.002, fy, fz);
+  p.box(0.024, 0.06, 0.18, 0xf3efe4, wx - 0.003, fy - 0.11, fz + 0.15);
+  p.box(0.024, 0.05, 0.3, 0xf2f0e8, wx - 0.004, fy + 0.02, fz);
+  p.box(0.025, 0.018, 0.34, C.red, wx - 0.005, fy + 0.01, fz);
+  p.box(0.024, 0.1, 0.05, 0xf2f0e8, wx - 0.004, fy + 0.09, fz - 0.13);
+  p.box(0.025, 0.025, 0.2, 0xd7d9cf, wx - 0.005, fy + 0.0, fz + 0.02);
+  p.box(0.025, 0.04, 0.03, 0x34507a, wx - 0.005, fy + 0.03, fz + 0.14);
   g.add(body(p));
   return g;
 }

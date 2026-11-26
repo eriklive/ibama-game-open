@@ -129,7 +129,7 @@ export const TEST_CASES: readonly TestCase[] = [
     mapId: 'aeroporto',
     active: 'clara',
     agents: { clara: { col: 37, row: 29 }, ana: { col: 37, row: 28 }, bruno: { col: 37, row: 30 } },
-    enemies: { jo: { hex: { col: 32, row: 29 }, status: 'surrendered' }, ...PILOTO_LONGE },
+    enemies: { jo: { hex: { col: 31, row: 29 }, status: 'surrendered' }, ...PILOTO_LONGE },
     start: { kind: 'turn', agent: 'clara' },
   },
   {

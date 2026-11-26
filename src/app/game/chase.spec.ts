@@ -295,7 +295,7 @@ describe('carga baixa do Aeroporto', () => {
     const m = findMap('aeroporto')!;
     const low = lowCoverHexes(m);
     const kinds = new Set((m.cover ?? []).filter((c) => low.has(hexKey(c))).map((c) => c.kind));
-    expect(kinds).toEqual(new Set(['sacks', 'cages', 'table', 'bed', 'nightstand']));
+    expect(kinds).toEqual(new Set(['sacks', 'cages', 'table', 'bed', 'nightstand', 'tv']));
     for (const c of m.cover ?? []) {
       if (low.has(hexKey(c))) expect(blockedHexes(m).has(hexKey(c)), hexKey(c)).toBe(false);
       else expect(blockedHexes(m).has(hexKey(c)), hexKey(c)).toBe(true);
