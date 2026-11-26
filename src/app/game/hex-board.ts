@@ -17,6 +17,7 @@ import { Door, commonDoors, isOpen, seeThroughDoors } from './door';
 import { lineOfSight } from './enemies';
 import { DoorPush, DoorViews } from './door-view';
 import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
+import { OUTLINE_LAYER, TargetOutline } from './target-outline';
 import { AuraLayer, AuraStyle, AuraTextures, createAuraTextures, splitHot } from './aura-layer';
 import { BASE_PITCH, INTRO, ScreenEllipse, easeInOutCubic, introZoom } from './mission-intro';
 
@@ -601,42 +602,10 @@ export class HexBoard {
    * (contorno amarelo); sem, só o toque. `rig` lembra se o contorno já pegou o modelo 3D.
    */
   private readonly npcTargets = new Map<string, { talk: boolean; rig: boolean }>();
-  /** Contorno do NPC com interação: amarelo, fino e suave, acompanhando a animação (ver `skinOutline`). */
-  private readonly npcOutlineMat = this.skinOutline(0.05, 0.7);
-  /** Contorno do NPC tocado uma vez: mais grosso e intenso, como o do avião armado. */
-  private readonly npcArmedMat = this.skinOutline(0.1, 0.9);
   /** Balões passageiros sobre um alvo ("Nenhuma interação"), ver `flashTargetLabel`. */
   private readonly flashes = new Map<string, { fx: Pick<AimFx, 'label' | 'labelTop' | 'labelLow' | 'avoid'>; until: number; span: number }>();
-  /** Contorno de "dá para tocar": fino, amarelo e suave. */
-  private readonly outlineMat = new THREE.MeshBasicMaterial({
-    color: 0xffd23a,
-    side: THREE.BackSide,
-    transparent: true,
-    depthWrite: false,
-    toneMapped: false,
-    opacity: 0.35,
-  });
-  /** Contorno do alvo já tocado uma vez (ver `setArmedTarget`): mais grosso, amarelo e intenso. */
-  private readonly armedOutlineMat = new THREE.MeshBasicMaterial({
-    color: 0xffd23a,
-    side: THREE.BackSide,
-    transparent: true,
-    depthWrite: false,
-    toneMapped: false,
-    opacity: 0.9,
-  });
-  /**
-   * Aura da porta: a casca em volta do vão (ver `DoorViews.modelsOf`) atravessa a parede, então
-   * só as faces da frente aparecem — uma porta maior, translúcida, por cima da porta toda.
-   */
-  private readonly shellMat = new THREE.MeshBasicMaterial({
-    color: 0xffd23a,
-    transparent: true,
-    depthWrite: false,
-    toneMapped: false,
-    opacity: 0.2,
-  });
-  private readonly armedShellMat = this.shellMat.clone();
+  /** Contorno de desenho animado dos alvos tocáveis (ver `TargetOutline`). */
+  private readonly targetOutline: TargetOutline;
   /** Alvo tocado uma vez, esperando o segundo toque (ou `null`). */
   private armedTarget: string | null = null;
   /** Efeitos do alvo tocado uma vez (ver `setTargetAim`). */
@@ -767,6 +736,7 @@ export class HexBoard {
     this.renderer.info.autoReset = false;
     this.staticShadow = new StaticShadow(this.renderer, this.scene, this.sun);
     this.spotlight = new Spotlight(this.renderer, this.scene, this.camera);
+    this.targetOutline = new TargetOutline(this.renderer, this.scene, this.camera);
     // etiqueta escondida para o aquecimento do destaque (ver `warmSpotlight`)
     this.warmLabel = this.labelSprite('…', 'roll');
     this.warmLabel.visible = false;
@@ -2613,6 +2583,7 @@ export class HexBoard {
     this.auraTextures.fade.dispose();
     this.setSpotlight(null);
     this.spotlight.dispose();
+    this.targetOutline.dispose();
     this.warmLabel.material.map?.dispose();
     this.warmLabel.material.dispose();
     this.renderer.dispose();
@@ -3099,17 +3070,13 @@ export class HexBoard {
 
   /**
    * Alvos que dá para tocar direto (o avião, os suprimentos, as portas fechadas, o quadro de
-   * chaves, o móvel com algo percebido): cada peça do modelo ganha uma
-   * casca um pouco maior, só com as faces de trás, que aparece como um contorno pulsante em
-   * volta da silhueta. Tocar no modelo chama `onTargetTap`. Alvos que pegam fogo perdem o
+   * chaves, o móvel com algo percebido): cada peça do modelo ganha uma cópia na camada do
+   * contorno, e a silhueta delas ganha um contorno de desenho animado que respira (ver
+   * `TargetOutline`). Tocar no modelo chama `onTargetTap`. Alvos que pegam fogo perdem o
    * contorno (ver `ignite`).
    */
   setTargetOutlines(targets: readonly { id: string; hexes: readonly HexCoord[] }[]): void {
     for (const id of [...this.outlined.keys()]) if (!id.startsWith(NPC_TARGET)) this.dropOutline(id);
-    const thick = 0.08; // espessura do contorno, em unidades do mundo
-    const size = new THREE.Vector3();
-    const center = new THREE.Vector3();
-    const scale = new THREE.Vector3();
     for (const t of targets) {
       const models = [...this.modelsOn(t.hexes)];
       if (!models.length) continue;
@@ -3127,30 +3094,11 @@ export class HexBoard {
           ((mesh.userData['outlineParts'] as THREE.BufferGeometry[] | undefined) ?? [mesh.geometry]).map((geo) => ({ mesh, geo })),
         );
         for (const { mesh, geo } of pieces) {
-          if (!geo.boundingBox) geo.computeBoundingBox();
-          const box = geo.boundingBox!;
-          box.getSize(size);
-          box.getCenter(center);
-          mesh.getWorldScale(scale);
-          // cresce `thick` para cada lado, em volta do centro da peça (caixas e cilindros ficam inteiros)
-          const grow = (len: number, ws: number) => (len > 1e-4 ? 1 + (2 * thick) / Math.max(len * Math.abs(ws), 1e-4) : 1);
-          const shell = !!mesh.userData['outlineShell'];
-          const hull = new THREE.Mesh(geo, shell ? this.shellMat : this.outlineMat);
-          if (shell) hull.userData['shell'] = true;
-          hull.scale.set(grow(size.x, scale.x), grow(size.y, scale.y), grow(size.z, scale.z));
-          hull.position.set(center.x * (1 - hull.scale.x), center.y * (1 - hull.scale.y), center.z * (1 - hull.scale.z));
+          // cópia da peça só na camada do contorno: forma a silhueta na máscara (ver `TargetOutline`)
+          const hull = new THREE.Mesh(geo, this.targetOutline.mask);
+          hull.layers.set(OUTLINE_LAYER);
           hull.castShadow = hull.receiveShadow = false;
-          hull.renderOrder = -1;
           hull.userData['outline'] = true;
-          // o contorno armado é ~2,5× mais grosso: guarda a escala/posição do fino e as da grossa
-          const armed = 2.5 * thick;
-          const growA = (len: number, ws: number) => (len > 1e-4 ? 1 + (2 * armed) / Math.max(len * Math.abs(ws), 1e-4) : 1);
-          const big = new THREE.Vector3(growA(size.x, scale.x), growA(size.y, scale.y), growA(size.z, scale.z));
-          hull.userData['thin'] = { scale: hull.scale.clone(), position: hull.position.clone() };
-          hull.userData['thick'] = {
-            scale: big,
-            position: new THREE.Vector3(center.x * (1 - big.x), center.y * (1 - big.y), center.z * (1 - big.z)),
-          };
           hull.visible = this.outlinesOn;
           mesh.add(hull);
           hulls.push(hull);
@@ -3172,18 +3120,7 @@ export class HexBoard {
     this.armedTarget = id;
     for (const [tid, o] of this.outlined) {
       const on = tid === id;
-      for (const h of o.hulls) {
-        if (h.userData['npc']) {
-          h.material = on ? this.npcArmedMat : this.npcOutlineMat;
-          continue;
-        }
-        const pose = h.userData[on ? 'thick' : 'thin'] as { scale: THREE.Vector3; position: THREE.Vector3 };
-        h.scale.copy(pose.scale);
-        h.position.copy(pose.position);
-        h.material = h.userData['shell']
-          ? on ? this.armedShellMat : this.shellMat
-          : on ? this.armedOutlineMat : this.outlineMat;
-      }
+      for (const h of o.hulls) h.material = on ? this.targetOutline.armedMask : this.targetOutline.mask;
     }
   }
 
@@ -3503,18 +3440,18 @@ export class HexBoard {
         let hull: THREE.Mesh;
         if (skin.isSkinnedMesh) {
           // mesma malha e mesmo esqueleto: o contorno se mexe junto com o clipe
-          const s = new THREE.SkinnedMesh(skin.geometry, this.npcOutlineMat);
+          const s = new THREE.SkinnedMesh(skin.geometry, this.targetOutline.mask);
           s.bindMode = skin.bindMode;
           s.bind(skin.skeleton, skin.bindMatrix);
           hull = s;
         } else {
-          hull = new THREE.Mesh(mesh.geometry, this.npcOutlineMat);
+          hull = new THREE.Mesh(mesh.geometry, this.targetOutline.mask);
         }
         hull.frustumCulled = false;
         hull.castShadow = hull.receiveShadow = false;
         hull.renderOrder = -1;
+        hull.layers.set(OUTLINE_LAYER);
         hull.userData['outline'] = true;
-        hull.userData['npc'] = true;
         hull.visible = this.outlinesOn;
         hull.raycast = () => {};
         mesh.add(hull);
@@ -3526,40 +3463,6 @@ export class HexBoard {
       this.armedTarget = null;
       this.setArmedTarget(key);
     }
-  }
-
-  /**
-   * Contorno que acompanha a pose (personagens com esqueleto): a casca só com as faces de trás é
-   * empurrada `thick` unidades para fora, pela normal, depois da animação (o contorno do avião
-   * cresce pela escala, que não serve para um corpo que se mexe).
-   */
-  private skinOutline(thick: number, opacity: number): THREE.MeshBasicMaterial {
-    const m = new THREE.MeshBasicMaterial({
-      color: 0xffd23a,
-      side: THREE.BackSide,
-      transparent: true,
-      depthWrite: false,
-      toneMapped: false,
-      opacity,
-    });
-    m.onBeforeCompile = (shader) => {
-      shader.uniforms['outlineThick'] = { value: thick };
-      shader.vertexShader = shader.vertexShader
-        .replace('#include <common>', '#include <common>\nuniform float outlineThick;')
-        .replace(
-          '#include <project_vertex>',
-          `#include <project_vertex>
-          #if defined( USE_SKINNING )
-            vec3 outlineN = normalize( normalMatrix * objectNormal );
-          #else
-            vec3 outlineN = normalize( normalMatrix * normal );
-          #endif
-          mvPosition.xyz += outlineN * outlineThick;
-          gl_Position = projectionMatrix * mvPosition;`,
-        );
-    };
-    m.customProgramCacheKey = () => 'skin-outline';
-    return m;
   }
 
   /** Acende ou apaga os contornos dos alvos (o toque neles só vale aceso). */
@@ -4733,21 +4636,6 @@ export class HexBoard {
 
     this.updateProps(t);
     if (this.outlinesOn && this.outlined.size) {
-      // amarelo suave que respira devagar: dá para tocar
-      const k = 0.5 + Math.sin(t * 2.5) * 0.5;
-      this.outlineMat.opacity = 0.2 + k * 0.25;
-      this.shellMat.opacity = 0.12 + k * 0.14;
-      // tocado uma vez: amarelo que pulsa rápido e forte, quase branco no pico
-      this.npcOutlineMat.opacity = 0.55 + k * 0.35;
-      if (this.armedTarget) {
-        const a = 0.5 + Math.sin(t * 7) * 0.5;
-        this.armedOutlineMat.opacity = 0.75 + a * 0.25;
-        this.armedOutlineMat.color.setRGB(1, 0.78 + a * 0.18, 0.1 + a * 0.35);
-        this.armedShellMat.opacity = 0.3 + a * 0.15;
-        this.armedShellMat.color.copy(this.armedOutlineMat.color);
-        this.npcArmedMat.opacity = this.armedOutlineMat.opacity;
-        this.npcArmedMat.color.copy(this.armedOutlineMat.color);
-      }
       this.updateAimFx(t);
     }
     this.updateFlashes();
@@ -4772,6 +4660,12 @@ export class HexBoard {
     this.updateSpotlight();
     if (this.spotWarmDue && !this.spot) this.warmSpotlight();
     this.spotlight.render(dt);
+    if (this.outlinesOn && this.outlined.size) {
+      // respira devagar: dá para tocar; o tocado uma vez pulsa rápido, quase branco no pico
+      const t = this.clock.elapsedTime;
+      const hulls = [...this.outlined.values()].flatMap((o) => o.hulls);
+      this.targetOutline.render(hulls, 0.5 + Math.sin(t * 2.5) * 0.5, this.armedTarget ? 0.5 + Math.sin(t * 7) * 0.5 : 0);
+    }
     if (this.labels.size || this.aimFx || this.flashes.size) {
       this.renderer.autoClear = false;
       this.renderer.render(this.labelScene, this.camera);
