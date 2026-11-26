@@ -58,9 +58,9 @@ import { KEY_PANEL_ID, KEY_TAKEN, PLANE_LOCKED } from './plane';
  * `hiddenWhen` de quem depende dela.
  *
  **Respostas que entregam um esconderijo:** `notices: '<id>'` num desfecho (o id de um item em
- * `hidden` do mapa) faz o esconderijo contar como já percebido: ninguém precisa rolar percepção
- * no cômodo, a lupa aparece e objetivos `notice` desse item ficam cumpridos. Achar o item ainda
- * pede a inspeção (d20). Ex.: o caseiro confessa "Tem sim, tá no quartinho de trás." → `arma`.
+ * `hidden` do mapa, ou o quadro de chaves) faz o móvel contar como já percebido: ele ganha o
+ * contorno sem ninguém rolar percepção, e objetivos `notice` desse item ficam cumpridos. Achar o
+ * item ainda pede o toque nele, no zoom do móvel. Ex.: o caseiro confessa "Tem sim, tá no quartinho de trás." → `arma`.
  *
  * `resume` é a fala curta de quando o agente volta a conversar (sem ela, repete a de entrada).
  */
@@ -71,7 +71,7 @@ export const MORE_PEOPLE_ASKS: readonly string[] = [MORE_PEOPLE, 'Tem mais algu�
 /** É a pergunta de "mais gente" (toda classe com diálogo tem, sem condição). */
 export const isMorePeople = (q: QuestionNode): boolean => MORE_PEOPLE_ASKS.includes(q.ask);
 
-/** Pista: alguém confirmou de quem é a arma escondida na prateleira da casa. */
+/** Pista: alguém confirmou de quem é a arma escondida no armário da casa. */
 export const GUN_OWNER = 'dono-arma';
 
 /**
@@ -116,10 +116,10 @@ const WHOSE_GUN_CASEIRO: RolledQuestion = {
   ...WHOSE_GUN,
   pass: { say: 'Sei não, senhor.', note: 'Diz não saber de quem é a arma.' },
   // resistiu à tréplica: o agente fecha a insistência (sem cartão, sem rolagem, sem resposta)
-  closing: 'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
+  closing: 'Claro. A arma entrou sozinha e foi se esconder no armário.',
   fail: {
     say: '…É minha, doutor. É pra onça, juro.',
-    note: 'A arma da prateleira é dele.',
+    note: 'A arma do armário é dele.',
     confess: true,
     clue: GUN_OWNER,
   },
@@ -142,16 +142,23 @@ const WHOSE_GUN_CASEIRO: RolledQuestion = {
  */
 const WHERE_KEY = { requires: PLANE_LOCKED, hiddenWhen: KEY_TAKEN } as const;
 
-/** Os ajudantes do hangar não sabem onde está a chave (resposta fixa). */
+/**
+ * Os ajudantes do hangar não sabem onde está a chave, mas mandam olhar no quadro do fundo do
+ * hangar (resposta fixa): como o piloto cedendo, o quadro conta como percebido e ganha o contorno.
+ */
 const whereKeyUnknown: FixedQuestion = {
   ...WHERE_KEY,
   ask: 'Onde está a chave?',
-  answer: { say: 'Não sei não.', note: 'Diz não saber da chave do avião.' },
+  answer: {
+    say: 'Sei não. Mas olha no quadro lá no fundo do hangar.',
+    note: 'Não sabe da chave do avião, mas manda olhar no quadro do fundo do hangar.',
+    notices: KEY_PANEL_ID,
+  },
 };
 
 /**
  * O piloto sabe, e pode mentir: pergunta, réplica e tréplica têm uma verdade só ("No painel ali
- * atrás"). Cedendo, a equipe passa a reconhecer a chave no quadro dos fundos (`notices`).
+ * atrás"). Cedendo, o quadro dos fundos conta como percebido e ganha o contorno (`notices`).
  */
 const WHERE_KEY_PILOTO: RolledQuestion = {
   ...WHERE_KEY,
@@ -161,7 +168,7 @@ const WHERE_KEY_PILOTO: RolledQuestion = {
     say: 'No painel ali atrás.',
     note: 'A chave do avião está no painel (quadro de chaves) dos fundos do hangar.',
     confess: true,
-    // entrega o quadro: ninguém precisa rolar percepção para reconhecer a chave
+    // entrega o quadro: ele ganha o contorno sem ninguém rolar percepção
     notices: KEY_PANEL_ID,
   },
   followUp: {
@@ -299,7 +306,7 @@ export const NPC_CLASSES: Readonly<Record<NpcClassId, NpcClass>> = {
           say: 'Tem sim, tá no quartinho de trás.',
           note: 'Há uma arma no quartinho de trás.',
           confess: true,
-          // entrega o esconderijo: a prateleira do quarto de trás conta como percebida
+          // entrega o esconderijo: o armário do quarto de trás conta como percebido
           notices: 'arma',
         },
         followUp: {

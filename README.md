@@ -237,29 +237,20 @@ pela porta do oeste, que dá para a pista; uma divisória com porta separa os c�
   turno inimigo, mas o cone de visão dele cobre a porta do cômodo 2: entre por trás e **aborde** (a até 2
   hexágonos ele se rende). A porta do meio está **trancada** (ver [Portas](#portas)); quem passa por ela
   sem rendê-lo é avistado.
-- **Cômodo 2:** ao entrar (mesmo só de passagem), cada agente rola **percepção** uma vez — um **d20** que
-  aparece numa ficha no canto esquerdo da tela. Tirando **mais que 6**, ele repara em algo na
-  **prateleira** da parede do leste, que ganha uma lupa. O resultado fica na ficha até o jogador tocar
-  em **Continuar** (✕ no controle); só então o jogo segue.
-- Colado na prateleira percebida, **toque na lupa** (que pulsa; □ no controle, quando não há ninguém
-  para abordar): a câmera faz o mesmo enquadramento da cena da porta (arrombar / abrir fechadura) —
-  gira 45° para o lado do agente, desce para 30° e chega perto, mirando entre a prateleira e o
-  agente, que vira para ela — e fica **travada** (arrastar, pinça e roda não mexem nela). A HUD some;
-  sobram o bilhete e os botões de sempre: o carimbo **Inspecionar** (✕/□, ou a lupa de novo) rola o
-  d20 e **Cancelar** (○) volta ao normal sem gastar nada. Tirando **mais que 4**, acha a **arma
-  escondida**, que é apreendida. Se falhar, o d20 fica com o resultado, o bilhete diz que falhou e
-  dá para tentar **De novo!** ali mesmo ou **Fechar**. **Cada rolagem gasta 1 de movimento.**
-  Longe da prateleira, tocar na lupa avisa que é
-  preciso chegar colado nela.
-- Se os três agentes falharem na percepção, a arma fica sem ser encontrada.
+- **Cômodo 2:** ao andar por ele (mesmo só de passagem), cada agente rola **percepção** uma vez. Passando,
+  repara no **armário do caseiro** (1,85 m, um pouco mais alto que os agentes, encostado na parede do leste,
+  com as portas abertas), que ganha o contorno amarelo pulsante dos alvos tocáveis. Ver
+  [Zoom nos móveis](#zoom-nos-móveis-quadro-de-chaves-e-armário).
+- Se os três agentes falharem na percepção, o armário não se destaca e a arma fica sem ser encontrada — a não
+  ser que o Jô confesse.
 
 Os **objetivos** da missão ficam num bilhete embaixo da pilha de suspeitos. Da casa, de início, aparece só
-**Investigar a casa**: quando alguém repara na prateleira (percepção), ele fica cumprido (✓) e surge o passo
-seguinte, **Apreender a arma escondida**, cumprido ao inspecionar e achar a arma. Também há **Render o Caseiro
+**Investigar a casa**: quando alguém repara no armário (percepção), ele fica cumprido (✓) e surge o passo
+seguinte, **Apreender a arma escondida**, cumprido ao tocar na arma, no zoom do armário, e pegá-la. Também há **Render o Caseiro
 Jô**. Passos assim usam `after` no objetivo (só aparece depois do objetivo com aquele id); `notice` cumpre ao
 reparar num esconderijo. As regras dos testes ficam em `SEARCH_RULES` (`src/app/game/search.ts`); a casa, o esconderijo
 e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
-mesa (cobertura baixa) e `P` a prateleira (alta); os modelos são montados em `scenery.ts` (`buildHouse`).
+mesa (cobertura baixa) e `P` o armário do caseiro (alto); a casa é montada em `scenery.ts` (`buildHouse`) e o armário em `prop-models.ts`.
 Um inimigo com rota de um ponto só fica parado; `facing` no mapa diz para onde ele olha.
 
 ### Portas
@@ -326,8 +317,8 @@ As regras ficam em `src/app/game/door.ts` (`DOOR_RULES`, funções puras testada
 
 Todo suspeito **rendido** tem um **raio de conversa** de 1 hexágono (sem nada pintado no chão: quem
 mostra que dá para conversar é o contorno amarelo no modelo). Com o agente da vez nele, aparece o papel
-**Conversar** (□ no controle, quando não há ninguém para abordar, nada para queimar nem para
-inspecionar), **a qualquer momento e quantas vezes quiser**. Se a classe do suspeito não tem diálogo
+**Conversar** (□ no controle, quando não há ninguém para abordar, nada para queimar nem móvel para
+olhar de perto), **a qualquer momento e quantas vezes quiser**. Se a classe do suspeito não tem diálogo
 (o segurança), o papel aparece **bloqueado** ("sem diálogo").
 Quem não se rendeu não conversa.
 
@@ -343,7 +334,7 @@ Quem não se rendeu não conversa.
   de onde cada alvo age e o que acontece. Caso de teste: **Rendidos: tocar para conversar**
   (`?caso=rendidos-interacao`).
 
-- **Close-up:** a câmera faz o mesmo enquadramento da inspeção e das portas (desce para 30° e chega
+- **Close-up:** a câmera faz o mesmo enquadramento das portas (desce para 30° e chega
   perto), mas de lado para a dupla: agente em pé e suspeito na pose de rendido, na faixa de cima
   da tela. Faixas pretas, vinheta, a HUD sai e a papelada entra com o "slap". Encerrar volta a câmera.
 - O suspeito abre com a **postura e a fala de entrada** da classe; ao voltar, com uma **fala de
@@ -368,18 +359,17 @@ Quem não se rendeu não conversa.
   arma?") têm cadeia.
 - **Perguntas que surgem e somem com pistas:** uma pergunta pode exigir uma pista da missão
   (`requires`) e pode sumir quando outra aparece (`hiddenWhen`, menos para quem já a fez). Achar a
-  arma na prateleira da casa (inspeção, pista `item:arma`) libera **"De quem é essa arma?"** para
+  arma no armário da casa (pista `item:arma`) libera **"De quem é essa arma?"** para
   todos os suspeitos com diálogo. O piloto não sabe; os garimpeiros também não, e cada um responde
   com uma fala de um **pool compartilhado** (a fala usada sai do pool, sem repetição entre eles;
   acabou, "Não sei."). O caseiro tem três chances de ceder (pergunta, réplica e tréplica); resistindo
-  à tréplica, o agente fecha com "Claro. A arma entrou sozinha e foi se esconder na prateleira."
+  à tréplica, o agente fecha com "Claro. A arma entrou sozinha e foi se esconder no armário."
   (fecho `closing`: sem cartão, sem rolagem, sem resposta). Se ceder, confessa que é dele: a pista `dono-arma` faz a pergunta sumir de quem ainda não a fez (quem já fez continua
   vendo o cartão como "Perguntado"). Responder "não sei" não fecha a pergunta para os outros.
 - **Confissão que entrega o esconderijo:** se o caseiro confessar em "Tem arma na casa?" ("Tem sim, tá
-  no quartinho de trás."), a arma da prateleira conta como **já percebida**: ninguém precisa rolar
-  percepção no quarto de trás, a lupa aparece e **Investigar a casa** fica cumprido. Achar e apreender
-  a arma ainda pede a inspeção (d20). No dado, é `notices: '<id do esconderijo>'` na resposta.
-- **Custo:** como a inspeção, a **primeira pergunta de cada conversa gasta 1 de movimento** (entrar e
+  no quartinho de trás."), o armário conta como **já percebido**: ganha o contorno sem ninguém rolar
+  percepção, e **Investigar a casa** fica cumprido. Apreender a arma ainda pede o toque nela. No dado, é `notices: '<id do esconderijo>'` na resposta.
+- **Custo:** a **primeira pergunta de cada conversa gasta 1 de movimento** (entrar e
   sair sem perguntar não gasta) e a vez continua. Ficam em `INTERROGATION_RULES` (`moveCost`,
   `endsTurn`).
 - **Caderneta de campo:** cada resposta vira uma anotação (*declarou*, *sinal* ou *confessou*), que sai
@@ -396,7 +386,7 @@ adicionar NPC, pergunta e pista). Para ligar uma classe a um suspeito, use `npc`
 (`maps.ts`); `hidden: true` deixa um inimigo escondido e `reveals` diz quem o suspeito pode entregar.
 As regras (CDs, intimidação, raio da aura, custo), a memória por NPC e as pistas ficam em
 `src/app/game/interrogation.ts`; a papelada em `src/app/ui/interrogation/` e a câmera em
-`HexBoard.closeUp` (a mesma da inspeção, com `frame: 'pair'`).
+`HexBoard.closeUp` (com `frame: 'pair'`).
 
 ### Missão principal: queimar o avião e os suprimentos
 
@@ -430,15 +420,44 @@ O avião do hangar está **trancado**; a chave fica no **quadro de chaves**, na 
 - **Avião:** colado nele, aparece **Inspecionar** (no lugar de Queimar). O menu (como o das portas) tem
   **Olhar dentro** e **Queimar**. Sem a chave, o menu já abre com o carimbo **Trancado**, e isso basta para
   liberar, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave). Olhar
-  dentro só dá um leve zoom out e o aviso "O avião está trancado" (e a equipe passa a reconhecer a chave no quadro).
-- **Diálogos:** os dois ajudantes do hangar (garimpeiros) respondem "Não sei não.". O piloto pode mentir
-  (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e, cedendo, diz
-  **"No painel ali atrás."**, o que faz a equipe reconhecer a chave no quadro.
-- **Quadro de chaves:** quem mexe nele rola **percepção** (d20, uma vez por agente): passando, vê a chave do avião
-  e escolhe **Pegar** ou **Deixar**; falhando, não vê nada. Não rola se alguém já tentou o avião, se o piloto contou
-  ou se alguém já viu a chave lá.
+  dentro só dá um leve zoom out e o aviso "O avião está trancado".
+- **Diálogos:** os dois ajudantes do hangar (garimpeiros) não sabem da chave, mas dão a dica: "Sei não.
+  Mas olha no quadro lá no fundo do hangar." — e o quadro ganha o contorno, sem ninguém rolar
+  percepção. O piloto
+  pode mentir (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e,
+  cedendo, diz **"No painel ali atrás."**, o que faz o quadro ganhar o contorno sem ninguém rolar percepção.
+- **Quadro de chaves:** pendurado na parede do fundo, sobre uma bancada de ferramentas. Quem anda pelo
+  **fundo do hangar** (da parede do fundo até a frente do avião, `keyPanel.room`) rola **percepção** uma vez;
+  passando, o quadro ganha o contorno amarelo pulsante (enquanto a chave estiver lá). Falhando os três, ele não
+  se destaca — só com a dica de um garimpeiro ou o piloto contando. Ver [Zoom nos móveis](#zoom-nos-móveis-quadro-de-chaves-e-armário).
 - **Quem viu e deixou:** ao olhar dentro do avião trancado, esse agente comenta embaixo da tela, com o avatar
   dele: "Eu vi uma chave no quadro dos fundos."
+
+### Zoom nos móveis: quadro de chaves e armário
+
+O **quadro de chaves** do hangar e o **armário do caseiro** são móveis 3D na escala dos agentes (medidas
+reais em metros: quadro de 70 × 50 cm a 1,15 m do chão, bancada de 90 cm; armário de 1,0 × 0,45 × 1,85 m),
+montados em `game/prop-models.ts`.
+
+- **Percepção primeiro:** o móvel só fica tocável depois de percebido — a percepção passiva (d20, passa com
+  **mais que 6**, uma vez por agente) ao andar pelo cômodo dele, ou um suspeito que conta (os garimpeiros e o
+  piloto, sobre o quadro; o caseiro, sobre o armário).
+  Só então ganha o contorno amarelo pulsante. Quem rola e não passa não destaca nada.
+- **Tocar no móvel** percebido (como no avião: colado, abre; de longe, marca o caminho e o segundo toque anda
+  até lá) aproxima a câmera: ela fica **de frente** para o móvel, quase na altura dos olhos, e enquadra o móvel no
+  que a papelada não cobre (`HexBoard.propCloseUp`). Quem estiver na frente do móvel some enquanto durar.
+  A HUD some; ficam o bilhete e **Fechar** (○ / Esc). Não gasta movimento.
+- **A peça destacada:** no zoom, a **chave do avião** (etiqueta vermelha, entre outras etiquetas coloridas)
+  ou a **espingarda** (de pé no canto, ao lado da capa de chuva) aparece com o **destaque** de interagível:
+  contorno amarelo e brilho que pulsam.
+- **Tocar na peça** pega (✕ no controle; pelo teclado, o botão **Pegar** aparece com o Tab): a peça sobe e
+  some do móvel, e o bilhete confirma ("Chave do avião com a equipe.", "Arma apreendida!"). Tocar no resto
+  do móvel só diz o que tem ali.
+- **Poucas chamadas de desenho:** cada móvel é **uma malha só** (tábuas, ganchos, as outras chaves, potes,
+  roupas… juntados numa geometria com a cor em cada vértice) **mais a peça destacável**. O contorno pulsante
+  do alvo sai só das peças da silhueta (`outlineParts`).
+- **Casos de teste:** no menu, "Quadro de chaves" (a equipe na frente do avião, logo antes do fundo do hangar)
+  e "Armário do caseiro" (a equipe no quarto de trás): é só andar para rolar a percepção.
 
 ### Mundo semiaberto: área da missão
 
@@ -498,7 +517,7 @@ símbolo correspondente.
 | Direcional / analógico esquerdo | Move o cursor; sobre um hexágono claro, já mostra o caminho |
 | ✕ | Confirma (movimento, abordagem); sobre um agente, mostra aquele agente |
 | ○ | Cancela |
-| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, inspecionar, conversar ou abrir o menu da porta) |
+| □ | Abordar: toque abre a prévia, segurar aborda direto (sem ninguém no raio: queimar o alvo, olhar de perto o móvel, conversar ou abrir o menu da porta) |
 | No modo diálogo | direcional escolhe a pergunta, ✕ pergunta, ○ encerra |
 | No menu da porta | ✕ arromba, □ destranca, △ abre, ○ volta |
 | L3 | Encerrar a operação (depois de queimar o avião) |

@@ -2,29 +2,35 @@ import { HexCoord, hexDistance } from './hex';
 import { HexRect, inStructure } from './maps';
 
 /**
- * Testes de dados fora do movimento (estilo "percepção passiva"): todos com 1d20, e
- * passa quem tira **mais que** o número da regra.
+ * Testes de dados fora do movimento: todos com 1d20, e passa quem tira **mais que** o número
+ * da regra.
  *
- * - `notice`: ao entrar no cômodo de um esconderijo, cada agente rola percepção uma vez.
- *   Passando, ele repara no móvel e a equipe pode inspecioná-lo.
- * - `find`: inspecionar o móvel (colado nele) rola de novo; passando, acha o que está
- *   escondido. Cada tentativa gasta 1 de movimento, e dá para tentar de novo.
+ * - `notice` (percepção passiva): quem anda pelo cômodo de um móvel com algo escondido (o armário
+ *   do caseiro, o fundo do hangar com o quadro de chaves) rola percepção uma vez. Passando, repara
+ *   no móvel: ele ganha o contorno pulsante dos alvos tocáveis e a equipe passa a poder abri-lo
+ *   (zoom, com a peça — a arma, a chave do avião — destacada). Falhando, nada se destaca. Um
+ *   suspeito que conta (o caseiro, o piloto) também faz o móvel contar como percebido.
  */
 export const SEARCH_RULES = {
   die: 20,
   notice: 6,
-  find: 4,
-  /** Movimento gasto por tentativa de inspecionar. */
-  inspectCost: 1,
 } as const;
 
-/** Algo escondido no mapa (a arma na prateleira, por exemplo). */
+/** Algo escondido no mapa (a arma no armário, por exemplo). */
 export interface HiddenItem {
   id: string;
   /** Nome do que está escondido ("arma"). */
   name: string;
-  /** Onde está guardado ("prateleira"): o hexágono do móvel. */
+  /** Onde está guardado ("armário"): o hexágono do móvel. */
   furniture: string;
+  /** Título do zoom no móvel ("Armário do caseiro"). */
+  title: string;
+  /** O móvel com a preposição, para as frases ("no armário"). */
+  at: string;
+  /** O que se vê tocando no resto do móvel ("Potes, latas e roupa dobrada."). */
+  clutter: string;
+  /** O que se destaca no zoom do móvel ("Uma coronha de madeira…"). */
+  glimpse: string;
   spot: HexCoord;
   /** Aviso quando é achado ("Arma apreendida!"). */
   seized: string;
@@ -46,12 +52,12 @@ export const entersRoom = (path: readonly HexCoord[], room: HexRect): boolean =>
 export const canReach = (agent: HexCoord, spot: HexCoord): boolean => hexDistance(agent, spot) === 1;
 
 /**
- * Precisa rolar percepção: o agente `who` entrou (pelo `path`) no cômodo do esconderijo, ainda
+ * Precisa rolar percepção: o agente `who` entrou (pelo `path`) no cômodo do móvel `id`, ainda
  * não rolou ali e ninguém reparou nele. Já percebido — por um teste ou porque alguém contou
  * (um suspeito que confessa, ver `Outcome.notices` em `interrogation.ts`) — não rola mais.
  */
 export function needsNoticeRoll(
-  item: Pick<HiddenItem, 'id' | 'room'>,
+  item: { id: string; room: HexRect },
   who: string,
   path: readonly HexCoord[],
   noticed: ReadonlySet<string>,

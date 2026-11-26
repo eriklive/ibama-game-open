@@ -150,7 +150,7 @@ describe('aeroporto: mundo semiaberto', () => {
     }
     // caixotes soltos do lado de fora servem de cobertura na fuga
     expect(cover.some((c) => rects.every((r) => !onRect(c, r)))).toBe(true);
-    // na casa só há móveis: a mesa do Jô e a prateleira
+    // na casa só há móveis: a mesa do Jô e o armário
     expect(cover.filter((c) => inside(c, structureRect(map, 'house')!)).map((c) => c.kind).sort()).toEqual(['shelf', 'table']);
   });
 
@@ -211,6 +211,21 @@ describe('aeroporto: avião trancado e quadro de chaves', () => {
     expect(panel.spot.row).toBe(hangar.rows[0] + 1);
     expect(map.walls.some((w) => w.col === panel.spot.col && w.row === hangar.rows[0])).toBe(true);
     expect(blockedHexes(map).has(hexKey(panel.spot))).toBe(true);
+  });
+
+  it('a percepção do quadro rola no fundo do hangar: quem chega colado nele passou pela zona', () => {
+    const panel = map.keyPanel!;
+    const { cols, rows } = panel.room;
+    expect(cols[0]).toBeGreaterThan(hangar.cols[0]);
+    expect(cols[1]).toBeLessThan(hangar.cols[1]);
+    expect(rows[0]).toBeGreaterThan(hangar.rows[0]);
+    const solid = new Set([...blockedHexes(map), ...lowCoverHexes(map)]);
+    const reach = reachableHexes(map.starts[0], 999, playArea(map), solid);
+    const sides = [...reach.values()].map((r) => r.coord).filter((h) => hexDistance(h, panel.spot) === 1);
+    expect(sides.length).toBeGreaterThan(0);
+    for (const h of sides) {
+      expect(h.col >= cols[0] && h.col <= cols[1] && h.row >= rows[0] && h.row <= rows[1], `${h.col},${h.row}`).toBe(true);
+    }
   });
 
   it('o avião não se queima direto: tem menu de inspecionar', () => {

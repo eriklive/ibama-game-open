@@ -2,19 +2,27 @@ import { describe, expect, it } from 'vitest';
 import { spawnEnemy, stationary, visionHexes } from './enemies';
 import { hexKey, reachableHexes } from './hex';
 import { MAPS, blockedHexes, lowCoverHexes, playArea, structureRect } from './maps';
-import { SEARCH_RULES, beats, canReach, chance, entersRoom } from './search';
+import { SEARCH_RULES, beats, canReach, chance, entersRoom, needsNoticeRoll } from './search';
 
 describe('testes de d20', () => {
   it('passa só quem tira mais que o alvo', () => {
     expect(beats(7, SEARCH_RULES.notice)).toBe(true);
     expect(beats(6, SEARCH_RULES.notice)).toBe(false);
-    expect(beats(5, SEARCH_RULES.find)).toBe(true);
-    expect(beats(4, SEARCH_RULES.find)).toBe(false);
   });
 
-  it('chances: percepção 70%, inspecionar 80%', () => {
+  it('chance de percepção: 70%', () => {
     expect(chance(SEARCH_RULES.notice)).toBeCloseTo(0.7);
-    expect(chance(SEARCH_RULES.find)).toBeCloseTo(0.8);
+  });
+
+  it('percepção ao entrar no cômodo: uma vez por agente, e não rola se o móvel já foi percebido', () => {
+    const item = { id: 'chave-aviao', room: { cols: [12, 31], rows: [5, 8] } as { cols: [number, number]; rows: [number, number] } };
+    const path = [{ col: 21, row: 9 }, { col: 21, row: 8 }];
+    expect(needsNoticeRoll(item, 'ana', path, new Set(), new Set())).toBe(true);
+    expect(needsNoticeRoll(item, 'ana', path, new Set(), new Set(['chave-aviao:ana']))).toBe(false);
+    expect(needsNoticeRoll(item, 'bruno', path, new Set(), new Set(['chave-aviao:ana']))).toBe(true);
+    expect(needsNoticeRoll(item, 'bruno', path, new Set(['chave-aviao']), new Set())).toBe(false);
+    // andando só fora do fundo do hangar, não rola
+    expect(needsNoticeRoll(item, 'ana', [{ col: 21, row: 10 }, { col: 21, row: 9 }], new Set(), new Set())).toBe(false);
   });
 
   it('entrar no cômodo: algum passo do caminho dentro do retângulo', () => {
@@ -23,7 +31,7 @@ describe('testes de d20', () => {
     expect(entersRoom([{ col: 35, row: 29 }, { col: 36, row: 29 }], room)).toBe(true);
   });
 
-  it('inspeciona só colado no móvel', () => {
+  it('examina só colado no móvel', () => {
     expect(canReach({ col: 39, row: 29 }, { col: 40, row: 29 })).toBe(true);
     expect(canReach({ col: 38, row: 29 }, { col: 40, row: 29 })).toBe(false);
   });
@@ -71,7 +79,7 @@ describe('aeroporto: casa do Caseiro Jô', () => {
     expect(seen.has('35,29')).toBe(true);
   });
 
-  it('a prateleira fica no cômodo 2, encostada na parede, e dá para chegar ao lado dela', () => {
+  it('o armário fica no cômodo 2, encostado na parede, e dá para chegar ao lado dele', () => {
     expect(solid.has(hexKey(item.spot))).toBe(true);
     const reach = reachableHexes(map.starts[0], 999, area, solid);
     const sides = [{ col: 39, row: 29 }, { col: 39, row: 28 }, { col: 40, row: 28 }, { col: 40, row: 30 }].filter((h) =>

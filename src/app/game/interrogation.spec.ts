@@ -290,7 +290,7 @@ describe('confissão que entrega o esconderijo', () => {
   ];
   const aeroporto = MAPS.find((m) => m.id === 'aeroporto')!;
   const arma = aeroporto.hidden!.find((h) => h.id === 'arma')!;
-  // entrando no quarto de trás (o cômodo da prateleira)
+  // entrando no quarto de trás (o cômodo do armário)
   const path = [
     { col: 35, row: 29 },
     { col: 36, row: 29 },
@@ -303,7 +303,7 @@ describe('confissão que entrega o esconderijo', () => {
     burned: new Set<string>(),
   });
 
-  it('o caseiro confessa (em qualquer nível): a arma conta como percebida e pula a percepção', () => {
+  it('o caseiro confessa (em qualquer nível): o armário conta como percebido e pula a percepção', () => {
     for (let level = 0; level < 3; level++) {
       let m = EMPTY_MEMORY;
       let last;
@@ -489,7 +489,7 @@ describe('perguntas que surgem (e somem) com pistas da missão', () => {
     expect(res.map((a) => a.closing)).toEqual([
       null,
       null,
-      'Claro. A arma entrou sozinha e foi se esconder na prateleira.',
+      'Claro. A arma entrou sozinha e foi se esconder no armário.',
     ]);
     expect(res[2].unlocked).toBeNull();
     expect(res[2].outcome.clue).toBeUndefined();
@@ -694,9 +694,12 @@ describe('a chave do avião trancado', () => {
     }
   });
 
-  it('os ajudantes não sabem: resposta fixa "Não sei não."', () => {
+  it('os ajudantes não sabem da chave, mas mandam olhar no quadro do fundo do hangar (resposta fixa)', () => {
     const q = garimpeiro.questions.find((x) => x.ask === 'Onde está a chave?')!;
-    expect('answer' in q && q.answer.say).toBe('Não sei não.');
+    expect('answer' in q && q.answer.say).toBe('Sei não. Mas olha no quadro lá no fundo do hangar.');
+    // a dica destaca o quadro, como o piloto cedendo
+    expect('answer' in q && q.answer.notices).toBe(KEY_PANEL_ID);
+    expect('answer' in q && noticedAfter(new Set(), q.answer).has(KEY_PANEL_ID)).toBe(true);
   });
 
   it('o piloto mente ("Não sei não.") e, cedendo, entrega o painel e o quadro de chaves', () => {

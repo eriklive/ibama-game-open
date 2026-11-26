@@ -386,10 +386,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   border-block: calc(26px + var(--safe-top)) solid #0c0d0b;
   border-bottom-width: calc(26px + var(--safe-bottom));
 }
-.focus-die {
-  position: absolute; left: 50%; top: calc(26px + var(--safe-top));
-  width: 200px; height: 200px; transform: translateX(-50%);
-}
 /* inspeção: os botões ficam onde ficam nos outros modos (bilhete, carimbo e Cancelar) */
 .aim-actions {
   position: absolute; z-index: 5;
@@ -404,12 +400,18 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .aim-actions .side .stencil { font-size: 13px; }
 .stamp.inspect-stamp .stamp-text { font-size: 12px; }
 .inspect-slip.pass strong { color: var(--green-ok); }
+/* zoom no móvel: sem vinheta pesada (o móvel enche a tela) */
+.prop-stage::before { background: radial-gradient(ellipse 70% 70% at 50% 45%, transparent 70%, rgba(8, 10, 8, .55) 100%); }
+.prop-slip { width: 160px; }
+.aim-actions .prop-take { position: absolute; right: 108px; bottom: 0; width: 136px; }
+.prop-take:not(:focus-visible) { opacity: 0; }
+.prop-take:not(:focus) { pointer-events: none; }
 
-/* inspecionar pelo teclado: o botão só aparece quando recebe o foco */
+/* inspecionar e conversar pelo teclado: o botão só aparece quando recebe o foco */
 /* (o toque segue valendo enquanto ele tem o foco: no iOS o :focus-visible cai no próprio toque,
    e o pointer-events: none fazia o toque atravessar o botão) */
-.inspect.keyboard-only:not(:focus-visible) { opacity: 0; }
-.inspect.keyboard-only:not(:focus) { pointer-events: none; }
+.paper.keyboard-only:not(:focus-visible) { opacity: 0; animation: none; }
+.paper.keyboard-only:not(:focus) { pointer-events: none; }
 
 
 /* bilhete da abordagem: quem se rende e quem corre */
@@ -853,7 +855,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 
 /* ---------- avião trancado, quadro de chaves e fala embaixo da tela ---------- */
 .key-btn { width: 84px; }
-.key-slip { background: var(--postit); right: 108px; width: 150px; }
 .plane-note {
   margin: 0; padding: 8px 10px;
   background: var(--paper-light); box-shadow: var(--drop);
