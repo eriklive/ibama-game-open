@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, HexRect, doorsOf, inStructure, playArea, structureView } from './maps';
+import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
@@ -267,6 +267,9 @@ function mixPose(out: Pose, a: Pose, b: Pose, t: number): void {
 /** Giro máximo da câmera para mostrar uma porta ao lado do agente da vez (ver `doorYawGoal`). */
 const DOOR_CAMERA_YAW = THREE.MathUtils.degToRad(32);
 
+/** Giro da câmera com o agente da vez dentro da casa ou junto de uma porta dela: 15° para a esquerda. */
+const HOUSE_CAMERA_YAW = THREE.MathUtils.degToRad(-15);
+
 /** Gira um vetor do plano XZ em volta de +Y. */
 const yawTurn = (v: THREE.Vector3, a: number): THREE.Vector3 =>
   new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), 0, -v.x * Math.sin(a) + v.z * Math.cos(a));
@@ -514,7 +517,7 @@ export class HexBoard {
    * Estruturas (hangar, casa): o telhado some quando um agente entra e o que fica dentro
    * (carga, avião, lâmpadas, móveis) só aparece com um agente por perto.
    */
-  private readonly structures: { rect: HexRect; doors: HexCoord[]; object: THREE.Object3D; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
+  private readonly structures: { kind: StructureKind; rect: HexRect; doors: HexCoord[]; object: THREE.Object3D; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
   /** Folhas das portas comuns (ver `DoorViews`). */
   private doorViews?: DoorViews;
   /**
@@ -2839,7 +2842,7 @@ export class HexBoard {
       const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE);
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
-      this.structures.push({ rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
+      this.structures.push({ kind, rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
       roof?.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) this.roofMeshes.push({ mesh: o, roof });
       });
@@ -4468,9 +4471,15 @@ export class HexBoard {
    */
   private doorYawGoal(): number {
     const u = this.activeId ? this.units.get(this.activeId) : undefined;
-    const doors = this.doorViews;
-    if (!u || !doors) return 0;
+    if (!u) return 0;
     const near = new Set([u.hex, ...hexNeighbors(u.hex)].map(hexKey));
+    // casa: um giro só, da porta de entrada até sair, que mostra as portas e os cômodos
+    for (const st of this.structures) {
+      if (st.kind !== 'house') continue;
+      if (inStructure(u.hex, st.rect) || st.doors.some((d) => near.has(hexKey(d)))) return HOUSE_CAMERA_YAW;
+    }
+    const doors = this.doorViews;
+    if (!doors) return 0;
     let best: { yaw: number; d: number } | null = null;
     for (const key of doors.keys()) {
       if (!near.has(key)) continue;
