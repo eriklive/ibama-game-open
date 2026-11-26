@@ -602,19 +602,17 @@
           <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
         </button>
       }
-      <!-- Conversar: colado em qualquer rendido; sem diálogo, o papel aparece bloqueado -->
-      @if (talkTarget(); as t) {
+      <!-- Conversar: o toque é no rendido do tabuleiro (e o □ do controle); este botão só aparece com o foco do teclado -->
+      @if (canTalk()) {
+        @let t = talkTarget()!;
         <button
           type="button"
-          class="paper"
+          class="paper keyboard-only"
           appTalkButton
-          [silent]="t.silent"
-          [disabled]="t.silent"
-          [glyph]="!t.silent && pad() && !canApproach() && !burnable() && !inspectable() ? glyph('approach') : ''"
-          [attr.aria-label]="t.silent ? t.enemy.name + ' (rendido) não tem nada a dizer: sem diálogo' : 'Conversar com ' + t.enemy.name + ' (rendido). A primeira pergunta de cada conversa gasta ' + interrogationRules.moveCost + ' de movimento'"
+          [attr.aria-label]="'Conversar com ' + t.enemy.name + ' (rendido). A primeira pergunta de cada conversa gasta ' + interrogationRules.moveCost + ' de movimento'"
           data-testid="talk"
           (click)="startInterrogation()">
-          {{ t.silent ? 'sem diálogo' : t.enemy.name }}
+          {{ t.enemy.name }}
         </button>
       }
       <!-- Porta: colado numa porta, abre o menu (arrombar, destrancar, abrir) -->

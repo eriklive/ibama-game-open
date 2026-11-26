@@ -405,11 +405,11 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .stamp.inspect-stamp .stamp-text { font-size: 12px; }
 .inspect-slip.pass strong { color: var(--green-ok); }
 
-/* inspecionar pelo teclado: o botão só aparece quando recebe o foco */
+/* inspecionar e conversar pelo teclado: o botão só aparece quando recebe o foco */
 /* (o toque segue valendo enquanto ele tem o foco: no iOS o :focus-visible cai no próprio toque,
    e o pointer-events: none fazia o toque atravessar o botão) */
-.inspect.keyboard-only:not(:focus-visible) { opacity: 0; }
-.inspect.keyboard-only:not(:focus) { pointer-events: none; }
+.paper.keyboard-only:not(:focus-visible) { opacity: 0; animation: none; }
+.paper.keyboard-only:not(:focus) { pointer-events: none; }
 
 
 /* bilhete da abordagem: quem se rende e quem corre */
