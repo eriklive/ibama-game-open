@@ -121,6 +121,7 @@ import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-
 import { HexCoord, hexDistance, hexKey, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, HexRect, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
+import { SLOT_COUNT, SAVE_VERSION, SaveGames, SaveId, SaveState, savedAtLabel } from '../../game/save-game';
 import { TEST_CASES, TestCase, findTestCase } from '../../game/test-cases';
 import {
   Clues,
@@ -305,6 +306,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly roster = inject(RosterService);
   private readonly haptics = inject(Haptics);
   private readonly sound = inject(Sound);
+  /** Saves da sessão: o automático (começo de cada vez) e os slots do menu. */
+  private readonly saves = inject(SaveGames);
   private stopPad?: () => void;
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private readonly tacticalBoard = viewChild(TacticalBoard);
@@ -386,9 +389,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly testCasesOpen = signal(false);
   /** Submenu "Tutoriais" do menu: as lições da lousa tática, para rever. */
   protected readonly tutorialsOpen = signal(false);
+  /** Submenu "Saves" do menu: novo jogo, o automático e os slots. */
+  protected readonly savesOpen = signal(false);
+  protected readonly savesSupported = this.saves.supported;
+  protected readonly saveList = computed(() => this.saves.summaries());
+  protected readonly savedAtLabel = savedAtLabel;
+  /** Slot cheio tocado uma vez em "Salvar": o segundo toque sobrescreve. */
+  protected readonly overwriteArmed = signal<number | null>(null);
+  /** "Novo jogo" tocado uma vez: o segundo toque apaga o automático e volta ao início. */
+  protected readonly newGameArmed = signal(false);
 
   protected toggleMenu(): void {
     this.menuOpen.update((v) => !v);
+    this.overwriteArmed.set(null);
+    this.newGameArmed.set(false);
     clearInterval(this.statsTicker);
     if (this.menuOpen()) {
       const tick = () => this.renderStats.set(this.board?.renderStats() ?? null);
@@ -1309,8 +1323,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.refreshVision();
     // `?caso=` abre direto num caso de teste (o menu usa isso para trocar de mapa)
     const testCase = findTestCase(this.route.snapshot.queryParamMap.get('caso'));
+    // `?save=` carrega um save (o menu usa isso para trocar de mapa); sem nada, o automático
+    // deste mapa, se houver (a página recarregou no meio da partida)
+    const save = this.saveFromUrl() ?? this.saves.read('auto');
     if (testCase?.mapId === this.map.id) void this.runTestCase(testCase);
+    else if (save?.mapId === this.map.id) this.applySave(save);
     else this.beginMatch();
+    // tira o `?save=` da URL: recarregar a página volta ao automático, não a este slot
+    if (this.route.snapshot.queryParamMap.has('save')) {
+      void this.router.navigate([], { relativeTo: this.route, queryParams: { save: null }, queryParamsHandling: 'merge', replaceUrl: true });
+    }
     this.lessonTicker = setInterval(() => this.checkLessons(), 400);
     this.stopPad = this.gamepad.listen({
       button: (b) => this.padButton(b),
@@ -1340,6 +1362,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private startTurn(): void {
     const active = this.active();
+    // fim do turno anterior: a partida vai para o save automático da sessão
+    this.autosave();
     this.commandsUsed.set(0);
     this.closeApproach();
     this.closeGrouping();
@@ -3996,6 +4020,157 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.notice.set(null);
     this.activeIndex.set(0);
     this.turn.set(1);
+  }
+
+  // ---------- saves (ver `save-game.ts`) ----------
+
+  /** A partida agora, num formato que vai para o `sessionStorage`. Só no começo de uma vez. */
+  private snapshot(): SaveState | null {
+    const map = this.map;
+    if (!map) return null;
+    return {
+      version: SAVE_VERSION,
+      savedAt: Date.now(),
+      mapId: map.id,
+      mapName: map.name,
+      round: this.round(),
+      activeName: this.active().name,
+      roster: {
+        points: Object.fromEntries(CHARACTERS.map((c) => [c.id, this.roster.spent(c.id)])),
+        captain: this.captainId(),
+      },
+      turn: this.turn(),
+      activeIndex: this.activeIndex(),
+      positions: [...this.positions()].map(([id, h]) => [id, { ...h }]),
+      group: [...this.group()],
+      groupLine: [...this.groupLine()],
+      enemies: this.enemies().map((e) => ({ ...e })),
+      doors: [...this.doors()],
+      burned: [...this.burned()],
+      noticed: [...this.noticed()],
+      found: [...this.found()],
+      noticeRolled: [...this.noticeRolled],
+      seenAgents: [...this.seenAgents],
+      ranThisRound: [...this.ranThisRound],
+      caughtThisRound: [...this.caughtThisRound],
+      dialogues: [...this.dialogues()],
+      linePools: [...this.linePools()].map(([k, v]) => [k, [...v]]),
+      clueLog: [...this.clueLog()],
+      fieldNotes: this.fieldNotes().map((n) => ({ ...n })),
+      hasKey: this.hasKey(),
+      keySeenBy: [...this.keySeenBy()],
+      planeNote: this.planeNote(),
+      breakInUntil: this.breakInUntil(),
+    };
+  }
+
+  private autosave(): void {
+    const state = this.snapshot();
+    if (state) this.saves.write('auto', state);
+  }
+
+  /** O save pedido na URL (`?save=auto` ou `?save=2`). */
+  private saveFromUrl(): SaveState | null {
+    const raw = this.route.snapshot.queryParamMap.get('save');
+    if (!raw) return null;
+    const id: SaveId = raw === 'auto' ? 'auto' : Number(raw);
+    return id === 'auto' || (Number.isInteger(id) && id >= 1 && id <= SLOT_COUNT) ? this.saves.read(id) : null;
+  }
+
+  /** Remonta a partida do save (sem a abertura da missão) e começa a vez de quem estava nela. */
+  private applySave(s: SaveState): void {
+    this.resetMatch();
+    this.roster.confirm(s.roster.points, s.roster.captain);
+    const positions = new Map(s.positions);
+    this.positions.set(positions);
+    this.board?.placeUnits(positions);
+    this.group.set(new Set(s.group));
+    this.groupLine.set(s.groupLine);
+    this.enemies.set(s.enemies);
+    this.board?.placeEnemies(
+      this.enemies().map((e) => ({
+        ...e,
+        alert: e.status === 'alert',
+        surrendered: e.status === 'surrendered',
+        gone: e.status === 'hidden' || e.status === 'fled',
+      })),
+    );
+    this.doors.set(new Map(s.doors));
+    this.board?.setDoors(this.doors(), true);
+    this.noticed.set(new Set(s.noticed));
+    this.found.set(new Set(s.found));
+    for (const k of s.noticeRolled) this.noticeRolled.add(k);
+    for (const id of s.seenAgents) this.seenAgents.add(id);
+    this.board?.setSeenAgents(this.seenAgents);
+    for (const id of s.ranThisRound) this.ranThisRound.add(id);
+    for (const id of s.caughtThisRound) this.caughtThisRound.add(id);
+    this.dialogues.set(new Map(s.dialogues));
+    this.linePools.set(new Map(s.linePools));
+    this.clueLog.set(new Set(s.clueLog));
+    this.fieldNotes.set(s.fieldNotes as FieldNote[]);
+    this.noteSeq = Math.max(0, ...s.fieldNotes.map((n) => n.id));
+    this.hasKey.set(s.hasKey);
+    this.keySeenBy.set(s.keySeenBy);
+    this.planeNote.set(s.planeNote);
+    this.breakInUntil.set(s.breakInUntil);
+    // o que já foi pego some dos móveis; o que já queimou volta a arder
+    for (const h of this.map?.hidden ?? []) if (this.found().has(h.id)) this.board?.hidePropItem(h.spot);
+    const panel = this.map?.keyPanel;
+    if (panel && s.hasKey) this.board?.hidePropItem(panel.spot);
+    this.burned.set(new Set(s.burned));
+    for (const t of this.map?.burnables ?? []) {
+      if (!this.burned().has(t.id)) continue;
+      this.board?.ignite(t.id, t.hexes);
+      this.sound.ignite(t.id, t.hexes, !!t.inspect);
+    }
+    this.refreshVision();
+    this.activeIndex.set(Math.min(Math.max(0, s.activeIndex), CHARACTERS.length - 1));
+    this.turn.set(s.turn);
+    this.rollSeq++;
+    this.rollKeys.set([]);
+    this.phase.set('rolling');
+    this.say(`Save carregado · turno ${this.round()}, vez de ${this.active().name}`, 'info');
+    this.startTurn();
+  }
+
+  /** Copia o estado do começo do turno atual (o automático) para um slot. */
+  protected saveToSlot(slot: number): void {
+    const filled = !!this.saveList().slots.find((x) => x.slot === slot)?.save;
+    if (filled && this.overwriteArmed() !== slot) {
+      this.overwriteArmed.set(slot);
+      return;
+    }
+    this.overwriteArmed.set(null);
+    const state = this.saves.read('auto') ?? this.snapshot();
+    const ok = !!state && state.mapId === this.map?.id && this.saves.write(slot, { ...state, savedAt: Date.now() });
+    this.sound.play(ok ? 'ui.confirmar' : 'ui.hex');
+    this.say(ok ? `Salvo no slot ${slot} · começo do turno ${state!.round}` : 'Não deu para salvar neste navegador', ok ? 'info' : 'alert');
+  }
+
+  /** Carrega um save: no mesmo mapa, aqui; em outro, abre a partida lá com `?save=`. */
+  protected loadSave(id: SaveId): void {
+    const state = this.saves.read(id);
+    if (!state) return;
+    this.menuOpen.set(false);
+    this.savesOpen.set(false);
+    clearInterval(this.statsTicker);
+    if (state.mapId === this.map?.id) {
+      this.applySave(state);
+      return;
+    }
+    void this.router
+      .navigateByUrl('/', { skipLocationChange: true })
+      .then(() => this.router.navigate(['/jogo', state.mapId], { queryParams: { save: id } }));
+  }
+
+  /** Novo jogo: apaga o automático (os slots ficam) e volta para a escolha da missão. */
+  protected newGame(): void {
+    if (!this.newGameArmed()) {
+      this.newGameArmed.set(true);
+      return;
+    }
+    this.saves.clear('auto');
+    this.router.navigate(['/']);
   }
 
   // ---------- casos de teste (ver `test-cases.ts`) ----------

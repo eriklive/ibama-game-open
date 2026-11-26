@@ -25,6 +25,7 @@ import {
   classSkills,
 } from '../../game/agent-class';
 import { RosterService } from '../../game/roster.service';
+import { SaveGames } from '../../game/save-game';
 import {
   GROUP_STAT_BONUS,
   STAT_KEYS,
@@ -89,6 +90,7 @@ const STAT_TEXT: Record<
 export class RosterScreen implements AfterViewInit, OnDestroy {
   private readonly router = inject(Router);
   private readonly roster = inject(RosterService);
+  private readonly saves = inject(SaveGames);
   private readonly gamepad = inject(GamepadService);
   private readonly mapId = inject(ActivatedRoute).snapshot.paramMap.get('mapId') ?? '';
   protected readonly map = findMap(this.mapId);
@@ -266,6 +268,8 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
       return;
     }
     this.roster.confirm(this.points(), this.captain());
+    // escalação nova é partida nova: o automático da anterior não volta por cima dela
+    this.saves.clear('auto');
     this.router.navigate(['/jogo', this.mapId]);
   }
 

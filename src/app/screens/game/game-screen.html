@@ -91,6 +91,72 @@
   @if (menuOpen()) {
     <section id="game-menu" class="menu" aria-label="Menu" data-testid="menu">
       <h2 class="menu-title">Menu</h2>
+      <!-- Saves da sessão: novo jogo, o automático (começo de cada vez) e os slots -->
+      <div class="menu-sub menu-saves-sub">
+        <button
+          type="button"
+          class="menu-sub-toggle"
+          [class.open]="savesOpen()"
+          (click)="savesOpen.set(!savesOpen()); overwriteArmed.set(null); newGameArmed.set(false)"
+          [attr.aria-expanded]="savesOpen()"
+          aria-controls="saves"
+          data-testid="saves-toggle">
+          Saves <span class="menu-sub-arrow" aria-hidden="true">›</span>
+        </button>
+        @if (savesOpen()) {
+          <div id="saves" class="saves" data-testid="saves">
+            @if (!savesSupported) {
+              <p class="menu-option-hint">Este navegador não guarda saves (modo privado?).</p>
+            } @else {
+              <p class="saves-note">Ficam nesta aba do navegador. Salvar guarda o começo do turno atual.</p>
+              @if (saveList().auto; as a) {
+                <div class="save-card auto" data-testid="save-auto">
+                  <span class="save-tag">Automático</span>
+                  <span class="menu-option-label">{{ a.mapName }} · Turno {{ a.round }}</span>
+                  <span class="menu-option-hint">Vez de {{ a.activeName }} · {{ savedAtLabel(a.savedAt) }}</span>
+                  <div class="save-actions">
+                    <button type="button" class="save-btn" (click)="loadSave('auto')" data-testid="load-auto">Carregar</button>
+                  </div>
+                </div>
+              }
+              <ul class="menu-sub-list" role="list">
+                @for (row of saveList().slots; track row.slot) {
+                  <li class="save-card" [class.empty]="!row.save" [attr.data-testid]="'save-slot-' + row.slot">
+                    <span class="save-tag">Slot {{ row.slot }}</span>
+                    @if (row.save; as sv) {
+                      <span class="menu-option-label">{{ sv.mapName }} · Turno {{ sv.round }}</span>
+                      <span class="menu-option-hint">Vez de {{ sv.activeName }} · {{ savedAtLabel(sv.savedAt) }}</span>
+                    } @else {
+                      <span class="menu-option-label save-empty">— vazio —</span>
+                    }
+                    <div class="save-actions">
+                      <button
+                        type="button"
+                        class="save-btn"
+                        [class.armed]="overwriteArmed() === row.slot"
+                        (click)="saveToSlot(row.slot)"
+                        [attr.data-testid]="'save-to-' + row.slot">
+                        {{ overwriteArmed() === row.slot ? 'Sobrescrever?' : 'Salvar aqui' }}
+                      </button>
+                      @if (row.save) {
+                        <button type="button" class="save-btn" (click)="loadSave(row.slot)" [attr.data-testid]="'load-' + row.slot">Carregar</button>
+                      }
+                    </div>
+                  </li>
+                }
+              </ul>
+            }
+            <button
+              type="button"
+              class="menu-restart new-game"
+              [class.armed]="newGameArmed()"
+              (click)="newGame()"
+              data-testid="new-game">
+              {{ newGameArmed() ? 'Toque de novo: descartar e começar' : 'Novo jogo' }}
+            </button>
+          </div>
+        }
+      </div>
       <fieldset class="menu-group">
         <legend>Renderização</legend>
         @for (p of renderProfiles; track p.mode) {

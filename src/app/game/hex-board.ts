@@ -1184,6 +1184,14 @@ export class HexBoard {
     this.taking = { info, t0: performance.now(), y: info.item.position.y };
   }
 
+  /** Carregar um save: a peça já pega some do móvel na hora, sem a animação de pegar. */
+  hidePropItem(hex: HexCoord): void {
+    const info = this.props.get(hexKey(hex));
+    if (!info) return;
+    this.unglow(info);
+    info.item.visible = false;
+  }
+
   /** Recomeço: as peças voltam para os móveis, sem destaque. */
   resetProps(): void {
     this.finishTaking();
