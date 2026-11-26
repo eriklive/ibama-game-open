@@ -5,6 +5,7 @@ import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx'
 import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
+import { wallFloorShape } from './house-plan';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
 import { PropInfo } from './prop-models';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
@@ -2838,8 +2839,14 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
     const wallKeys = new Set(walls.map(hexKey));
-    for (const { kind, rect } of this.map.structures ?? []) {
-      const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE);
+    const doorKeys = new Set((this.map.doors ?? []).map(hexKey));
+    const split = new Set<string>();
+    for (const { kind, rect, windows } of this.map.structures ?? []) {
+      const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE, doorKeys, windows);
+      if (kind === 'house') {
+        const nodes = [...walls, ...(this.map.doors ?? [])].filter((h) => inStructure(h, rect));
+        for (const k of this.splitHouseFloor(rect, nodes)) split.add(k);
+      }
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
       this.structures.push({ kind, rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
@@ -2863,7 +2870,7 @@ export class HexBoard {
     for (const h of walls) {
       const tile = this.tiles.get(hexKey(h));
       if (!tile) continue;
-      tile.baseColor.set(0x3b4a50);
+      if (!split.has(hexKey(h))) tile.baseColor.set(0x3b4a50);
       if (inHangar(h)) continue; // a parede da estrutura é desenhada inteira, não por hexágono
       const wall = new THREE.Mesh(geo, mats);
       wall.castShadow = true;
@@ -2873,6 +2880,62 @@ export class HexBoard {
       wall.scale.y = 0.85 + ((h.col * 13 + h.row * 7) % 5) * 0.07;
       this.field.attach(tile, wall);
     }
+  }
+
+  /**
+   * Piso dos hexágonos de parede da casa: a parede (reta) corta cada um deles, então o hexágono
+   * fica com o chão do entorno (a cor dele) e, por cima, a parte de dentro com o piso da casa
+   * (ver `wallFloorShape`). Os recortes se repetem: meio a meio nas laterais, faixas de 1/4 e
+   * 3/4 no fundo e na frente, as quinas nos cantos. As portas e as divisórias ficam inteiras
+   * de piso. Devolve os hexágonos pintados.
+   */
+  private splitHouseFloor(rect: HexRect, nodes: readonly HexCoord[]): string[] {
+    const done: string[] = [];
+    const shapes = new Map<string, THREE.BufferGeometry>();
+    const material = new THREE.MeshStandardMaterial({ roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    const pieces = new Map<THREE.BufferGeometry, { tile: HexTile; local: THREE.Matrix4; color: THREE.Color }[]>();
+    const isDoor = (h: HexCoord) => this.map.doors?.some((d) => sameHex(d, h));
+    for (const h of nodes) {
+      const tile = this.tiles.get(hexKey(h));
+      if (!tile) continue;
+      const floor = new THREE.Color(GROUND.floor[tone(h)]);
+      const { shape, fraction } = wallFloorShape(h, rect, HEX_SIZE, HEX_SIZE * HEX_GAP * 0.985);
+      if (fraction > 0.999 || isDoor(h)) {
+        tile.baseColor.copy(floor);
+      } else {
+        // o chão do entorno: o de um vizinho fora da casa (grama, na clareira)
+        const out = hexNeighbors(h).find((n) => !inStructure(n, rect));
+        const ground = (out && this.map.ground?.get(hexKey(out))) || 'grass';
+        tile.baseColor.set(GROUND[ground === 'floor' ? 'grass' : ground][tone(h)]);
+        if (shape.length >= 3) {
+          const k = shape.map((p) => `${p.x.toFixed(3)},${p.z.toFixed(3)}`).join(' ');
+          let geo = shapes.get(k);
+          if (!geo) {
+            // leque a partir do primeiro vértice (o recorte é convexo), virado para cima
+            const pos: number[] = [];
+            for (let i = 1; i + 1 < shape.length; i++) {
+              const [a, b, c] = [shape[0], shape[i], shape[i + 1]];
+              const up = (b.z - a.z) * (c.x - a.x) - (b.x - a.x) * (c.z - a.z) > 0;
+              const [p, q] = up ? [b, c] : [c, b];
+              pos.push(a.x, 0, a.z, p.x, 0, p.z, q.x, 0, q.z);
+            }
+            geo = new THREE.BufferGeometry();
+            geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+            geo.computeVertexNormals();
+            shapes.set(k, geo);
+          }
+          const list = pieces.get(geo) ?? [];
+          // um pouco acima do topo do hexágono (sem brigar com ele na sombra), dentro do contorno
+          list.push({ tile, local: new THREE.Matrix4().makeTranslation(0, 0.006, 0), color: floor });
+          pieces.set(geo, list);
+        }
+      }
+      tile.color.copy(tile.baseColor);
+      this.field.mark(tile);
+      done.push(hexKey(h));
+    }
+    for (const [geo, items] of pieces) this.field.addDecals(geo, material, items);
+    return done;
   }
 
   /** Carga do hangar (cobertura) e decoração solta; cada peça sobe junto com o seu hexágono. */

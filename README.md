@@ -233,13 +233,24 @@ A leste da pista, numa clareira, fica a **casa** dos garimpeiros: dois cômodos 
 tábuas e com telhado de chapa enferrujada (que some quando um agente entra, como o do hangar). Entra-se
 pela porta do oeste, que dá para a pista; uma divisória com porta separa os cômodos.
 
-- **Cômodo 1:** o **Caseiro Jô** come parado na mesa, **de costas para a entrada**. Ele não anda no
+As paredes da casa são retas e perpendiculares (como as do hangar): as laterais e a divisória passam pelo
+centro da coluna; a do fundo e a da frente, na média das fileiras par e ímpar. O **piso** dos hexágonos que
+a parede corta fica dividido: o chão do entorno (grama) e, por cima, o piso da casa na parte de dentro
+(`wallFloorShape` em `src/app/game/house-plan.ts` e `splitHouseFloor` em `hex-board.ts`). Os recortes se
+repetem em poucos padrões: **meio a meio** nas laterais, faixas de **1/4 e 3/4** no fundo e na frente
+(colunas pares e ímpares) e as **quinas** nos cantos. Há duas **janelas** com folhas de tábua abertas para dentro (`windows` na estrutura do mapa; só aparência:
+a parede continua bloqueando passagem e visão). Cada parede é uma malha só e esmaece inteira quando tapa
+alguém.
+
+- **Cômodo 1 (sala):** o **Caseiro Jô** come parado na mesa de tábuas grossas (com banco, panela e garrafa
+  térmica), **de costas para a entrada**. Ele não anda no
   turno inimigo, mas o cone de visão dele cobre a porta do cômodo 2: entre por trás e **aborde** (a até 2
   hexágonos ele se rende). A porta do meio está **trancada** (ver [Portas](#portas)); quem passa por ela
   sem rendê-lo é avistado.
-- **Cômodo 2:** ao andar por ele (mesmo só de passagem), cada agente rola **percepção** uma vez. Passando,
-  repara no **armário do caseiro** (1,85 m, um pouco mais alto que os agentes, encostado na parede do leste,
-  com as portas abertas), que ganha o contorno amarelo pulsante dos alvos tocáveis. Ver
+- **Cômodo 2 (quarto):** tem a cama de solteiro e a mesinha com abajur (cobertura baixa), encostadas na
+  parede da frente, e a janela no fundo (leste). Ao andar por ele (mesmo só de passagem), cada agente rola
+  **percepção** uma vez. Passando, repara no **armário do caseiro** (1,85 m, um pouco mais alto que os
+  agentes, encostado na parede do fundo, sem portas), que ganha o contorno amarelo pulsante dos alvos tocáveis. Ver
   [Zoom nos móveis](#zoom-nos-móveis-quadro-de-chaves-e-armário).
 - Se os três agentes falharem na percepção, o armário não se destaca e a arma fica sem ser encontrada — a não
   ser que o Jô confesse.
@@ -250,7 +261,7 @@ seguinte, **Apreender a arma escondida**, cumprido ao tocar na arma, no zoom do 
 Jô**. Passos assim usam `after` no objetivo (só aparece depois do objetivo com aquele id); `notice` cumpre ao
 reparar num esconderijo. As regras dos testes ficam em `SEARCH_RULES` (`src/app/game/search.ts`); a casa, o esconderijo
 e os objetivos ficam no mapa (`house`, `hidden`, `objectives` em `maps.ts`). No desenho em texto, `m` é a
-mesa (cobertura baixa) e `P` o armário do caseiro (alto); a casa é montada em `scenery.ts` (`buildHouse`) e o armário em `prop-models.ts`.
+mesa, `L` a cama e `n` a mesinha (cobertura baixa) e `P` o armário do caseiro (alto); a casa é montada em `scenery.ts` (`buildHouse`) e os móveis em `prop-models.ts`.
 Um inimigo com rota de um ponto só fica parado; `facing` no mapa diz para onde ele olha.
 
 ### Portas

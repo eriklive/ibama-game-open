@@ -338,8 +338,9 @@ function keyParts(p: Parts, x: number, y: number, z: number, tag: number, tilt: 
 // ---------- armário do caseiro ----------
 
 /**
- * Armário de madeira do caseiro, encostado na parede do leste (+X), com as duas portas
- * abertas. `back` é a distância do centro do hexágono até a face da parede (unidades do mundo).
+ * Armário de madeira do caseiro, sem portas (a frente fica aberta), com o fundo em +X.
+ * `back` é a distância do centro do hexágono até a face da parede (unidades do mundo); quem
+ * encosta na parede do fundo da casa gira o grupo (ver `buildCover`).
  * Medidas reais: 1,0 m de largura, 45 cm de fundo e 1,85 m de altura (um pouco mais alto que
  * os agentes de ombro).
  *
@@ -373,20 +374,6 @@ export function buildCabinet(back: number): THREE.Group {
   const shelfZ = -W / 2 + t + shelfW / 2;
   const shelves = [0.08, 0.48, 0.88, 1.28];
   for (const y of shelves.slice(1)) p.box(D - 0.03, t, shelfW, C.plankLight, cx + 0.005, y, shelfZ);
-  // portas abertas, viradas 100° para fora em volta das dobradiças (nas laterais da frente)
-  const doorW = W / 2 - 0.005;
-  const open = THREE.MathUtils.degToRad(100);
-  for (const side of [-1, 1] as const) {
-    const hz = side * (W / 2);
-    // direção da dobradiça para a ponta solta (fechada: para o meio; aberta: para fora e para trás)
-    const dx = -Math.sin(open);
-    const dz = -side * Math.cos(open);
-    const yaw = Math.atan2(dx, dz);
-    p.box(0.02, H - 0.12, doorW, C.plank, front + (dx * doorW) / 2, H / 2 + 0.02, hz + (dz * doorW) / 2, [0, yaw, 0], { outline: true });
-    // puxador, perto da ponta solta, na face de dentro
-    p.box(0.03, 0.12, 0.02, C.black, front + dx * (doorW - 0.05) + 0.02, 1.0, hz + dz * (doorW - 0.05), [0, yaw, 0]);
-  }
-
   // prateleira de baixo (no chão do armário): botas
   const sx = cx + 0.02;
   p.box(0.12, 0.28, 0.1, C.boot, sx, 0.08 + 0.14, shelfZ - 0.12);
@@ -471,5 +458,155 @@ export function buildCabinet(back: number): THREE.Group {
 export const northWallGap = (col: number, wallThickness: number): number =>
   Math.sqrt(3) * (0.75 + 0.5 * (col & 1)) - wallThickness / 2;
 
-/** Distância do centro de um hexágono até a face da parede do leste, na coluna ao lado. */
-export const eastWallGap = (wallThickness: number): number => 1.5 - wallThickness / 2;
+/**
+ * Distância do centro de um hexágono (coluna `col`) da última fileira de dentro até a face da
+ * parede da frente (sul) da estrutura, na fileira logo abaixo (o espelho de `northWallGap`).
+ */
+export const southWallGap = (col: number, wallThickness: number): number =>
+  Math.sqrt(3) * (1.25 - 0.5 * (col & 1)) - wallThickness / 2;
+
+// ---------- móveis da casa (sala e quarto) ----------
+
+/** Material do vidro do abajur (acende de leve). */
+let shadeMaterial: THREE.MeshStandardMaterial | undefined;
+const shadeMat = (): THREE.MeshStandardMaterial =>
+  (shadeMaterial ??= new THREE.MeshStandardMaterial({ color: 0xf1e2b8, emissive: 0xffc768, emissiveIntensity: 0.55, roughness: 0.7 }));
+
+/**
+ * Mesa da sala, de tábuas grossas: 1,25 × 0,8 m, 76 cm de altura, com um banco do outro lado.
+ * O almoço do caseiro (prato esmaltado com arroz, feijão e um pedaço de carne, garfo e
+ * caneca) fica no lado oeste (−X), de quem come olhando para o leste; no meio, uma panela
+ * tampada e a garrafa térmica; um pano de prato dobrado na ponta.
+ */
+export function buildDiningTable(): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const L = 1.25;
+  const D = 0.8;
+  const H = 0.76;
+  const t = 0.045;
+  // tampo: quatro tábuas no comprimento, de tons um pouco diferentes
+  const tones = [C.plankLight, C.plank, 0xab7c48, C.plankLight];
+  tones.forEach((tone, i) => p.box(L, t, D / 4 - 0.006, tone, 0, H - t / 2, -D / 2 + D / 8 + (i * D) / 4, undefined, { outline: true }));
+  // saia embaixo do tampo e as pernas, levemente afinadas
+  for (const z of [-1, 1]) p.box(L - 0.16, 0.1, 0.025, C.plankDark, 0, H - t - 0.05, z * (D / 2 - 0.07));
+  for (const x of [-1, 1]) p.box(0.025, 0.1, D - 0.16, C.plankDark, x * (L / 2 - 0.08), H - t - 0.05, 0);
+  for (const x of [-1, 1]) {
+    for (const z of [-1, 1]) p.add(new THREE.CylinderGeometry(m(0.03), m(0.025), m(H - t), 4, 1), C.plankDark, x * (L / 2 - 0.08), (H - t) / 2, z * (D / 2 - 0.07), [0, Math.PI / 4, 0]);
+    // travessa baixa entre as pernas de cada cabeceira
+    p.box(0.03, 0.04, D - 0.16, C.plankDark, x * (L / 2 - 0.08), 0.16, 0);
+  }
+  p.box(L - 0.16, 0.04, 0.03, C.plankDark, 0, 0.16, 0);
+  // banco do outro lado (leste): assento de tábua e dois pés de cavalete
+  const bx = L / 2 + 0.22;
+  p.box(0.3, 0.04, 0.95, C.plank, bx, 0.45, 0, undefined, { outline: true });
+  for (const z of [-1, 1]) {
+    p.box(0.26, 0.43, 0.04, C.plankDark, bx, 0.215, z * 0.36);
+  }
+  p.box(0.04, 0.05, 0.7, C.plankDark, bx, 0.12, 0);
+
+  const y = H;
+  // prato esmaltado (branco de borda azul) com a comida
+  const px = -0.36;
+  const pz = 0.05;
+  p.cyl(0.13, 0.1, 0.025, 0xf2f0e8, px, y + 0.0125, pz, undefined, 16);
+  p.cyl(0.131, 0.131, 0.006, 0x2f5fa0, px, y + 0.024, pz, undefined, 16);
+  p.dome(0.075, 0xf4efe2, px - 0.03, y + 0.022, pz - 0.03); // arroz
+  p.dome(0.055, 0x4a2a1c, px + 0.05, y + 0.022, pz + 0.03); // feijão
+  p.box(0.07, 0.025, 0.05, 0x7a3b22, px + 0.0, y + 0.035, pz + 0.07, [0, 0.4, 0]); // carne
+  p.box(0.012, 0.006, 0.17, C.steel, px - 0.17, y + 0.003, pz + 0.01); // garfo
+  // caneca de alumínio com asa
+  p.cyl(0.04, 0.038, 0.09, 0xb9c0c4, -0.2, y + 0.045, -0.24, undefined, 12);
+  p.ring(0.025, 0.006, 0xb9c0c4, -0.2, y + 0.05, -0.29, [0, Math.PI / 2, 0]);
+  // panela de alumínio tampada, com os cabos
+  p.cyl(0.13, 0.12, 0.12, 0xa9b0b4, 0.1, y + 0.06, -0.05, undefined, 16);
+  p.cyl(0.135, 0.135, 0.015, 0x9aa1a5, 0.1, y + 0.128, -0.05, undefined, 16);
+  p.cyl(0.02, 0.02, 0.025, C.black, 0.1, y + 0.145, -0.05, undefined, 8);
+  for (const s of [-1, 1]) p.box(0.06, 0.015, 0.03, C.black, 0.1 + s * 0.16, y + 0.1, -0.05);
+  // garrafa térmica vermelha
+  p.cyl(0.055, 0.055, 0.26, C.toolRed, 0.38, y + 0.13, 0.2, undefined, 12);
+  p.cyl(0.045, 0.05, 0.06, 0xe9e2c9, 0.38, y + 0.29, 0.2, undefined, 12);
+  // pano de prato dobrado
+  p.box(0.22, 0.012, 0.16, C.rag, 0.42, y + 0.006, -0.22, [0, 0.25, 0]);
+  p.box(0.22, 0.004, 0.025, 0xe9e2c9, 0.42, y + 0.013, -0.22, [0, 0.25, 0]);
+  g.add(body(p));
+  return g;
+}
+
+/**
+ * Cama de solteiro (0,95 × 1,9 m) com a cabeceira em +Z, a `head` (unidades do mundo) do
+ * centro do hexágono, encostada na parede. Lençol, travesseiro e uma colcha listrada meio
+ * dobrada nos pés; um par de chinelos no chão.
+ */
+export function buildBed(head: number): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const W = 0.95;
+  const Lb = 1.9;
+  const hz = head / METER;
+  const cz = hz - Lb / 2;
+  // estrado: laterais, pés e as duas cabeceiras de tábua
+  for (const x of [-1, 1]) p.box(0.04, 0.16, Lb, C.plank, x * (W / 2 - 0.02), 0.3, cz, undefined, { outline: true });
+  for (const x of [-1, 1]) {
+    for (const z of [hz - 0.03, hz - Lb + 0.03]) p.box(0.06, z > cz ? 0.9 : 0.55, 0.06, C.plankDark, x * (W / 2 - 0.03), (z > cz ? 0.9 : 0.55) / 2, z);
+  }
+  for (const [z, h] of [[hz - 0.03, 0.9], [hz - Lb + 0.03, 0.55]] as const) {
+    for (let i = 0; i < 3; i++) p.box(W - 0.1, 0.12, 0.025, i % 2 ? C.plank : C.plankLight, 0, h - 0.1 - i * 0.16, z, undefined, { outline: true });
+  }
+  // colchão e lençol
+  p.box(W - 0.08, 0.16, Lb - 0.1, 0xe8e1cf, 0, 0.44, cz);
+  p.box(W - 0.06, 0.02, Lb - 0.5, 0xd7d9cf, 0, 0.525, cz - 0.15);
+  // travesseiro
+  p.box(0.6, 0.1, 0.36, 0xf3efe4, 0, 0.57, hz - 0.28, [0.12, 0, 0]);
+  // colcha listrada dobrada nos pés (faixas alternadas)
+  const quiltZ = hz - Lb + 0.45;
+  for (let i = 0; i < 5; i++) {
+    const color = [0x7d2f2a, 0xd9be7c, 0x2f5a3a, 0xd9be7c, 0x7d2f2a][i];
+    p.box(W - 0.02, 0.06, 0.12, color, 0, 0.56, quiltZ - 0.24 + i * 0.12);
+  }
+  for (const x of [-1, 1]) p.box(0.03, 0.2, 0.6, 0x7d2f2a, x * (W / 2 - 0.01), 0.47, quiltZ);
+  // chinelos ao lado da cama
+  for (const dx of [0, 0.11]) p.box(0.09, 0.02, 0.24, 0x2f6fb0, -W / 2 - 0.12 - dx, 0.01, cz + 0.3, [0, 0.15, 0]);
+  g.add(body(p));
+  return g;
+}
+
+/**
+ * Mesinha de cabeceira com uma gaveta e, em cima, o abajur (cúpula que acende de leve), um
+ * copo d'água e um despertador. `x`, `z` (unidades do mundo): onde fica, em relação ao centro
+ * do hexágono (encostada na cabeceira da cama ao lado).
+ */
+export function buildNightstand(x: number, z: number): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const W = 0.45;
+  const D = 0.38;
+  const H = 0.55;
+  const cx = x / METER;
+  const cz = z / METER;
+  p.box(W, 0.03, D, C.plankLight, cx, H - 0.015, cz, undefined, { outline: true });
+  for (const sx of [-1, 1]) p.box(0.025, H - 0.03, D, C.plank, cx + sx * (W / 2 - 0.0125), (H - 0.03) / 2, cz);
+  p.box(W - 0.05, H - 0.03, 0.02, C.plankDark, cx, (H - 0.03) / 2, cz + D / 2 - 0.01);
+  p.box(W - 0.05, 0.02, D - 0.02, C.plank, cx, 0.08, cz);
+  // gaveta (frente para −Z, para dentro do quarto) com puxador
+  p.box(W - 0.06, 0.14, 0.02, C.plankLight, cx, H - 0.12, cz - D / 2 + 0.01);
+  p.cyl(0.015, 0.015, 0.02, C.brass, cx, H - 0.12, cz - D / 2 - 0.005, [Math.PI / 2, 0, 0], 8);
+  // abajur: pé de cerâmica e haste
+  const lx = cx + 0.08;
+  const lz = cz + 0.04;
+  p.cyl(0.07, 0.08, 0.03, 0x3f5a3a, lx, H + 0.015, lz, undefined, 12);
+  p.cyl(0.05, 0.065, 0.12, 0x4f7048, lx, H + 0.09, lz, undefined, 12);
+  p.cyl(0.008, 0.008, 0.16, C.brass, lx, H + 0.23, lz, undefined, 6);
+  // copo d'água e despertador
+  p.cyl(0.03, 0.026, 0.09, 0xbfd7dc, cx - 0.13, H + 0.045, cz - 0.08, undefined, 10);
+  p.cyl(0.045, 0.045, 0.03, 0xb3302a, cx - 0.1, H + 0.05, cz + 0.08, [Math.PI / 2, 0, 0], 12);
+  p.box(0.06, 0.02, 0.02, C.black, cx - 0.1, H + 0.01, cz + 0.08);
+  g.add(body(p));
+  // cúpula do abajur (material próprio, que acende)
+  const shade = new THREE.Mesh(new THREE.CylinderGeometry(m(0.09), m(0.15), m(0.17), 16, 1, true), shadeMat());
+  shade.material.side = THREE.DoubleSide;
+  shade.position.set(m(lx), m(H + 0.33), m(lz));
+  shade.castShadow = true;
+  g.add(shade);
+  return g;
+}
