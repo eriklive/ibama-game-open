@@ -198,7 +198,8 @@ O hangar tem carga empilhada para os agentes se esconderem e planejarem a aproxi
 - **Cobertura baixa** (sacos no palete e gaiolas vazias): ninguém passa, mas o inimigo enxerga por
   cima. Só não vê o agente que está **colado nela, do lado de lá** (o último hexágono antes dele, na
   linha do olhar, é a carga). O cone vermelho já mostra essa "sombra" atrás da carga. Parado ao lado de
-  carga baixa, o agente fica agachado. Na fuga, a carga baixa (e a mesa) é obstáculo: a rota travada
+  carga baixa, o agente fica agachado — se houver garimpeiro não rendido à vista. Não se abaixa se já foi
+  avistado por um inimigo nem se há um rendido a até 2 hexágonos de caminho (contornando paredes). Na fuga, a carga baixa (e a mesa) é obstáculo: a rota travada
   dá a volta nela.
 - **Decoração** (galões de gasolina e botijão): não bloqueia nada.
 
@@ -338,8 +339,8 @@ Quem não se rendeu não conversa.
   amarelo** pulsante no próprio modelo (acompanha a pose de algemado). Tocar nele, colado, abre a
   conversa; de longe, marca o caminho mais curto até a aura (contorno grosso, fantasma do agente no
   destino, pontos correndo e o balão "Toque de novo para ir · N passos") e o segundo toque anda até lá e
-  já abre a conversa. O caminho precisa deixar sobrando o movimento da primeira pergunta; sem isso, o
-  caminho aparece em cinza com "Longe demais para interagir". Quem **não tem interação** fica sem
+  já abre a conversa. O alcance conta só os passos até o hexágono colado no rendido (não até o
+  hexágono dele); colado, conversa mesmo sem movimento. Sem passos para chegar, o caminho aparece em cinza com "Longe demais para interagir". Quem **não tem interação** fica sem
   contorno e, ao toque, mostra o balão cinza **"Nenhuma interação"** sobre a cabeça. O hexágono do
   rendido também vale como tocar nele. No tabuleiro: `setNpcTargets` (alvos `npc:<id>`) e
   `flashTargetLabel` (balão passageiro, reaproveitável para outros alvos); na tela, `tapTargetOf` diz
@@ -381,8 +382,8 @@ Quem não se rendeu não conversa.
 - **Confissão que entrega o esconderijo:** se o caseiro confessar em "Tem arma na casa?" ("Tem sim, tá
   no quartinho de trás."), o armário conta como **já percebido**: ganha o contorno sem ninguém rolar
   percepção, e **Investigar a casa** fica cumprido. Apreender a arma ainda pede o toque nela. No dado, é `notices: '<id do esconderijo>'` na resposta.
-- **Custo:** a **primeira pergunta de cada conversa gasta 1 de movimento** (entrar e
-  sair sem perguntar não gasta) e a vez continua. Ficam em `INTERROGATION_RULES` (`moveCost`,
+- **Custo:** conversar **não gasta movimento** e a vez continua (a primeira pergunta de cada conversa
+  gastaria `moveCost`, hoje 0). Ficam em `INTERROGATION_RULES` (`moveCost`,
   `endsTurn`).
 - **Caderneta de campo:** cada resposta vira uma anotação (*declarou*, *sinal* ou *confessou*), que sai
   no **relatório da operação**; ao encerrar, um telegrama resume.
