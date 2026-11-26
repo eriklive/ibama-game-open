@@ -157,11 +157,16 @@ export class TileField {
 
   /**
    * Enfeites presos ao chão (uma malha instanciada por tipo). `items` traz, para cada
-   * peça, o hexágono e a matriz relativa ao centro dele.
+   * peça, o hexágono, a matriz relativa ao centro dele e, se quiser, a cor da peça.
    */
-  addDecals(geometry: THREE.BufferGeometry, material: THREE.Material, items: { tile: HexTile; local: THREE.Matrix4 }[]): void {
+  addDecals(
+    geometry: THREE.BufferGeometry,
+    material: THREE.Material,
+    items: { tile: HexTile; local: THREE.Matrix4; color?: THREE.Color }[],
+  ): void {
     if (!items.length) return;
     const mesh = new THREE.InstancedMesh(geometry, material, items.length);
+    if (items.some((it) => it.color)) items.forEach((it, i) => mesh.setColorAt(i, it.color ?? new THREE.Color(0xffffff)));
     mesh.receiveShadow = true;
     mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
     const decal: Decal = { mesh, local: [], byTile: new Map() };

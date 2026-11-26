@@ -150,8 +150,13 @@ describe('aeroporto: mundo semiaberto', () => {
     }
     // caixotes soltos do lado de fora servem de cobertura na fuga
     expect(cover.some((c) => rects.every((r) => !onRect(c, r)))).toBe(true);
-    // na casa só há móveis: a mesa do Jô e o armário
-    expect(cover.filter((c) => inside(c, structureRect(map, 'house')!)).map((c) => c.kind).sort()).toEqual(['shelf', 'table']);
+    // na casa só há móveis: a mesa do Jô e, no quarto, o armário, a cama e a mesinha
+    expect(cover.filter((c) => inside(c, structureRect(map, 'house')!)).map((c) => c.kind).sort()).toEqual([
+      'bed',
+      'nightstand',
+      'shelf',
+      'table',
+    ]);
   });
 
   it('estrutura: o teto some com um agente dentro e o interior só aparece a até 6 hexágonos', () => {

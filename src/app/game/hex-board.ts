@@ -5,6 +5,7 @@ import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx'
 import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
+import { HousePlan, floorSectors, housePlan, insidePolygon } from './house-plan';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
 import { PropInfo } from './prop-models';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
@@ -2818,8 +2819,11 @@ export class HexBoard {
       new THREE.MeshStandardMaterial({ color: COLORS.wall, roughness: 0.95 }),
     ];
     const wallKeys = new Set(walls.map(hexKey));
-    for (const { kind, rect } of this.map.structures ?? []) {
-      const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE);
+    const doorKeys = new Set((this.map.doors ?? []).map(hexKey));
+    const split = new Set<string>();
+    for (const { kind, rect, windows } of this.map.structures ?? []) {
+      const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE, doorKeys, windows);
+      if (kind === 'house') for (const k of this.splitHouseFloor(housePlan(rect, wallKeys, doorKeys, HEX_SIZE))) split.add(k);
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
       this.structures.push({ rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
@@ -2843,7 +2847,7 @@ export class HexBoard {
     for (const h of walls) {
       const tile = this.tiles.get(hexKey(h));
       if (!tile) continue;
-      tile.baseColor.set(0x3b4a50);
+      if (!split.has(hexKey(h))) tile.baseColor.set(0x3b4a50);
       if (inHangar(h)) continue; // a parede da estrutura é desenhada inteira, não por hexágono
       const wall = new THREE.Mesh(geo, mats);
       wall.castShadow = true;
@@ -2853,6 +2857,66 @@ export class HexBoard {
       wall.scale.y = 0.85 + ((h.col * 13 + h.row * 7) % 5) * 0.07;
       this.field.attach(tile, wall);
     }
+  }
+
+  /**
+   * Piso dos hexágonos de parede da casa: a parede passa pelo meio deles, então cada um fica
+   * com o chão do entorno (a cor do hexágono) e, por cima, as fatias de dentro com o piso da
+   * casa (ver `floorSectors`). Poucos padrões, girados em cada parede: meio a meio (parede
+   * reta), as quinas de 1/3 e 2/3 (zigue-zague e cantos) e a de 1/6 (pé da divisória). As
+   * portas ficam inteiras de piso. Devolve os hexágonos divididos.
+   */
+  private splitHouseFloor(plan: HousePlan): string[] {
+    const done: string[] = [];
+    const shapes = new Map<string, THREE.BufferGeometry>();
+    const r = HEX_SIZE * HEX_GAP;
+    const shape = (span: number): THREE.BufferGeometry => {
+      const k = span.toFixed(4);
+      let geo = shapes.get(k);
+      if (geo) return geo;
+      // fatia de `0` a `span`: o centro, a borda até a primeira ponta, as pontas e a outra borda
+      const pts: [number, number][] = [];
+      const apothem = r * Math.cos(Math.PI / 6);
+      pts.push([apothem, 0]);
+      for (let a = Math.PI / 6; a < span - 1e-6; a += Math.PI / 3) pts.push([r * Math.cos(a), r * Math.sin(a)]);
+      pts.push([apothem * Math.cos(span), apothem * Math.sin(span)]);
+      const pos: number[] = [];
+      for (let i = 0; i + 1 < pts.length; i++) pos.push(0, 0, 0, pts[i + 1][0], 0, pts[i + 1][1], pts[i][0], 0, pts[i][1]);
+      geo = new THREE.BufferGeometry();
+      geo.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
+      geo.computeVertexNormals();
+      shapes.set(k, geo);
+      return geo;
+    };
+    const material = new THREE.MeshStandardMaterial({ roughness: 0.85, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    const pieces = new Map<THREE.BufferGeometry, { tile: HexTile; local: THREE.Matrix4; color: THREE.Color }[]>();
+    for (const h of plan.nodes.values()) {
+      const tile = this.tiles.get(hexKey(h));
+      if (!tile || this.map.doors?.some((d) => sameHex(d, h))) continue;
+      const sectors = floorSectors(plan, h, HEX_SIZE);
+      const floor = new THREE.Color(GROUND.floor[tone(h)]);
+      if (sectors.every((s) => s.inside)) {
+        tile.baseColor.copy(floor);
+      } else {
+        // o chão do entorno: o de um vizinho de fora (grama, na clareira)
+        const out = hexNeighbors(h).find((n) => !plan.nodes.has(hexKey(n)) && !insidePolygon(hexToWorld(n, HEX_SIZE), plan.outline));
+        const ground = (out && this.map.ground?.get(hexKey(out))) || 'grass';
+        tile.baseColor.set(GROUND[ground === 'floor' ? 'grass' : ground][tone(h)]);
+        for (const s of sectors) {
+          if (!s.inside) continue;
+          const geo = shape(s.span);
+          const list = pieces.get(geo) ?? [];
+          // a fatia sai de 0 (eixo +X); gira até `start` (atan2 no plano XZ → giro em Y negativo)
+          list.push({ tile, local: new THREE.Matrix4().makeRotationY(-s.start), color: floor });
+          pieces.set(geo, list);
+        }
+      }
+      tile.color.copy(tile.baseColor);
+      this.field.mark(tile);
+      done.push(hexKey(h));
+    }
+    for (const [geo, items] of pieces) this.field.addDecals(geo, material, items);
+    return done;
   }
 
   /** Carga do hangar (cobertura) e decoração solta; cada peça sobe junto com o seu hexágono. */

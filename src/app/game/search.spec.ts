@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { spawnEnemy, stationary, visionHexes } from './enemies';
-import { hexKey, reachableHexes } from './hex';
+import { hexKey, hexNeighbors, reachableHexes } from './hex';
 import { MAPS, blockedHexes, lowCoverHexes, playArea, structureRect } from './maps';
 import { SEARCH_RULES, beats, canReach, chance, entersRoom, needsNoticeRoll } from './search';
 
@@ -79,12 +79,13 @@ describe('aeroporto: casa do Caseiro Jô', () => {
     expect(seen.has('35,29')).toBe(true);
   });
 
-  it('o armário fica no cômodo 2, encostado na parede, e dá para chegar ao lado dele', () => {
+  it('o armário fica no cômodo 2, encostado na parede do fundo, e dá para chegar ao lado dele', () => {
     expect(solid.has(hexKey(item.spot))).toBe(true);
+    const house = structureRect(map, 'house')!;
+    expect(item.spot.row).toBe(house.rows[0] + 1);
+    expect(map.walls.some((w) => w.col === item.spot.col && w.row === house.rows[0])).toBe(true);
     const reach = reachableHexes(map.starts[0], 999, area, solid);
-    const sides = [{ col: 39, row: 29 }, { col: 39, row: 28 }, { col: 40, row: 28 }, { col: 40, row: 30 }].filter((h) =>
-      reach.has(hexKey(h)),
-    );
+    const sides = hexNeighbors(item.spot).filter((h) => reach.has(hexKey(h)));
     expect(sides.length).toBeGreaterThan(0);
     for (const h of sides) expect(canReach(h, item.spot)).toBe(true);
   });

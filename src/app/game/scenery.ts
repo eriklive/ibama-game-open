@@ -1,7 +1,9 @@
 import * as THREE from 'three';
 import { HexCoord, hexKey, hexToWorld } from './hex';
 import { METER } from './character-model';
-import { buildCabinet, buildKeyBoard, eastWallGap, northWallGap } from './prop-models';
+import { buildBed, buildCabinet, buildDiningTable, buildKeyBoard, buildNightstand, houseWallGap, northWallGap } from './prop-models';
+import { housePlan, insidePolygon } from './house-plan';
+import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
  * Cenário montado por código: o hangar (paredes retas de chapa ondulada, portão,
@@ -312,80 +314,197 @@ function plankTexture(): THREE.Texture {
   return tex;
 }
 
+/** Pedaço de uma geometria sem índice: os vértices de `start` a `start + count`. */
+function slice(geo: THREE.BufferGeometry, start: number, count: number): THREE.BufferGeometry {
+  const out = new THREE.BufferGeometry();
+  for (const name of ['position', 'normal', 'uv']) {
+    const attr = geo.getAttribute(name);
+    const n = attr.itemSize;
+    out.setAttribute(name, new THREE.Float32BufferAttribute((attr.array as Float32Array).slice(start * n, (start + count) * n), n));
+  }
+  return out;
+}
+
+/** Uma janela da casa: no meio do caminho entre os centros de dois hexágonos da mesma parede. */
+export type HouseWindow = [HexCoord, HexCoord];
+
+/** Janela: 80 cm de largura, peitoril a 0,95 m e verga a 2,0 m do chão. */
+const WINDOW_WIDTH = 0.8 * METER;
+const WINDOW_SILL = 0.95 * METER;
+const WINDOW_TOP = 2.0 * METER;
+
 /**
- * Casa de tábuas sobre os hexágonos de parede do retângulo `cols` × `rows`: paredes retas
- * (como as do hangar) no perímetro e nas divisórias (colunas de parede dentro do retângulo),
- * interrompidas onde não há parede — as portas. O telhado de duas águas, de chapa
- * enferrujada, vem num grupo com nome (`HOUSE_ROOF`).
+ * Casa de tábuas sobre os hexágonos de parede do retângulo `cols` × `rows`. As paredes passam
+ * pelo **meio** dos hexágonos de parede, de centro a centro (ver `housePlan`): retas nas
+ * laterais e nas divisórias, em zigue-zague nas paredes compridas; nas portas a parede para
+ * na borda do hexágono da porta. `windows` abre janelas (batente, peitoril e as duas folhas
+ * de tábua abertas para dentro). O telhado de duas águas, de chapa enferrujada, vem num grupo com nome
+ * (`HOUSE_ROOF`).
  */
 export function buildHouse(
   rect: { cols: [number, number]; rows: [number, number] },
   walls: ReadonlySet<string>,
   size: number,
+  doors: ReadonlySet<string> = new Set(),
+  windows: readonly HouseWindow[] = [],
 ): THREE.Group {
   const group = new THREE.Group();
   const [c0, c1] = rect.cols;
   const [r0, r1] = rect.rows;
   const H = HOUSE_WALL_HEIGHT;
   const colX = (col: number) => hexToWorld({ col, row: 0 }, size).x;
+  // o telhado cobre da média do zigue-zague de trás à da frente
   const rowZ = (row: number) => hexToWorld({ col: 0, row }, size).z + (Math.sqrt(3) * size) / 4;
-  const colZ = (col: number, row: number) => hexToWorld({ col, row }, size).z;
   const x0 = colX(c0);
   const x1 = colX(c1);
   const zBack = rowZ(r0);
   const zFront = rowZ(r1);
-  const isWall = (col: number, row: number) => walls.has(hexKey({ col, row }));
 
   const texture = plankTexture();
   const trim = new THREE.MeshStandardMaterial({ color: 0x5a3b1e, roughness: 0.9 });
-  const panel = (ax: number, az: number, bx: number, bz: number): void => {
-    const length = Math.hypot(bx - ax, bz - az);
-    const map = texture.clone();
-    map.repeat.set(length / 1.2, H / 1.2);
-    map.needsUpdate = true;
-    const side = new THREE.MeshStandardMaterial({ map, roughness: 0.9 });
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(length, H, WALL_THICKNESS), [trim, trim, trim, trim, side, side]);
-    mesh.position.set((ax + bx) / 2, H / 2, (az + bz) / 2);
-    mesh.rotation.y = Math.atan2(-(bz - az), bx - ax);
+  const plank = new THREE.MeshStandardMaterial({ map: texture, roughness: 0.9 });
+  const shutterMat = new THREE.MeshStandardMaterial({ color: 0x6f8a5a, roughness: 0.85 });
+
+  // cada parede (lado da casa ou divisória) vira uma malha só, com três materiais: menos
+  // chamadas de desenho, e a parede que tapa alguém esmaece inteira
+  type Part = 'trim' | 'plank' | 'shutter';
+  const wallParts = new Map<string, Record<Part, THREE.BufferGeometry[]>>();
+  /** Caixa `w × h × d` em `(x, y, z)` no espaço de `parent` (já posto no mundo da casa). */
+  const box = (wall: string, part: Part, w: number, h: number, d: number, x: number, y: number, z: number, parent: THREE.Object3D): THREE.Object3D => {
+    const lists = wallParts.get(wall) ?? { trim: [], plank: [], shutter: [] };
+    wallParts.set(wall, lists);
+    const at = new THREE.Object3D();
+    at.position.set(x, y, z);
+    parent.add(at);
+    at.updateWorldMatrix(true, false);
+    const geo = new THREE.BoxGeometry(w, h, d).toNonIndexed();
+    if (part === 'plank') {
+      // as faces da frente e de trás são de tábua (textura em metros de parede); as outras, de arremate
+      const uv = geo.getAttribute('uv');
+      for (let i = 24; i < 36; i++) uv.setXY(i, (uv.getX(i) * w) / 1.2, (uv.getY(i) * h) / 1.2);
+      lists.plank.push(slice(geo, 24, 12).applyMatrix4(at.matrixWorld));
+      lists.trim.push(slice(geo, 0, 24).applyMatrix4(at.matrixWorld));
+      geo.dispose();
+    } else {
+      lists[part].push(geo.applyMatrix4(at.matrixWorld));
+    }
+    return at;
+  };
+
+  // trechos de parede: de centro a centro (ou do centro até a borda da porta)
+  const plan = housePlan(rect, walls, doors, size);
+  const isDoor = (h: HexCoord) => doors.has(hexKey(h));
+  // a parede a que o trecho pertence: a coluna (laterais, divisórias) ou a fileira (fundo, frente)
+  type Seg = { a: THREE.Vector2; b: THREE.Vector2; wall: string };
+  const segs: Seg[] = [];
+  for (const [p, q] of plan.edges) {
+    if (isDoor(p) && isDoor(q)) continue;
+    const [w, d] = isDoor(p) ? [q, p] : [p, q];
+    const a = new THREE.Vector2(hexToWorld(w, size).x, hexToWorld(w, size).z);
+    const far = new THREE.Vector2(hexToWorld(d, size).x, hexToWorld(d, size).z);
+    const wall = p.col === q.col ? `col ${p.col}` : `row ${Math.max(p.row, q.row) === r1 ? r1 : r0}`;
+    segs.push({ a, b: isDoor(d) ? a.clone().lerp(far, 0.5) : far, wall });
+  }
+  // junta os trechos em linha reta (paredes laterais), para a janela poder cair num centro
+  const key = (v: THREE.Vector2) => `${v.x.toFixed(3)},${v.y.toFixed(3)}`;
+  const dir = (a: THREE.Vector2, b: THREE.Vector2) => b.clone().sub(a).normalize();
+  for (let merged = true; merged; ) {
+    merged = false;
+    for (let i = 0; i < segs.length && !merged; i++) {
+      for (let j = i + 1; j < segs.length && !merged; j++) {
+        const s = segs[i];
+        const t = segs[j];
+        // orienta os dois para que s termine onde t começa
+        for (const [sa, sb, ta, tb] of [[s.a, s.b, t.a, t.b], [s.a, s.b, t.b, t.a], [s.b, s.a, t.a, t.b], [s.b, s.a, t.b, t.a]]) {
+          if (key(sb) !== key(ta)) continue;
+          const joints = segs.filter((u) => key(u.a) === key(sb) || key(u.b) === key(sb)).length;
+          if (joints !== 2 || Math.abs(dir(sa, sb).dot(dir(ta, tb)) - 1) > 1e-6) continue;
+          segs[i] = { a: sa, b: tb, wall: s.wall };
+          segs.splice(j, 1);
+          merged = true;
+          break;
+        }
+      }
+    }
+  }
+
+  const openings = windows.map(([p, q]) => {
+    const a = hexToWorld(p, size);
+    const b = hexToWorld(q, size);
+    return new THREE.Vector2((a.x + b.x) / 2, (a.z + b.z) / 2);
+  });
+  const W = WALL_THICKNESS;
+  const root = new THREE.Object3D();
+  /** Lado de dentro da casa no espaço do trecho: +1 se for o +Z local, −1 se o −Z. */
+  const inward = (holder: THREE.Object3D): number => {
+    const r = holder.rotation.y;
+    const p = { x: holder.position.x + Math.sin(r) * 0.4, z: holder.position.z + Math.cos(r) * 0.4 };
+    return insidePolygon(p, plan.outline) ? 1 : -1;
+  };
+  const windowFrame = (wall: string, holder: THREE.Object3D, s: number): void => {
+    const w = WINDOW_WIDTH;
+    const h = WINDOW_TOP - WINDOW_SILL;
+    const cy = (WINDOW_SILL + WINDOW_TOP) / 2;
+    const f = 0.07;
+    // batentes, verga e o peitoril (sai um pouco para os dois lados)
+    for (const x of [-1, 1]) box(wall, 'trim', f, h, W + 0.05, s + x * (w / 2 - f / 2), cy, 0, holder);
+    box(wall, 'trim', w, f, W + 0.05, s, WINDOW_TOP - f / 2, 0, holder);
+    box(wall, 'trim', w + 0.14, 0.05, W + 0.16, s, WINDOW_SILL, 0, holder);
+    // as duas folhas de tábua, abertas para dentro e encostadas quase rente à parede
+    const leafW = w / 2 - 0.01;
+    const face = inward(holder);
+    for (const x of [-1, 1]) {
+      const hinge = new THREE.Object3D();
+      hinge.position.set(s + x * (w / 2), cy, face * (W / 2 + 0.03));
+      hinge.rotation.y = -x * face * 0.45;
+      holder.add(hinge);
+      const leaf = box(wall, 'shutter', leafW, h - 0.04, 0.035, x * (leafW / 2), 0, 0, hinge);
+      for (const y of [-0.3, 0.3]) box(wall, 'trim', leafW - 0.05, 0.06, 0.06, 0, y * h, 0, leaf);
+      box(wall, 'trim', 0.04, 0.03, 0.05, x * (leafW / 2 - 0.06), 0, face * 0.04, leaf);
+    }
+  };
+  for (const { a, b, wall } of segs) {
+    const length = a.distanceTo(b);
+    const holder = new THREE.Object3D();
+    holder.position.set((a.x + b.x) / 2, 0, (a.y + b.y) / 2);
+    holder.rotation.y = Math.atan2(-(b.y - a.y), b.x - a.x);
+    root.add(holder);
+    // janelas neste trecho (distância a partir do meio, ao longo da parede)
+    const along = dir(a, b);
+    const cuts = openings
+      .map((o) => ({ o, s: o.clone().sub(a).dot(along) - length / 2 }))
+      .filter(({ o, s }) => Math.abs(s) < length / 2 && a.clone().addScaledVector(along, s + length / 2).distanceTo(o) < 1e-3)
+      .map(({ s }) => s)
+      .sort((p, q) => p - q);
+    const piece = (from: number, to: number, y0: number, y1: number) => {
+      if (to - from > 1e-3 && y1 - y0 > 1e-3) box(wall, 'plank', to - from, y1 - y0, W, (from + to) / 2, (y0 + y1) / 2, 0, holder);
+    };
+    let from = -length / 2;
+    for (const s of cuts) {
+      const l = s - WINDOW_WIDTH / 2;
+      const r = s + WINDOW_WIDTH / 2;
+      piece(from, l, 0, H);
+      piece(l, r, 0, WINDOW_SILL);
+      piece(l, r, WINDOW_TOP, H);
+      windowFrame(wall, holder, s);
+      from = r;
+    }
+    piece(from, length / 2, 0, H);
+  }
+  // esteios nas pontas e nas quinas (escondem as emendas do zigue-zague)
+  const posts = new Map<string, { v: THREE.Vector2; wall: string }>();
+  for (const s of segs) for (const v of [s.a, s.b]) if (!posts.has(key(v))) posts.set(key(v), { v, wall: s.wall });
+  for (const { v, wall } of posts.values()) box(wall, 'trim', 0.22, H + 0.1, 0.22, v.x, (H + 0.1) / 2, v.y, root);
+  for (const lists of wallParts.values()) {
+    const parts = (['trim', 'plank', 'shutter'] as const).map((p) => lists[p]);
+    const used = parts.map((list) => (list.length ? mergeGeometries(list, false) : null));
+    for (const list of parts) for (const g of list) g.dispose();
+    const mats = [trim, plank, shutterMat].filter((_, i) => used[i]);
+    const mesh = new THREE.Mesh(mergeGeometries(used.filter((g): g is THREE.BufferGeometry => !!g), true), mats);
+    for (const g of used) g?.dispose();
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     group.add(mesh);
-  };
-  const post = (x: number, z: number): void => {
-    const mesh = new THREE.Mesh(new THREE.BoxGeometry(0.22, H + 0.1, 0.22), trim);
-    mesh.position.set(x, (H + 0.1) / 2, z);
-    mesh.castShadow = true;
-    group.add(mesh);
-  };
-
-  const half = 0.75 * size;
-  const clampX = (x: number) => Math.min(x1, Math.max(x0, x));
-  const cols = Array.from({ length: c1 - c0 + 1 }, (_, i) => c0 + i);
-  for (const [row, z] of [[r0, zBack], [r1, zFront]] as const) {
-    for (const [a, b] of runs(cols.filter((c) => isWall(c, row)))) {
-      const ax = clampX(colX(a) - half);
-      const bx = clampX(colX(b) + half);
-      panel(ax, z, bx, z);
-      post(ax, z);
-      post(bx, z);
-    }
-  }
-  // laterais e divisórias: colunas com parede em todas (ou quase todas) as fileiras de dentro
-  const rows = Array.from({ length: r1 - r0 + 1 }, (_, i) => r0 + i);
-  const inner = rows.slice(1, -1);
-  const halfRow = (Math.sqrt(3) * size) / 2;
-  const clampZ = (z: number) => Math.min(zFront, Math.max(zBack, z));
-  for (const col of cols) {
-    const side = col === c0 || col === c1;
-    if (!side && inner.filter((r) => isWall(col, r)).length < inner.length - 1) continue;
-    const x = colX(col);
-    for (const [a, b] of runs(rows.filter((r) => isWall(col, r)))) {
-      const za = clampZ(colZ(col, a) - halfRow);
-      const zb = clampZ(colZ(col, b) + halfRow);
-      panel(x, za, x, zb);
-      post(x, za);
-      post(x, zb);
-    }
   }
 
   // telhado de duas águas: cumeeira no sentido leste–oeste, oitões de tábua nas pontas
@@ -530,13 +649,8 @@ function makeCargoMaterials() {
     cylinder: std(0xe9e6dd, 0.4, 0.2),
     cylinderBand: std(0x2f6fb0, 0.5),
     brass: std(0xc9a440, 0.4, 0.7),
-    plate: std(0xf1ede2, 0.35),
-    rice: std(0xf6f1df, 0.9),
-    beans: std(0x5b2f1c, 0.8),
-    mug: std(0x2f6fb0, 0.45),
     jar: std(0xd8c27a, 0.3),
     tin: std(0x9aa3a8, 0.4, 0.6),
-    rag: std(0x7d2f2a, 1),
     tarp: std(0x3f6b3a, 0.95),
     rope: std(0xcfb77a, 0.9),
     drum: std(0x2b5d9e, 0.5, 0.3),
@@ -690,17 +804,37 @@ function cage(w: number, h: number, d: number): THREE.Group {
   return g;
 }
 
-export type CoverKind = 'crates' | 'lowCrate' | 'boxes' | 'sacks' | 'cages' | 'table' | 'shelf' | 'supplies' | 'keys';
+export type CoverKind =
+  | 'crates'
+  | 'lowCrate'
+  | 'boxes'
+  | 'sacks'
+  | 'cages'
+  | 'table'
+  | 'shelf'
+  | 'supplies'
+  | 'keys'
+  | 'bed'
+  | 'nightstand';
 
 /**
  * Monta a carga de um hexágono. `seed` varia a arrumação (giro, quantas peças, quais
- * pilhas são mais altas) sem mudar a altura total de cada tipo. O armário (`shelf`) e o quadro
- * de chaves (`keys`) encostam na parede (do leste e do fundo); `col` (a coluna do hexágono)
+ * pilhas são mais altas) sem mudar a altura total de cada tipo. O armário (`shelf`), a cama
+ * (`bed`) e o quadro de chaves (`keys`) encostam na parede (do fundo da casa, da frente da casa
+ * e do fundo do hangar); `col` (a coluna do hexágono)
  * acerta a distância até a parede do fundo, que muda entre colunas pares e ímpares.
  */
 export function buildCover(kind: CoverKind, seed: number, col = 0): THREE.Group {
-  if (kind === 'table') return diningTable();
-  if (kind === 'shelf') return buildCabinet(eastWallGap(WALL_THICKNESS));
+  if (kind === 'table') return buildDiningTable();
+  if (kind === 'shelf') {
+    // encostado na parede do fundo (norte): a frente, que olha para −X, passa a olhar para +Z
+    const cabinet = buildCabinet(houseWallGap(WALL_THICKNESS));
+    cabinet.rotation.y = Math.PI / 2;
+    return cabinet;
+  }
+  // cabeceira na parede da frente (sul); a mesinha fica ao lado dela
+  if (kind === 'bed') return buildBed(houseWallGap(WALL_THICKNESS) - 0.02);
+  if (kind === 'nightstand') return buildNightstand(-0.45, 0.55);
   if (kind === 'keys') return buildKeyBoard(northWallGap(col, WALL_THICKNESS));
   if (kind === 'supplies') return supplyPile(seed);
   const rnd = seeded(seed);
@@ -782,29 +916,6 @@ export function buildCover(kind: CoverKind, seed: number, col = 0): THREE.Group 
     g.add(c);
   }
   g.rotation.y = Math.floor(rnd(99) * 6) * (Math.PI / 3);
-  return g;
-}
-
-/**
- * Mesa rústica com o almoço servido: prato de arroz com feijão, caneca e um pano. O prato
- * fica no lado oeste (−X), de quem come olhando para o leste.
- */
-function diningTable(): THREE.Group {
-  const m = cargo();
-  const g = new THREE.Group();
-  const top = 0.5;
-  g.add(solid(new THREE.BoxGeometry(0.8, 0.06, 1.0), m.wood, 0, top, 0));
-  for (const x of [-1, 1]) for (const z of [-1, 1]) {
-    g.add(solid(new THREE.BoxGeometry(0.07, top, 0.07), m.woodDark, x * 0.32, top / 2, z * 0.42));
-  }
-  const y = top + 0.03;
-  g.add(solid(new THREE.CylinderGeometry(0.17, 0.13, 0.03, 16), m.plate, -0.2, y + 0.015, 0.05));
-  g.add(solid(new THREE.SphereGeometry(0.09, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), m.rice, -0.24, y + 0.03, 0.02));
-  g.add(solid(new THREE.SphereGeometry(0.07, 10, 6, 0, Math.PI * 2, 0, Math.PI / 2), m.beans, -0.13, y + 0.03, 0.1));
-  g.add(solid(new THREE.CylinderGeometry(0.05, 0.045, 0.11, 10), m.mug, 0.05, y + 0.055, -0.3));
-  const rag = solid(new THREE.BoxGeometry(0.22, 0.01, 0.18), m.rag, 0.18, y + 0.005, 0.28);
-  rag.rotation.y = 0.4;
-  g.add(rag);
   return g;
 }
 
