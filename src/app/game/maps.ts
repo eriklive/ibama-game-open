@@ -25,14 +25,15 @@ export type StructureKind = 'hangar' | 'house';
  * Estrutura coberta sobre um retângulo de hexágonos (colunas e fileiras, inclusive).
  * `hangar`: paredes de chapa reta e telhado em arco. `house`: paredes de tábua e telhado de
  * duas águas; paredes de dentro (divisórias) são colunas inteiras de `#` dentro do retângulo.
- * As paredes da casa passam pelo meio dos hexágonos de parede (ver `housePlan`).
+ * O piso dos hexágonos de parede da casa fica dividido pela parede (ver `wallFloorShape`).
  */
 export interface Structure {
   kind: StructureKind;
   rect: HexRect;
   /**
    * Janelas da casa (só aparência: a parede continua bloqueando passagem e visão). Cada uma
-   * fica no meio do caminho entre os centros de dois hexágonos de parede da mesma parede.
+   * fica no meio do caminho entre os centros de dois hexágonos de parede da mesma parede
+   * (vizinhos, no fundo e na frente, para cair na linha da parede).
    */
   windows?: [HexCoord, HexCoord][];
 }
@@ -232,8 +233,7 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  * do oeste, que dá para a pista. No cômodo 1 (a sala) o caseiro Jô come de costas para a
  * entrada, na mesa (`m`); há uma janela na parede da frente. O cômodo 2 é o quarto: o armário
  * do caseiro (`P`), na parede do fundo, esconde uma arma; a cama (`L`) e a mesinha com o
- * abajur (`n`) ficam na parede da frente, e a janela, na parede do leste. As quinas da frente
- * da casa são chanfradas (a parede corta na diagonal, de centro a centro).
+ * abajur (`n`) ficam na parede da frente, e a janela, na parede do leste.
  *
  * O avião fica **trancado**; a chave está no quadro de chaves (`K`), na parede do fundo.
  *
@@ -271,12 +271,12 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TT.T..TT..TTTTT..T.~~~~~~.TT..T...T.T...T.TT',
   'TT.....T..TTTTT....~~~~~~...................',
   'TTTTTTTT..TTTTTTT..~~~~~~....#############..',
-  'TTTTTTTT..TT..T....~~~~~~.TT.#_____#_P___#..',
+  'TTTTTTTT..TT..T....~~~~~~.TT.#_____#__P__#..',
   'TTTT.............T.~~~~~~.T..#_____#_____#..',
   'TTTTT.T........TTT.~~~~~~....D___m_D_____#..',
   'TT........T..TTTTT.~~~~~~....#_____#_____#..',
   'T........TTT...TT..~~~~~~.TTB#_____#__Ln_#..',
-  '..........TTT....T.~~~~~~.TTB.###########...',
+  '..........TTT....T.~~~~~~.TTB#############..',
   '.........TTTT...TT.~~~~~~.T.................',
   '.........TTT..T.TT.~~~~~~..T...T............',
   '........TTT...TTT..~~~~~~.TTTTTT..TT.T.T.T.T',
@@ -366,7 +366,7 @@ export const MAPS: GameMap[] = [
         at: 'no armário',
         clutter: 'Potes, latas, roupa dobrada e uma capa de chuva.',
         glimpse: 'Uma coronha de madeira, ao lado da capa de chuva.',
-        spot: { col: 37, row: 27 },
+        spot: { col: 38, row: 27 },
         seized: 'Arma apreendida!',
         room: { cols: [36, 40], rows: [27, 31] },
       },

@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { describe, expect, it } from 'vitest';
 import { METER, heightOf } from './character-model';
-import { PropInfo, buildBed, buildCabinet, buildDiningTable, buildKeyBoard, buildNightstand, houseWallGap, northWallGap } from './prop-models';
+import { PropInfo, buildBed, buildCabinet, buildDiningTable, buildKeyBoard, buildNightstand, northWallGap, southWallGap } from './prop-models';
 
 /** Malhas que vão para a placa de vídeo (material visível), sem contar as escondidas. */
 const drawn = (g: THREE.Object3D): THREE.Mesh[] => {
@@ -37,7 +37,7 @@ describe('móveis com zoom', () => {
   });
 
   it('armário do caseiro: duas malhas (o corpo e a arma), um pouco mais alto que os agentes, sem portas', () => {
-    const g = buildCabinet(houseWallGap(0.18));
+    const g = buildCabinet(northWallGap(38, 0.18));
     const info = g.userData['prop'] as PropInfo;
     expect(drawn(g)).toHaveLength(2);
     expect(drawn(g)).toContain(info.item);
@@ -64,7 +64,7 @@ describe('móveis com zoom', () => {
 
   it('encostados na parede: a frente olha para dentro do cômodo', () => {
     const keys = buildKeyBoard(northWallGap(20, 0.18)).userData['prop'] as PropInfo;
-    const cab = buildCabinet(houseWallGap(0.18)).userData['prop'] as PropInfo;
+    const cab = buildCabinet(northWallGap(38, 0.18)).userData['prop'] as PropInfo;
     expect(keys.facing.z).toBe(1);
     expect(cab.facing.x).toBe(-1);
     expect(northWallGap(21, 0.18)).toBeGreaterThan(northWallGap(20, 0.18));
@@ -85,7 +85,7 @@ describe('móveis da casa', () => {
   });
 
   it('cama de solteiro: cabeceira encostada na parede (+Z), baixa e do tamanho de uma cama', () => {
-    const head = houseWallGap(0.18) - 0.02;
+    const head = southWallGap(38, 0.18) - 0.02;
     const g = buildBed(head);
     const box = new THREE.Box3().setFromObject(g);
     expect(box.max.z).toBeLessThanOrEqual(head + 1e-6);

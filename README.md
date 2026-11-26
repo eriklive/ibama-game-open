@@ -233,13 +233,12 @@ A leste da pista, numa clareira, fica a **casa** dos garimpeiros: dois cômodos 
 tábuas e com telhado de chapa enferrujada (que some quando um agente entra, como o do hangar). Entra-se
 pela porta do oeste, que dá para a pista; uma divisória com porta separa os cômodos.
 
-As paredes da casa passam **pelo meio dos hexágonos de parede**, de centro a centro (`housePlan` em
-`src/app/game/house-plan.ts`): retas nas laterais e na divisória, em **zigue-zague** nas paredes do fundo e
-da frente (as colunas ímpares ficam meio hexágono abaixo), e as duas quinas da frente são chanfradas. Cada
-hexágono de parede fica com o chão do entorno (grama) e, por cima, o piso da casa na parte de dentro
-(`floorSectors` e `splitHouseFloor` em `hex-board.ts`), em poucos padrões girados em cada parede:
-**meio a meio** (parede reta), **quinas** de 1/3 e 2/3 (zigue-zague e cantos) e 1/6 (pé da divisória). Há
-duas **janelas** com folhas de tábua abertas para dentro (`windows` na estrutura do mapa; só aparência:
+As paredes da casa são retas e perpendiculares (como as do hangar): as laterais e a divisória passam pelo
+centro da coluna; a do fundo e a da frente, na média das fileiras par e ímpar. O **piso** dos hexágonos que
+a parede corta fica dividido: o chão do entorno (grama) e, por cima, o piso da casa na parte de dentro
+(`wallFloorShape` em `src/app/game/house-plan.ts` e `splitHouseFloor` em `hex-board.ts`). Os recortes se
+repetem em poucos padrões: **meio a meio** nas laterais, faixas de **1/4 e 3/4** no fundo e na frente
+(colunas pares e ímpares) e as **quinas** nos cantos. Há duas **janelas** com folhas de tábua abertas para dentro (`windows` na estrutura do mapa; só aparência:
 a parede continua bloqueando passagem e visão). Cada parede é uma malha só e esmaece inteira quando tapa
 alguém.
 

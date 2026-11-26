@@ -459,10 +459,11 @@ export const northWallGap = (col: number, wallThickness: number): number =>
   Math.sqrt(3) * (0.75 + 0.5 * (col & 1)) - wallThickness / 2;
 
 /**
- * Distância do centro de um hexágono até a face da parede da casa que passa pelo centro do
- * vizinho (as paredes da casa correm de centro a centro, ver `housePlan`).
+ * Distância do centro de um hexágono (coluna `col`) da última fileira de dentro até a face da
+ * parede da frente (sul) da estrutura, na fileira logo abaixo (o espelho de `northWallGap`).
  */
-export const houseWallGap = (wallThickness: number): number => Math.sqrt(3) - wallThickness / 2;
+export const southWallGap = (col: number, wallThickness: number): number =>
+  Math.sqrt(3) * (1.25 - 0.5 * (col & 1)) - wallThickness / 2;
 
 // ---------- móveis da casa (sala e quarto) ----------
 

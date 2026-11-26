@@ -1,11 +1,15 @@
-import { HexCoord, hexKey, hexNeighbors, hexToWorld } from './hex';
+import { HexCoord, hexToWorld } from './hex';
 
 /**
- * Planta das paredes da casa: as paredes passam **pelo meio** dos hexágonos de parede, de
- * centro a centro. Nas laterais (colunas) a parede é reta; nas paredes compridas (fileiras),
- * como as colunas ímpares ficam meio hexágono abaixo, ela anda em zigue-zague, sempre de um
- * centro ao outro. Assim cada hexágono de parede fica dividido por ela e o piso segue
- * poucos padrões (ver `floorSectors`): meio a meio (parede reta) e as quinas (1/3, 1/6…).
+ * Piso dos hexágonos de parede da casa. As paredes são retas (ver `buildHouse`): as laterais e
+ * as divisórias passam pelo centro da coluna; a do fundo e a da frente, na média das fileiras
+ * par e ímpar (as colunas ímpares ficam meio hexágono abaixo), a 1/4 do hexágono do centro.
+ * Cada hexágono que a parede corta fica com o chão do entorno e, por cima, a parte de dentro
+ * com o piso da casa: o hexágono recortado pelo retângulo de dentro da casa.
+ *
+ * Saem poucos padrões, que se repetem girados/espelhados em cada parede: meio a meio
+ * (laterais), as faixas de 1/4 e 3/4 (fundo e frente, colunas pares e ímpares) e as quinas
+ * (cantos da casa).
  */
 
 /** Retângulo de uma estrutura (colunas e fileiras das paredes, inclusive). */
@@ -19,137 +23,68 @@ export interface Point {
   z: number;
 }
 
-export interface HousePlan {
-  /** Hexágonos de parede e de porta dentro do retângulo. */
-  nodes: Map<string, HexCoord>;
-  /** Para cada hexágono, os vizinhos ligados a ele pela parede. */
-  links: Map<string, HexCoord[]>;
-  /** Ligações (cada par uma vez). */
-  edges: [HexCoord, HexCoord][];
-  /** Contorno de fora da casa (centros dos hexágonos do perímetro, em ordem). */
-  outline: Point[];
-}
-
-const onPerimeter = (h: HexCoord, { cols: [c0, c1], rows: [r0, r1] }: PlanRect): boolean =>
-  h.col === c0 || h.col === c1 || h.row === r0 || h.row === r1;
-
-/**
- * Liga os hexágonos de parede e de porta vizinhos. Onde três se tocam (um triângulo, como no
- * pé de uma divisória), a ligação "na diagonal" (coluna e fileira diferentes) sai: a parede
- * segue a fileira e a coluna, sem atalho.
- */
-export function housePlan(
+/** Retângulo do lado de dentro das paredes, no mundo (as linhas por onde as paredes passam). */
+export function houseInterior(
   rect: PlanRect,
-  walls: ReadonlySet<string>,
-  doors: ReadonlySet<string> = new Set(),
   size = 1,
-): HousePlan {
-  const nodes = new Map<string, HexCoord>();
-  const [c0, c1] = rect.cols;
-  const [r0, r1] = rect.rows;
-  for (let col = c0; col <= c1; col++) {
-    for (let row = r0; row <= r1; row++) {
-      const k = hexKey({ col, row });
-      if (walls.has(k) || doors.has(k)) nodes.set(k, { col, row });
-    }
-  }
-  const linked = new Map<string, Set<string>>();
-  for (const [k, h] of nodes) {
-    linked.set(
-      k,
-      new Set(
-        hexNeighbors(h)
-          .map(hexKey)
-          .filter((n) => nodes.has(n)),
-      ),
-    );
-  }
-  const diagonal = (a: HexCoord, b: HexCoord) => a.col !== b.col && a.row !== b.row;
-  const drop: [string, string][] = [];
-  for (const [a, na] of linked) {
-    for (const b of na) {
-      for (const c of na) {
-        if (b >= c || !linked.get(b)!.has(c)) continue;
-        // triângulo a–b–c: tira as ligações diagonais dele
-        for (const [p, q] of [
-          [a, b],
-          [a, c],
-          [b, c],
-        ] as const) {
-          if (diagonal(nodes.get(p)!, nodes.get(q)!)) drop.push([p, q]);
-        }
-      }
-    }
-  }
-  for (const [p, q] of drop) {
-    linked.get(p)!.delete(q);
-    linked.get(q)!.delete(p);
-  }
-  const links = new Map<string, HexCoord[]>();
-  const edges: [HexCoord, HexCoord][] = [];
-  for (const [k, set] of linked) {
-    links.set(
-      k,
-      [...set].map((n) => nodes.get(n)!),
-    );
-    for (const n of set) if (k < n) edges.push([nodes.get(k)!, nodes.get(n)!]);
-  }
-
-  // contorno: o ciclo pelos hexágonos do perímetro (as divisórias ficam de fora)
-  const outline: Point[] = [];
-  const ring = [...nodes.values()].filter((h) => onPerimeter(h, rect));
-  const onRing = new Set(ring.map(hexKey));
-  if (ring.length) {
-    const seen = new Set<string>();
-    let cur: HexCoord | undefined = ring[0];
-    while (cur && !seen.has(hexKey(cur))) {
-      seen.add(hexKey(cur));
-      outline.push(hexToWorld(cur, size));
-      cur = links.get(hexKey(cur))!.find((n) => onRing.has(hexKey(n)) && !seen.has(hexKey(n)));
-    }
-  }
-  return { nodes, links, edges, outline };
+): { x0: number; x1: number; z0: number; z1: number } {
+  const quarter = (Math.sqrt(3) * size) / 4;
+  return {
+    x0: hexToWorld({ col: rect.cols[0], row: 0 }, size).x,
+    x1: hexToWorld({ col: rect.cols[1], row: 0 }, size).x,
+    z0: hexToWorld({ col: 0, row: rect.rows[0] }, size).z + quarter,
+    z1: hexToWorld({ col: 0, row: rect.rows[1] }, size).z + quarter,
+  };
 }
 
-/** O ponto fica dentro do polígono (regra par–ímpar). */
-export function insidePolygon(p: Point, poly: readonly Point[]): boolean {
-  let inside = false;
-  for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+/** Recorta um polígono convexo pelo semiplano `n · p <= c` (Sutherland–Hodgman). */
+function clip(poly: Point[], nx: number, nz: number, c: number): Point[] {
+  const out: Point[] = [];
+  const d = (p: Point) => nx * p.x + nz * p.z - c;
+  for (let i = 0; i < poly.length; i++) {
     const a = poly[i];
-    const b = poly[j];
-    if (a.z > p.z !== b.z > p.z && p.x < ((b.x - a.x) * (p.z - a.z)) / (b.z - a.z) + a.x)
-      inside = !inside;
+    const b = poly[(i + 1) % poly.length];
+    const da = d(a);
+    const db = d(b);
+    if (da <= 0) out.push(a);
+    if (da * db < 0) {
+      const t = da / (da - db);
+      out.push({ x: a.x + (b.x - a.x) * t, z: a.z + (b.z - a.z) * t });
+    }
   }
-  return inside;
+  return out;
 }
 
-/** Fatia do piso de um hexágono de parede: de `start` (radianos, no plano XZ) por `span`. */
-export interface FloorSector {
-  start: number;
-  span: number;
-  /** Do lado de dentro da casa (piso) ou de fora (o chão do entorno). */
-  inside: boolean;
-}
+/** Área de um polígono (fórmula do laço; sinal pelo sentido). */
+const area = (poly: Point[]): number =>
+  Math.abs(
+    poly.reduce(
+      (s, p, i) => s + p.x * poly[(i + 1) % poly.length].z - poly[(i + 1) % poly.length].x * p.z,
+      0,
+    ),
+  ) / 2;
 
 /**
- * Como a parede divide o piso de um hexágono: as fatias entre as direções em que ela sai
- * do centro (para os vizinhos ligados). Parede reta: duas metades (`span` = π); quina:
- * 1/3 e 2/3 (2π/3 e 4π/3); pé de divisória: 1/6. Os ângulos são os de `Math.atan2(dz, dx)`.
+ * Parte de dentro da casa num hexágono de raio `radius` (em volta do centro dele): o contorno
+ * relativo ao centro e que fração do hexágono ela cobre (0 = todo fora, 1 = todo dentro).
  */
-export function floorSectors(plan: HousePlan, h: HexCoord, size = 1): FloorSector[] {
+export function wallFloorShape(
+  h: HexCoord,
+  rect: PlanRect,
+  size = 1,
+  radius = size,
+): { shape: Point[]; fraction: number } {
   const c = hexToWorld(h, size);
-  const rays = (plan.links.get(hexKey(h)) ?? [])
-    .map((n) => {
-      const p = hexToWorld(n, size);
-      return Math.atan2(p.z - c.z, p.x - c.x);
-    })
-    .sort((a, b) => a - b);
-  if (!rays.length) return [];
-  return rays.map((start, i) => {
-    const end = i + 1 < rays.length ? rays[i + 1] : rays[0] + 2 * Math.PI;
-    const span = end - start;
-    const mid = start + span / 2;
-    const sample = { x: c.x + Math.cos(mid) * 0.35 * size, z: c.z + Math.sin(mid) * 0.35 * size };
-    return { start, span, inside: insidePolygon(sample, plan.outline) };
-  });
+  const { x0, x1, z0, z1 } = houseInterior(rect, size);
+  const hex: Point[] = Array.from({ length: 6 }, (_, i) => ({
+    x: Math.cos((i * Math.PI) / 3) * radius,
+    z: Math.sin((i * Math.PI) / 3) * radius,
+  }));
+  let shape = hex;
+  shape = clip(shape, -1, 0, -(x0 - c.x));
+  shape = clip(shape, 1, 0, x1 - c.x);
+  shape = clip(shape, 0, -1, -(z0 - c.z));
+  shape = clip(shape, 0, 1, z1 - c.z);
+  const fraction = shape.length >= 3 ? area(shape) / area(hex) : 0;
+  return { shape: fraction > 0 ? shape : [], fraction };
 }

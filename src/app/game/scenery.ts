@@ -1,8 +1,7 @@
 import * as THREE from 'three';
 import { HexCoord, hexKey, hexToWorld } from './hex';
 import { METER } from './character-model';
-import { buildBed, buildCabinet, buildDiningTable, buildKeyBoard, buildNightstand, houseWallGap, northWallGap } from './prop-models';
-import { housePlan, insidePolygon } from './house-plan';
+import { buildBed, buildCabinet, buildDiningTable, buildKeyBoard, buildNightstand, northWallGap, southWallGap } from './prop-models';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 
 /**
@@ -325,7 +324,7 @@ function slice(geo: THREE.BufferGeometry, start: number, count: number): THREE.B
   return out;
 }
 
-/** Uma janela da casa: no meio do caminho entre os centros de dois hexágonos da mesma parede. */
+/** Uma janela da casa: no meio do caminho entre os centros de dois hexágonos vizinhos da mesma parede. */
 export type HouseWindow = [HexCoord, HexCoord];
 
 /** Janela: 80 cm de largura, peitoril a 0,95 m e verga a 2,0 m do chão. */
@@ -334,11 +333,11 @@ const WINDOW_SILL = 0.95 * METER;
 const WINDOW_TOP = 2.0 * METER;
 
 /**
- * Casa de tábuas sobre os hexágonos de parede do retângulo `cols` × `rows`. As paredes passam
- * pelo **meio** dos hexágonos de parede, de centro a centro (ver `housePlan`): retas nas
- * laterais e nas divisórias, em zigue-zague nas paredes compridas; nas portas a parede para
- * na borda do hexágono da porta. `windows` abre janelas (batente, peitoril e as duas folhas
- * de tábua abertas para dentro). O telhado de duas águas, de chapa enferrujada, vem num grupo com nome
+ * Casa de tábuas sobre os hexágonos de parede do retângulo `cols` × `rows`: paredes retas
+ * (como as do hangar) no perímetro e nas divisórias (colunas de parede dentro do retângulo),
+ * interrompidas onde não há parede — as portas. O piso dos hexágonos que a parede corta fica
+ * dividido entre o de dentro e o de fora (ver `wallFloorShape`). `windows` abre janelas
+ * (batente, peitoril e as duas folhas de tábua abertas para dentro). O telhado de duas águas, de chapa enferrujada, vem num grupo com nome
  * (`HOUSE_ROOF`).
  */
 export function buildHouse(
@@ -353,7 +352,7 @@ export function buildHouse(
   const [r0, r1] = rect.rows;
   const H = HOUSE_WALL_HEIGHT;
   const colX = (col: number) => hexToWorld({ col, row: 0 }, size).x;
-  // o telhado cobre da média do zigue-zague de trás à da frente
+  // as colunas ímpares ficam meio hexágono abaixo: a parede do fundo e a da frente passam na média das duas
   const rowZ = (row: number) => hexToWorld({ col: 0, row }, size).z + (Math.sqrt(3) * size) / 4;
   const x0 = colX(c0);
   const x1 = colX(c1);
@@ -391,42 +390,36 @@ export function buildHouse(
     return at;
   };
 
-  // trechos de parede: de centro a centro (ou do centro até a borda da porta)
-  const plan = housePlan(rect, walls, doors, size);
-  const isDoor = (h: HexCoord) => doors.has(hexKey(h));
-  // a parede a que o trecho pertence: a coluna (laterais, divisórias) ou a fileira (fundo, frente)
+  // trechos de parede retos (como no hangar): fundo e frente no sentido X, na média das
+  // fileiras par e ímpar; laterais e divisórias no sentido Z, pelo centro da coluna. A parede
+  // se interrompe nas portas.
+  const isWall = (col: number, row: number) => walls.has(hexKey({ col, row }));
+  const colZ = (col: number, row: number) => hexToWorld({ col, row }, size).z;
   type Seg = { a: THREE.Vector2; b: THREE.Vector2; wall: string };
   const segs: Seg[] = [];
-  for (const [p, q] of plan.edges) {
-    if (isDoor(p) && isDoor(q)) continue;
-    const [w, d] = isDoor(p) ? [q, p] : [p, q];
-    const a = new THREE.Vector2(hexToWorld(w, size).x, hexToWorld(w, size).z);
-    const far = new THREE.Vector2(hexToWorld(d, size).x, hexToWorld(d, size).z);
-    const wall = p.col === q.col ? `col ${p.col}` : `row ${Math.max(p.row, q.row) === r1 ? r1 : r0}`;
-    segs.push({ a, b: isDoor(d) ? a.clone().lerp(far, 0.5) : far, wall });
-  }
-  // junta os trechos em linha reta (paredes laterais), para a janela poder cair num centro
-  const key = (v: THREE.Vector2) => `${v.x.toFixed(3)},${v.y.toFixed(3)}`;
-  const dir = (a: THREE.Vector2, b: THREE.Vector2) => b.clone().sub(a).normalize();
-  for (let merged = true; merged; ) {
-    merged = false;
-    for (let i = 0; i < segs.length && !merged; i++) {
-      for (let j = i + 1; j < segs.length && !merged; j++) {
-        const s = segs[i];
-        const t = segs[j];
-        // orienta os dois para que s termine onde t começa
-        for (const [sa, sb, ta, tb] of [[s.a, s.b, t.a, t.b], [s.a, s.b, t.b, t.a], [s.b, s.a, t.a, t.b], [s.b, s.a, t.b, t.a]]) {
-          if (key(sb) !== key(ta)) continue;
-          const joints = segs.filter((u) => key(u.a) === key(sb) || key(u.b) === key(sb)).length;
-          if (joints !== 2 || Math.abs(dir(sa, sb).dot(dir(ta, tb)) - 1) > 1e-6) continue;
-          segs[i] = { a: sa, b: tb, wall: s.wall };
-          segs.splice(j, 1);
-          merged = true;
-          break;
-        }
-      }
+  const half = 0.75 * size;
+  const clampX = (x: number) => Math.min(x1, Math.max(x0, x));
+  const cols = Array.from({ length: c1 - c0 + 1 }, (_, i) => c0 + i);
+  for (const [row, z] of [[r0, zBack], [r1, zFront]] as const) {
+    for (const [a, b] of runs(cols.filter((c) => isWall(c, row)))) {
+      segs.push({ a: new THREE.Vector2(clampX(colX(a) - half), z), b: new THREE.Vector2(clampX(colX(b) + half), z), wall: `row ${row}` });
     }
   }
+  // laterais e divisórias: colunas com parede em todas (ou quase todas) as fileiras de dentro
+  const rows = Array.from({ length: r1 - r0 + 1 }, (_, i) => r0 + i);
+  const inner = rows.slice(1, -1);
+  const halfRow = (Math.sqrt(3) * size) / 2;
+  const clampZ = (z: number) => Math.min(zFront, Math.max(zBack, z));
+  for (const col of cols) {
+    const side = col === c0 || col === c1;
+    if (!side && inner.filter((r) => isWall(col, r)).length < inner.length - 1) continue;
+    const x = colX(col);
+    for (const [a, b] of runs(rows.filter((r) => isWall(col, r)))) {
+      segs.push({ a: new THREE.Vector2(x, clampZ(colZ(col, a) - halfRow)), b: new THREE.Vector2(x, clampZ(colZ(col, b) + halfRow)), wall: `col ${col}` });
+    }
+  }
+  const key = (v: THREE.Vector2) => `${v.x.toFixed(3)},${v.y.toFixed(3)}`;
+  const dir = (a: THREE.Vector2, b: THREE.Vector2) => b.clone().sub(a).normalize();
 
   const openings = windows.map(([p, q]) => {
     const a = hexToWorld(p, size);
@@ -439,7 +432,7 @@ export function buildHouse(
   const inward = (holder: THREE.Object3D): number => {
     const r = holder.rotation.y;
     const p = { x: holder.position.x + Math.sin(r) * 0.4, z: holder.position.z + Math.cos(r) * 0.4 };
-    return insidePolygon(p, plan.outline) ? 1 : -1;
+    return p.x > x0 && p.x < x1 && p.z > zBack && p.z < zFront ? 1 : -1;
   };
   const windowFrame = (wall: string, holder: THREE.Object3D, s: number): void => {
     const w = WINDOW_WIDTH;
@@ -491,7 +484,7 @@ export function buildHouse(
     }
     piece(from, length / 2, 0, H);
   }
-  // esteios nas pontas e nas quinas (escondem as emendas do zigue-zague)
+  // esteios nas pontas de cada trecho (cantos, portas e o encontro com as divisórias)
   const posts = new Map<string, { v: THREE.Vector2; wall: string }>();
   for (const s of segs) for (const v of [s.a, s.b]) if (!posts.has(key(v))) posts.set(key(v), { v, wall: s.wall });
   for (const { v, wall } of posts.values()) box(wall, 'trim', 0.22, H + 0.1, 0.22, v.x, (H + 0.1) / 2, v.y, root);
@@ -828,13 +821,13 @@ export function buildCover(kind: CoverKind, seed: number, col = 0): THREE.Group 
   if (kind === 'table') return buildDiningTable();
   if (kind === 'shelf') {
     // encostado na parede do fundo (norte): a frente, que olha para −X, passa a olhar para +Z
-    const cabinet = buildCabinet(houseWallGap(WALL_THICKNESS));
+    const cabinet = buildCabinet(northWallGap(col, WALL_THICKNESS));
     cabinet.rotation.y = Math.PI / 2;
     return cabinet;
   }
   // cabeceira na parede da frente (sul); a mesinha fica ao lado dela
-  if (kind === 'bed') return buildBed(houseWallGap(WALL_THICKNESS) - 0.02);
-  if (kind === 'nightstand') return buildNightstand(-0.45, 0.55);
+  if (kind === 'bed') return buildBed(southWallGap(col, WALL_THICKNESS) - 0.02);
+  if (kind === 'nightstand') return buildNightstand(-0.45, southWallGap(col, WALL_THICKNESS) - 0.4);
   if (kind === 'keys') return buildKeyBoard(northWallGap(col, WALL_THICKNESS));
   if (kind === 'supplies') return supplyPile(seed);
   const rnd = seeded(seed);
