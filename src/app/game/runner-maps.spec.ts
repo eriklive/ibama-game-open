@@ -52,8 +52,22 @@ describe('Modo Corrida: as curvas', () => {
 
   it('a mata cresceu: o caminho ficou ~50% mais longo, para a corrida mais rápida durar o mesmo', () => {
     // antes: ~197 fileiras no A e ~186 no B
-    expect(raceLength(raceA('direita'))).toBeGreaterThan(280);
-    expect(raceLength(raceB('direita'))).toBeGreaterThan(270);
+    expect(raceLength(raceA('direita'))).toBeGreaterThan(300);
+    expect(raceLength(raceB('direita'))).toBeGreaterThan(290);
+  });
+
+  it('cada obstáculo tem pelo menos 8 fileiras livres antes (da curva anterior) e 9 do obstáculo anterior', () => {
+    for (const race of [raceA('direita'), raceA('esquerda'), raceB('direita'), raceB('esquerda')]) {
+      const corners = pathTurns(race.path).map((t) => t.at);
+      const obs = trackObstacles(race).map((o) => o.at);
+      const all = [...corners, ...obs].sort((x, y) => x - y);
+      for (const at of obs) {
+        const before = all.filter((x) => x < at - 1e-6).pop();
+        if (before !== undefined) expect(at - before).toBeGreaterThanOrEqual(8);
+      }
+      const gaps = obs.slice(1).map((x, i) => x - obs[i]);
+      expect(Math.min(...gaps)).toBeGreaterThanOrEqual(9);
+    }
   });
 
   it('nenhum obstáculo da mata cai fora do trecho dele nem colado numa esquina', () => {

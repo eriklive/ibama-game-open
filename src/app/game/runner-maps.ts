@@ -27,9 +27,10 @@ import { Point, S3, Segment, TRACK_HALF, buildPath, nearestOnPath, pathLength, p
 
 /**
  * Fileiras a mais no norte do mapa (a mata ganhou um segundo zigue-zague, com mais 4 curvas, para
- * a corrida mais rápida durar o mesmo tanto). Tudo o que tem fileira fixa soma isto (`R`).
+ * a corrida mais rápida durar o mesmo tanto, e trechos mais longos para os obstáculos terem
+ * espaço). Tudo o que tem fileira fixa soma isto (`R`).
  */
-const NORTH = 66;
+const NORTH = 86;
 /** Fileira `r` do desenho original (antes da mata crescer para o norte). */
 const R = (r: number) => r + NORTH;
 /** Tamanho do mapa de corrida (colunas × fileiras) e a coluna do meio da pista de terra. */
@@ -243,22 +244,29 @@ function laneHexes(path: Segment[], at: number, lane: Lane): HexCoord[] {
 /** Espelha as faixas (a variante da esquerda): esquerda ↔ direita. */
 const mirrorLanes = (lanes: Lane[], m: number): Lane[] => (m > 0 ? lanes.map((l) => (2 - l) as Lane) : lanes);
 
-/** Fileiras das curvas do segundo zigue-zague da mata e do fim do caminho (iguais nos dois mapas). */
-const FOREST_TAIL = { turn3: R(14), turn4: R(-10), end: 3 };
+/**
+ * A mata: fileiras entre a 1ª e a 2ª curva dela; as curvas do segundo zigue-zague e o fim do
+ * caminho (iguais nos dois mapas); e quanto (mundo) ela vai para o lado em cada zigue-zague.
+ */
+const FOREST = { firstRun: 26, turn3: R(1), turn4: R(-27), end: 3, across: 33 };
 
 /**
  * A mata com 8 curvas, a partir de `start` (indo para o norte): vai para o lado `−m` (+1 leste),
  * sobe, volta e sobe; e de novo (o segundo zigue-zague, `FOREST_TAIL`) até o fim.
  */
-function forestPoints(start: Point, m: number, zTurn1: number, zTurn2: number): Point[] {
-  const across = 27;
+function forestPoints(start: Point, m: number, turn1: number): Point[] {
+  const { across } = FOREST;
   const zig = (z1: number, z2: number): Point[] => [
     { x: start.x, z: z1 },
     { x: start.x - m * across, z: z1 },
     { x: start.x - m * across, z: z2 },
     { x: start.x, z: z2 },
   ];
-  return [...zig(zTurn1, zTurn2), ...zig(zRow(FOREST_TAIL.turn3), zRow(FOREST_TAIL.turn4)), { x: start.x, z: zRow(FOREST_TAIL.end) }];
+  return [
+    ...zig(zRow(turn1), zRow(turn1 - FOREST.firstRun)),
+    ...zig(zRow(FOREST.turn3), zRow(FOREST.turn4)),
+    { x: start.x, z: zRow(FOREST.end) },
+  ];
 }
 
 /**
@@ -274,21 +282,21 @@ function forestObstacles(first: number, m: number): RaceObstacle[] {
     move,
   });
   return [
-    o(0, 7, [0, 1], 'branch', 'deslizar'),
-    o(1, 6, [0, 1, 2], 'log', 'pular'),
-    o(1, 13, [1, 2], 'branch', 'deslizar'),
-    o(2, 8, [0, 1], 'log', 'pular'),
-    o(3, 8, [1, 2], 'branch', 'deslizar'),
-    o(3, 18, [0, 1, 2], 'log', 'pular'),
+    o(0, 9, [0, 1], 'branch', 'deslizar'),
+    o(1, 8, [0, 1, 2], 'log', 'pular'),
+    o(1, 17, [1, 2], 'branch', 'deslizar'),
+    o(2, 10, [0, 1], 'log', 'pular'),
+    o(3, 10, [1, 2], 'branch', 'deslizar'),
+    o(3, 22, [0, 1, 2], 'log', 'pular'),
     // segundo zigue-zague
-    o(4, 7, [1, 2], 'log', 'pular'),
-    o(5, 7, [0, 1], 'branch', 'deslizar'),
-    o(5, 16, [0, 1, 2], 'log', 'pular'),
-    o(6, 8, [0, 1], 'tarp', 'deslizar'),
-    o(7, 9, [1, 2], 'branch', 'deslizar'),
-    o(7, 19, [0, 1, 2], 'log', 'pular'),
-    o(7, 29, [0, 1], 'log', 'pular'),
-    o(7, 40, [1, 2], 'tarp', 'deslizar'),
+    o(4, 9, [1, 2], 'log', 'pular'),
+    o(5, 9, [0, 1], 'branch', 'deslizar'),
+    o(5, 20, [0, 1, 2], 'log', 'pular'),
+    o(6, 10, [0, 1], 'tarp', 'deslizar'),
+    o(7, 11, [1, 2], 'branch', 'deslizar'),
+    o(7, 23, [0, 1, 2], 'log', 'pular'),
+    o(7, 35, [0, 1], 'log', 'pular'),
+    o(7, 47, [1, 2], 'tarp', 'deslizar'),
   ];
 }
 
@@ -296,10 +304,10 @@ function forestObstacles(first: number, m: number): RaceObstacle[] {
 function pistaObstacles(m: number): RaceObstacle[] {
   const o = (d: number, lanes: Lane[], kind: ObstacleKind, move: RaceObstacle['move']): RaceObstacle => ({ seg: 0, d, lanes: mirrorLanes(lanes, m), kind, move });
   return [
-    o(27, [1], 'fuel', 'pular'),
-    o(35, [0, 1], 'log', 'pular'),
-    o(41, [2], 'crates', 'cenario'),
-    o(44, [1], 'cages', 'pular'),
+    o(21, [1], 'fuel', 'pular'),
+    o(31, [0, 1], 'log', 'pular'),
+    o(39, [2], 'crates', 'cenario'),
+    o(42, [1], 'cages', 'pular'),
   ];
 }
 
@@ -323,7 +331,7 @@ export function raceA(variant: Variant = 'direita'): RaceMap {
     { x: X0, z: zCorner },
     door,
     // na mata, primeiro volta para o meio do mapa (para o lado contrário ao da porta)
-    ...forestPoints(door, m, zRow(R(59)), zRow(R(41))),
+    ...forestPoints(door, m, R(57)),
   ];
   // colado na pista: a ponta da asa (meia envergadura 6,2) passa do meio, onde o agente corre
   const planeX = X0 + m * 5;
@@ -338,9 +346,9 @@ export function raceA(variant: Variant = 'direita'): RaceMap {
     o(0, 60, mirrorLanes([2], m), 'boxes', 'cenario'),
     o(0, dWing, [wingLane, 1], 'wing', 'deslizar'),
     // por trás do avião
-    o(1, 6, [1], 'lowCrate', 'pular'),
+    o(1, 8, [1], 'lowCrate', 'pular'),
     // saindo pela porta dos fundos, na trilha
-    o(2, 10, mirrorLanes([1, 2], m), 'log', 'pular'),
+    o(2, 12, mirrorLanes([1, 2], m), 'log', 'pular'),
     ...forestObstacles(3, m),
   ];
   return buildRaceMap({
@@ -354,8 +362,8 @@ export function raceA(variant: Variant = 'direita'): RaceMap {
       const turns = pathTurns(path);
       return [
         { id: 'pista', name: 'Pista de terra', at: 5 },
-        { id: 'patio', name: 'Pátio do portão', at: 38 },
-        { id: 'hangar', name: 'Hangar', at: 50 },
+        { id: 'patio', name: 'Pátio do portão', at: 34 },
+        { id: 'hangar', name: 'Hangar', at: 48 },
         // logo depois da porta dos fundos
         { id: 'fundos', name: 'Porta dos fundos', at: turns[1].at + 4 },
         { id: 'mata', name: 'Mata (fora da pista)', at: turns[2].at + 1 },
@@ -371,15 +379,15 @@ const HANGAR_B = { cols: [10, 36] as [number, number], rows: [R(72), R(108)] as 
 export function raceB(variant: Variant = 'direita'): RaceMap {
   const m = variant === 'direita' ? -1 : 1;
   const start: Point = { x: X0, z: zRow(R(66)) };
-  const points: Point[] = [{ x: X0, z: zRow(H - 3) }, ...forestPoints(start, -m, zRow(R(66)), zRow(R(46)))];
+  const points: Point[] = [{ x: X0, z: zRow(H - 3) }, ...forestPoints(start, -m, R(66))];
   const o = (seg: number, d: number, lanes: Lane[], kind: ObstacleKind, move: RaceObstacle['move']): RaceObstacle => ({ seg, d, lanes, kind, move });
   const obstacles: RaceObstacle[] = [
     ...pistaObstacles(m),
     // lateral do hangar: carga largada do lado de fora
-    o(0, 55, [1], 'cages', 'pular'),
+    o(0, 53, [1], 'cages', 'pular'),
     o(0, 64, [1, 2], 'tarp', 'deslizar'),
     o(0, 72, [2], 'crates', 'cenario'),
-    o(0, 80, [0, 1], 'lowCrate', 'pular'),
+    o(0, 79, [0, 1], 'lowCrate', 'pular'),
     ...forestObstacles(1, m),
     // (a lateral emenda direto na mata: o trecho 0 vai da pista até a primeira curva dela)
   ];
@@ -393,7 +401,7 @@ export function raceB(variant: Variant = 'direita'): RaceMap {
       const turns = pathTurns(path);
       return [
         { id: 'pista', name: 'Pista de terra', at: 5 },
-        { id: 'patio', name: 'Pátio do portão', at: 38 },
+        { id: 'patio', name: 'Pátio do portão', at: 34 },
         { id: 'lateral', name: 'Lateral do hangar', at: 66 },
         { id: 'mata', name: 'Mata (fora da pista)', at: turns[0].at + 1 },
       ];
