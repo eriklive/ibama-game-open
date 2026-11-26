@@ -2572,6 +2572,7 @@ export class HexBoard {
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
       else mat?.dispose();
     });
+    for (const f of this.roomFogs) f.fog.dispose();
     this.staticShadow.dispose();
     this.auraTextures.fill.dispose();
     this.auraTextures.fade.dispose();

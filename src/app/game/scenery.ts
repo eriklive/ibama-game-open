@@ -338,6 +338,8 @@ function slice(geo: THREE.BufferGeometry, start: number, count: number): THREE.B
 export interface RoomFog {
   group: THREE.Group;
   update(t: number, amount: number): void;
+  /** Libera as texturas (geometrias e materiais saem com o `traverse` da cena). */
+  dispose(): void;
 }
 
 /** Textura de névoa: manchas brancas e macias sobre um véu contínuo (sem furos), repete nos dois sentidos. */
@@ -411,12 +413,14 @@ export function buildRoomFog(room: { cols: [number, number]; rows: [number, numb
   const z1 = rowZ(room.rows[1] + 1) - WALL_THICKNESS / 2;
   const base = fogTexture();
   const edges = fogEdgeTexture();
+  const maps: THREE.Texture[] = [];
   const geo = new THREE.PlaneGeometry(x1 - x0, z1 - z0);
   geo.rotateX(-Math.PI / 2);
   const n = 7;
   const top = HOUSE_WALL_HEIGHT * 0.78;
   const layer = (geometry: THREE.BufferGeometry, i: number, opacity: number, x: number, y: number, z: number, bob: boolean) => {
     const map = base.clone();
+    maps.push(map);
     map.repeat.set(1.2 + (i % 3) * 0.35, 1 + ((i + 1) % 3) * 0.3);
     map.rotation = i * 0.9;
     const material = new THREE.MeshBasicMaterial({
@@ -467,6 +471,11 @@ export function buildRoomFog(room: { cols: [number, number]; rows: [number, numb
         const rise = (1 - amount) * 0.6;
         l.mesh.position.y = l.y + rise + (l.bob ? Math.sin(t * 0.5 + l.y) * 0.04 : 0);
       }
+    },
+    dispose(): void {
+      for (const map of maps) map.dispose();
+      base.dispose();
+      edges.dispose();
     },
   };
 }
