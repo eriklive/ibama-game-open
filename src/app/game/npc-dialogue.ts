@@ -144,7 +144,7 @@ const WHERE_KEY = { requires: PLANE_LOCKED, hiddenWhen: KEY_TAKEN } as const;
 
 /**
  * Os ajudantes do hangar não sabem onde está a chave, mas mandam olhar no quadro do fundo do
- * hangar (resposta fixa). Só a fala: o quadro continua precisando ser percebido (ou o piloto contar).
+ * hangar (resposta fixa): como o piloto cedendo, o quadro conta como percebido e ganha o contorno.
  */
 const whereKeyUnknown: FixedQuestion = {
   ...WHERE_KEY,
@@ -152,6 +152,7 @@ const whereKeyUnknown: FixedQuestion = {
   answer: {
     say: 'Sei não, doutor. Mas olha no quadro lá no fundo do hangar.',
     note: 'Não sabe da chave do avião, mas manda olhar no quadro do fundo do hangar.',
+    notices: KEY_PANEL_ID,
   },
 };
 

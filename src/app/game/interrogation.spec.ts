@@ -697,6 +697,9 @@ describe('a chave do avião trancado', () => {
   it('os ajudantes não sabem da chave, mas mandam olhar no quadro do fundo do hangar (resposta fixa)', () => {
     const q = garimpeiro.questions.find((x) => x.ask === 'Onde está a chave?')!;
     expect('answer' in q && q.answer.say).toBe('Sei não, doutor. Mas olha no quadro lá no fundo do hangar.');
+    // a dica destaca o quadro, como o piloto cedendo
+    expect('answer' in q && q.answer.notices).toBe(KEY_PANEL_ID);
+    expect('answer' in q && noticedAfter(new Set(), q.answer).has(KEY_PANEL_ID)).toBe(true);
   });
 
   it('o piloto mente ("Não sei não.") e, cedendo, entrega o painel e o quadro de chaves', () => {

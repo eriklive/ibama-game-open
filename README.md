@@ -409,13 +409,14 @@ O avião do hangar está **trancado**; a chave fica no **quadro de chaves**, na 
   liberar, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave). Olhar
   dentro só dá um leve zoom out e o aviso "O avião está trancado".
 - **Diálogos:** os dois ajudantes do hangar (garimpeiros) não sabem da chave, mas dão a dica: "Sei não,
-  doutor. Mas olha no quadro lá no fundo do hangar." (só a fala: o quadro não se destaca por isso). O piloto
+  doutor. Mas olha no quadro lá no fundo do hangar." — e o quadro ganha o contorno, sem ninguém rolar
+  percepção. O piloto
   pode mentir (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e,
   cedendo, diz **"No painel ali atrás."**, o que faz o quadro ganhar o contorno sem ninguém rolar percepção.
 - **Quadro de chaves:** pendurado na parede do fundo, sobre uma bancada de ferramentas. Quem anda pelo
   **fundo do hangar** (da parede do fundo até a frente do avião, `keyPanel.room`) rola **percepção** uma vez;
   passando, o quadro ganha o contorno amarelo pulsante (enquanto a chave estiver lá). Falhando os três, ele não
-  se destaca — só o piloto contando. Ver [Zoom nos móveis](#zoom-nos-móveis-quadro-de-chaves-e-armário).
+  se destaca — só com a dica de um garimpeiro ou o piloto contando. Ver [Zoom nos móveis](#zoom-nos-móveis-quadro-de-chaves-e-armário).
 - **Quem viu e deixou:** ao olhar dentro do avião trancado, esse agente comenta embaixo da tela, com o avatar
   dele: "Eu vi uma chave no quadro dos fundos."
 
@@ -426,7 +427,8 @@ reais em metros: quadro de 70 × 50 cm a 1,15 m do chão, bancada de 90 cm; arm�
 montados em `game/prop-models.ts`.
 
 - **Percepção primeiro:** o móvel só fica tocável depois de percebido — a percepção passiva (d20, passa com
-  **mais que 6**, uma vez por agente) ao andar pelo cômodo dele, ou um suspeito que conta (o piloto, o caseiro).
+  **mais que 6**, uma vez por agente) ao andar pelo cômodo dele, ou um suspeito que conta (os garimpeiros e o
+  piloto, sobre o quadro; o caseiro, sobre o armário).
   Só então ganha o contorno amarelo pulsante. Quem rola e não passa não destaca nada.
 - **Tocar no móvel** percebido (como no avião: colado, abre; de longe, marca o caminho e o segundo toque anda
   até lá) aproxima a câmera: ela fica **de frente** para o móvel, quase na altura dos olhos, e enquadra o móvel no
