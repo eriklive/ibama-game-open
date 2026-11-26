@@ -408,8 +408,8 @@ O avião do hangar está **trancado**; a chave fica no **quadro de chaves**, na 
   **Olhar dentro** e **Queimar**. Sem a chave, o menu já abre com o carimbo **Trancado**, e isso basta para
   liberar, nos interrogatórios, a pergunta **"Onde está a chave?"** (some quando a equipe pega a chave). Olhar
   dentro só dá um leve zoom out e o aviso "O avião está trancado".
-- **Diálogos:** os dois ajudantes do hangar (garimpeiros) não sabem da chave, mas dão a dica: "Sei não,
-  doutor. Mas olha no quadro lá no fundo do hangar." — e o quadro ganha o contorno, sem ninguém rolar
+- **Diálogos:** os dois ajudantes do hangar (garimpeiros) não sabem da chave, mas dão a dica: "Sei não.
+  Mas olha no quadro lá no fundo do hangar." — e o quadro ganha o contorno, sem ninguém rolar
   percepção. O piloto
   pode mentir (pergunta → réplica "O avião abre por digital? Cadê a chave?"): mente "Não sei não." / "…" e,
   cedendo, diz **"No painel ali atrás."**, o que faz o quadro ganhar o contorno sem ninguém rolar percepção.

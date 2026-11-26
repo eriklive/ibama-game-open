@@ -150,7 +150,7 @@ const whereKeyUnknown: FixedQuestion = {
   ...WHERE_KEY,
   ask: 'Onde está a chave?',
   answer: {
-    say: 'Sei não, doutor. Mas olha no quadro lá no fundo do hangar.',
+    say: 'Sei não. Mas olha no quadro lá no fundo do hangar.',
     note: 'Não sabe da chave do avião, mas manda olhar no quadro do fundo do hangar.',
     notices: KEY_PANEL_ID,
   },
