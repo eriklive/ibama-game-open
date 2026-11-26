@@ -33,6 +33,11 @@ interface Leaf {
   leaf: THREE.Mesh;
   lock: THREE.Object3D;
   planks: THREE.Object3D;
+  /**
+   * Casca da aura (ver `modelsOf`): uma caixa invisível do tamanho do vão inteiro (folha, verga
+   * e tábuas), saliente dos dois lados da parede. O contorno sai dela, e não das peças da folha.
+   */
+  shell: THREE.Mesh;
   /** Para que lado a folha abre (+1 ou −1): longe de quem empurrou por último. */
   side: number;
   angle: number;
@@ -152,6 +157,16 @@ export class DoorViews {
       }
       holder.add(planks);
 
+      // casca da aura: não desenha nada (nem cor nem profundidade), só dá a forma ao contorno
+      const shell = new THREE.Mesh(
+        new THREE.BoxGeometry(gap, LEAF_HEIGHT + 0.02 + LINTEL_HEIGHT, 0.5),
+        new THREE.MeshBasicMaterial({ colorWrite: false, depthWrite: false }),
+      );
+      shell.position.y = (LEAF_HEIGHT + 0.02 + LINTEL_HEIGHT) / 2;
+      shell.userData['outlineShell'] = true;
+      shell.raycast = () => undefined;
+      holder.add(shell);
+
       this.leaves.set(key, {
         key,
         center,
@@ -161,6 +176,7 @@ export class DoorViews {
         leaf,
         lock,
         planks,
+        shell,
         side: 1,
         angle: 0,
         vel: 0,
@@ -178,6 +194,16 @@ export class DoorViews {
   /** Centro do vão da porta (no chão). */
   centerOf(key: string): THREE.Vector3 | undefined {
     return this.leaves.get(key)?.center.clone();
+  }
+
+  /** Normal da parede da porta (unitária, plano XZ). */
+  normalOf(key: string): THREE.Vector3 | undefined {
+    return this.leaves.get(key)?.normal.clone();
+  }
+
+  /** Chaves de todas as portas com folha. */
+  keys(): IterableIterator<string> {
+    return this.leaves.keys();
   }
 
   /**
@@ -244,12 +270,16 @@ export class DoorViews {
   }
 
   /**
-   * Peças que mostram a porta fechada (a folha e as tábuas da bloqueada): o que ganha o contorno
-   * de "dá para tocar", como o avião (ver `HexBoard.setTargetOutlines`).
+   * Peças que mostram a porta fechada (a folha e as tábuas da bloqueada): o que se toca para
+   * escolher a porta, como o avião (ver `HexBoard.setTargetOutlines`). O contorno de "dá para
+   * tocar" não sai delas (sairia picado, metido na parede): sai da casca, uma porta maior em volta
+   * de tudo.
    */
   modelsOf(key: string): THREE.Object3D[] {
     const l = this.leaves.get(key);
-    return l ? [l.leaf, l.planks] : [];
+    if (!l) return [];
+    for (const part of [l.leaf, l.planks]) part.traverse((o) => (o.userData['noOutline'] = true));
+    return [l.leaf, l.planks, l.shell];
   }
 
   update(dt: number): void {

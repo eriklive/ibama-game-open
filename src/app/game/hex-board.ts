@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, HexRect, doorsOf, inStructure, playArea, structureView } from './maps';
+import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
@@ -264,6 +264,12 @@ function mixPose(out: Pose, a: Pose, b: Pose, t: number): void {
   }
 }
 
+/** Giro máximo da câmera para mostrar uma porta ao lado do agente da vez (ver `doorYawGoal`). */
+const DOOR_CAMERA_YAW = THREE.MathUtils.degToRad(32);
+
+/** Giro da câmera com o agente da vez dentro da casa ou junto de uma porta dela: 15° para a esquerda. */
+const HOUSE_CAMERA_YAW = THREE.MathUtils.degToRad(-15);
+
 /** Gira um vetor do plano XZ em volta de +Y. */
 const yawTurn = (v: THREE.Vector3, a: number): THREE.Vector3 =>
   new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), 0, -v.x * Math.sin(a) + v.z * Math.cos(a));
@@ -511,7 +517,7 @@ export class HexBoard {
    * Estruturas (hangar, casa): o telhado some quando um agente entra e o que fica dentro
    * (carga, avião, lâmpadas, móveis) só aparece com um agente por perto.
    */
-  private readonly structures: { rect: HexRect; doors: HexCoord[]; object: THREE.Object3D; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
+  private readonly structures: { kind: StructureKind; rect: HexRect; doors: HexCoord[]; object: THREE.Object3D; roof?: THREE.Object3D; interior: THREE.Object3D[] }[] = [];
   /** Folhas das portas comuns (ver `DoorViews`). */
   private doorViews?: DoorViews;
   /**
@@ -618,6 +624,18 @@ export class HexBoard {
     toneMapped: false,
     opacity: 0.9,
   });
+  /**
+   * Aura da porta: a casca em volta do vão (ver `DoorViews.modelsOf`) atravessa a parede, então
+   * só as faces da frente aparecem — uma porta maior, translúcida, por cima da porta toda.
+   */
+  private readonly shellMat = new THREE.MeshBasicMaterial({
+    color: 0xffd23a,
+    transparent: true,
+    depthWrite: false,
+    toneMapped: false,
+    opacity: 0.2,
+  });
+  private readonly armedShellMat = this.shellMat.clone();
   /** Alvo tocado uma vez, esperando o segundo toque (ou `null`). */
   private armedTarget: string | null = null;
   /** Efeitos do alvo tocado uma vez (ver `setTargetAim`). */
@@ -671,6 +689,8 @@ export class HexBoard {
   /** Caminho até o destino (sem a origem, com o destino), na ordem em que será percorrido. */
   private path: string[] = [];
   private activeId: string | null = null;
+  /** Giro (rad, em volta de +Y) da câmera para ver de frente a porta ao lado do agente da vez. */
+  private doorYaw = 0;
   private focusId: string | null = null;
   private moving = false;
   private inputEnabled = true;
@@ -2822,7 +2842,7 @@ export class HexBoard {
       const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE);
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
-      this.structures.push({ rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
+      this.structures.push({ kind, rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
       roof?.traverse((o) => {
         if ((o as THREE.Mesh).isMesh) this.roofMeshes.push({ mesh: o, roof });
       });
@@ -3051,7 +3071,9 @@ export class HexBoard {
           mesh.getWorldScale(scale);
           // cresce `thick` para cada lado, em volta do centro da peça (caixas e cilindros ficam inteiros)
           const grow = (len: number, ws: number) => (len > 1e-4 ? 1 + (2 * thick) / Math.max(len * Math.abs(ws), 1e-4) : 1);
-          const hull = new THREE.Mesh(geo, this.outlineMat);
+          const shell = !!mesh.userData['outlineShell'];
+          const hull = new THREE.Mesh(geo, shell ? this.shellMat : this.outlineMat);
+          if (shell) hull.userData['shell'] = true;
           hull.scale.set(grow(size.x, scale.x), grow(size.y, scale.y), grow(size.z, scale.z));
           hull.position.set(center.x * (1 - hull.scale.x), center.y * (1 - hull.scale.y), center.z * (1 - hull.scale.z));
           hull.castShadow = hull.receiveShadow = false;
@@ -3095,7 +3117,9 @@ export class HexBoard {
         const pose = h.userData[on ? 'thick' : 'thin'] as { scale: THREE.Vector3; position: THREE.Vector3 };
         h.scale.copy(pose.scale);
         h.position.copy(pose.position);
-        h.material = on ? this.armedOutlineMat : this.outlineMat;
+        h.material = h.userData['shell']
+          ? on ? this.armedShellMat : this.shellMat
+          : on ? this.armedOutlineMat : this.outlineMat;
       }
     }
   }
@@ -4436,20 +4460,54 @@ export class HexBoard {
       );
     }
     this.ringLast = null;
-    return this.placePerspective(this.camTarget, this.zoom, this.pitchDeg, look);
+    this.doorYaw += (this.doorYawGoal() - this.doorYaw) * (1 - Math.exp(-dt * 2.5));
+    if (Math.abs(this.doorYaw) < 1e-4) this.doorYaw = 0;
+    return this.placePerspective(this.camTarget, this.zoom, this.pitchDeg, look, this.doorYaw);
+  }
+
+  /**
+   * Agente da vez num hexágono vizinho de uma porta: a câmera gira um pouco para o lado em que
+   * ele está, para a porta não ficar de quina (as portas das paredes laterais somem de frente).
+   */
+  private doorYawGoal(): number {
+    const u = this.activeId ? this.units.get(this.activeId) : undefined;
+    if (!u) return 0;
+    const near = new Set([u.hex, ...hexNeighbors(u.hex)].map(hexKey));
+    // casa: um giro só, da porta de entrada até sair, que mostra as portas e os cômodos
+    for (const st of this.structures) {
+      if (st.kind !== 'house') continue;
+      if (inStructure(u.hex, st.rect) || st.doors.some((d) => near.has(hexKey(d)))) return HOUSE_CAMERA_YAW;
+    }
+    const doors = this.doorViews;
+    if (!doors) return 0;
+    let best: { yaw: number; d: number } | null = null;
+    for (const key of doors.keys()) {
+      if (!near.has(key)) continue;
+      const center = doors.centerOf(key)!;
+      const normal = doors.normalOf(key)!;
+      const away = u.group.position.clone().sub(center).setY(0);
+      // a normal virada para o lado do agente: a câmera vai para esse lado
+      const n = normal.multiplyScalar(Math.sign(away.dot(normal)) || 1);
+      // porta de frente para a câmera (ou de costas, que um giro leve não resolve): fica como está
+      if (n.z < -0.5) continue;
+      const yaw = THREE.MathUtils.clamp(Math.atan2(n.x, n.z), -DOOR_CAMERA_YAW, DOOR_CAMERA_YAW);
+      const d = away.lengthSq();
+      if (!best || d < best.d) best = { yaw, d };
+    }
+    return best?.yaw ?? 0;
   }
 
   /** Põe a câmera inclinada `pitchDeg` sobre `target`, afastada conforme `zoom`; devolve a distância. */
-  private placePerspective(target: THREE.Vector3, zoom: number, pitchDeg: number, look: THREE.Vector3): number {
+  private placePerspective(target: THREE.Vector3, zoom: number, pitchDeg: number, look: THREE.Vector3, yaw = 0): number {
     // Em retrato a câmera recua para enxergar o mesmo número de colunas.
     const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
     const dist = 11.5 * zoom * Math.min(portrait, 2.3);
     const pitch = THREE.MathUtils.degToRad(pitchDeg);
-    this.camera.position.set(target.x, target.y + Math.sin(pitch) * dist, target.z + Math.cos(pitch) * dist);
     // mira um pouco "abaixo" do jogador: ele fica acima do centro e o painel inferior não cobre o alcance
     const lead = this.camera.aspect < 1 ? 1.4 : 0.3;
-    this.camera.position.z += lead;
-    look.set(target.x, target.y, target.z + lead);
+    const back = yawTurn(new THREE.Vector3(0, 0, 1), yaw);
+    look.set(target.x, target.y, target.z).addScaledVector(back, lead);
+    this.camera.position.copy(look).addScaledVector(back, Math.cos(pitch) * dist).setY(target.y + Math.sin(pitch) * dist);
     return dist;
   }
 
@@ -4615,12 +4673,15 @@ export class HexBoard {
       // amarelo suave que respira devagar: dá para tocar
       const k = 0.5 + Math.sin(t * 2.5) * 0.5;
       this.outlineMat.opacity = 0.2 + k * 0.25;
+      this.shellMat.opacity = 0.12 + k * 0.14;
       // tocado uma vez: amarelo que pulsa rápido e forte, quase branco no pico
       this.npcOutlineMat.opacity = 0.55 + k * 0.35;
       if (this.armedTarget) {
         const a = 0.5 + Math.sin(t * 7) * 0.5;
         this.armedOutlineMat.opacity = 0.75 + a * 0.25;
         this.armedOutlineMat.color.setRGB(1, 0.78 + a * 0.18, 0.1 + a * 0.35);
+        this.armedShellMat.opacity = 0.3 + a * 0.15;
+        this.armedShellMat.color.copy(this.armedOutlineMat.color);
         this.npcArmedMat.opacity = this.armedOutlineMat.opacity;
         this.npcArmedMat.color.copy(this.armedOutlineMat.color);
       }
