@@ -278,7 +278,7 @@ export class TacticalBoard {
             { chip: '1 toque', text: 'Toque no rendido: *o caminho* até o raio fica marcado' },
             { chip: '2 toques', text: 'Toque de novo: o agente vai e *a conversa abre*' },
           ],
-          rule: `Já dentro do raio, um toque basta · a 1ª pergunta gasta ${TALK.moveCost} de movimento`,
+          rule: `Já dentro do raio, um toque basta · ${TALK.moveCost ? `a 1ª pergunta gasta ${TALK.moveCost} de movimento` : 'conversar não gasta movimento'}`,
         },
       ];
     }
