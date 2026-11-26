@@ -729,21 +729,6 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 }
 
 .game { --door-w: calc(min(300px, 40vw) + 14px); }
-.door-back {
-  position: absolute; z-index: 4;
-  left: calc(14px + var(--safe-left)); top: calc(12px + var(--safe-top));
-  height: 52px; padding: 0 20px 0 10px;
-  display: flex; align-items: center; gap: 6px;
-  background: var(--red); color: var(--paper-light);
-  border: 3px solid var(--red-dark) !important;
-  box-shadow: 3px 4px 0 rgba(0, 0, 0, .45);
-  transform-origin: 0 50%;
-  animation: slap .25s ease-out both, door-call 2.4s 1s ease-in-out infinite;
-}
-.door-back:active:not(:disabled) { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, .45); animation: none; }
-.door-back-arrow { width: 24px; height: 24px; fill: none; stroke: var(--paper-light); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; animation: door-nudge 1.1s ease-in-out infinite; }
-.door-back-text { font-family: var(--stencil); font-weight: 700; font-size: 20px; line-height: 1; letter-spacing: .06em; text-transform: uppercase; color: var(--paper-light); }
-.door-back:disabled { opacity: .5; animation: none; }
 /* chama a atenção: a seta empurra o tempo todo; de tempos em tempos o botão balança e ganha um halo */
 @keyframes door-nudge { 0%, 100% { translate: 0 0; } 50% { translate: -4px 0; } }
 @keyframes door-call {
@@ -812,9 +797,18 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .door-opt.locked:hover .door-lock .shackle { animation: door-rattle .35s; }
 @keyframes door-rattle { 25% { rotate: -10deg; } 75% { rotate: 10deg; } }
 .door-text { min-width: 0; }
-/* Voltar: a mesma ficha, sem o espaço do ícone, com o texto em vermelho */
-.door-opt.door-opt-back { grid-template-columns: minmax(0, 1fr); padding-left: 16px; }
-.door-opt-back .door-opt-name { color: var(--red-text); }
+/* Voltar: a última ficha, em vermelho vivo com a seta empurrando, chamando a atenção de tempos em tempos */
+.door-opt.door-opt-back {
+  display: flex; align-items: center; gap: 6px; padding: 10px 16px 10px 10px;
+  background: var(--red); color: var(--paper-light);
+  border: 3px solid var(--red-dark) !important;
+  box-shadow: 3px 4px 0 rgba(0, 0, 0, .45);
+  animation: slap .25s calc(var(--i, 0) * .06s) ease-out both, door-call 2.4s 1s ease-in-out infinite;
+}
+.door-opt.door-opt-back:active:not(:disabled) { box-shadow: 1px 1px 0 rgba(0, 0, 0, .45); animation: none; }
+.door-opt.door-opt-back:disabled { animation: none; }
+.door-opt-back .door-opt-name { color: var(--paper-light); letter-spacing: .06em; }
+.door-back-arrow { flex: none; width: 24px; height: 24px; fill: none; stroke: var(--paper-light); stroke-width: 3.5; stroke-linecap: round; stroke-linejoin: round; animation: door-nudge 1.1s ease-in-out infinite; }
 /* aviso do menu da porta: um bilhete logo abaixo das fichas (fica até sair do menu) */
 .door-notice {
   margin: 4px 0 0; padding: 8px 12px;
@@ -862,7 +856,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   .door-opt { padding-block: 5px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .door-sheet, .door-opt, .door-notice, .door-state, .door-back, .door-back-arrow, .door-btn, .photo.hero, .photo.hero .photo-img, .end-turn { animation: none; }
+  .door-sheet, .door-opt, .door-notice, .door-state, .door-back-arrow, .door-btn, .photo.hero, .photo.hero .photo-img, .end-turn { animation: none; }
 }
 
 /* ---------- avião trancado, quadro de chaves e fala embaixo da tela ---------- */

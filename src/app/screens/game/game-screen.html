@@ -295,11 +295,6 @@
 
   <!-- Menu da porta: a câmera gira e aproxima; as ações ficam em fichas na direita -->
   @if (phase() === 'door' && openDoor(); as door) {
-    <button type="button" class="door-back" [disabled]="doorBusy()" (click)="closeDoorMenu()" aria-label="Voltar ao tabuleiro" data-testid="door-back">
-      <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-      <span class="door-back-text">Voltar</span>
-      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
-    </button>
     <aside class="door-sheet" aria-label="Ações da porta" data-testid="door-sheet">
       <div class="door-head">
         <span class="door-kicker">Porta · {{ active().name }}</span>
@@ -337,7 +332,8 @@
           </li>
         }
         <li>
-          <button type="button" class="door-opt door-opt-back" [style.--i]="3" [style.--tilt]="'.5deg'" [disabled]="doorBusy()" aria-label="Voltar ao tabuleiro" data-testid="door-opt-back" (click)="closeDoorMenu()">
+          <button type="button" class="door-opt door-opt-back" [style.--i]="3" [style.--tilt]="'.5deg'" [disabled]="doorBusy()" aria-label="Voltar ao tabuleiro" data-testid="door-back" (click)="closeDoorMenu()">
+            <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
             <span class="door-opt-name">Voltar</span>
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
           </button>
@@ -351,11 +347,6 @@
 
   <!-- Menu do avião (inspecionar): a câmera aproxima; olhar dentro e queimar ficam em fichas na direita -->
   @if (phase() === 'plane') {
-    <button type="button" class="door-back" (click)="closePlaneMenu()" aria-label="Voltar ao tabuleiro" data-testid="plane-back">
-      <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-      <span class="door-back-text">Voltar</span>
-      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
-    </button>
     <aside class="door-sheet" aria-label="Ações do avião" data-testid="plane-sheet">
       <div class="door-head">
         <span class="door-kicker">Inspecionar · {{ active().name }}</span>
@@ -386,6 +377,13 @@
               <span class="door-opt-need free">encerra a vez</span>
             </span>
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('approach') }}</span> }
+          </button>
+        </li>
+        <li>
+          <button type="button" class="door-opt door-opt-back" style="--i: 2; --tilt: -.6deg" aria-label="Voltar ao tabuleiro" data-testid="plane-back" (click)="closePlaneMenu()">
+            <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            <span class="door-opt-name">Voltar</span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
           </button>
         </li>
       </ul>
