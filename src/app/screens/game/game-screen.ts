@@ -774,7 +774,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       option(
         'arrombar',
         'Arrombar',
-        st === 'bloqueada' && !door.broken ? 'nunca passa' : open ? 'já está aberta' : st === 'encostada' ? 'sem tranca, chama atenção' : 'porta trancada',
+        st === 'bloqueada' && !door.broken ? 'nunca passa' : open ? 'já está aberta' : (st === 'encostada' ? 'sem tranca, chama atenção' : 'porta trancada') + (door.damage ? `, já cedeu ${door.damage}` : ''),
         { disabled: busy || open, locked: open },
       ),
       option(
@@ -3069,28 +3069,48 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         board.crouchAtDoor(id, false);
         await this.wait(450);
       } else {
-        await board.stepToDoor(id, door.hex, 1.05);
+        await board.stepToDoor(id, door.hex, board.kickReach(id));
         if (stale()) return;
-        const reveal = out.rolled
-          ? this.startDoorCheck('Arrombar', this.nameOf(id), this.needText(need!), 'Arrombou!', door.state === 'bloqueada' ? 'Não cedeu' : 'Aguentou', roll, 950)
-          : null;
-        if (reveal) await this.wait(500);
-        await board.kick(id, () => {
-          if (stale()) return;
-          reveal?.(roll, out.pass);
-          this.sound.play(out.pass ? 'porta.chute-ok' : 'porta.chute-falha');
-          if (out.pass) settle('slam');
-          else board.pushDoor(door.hex, id, 'rattle');
-          this.gamepad.rumble(out.pass ? 1 : 0.6, 0.5, 220);
-          this.haptics.vibrate(SETTLE_PATTERN);
+        // a câmera fecha na porta; o agente recolhe o joelho, a cena entra em slow e o d20 rola
+        // com a perna no ar; quando o dado para, o slow acaba e o pé bate na porta
+        board.zoomOnDoor(door.hex);
+        let reveal: ((result: number, pass: boolean) => void) | null = null;
+        const ROLL_MS = 1100;
+        await board.kick(id, {
+          through: out.pass,
+          onSlow: out.rolled
+            ? async () => {
+                reveal = this.startDoorCheck('Arrombar', this.nameOf(id), this.needText(need!), 'Arrombou!', door.state === 'bloqueada' ? 'Não cedeu' : 'Aguentou', roll, ROLL_MS);
+                await this.wait(ROLL_MS);
+              }
+            : undefined,
+          onImpact: () => {
+            if (stale()) return;
+            reveal?.(roll, out.pass);
+            this.sound.play(out.pass ? 'porta.chute-ok' : 'porta.chute-falha');
+            if (out.pass) settle('slam');
+            else {
+              // a porta aguenta, mas cede um pouco: o próximo chute precisa de menos
+              this.doors.update((m) => new Map(m).set(hexKey(door.hex), applyDoor(door, out)));
+              board.setDoors(this.doors());
+              board.pushDoor(door.hex, id, 'rattle');
+            }
+            if (out.damage) board.floatDoorDamage(door.hex, `\u2212${out.damage}`);
+            this.gamepad.rumble(out.pass ? 1 : 0.6, 0.5, 220);
+            this.haptics.vibrate(SETTLE_PATTERN);
+          },
         });
         if (stale()) return;
         if (out.reaction) this.reactToBreakIn(door.hex, id);
         if (out.opened) {
-          await this.wait(400);
+          await this.wait(250);
           if (!(await this.breakIn(door.hex, id, stale))) return;
+        } else if (!out.pass && out.damage && door.state !== 'bloqueada') {
+          const next = doorNeed('arrombar', this.doors().get(hexKey(door.hex)) ?? door);
+          if (next) this.say(`A porta cedeu um pouco: o próximo chute precisa de ${next}+`, 'info');
         }
         await this.wait(400);
+        board.resetCineAim();
       }
       if (stale()) return;
       await board.stepBack(id);
@@ -3159,9 +3179,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
             () => rollDie(DOOR_RULES.die),
           )
         : [];
+    // o estouro da porta: todo mundo do cômodo dá um passo para trás, de frente para ela
+    for (const r of rolls) void board.enemyFlinch(r.enemy.id, doorHex);
+    if (rolls.length) await this.wait(380);
+    if (stale()) return false;
     for (const r of rolls) {
       const e = r.enemy;
       const resist = r.test === 'resist';
+      // a câmera inclina para ele, que olha de um lado para o outro; a rolagem vem em slow
+      board.tiltCineTo(e.hex);
+      board.enemyLookAround(e.id, true);
+      await this.wait(650);
+      if (stale()) return false;
+      board.setSceneSlowmo(true);
       const reveal = this.startDoorCheck(
         resist ? 'Resistir à rendição' : 'Atitude para correr',
         e.name,
@@ -3172,25 +3202,33 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         1000,
         'enemy',
       );
-      board.focusHex(e.hex);
       await this.wait(1000);
+      board.setSceneSlowmo(false);
       if (stale()) return false;
       reveal(r.roll, r.outcome !== 'flee');
+      board.enemyLookAround(e.id, false);
       const facing = facingBetween(e.hex, doorHex);
-      board.setEnemyFacing(e.id, facing);
-      board.startleEnemy(e.id);
       if (r.outcome === 'surrender') {
+        // falhou: rende na hora
+        board.setEnemyFacing(e.id, facing);
         if (!rolls.slice(0, rolls.indexOf(r)).some((o) => o.outcome === 'surrender')) this.sound.play('ini.rende', { at: e.hex });
         this.updateEnemy(e.id, { status: 'surrendered', facing });
         board.setEnemySurrendered(e.id, true);
       } else if (r.outcome === 'flee') {
+        // passou: vira de costas e fica pronto para correr (sai na vez dele)
         this.updateEnemy(e.id, { status: 'alert', facing });
         board.setEnemyAlert(e.id, true);
-      } else this.updateEnemy(e.id, { facing });
+        board.enemyBolt(e.id, doorHex);
+      } else {
+        board.setEnemyFacing(e.id, facing);
+        this.updateEnemy(e.id, { facing });
+      }
+      board.startleEnemy(e.id);
       this.refreshVision();
       await this.wait(1100);
       if (stale()) return false;
     }
+    board.resetCineAim();
     this.checkAllSpotted(this.positions());
     const said = (o: BreakInRoll['outcome']) => rolls.filter((r) => r.outcome === o).map((r) => r.enemy);
     const parts = [
@@ -3934,6 +3972,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.breakInUntil.set(0);
     clearTimeout(this.doorCheckTimer);
     this.board?.releaseDoorFocus();
+    this.board?.setSceneSlowmo(false);
     this.doors.set(this.initialDoors());
     this.board?.setDoors(this.doors(), true);
     this.burned.set(new Set());

@@ -11,7 +11,8 @@ import { buildCuffClips } from './cuff-poses';
  * `tools/assets/build-anims.mjs`). Os loops tocam no relógio (`play`); os gestos do Modo Corrida
  * (`jump`, `slide`, `trip`, `crash`) são percorridos no tempo da regra (`scrub`). `cuffed` e `kneel`
  * (suspeito algemado, de pé e ajoelhado) não vêm do arquivo: são montados por código a partir do
- * `idle` (`cuff-poses.ts`).
+ * `idle` (`cuff-poses.ts`). `kick` (o arrombamento, percorrido com `scrub`) e `look` (olha de um lado
+ * para o outro, em loop) vêm de clipes CC0 avulsos (`tools/assets/cc0-clips`).
  */
 export type ClipName =
   | 'idle'
@@ -24,7 +25,9 @@ export type ClipName =
   | 'trip'
   | 'crash'
   | 'cuffed'
-  | 'kneel';
+  | 'kneel'
+  | 'kick'
+  | 'look';
 
 /** Modelo 3D de um personagem (ver docs/esqueletos-e-movimentacao.md). */
 export interface ModelDef {
@@ -95,9 +98,35 @@ export const MODELS = {
   piloto: human('piloto', 1.77),
 } satisfies Record<string, ModelDef>;
 
-/** Ossos que a camada procedural (`CharacterRig.pose`) mexe. */
-const POSE_BONES = ['thigh_r', 'calf_r', 'spine_01'] as const;
-type PoseBone = (typeof POSE_BONES)[number];
+/**
+ * Camada procedural (`CharacterRig.pose`): cada entrada gira um osso no próprio eixo X local
+ * (multiplicando depois do clipe), com os sinais medidos no `idle` da biblioteca:
+ * - `thigh` < 0 levanta a coxa direita para a frente; `calf` > 0 dobra o joelho direito;
+ *   `foot` < 0 puxa a ponta do pé direito para cima (bate de calcanhar);
+ * - `thighL` / `calfL`: o mesmo na perna de apoio (esquerda);
+ * - `spine` < 0 inclina o tronco para trás (> 0, para a frente);
+ * - `armR` / `armL` > 0 levam o braço para a frente (< 0, para trás); `foreR` / `foreL` > 0
+ *   dobram o cotovelo.
+ */
+const POSE_BONES = {
+  thigh: 'thigh_r',
+  calf: 'calf_r',
+  foot: 'foot_r',
+  thighL: 'thigh_l',
+  calfL: 'calf_l',
+  spine: 'spine_01',
+  armR: 'upperarm_r',
+  foreR: 'lowerarm_r',
+  armL: 'upperarm_l',
+  foreL: 'lowerarm_l',
+} as const;
+export type PoseKey = keyof typeof POSE_BONES;
+export type Pose = Record<PoseKey, number>;
+/** Pose neutra: nada por cima do clipe. */
+export const restPose = (): Pose =>
+  Object.fromEntries(Object.keys(POSE_BONES).map((k) => [k, 0])) as Pose;
+const X_AXIS = new THREE.Vector3(1, 0, 0);
+const poseTurn = new THREE.Quaternion();
 
 /** Quanto da cor de `tint` entra no material (0 = nada, 1 = cor cheia). */
 const TINT_STRENGTH = 0.6;
@@ -141,12 +170,14 @@ export class CharacterRig {
   private readonly actions = new Map<ClipName, THREE.AnimationAction>();
   private current: THREE.AnimationAction | null = null;
   /**
-   * Camada procedural por cima do clipe (em radianos, somada depois do mixer): a biblioteca
-   * de clipes não tem chute, então o arrombamento dobra a perna direita e a coluna à mão.
-   * `thigh` < 0 levanta a coxa para a frente; `calf` > 0 dobra o joelho; `spine` < 0 inclina para trás.
+   * Camada procedural por cima do clipe (em radianos, aplicada depois do mixer; ver
+   * `POSE_BONES`): a biblioteca de clipes não tem chute, então o arrombamento monta o golpe à
+   * mão (pernas, tronco e braços).
    */
-  readonly pose = { thigh: 0, calf: 0, spine: 0 };
-  private readonly bones: Partial<Record<PoseBone, THREE.Object3D>> = {};
+  readonly pose: Pose = restPose();
+  private readonly bones: Partial<Record<PoseKey, THREE.Object3D>> = {};
+  /** Ângulos aplicados no último quadro: desfeitos antes do mixer (osso sem trilha no clipe não acumula). */
+  private readonly applied: Partial<Record<PoseKey, number>> = {};
   /** Argolas e corrente da algema (criadas no primeiro `setCuffed(true)`). */
   private cuffs: { rings: THREE.Mesh[]; link: THREE.Mesh } | null = null;
 
@@ -161,9 +192,9 @@ export class CharacterRig {
   ) {
     this.mixer = new THREE.AnimationMixer(object);
     for (const clip of clips) this.actions.set(clip.name as ClipName, this.mixer.clipAction(clip));
-    for (const name of POSE_BONES) {
+    for (const [key, name] of Object.entries(POSE_BONES) as [PoseKey, string][]) {
       const bone = object.getObjectByName(name);
-      if (bone) this.bones[name] = bone;
+      if (bone) this.bones[key] = bone;
     }
   }
 
@@ -242,6 +273,11 @@ export class CharacterRig {
     return this.actions.get(name) ?? (fallback ? this.actions.get(fallback) : undefined);
   }
 
+  /** A biblioteca tem o clipe `name` (sem contar o de reserva). */
+  has(name: ClipName): boolean {
+    return this.actions.has(name);
+  }
+
   /** O clipe em loop agora é `name`. */
   isPlaying(name: ClipName): boolean {
     const action = this.action(name);
@@ -298,11 +334,20 @@ export class CharacterRig {
   }
 
   update(dt: number): void {
+    for (const key in this.applied) {
+      const k = key as PoseKey;
+      this.bones[k]?.quaternion.multiply(poseTurn.setFromAxisAngle(X_AXIS, -this.applied[k]!));
+      delete this.applied[k];
+    }
     this.mixer.update(dt);
-    const { thigh, calf, spine } = this.pose;
-    if (thigh && this.bones.thigh_r) this.bones.thigh_r.rotation.x += thigh;
-    if (calf && this.bones.calf_r) this.bones.calf_r.rotation.x += calf;
-    if (spine && this.bones.spine_01) this.bones.spine_01.rotation.x += spine;
+    for (const key in this.pose) {
+      const k = key as PoseKey;
+      const angle = this.pose[k];
+      const bone = this.bones[k];
+      if (!angle || !bone) continue;
+      bone.quaternion.multiply(poseTurn.setFromAxisAngle(X_AXIS, angle));
+      this.applied[k] = angle;
+    }
     if (this.cuffs?.link.visible) this.placeCuffLink();
   }
 
