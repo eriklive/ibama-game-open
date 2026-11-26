@@ -12,7 +12,9 @@
  *    mais perto do suspeito ao mais longe, um por vez, até alguém arrancar (ou o jogador deixar fugir). Com vários fugindo, um por vez.
  * 2. **Iniciativa.** Só o agente rola: d20 + iniciativa, pelo menos `initiativeDC` (8), sem
  *    depender do garimpeiro (`initiativeCheck`). Passou: sai correndo. Falhou: hesita e o
- *    garimpeiro foge normal. O garimpeiro não rola nada novo: o teste de fuga da faixa amarela da
+ *    garimpeiro foge normal. O d20 natural conta: **20** (acerto crítico) deixa o agente
+ *    `initiativeCritPercent` (%) mais rápido durante toda a corrida; **1** (falha crítica), se ele
+ *    ainda arrancar, `initiativeFumblePercent` (%) mais lento. O garimpeiro não rola nada novo: o teste de fuga da faixa amarela da
  *    abordagem continua como está (falhou, tropeça e se rende), e quem foge sem rolar segue assim.
  * 3. **Rota travada.** O jogo calcula a fuga dele até a saída (borda) mais próxima, sem limite
  *    de passos (`lockRoute`). Ele evita o que os agentes enxergam (`agentSight`): prefere correr
@@ -26,9 +28,9 @@
  *    - **corrida** (`resolveSprint`): o jogador pode dar um gás quantas vezes quiser. Rola
  *      teste de vigor, d20 + vigor: o total é quanto (%) o agente fica mais rápido por
  *      `sprintSeconds`. Acabou o gás, `sprintCooldownSeconds` de recarga e pode rolar outro d20.
- *      O d20 natural conta: **20** (acerto crítico) deixa o agente `sprintCritPercent` (%) mais
- *      rápido até o fim da corrida; **1** (falha crítica), `sprintFumblePercent` (%) mais lento.
- *      Acumula (`permanentPercent`).
+ *      O d20 natural conta: **20** (acerto crítico) soma `sprintCritPercent` (%) à velocidade
+ *      até o fim da corrida (acumula com o da iniciativa); **1** é um **tropeço**: sem gás, o
+ *      agente tropeça e perde `sprintTripSeconds`.
  *      Só ele acelera; o garimpeiro segue no ritmo dele.
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
@@ -55,6 +57,10 @@ export const CHASE_RULES = {
   radiusBase: ENEMY_RULES.fleeSteps,
   /** Iniciativa do agente: d20 + iniciativa, pelo menos isto, para sair correndo. */
   initiativeDC: 8,
+  /** Iniciativa: d20 natural 20 (acerto crítico), o agente corre isto (%) mais rápido a corrida inteira. */
+  initiativeCritPercent: 10,
+  /** Iniciativa: d20 natural 1 (falha crítica), se ainda arrancar, corre isto (%) mais lento a corrida inteira. */
+  initiativeFumblePercent: 5,
   /**
    * Visão dos agentes na fuga: até onde (hexágonos, em linha reta e sem parede, árvore ou
    * porta fechada no meio) um agente enxerga. A rota foge desses hexágonos.
@@ -71,10 +77,10 @@ export const CHASE_RULES = {
   /** Corrida: recarga (s) depois que o gás acaba, até poder rolar outro d20. */
   sprintCooldownSeconds: 3,
   /** Corrida: tirou 20 no d20 (acerto crítico), o agente fica isto (%) mais rápido até o fim da corrida (acumula). */
-  sprintCritPercent: 10,
-  /** Corrida: tirou 1 no d20 (falha crítica), o agente fica isto (%) mais lento até o fim da corrida (acumula). */
-  sprintFumblePercent: 5,
-  /** Corrida: o agente nunca fica mais lento que isto (multiplicador), por mais falhas críticas que tire. */
+  sprintCritPercent: 5,
+  /** Corrida: tirou 1 no d20 (tropeço), sem gás: o agente tropeça e perde isto (s). */
+  sprintTripSeconds: 0.5,
+  /** Corrida: o agente nunca fica mais lento que isto (multiplicador). */
   minRate: 0.5,
   /** Corrida: entrada e saída suaves da velocidade (ms), antes e depois dos `sprintSeconds`. */
   sprintRampMs: 350,
@@ -199,12 +205,23 @@ export interface InitiativeResult {
   total: number;
   /** O agente arrancou a tempo. */
   go: boolean;
+  /** d20 natural 20: acerto crítico; 1: falha crítica. */
+  crit?: 'critico' | 'falha';
+  /** Quanto a velocidade dele muda (%) durante a corrida: +`initiativeCritPercent`, −`initiativeFumblePercent` ou 0. */
+  permanent: number;
 }
 
-/** Iniciativa do agente: d20 + iniciativa, pelo menos `initiativeDC`. */
+/**
+ * Iniciativa do agente: d20 + iniciativa, pelo menos `initiativeDC`. O d20 natural 20 é acerto
+ * crítico (+`initiativeCritPercent`% de velocidade na corrida); o 1, falha crítica
+ * (−`initiativeFumblePercent`%, se mesmo assim ele arrancar).
+ */
 export function initiativeCheck(roll: number, agent: ChaseStats = {}): InitiativeResult {
   const total = roll + (agent.iniciativa ?? 0);
-  return { total, go: total >= CHASE_RULES.initiativeDC };
+  const go = total >= CHASE_RULES.initiativeDC;
+  if (roll >= CHASE_RULES.die) return { total, go, crit: 'critico', permanent: CHASE_RULES.initiativeCritPercent };
+  if (roll <= 1) return { total, go, crit: 'falha', permanent: -CHASE_RULES.initiativeFumblePercent };
+  return { total, go, permanent: 0 };
 }
 
 /** Chance (0..1) de o agente arrancar a tempo. */
@@ -328,30 +345,32 @@ const worldDelta = (a: HexCoord, b: HexCoord): [number, number] => {
 
 // ---------- corrida ----------
 
-export type SprintCrit = 'critico' | 'falha';
+export type SprintCrit = 'critico' | 'tropeco';
 
 export interface SprintResult {
   /** d20 + vigor. */
   total: number;
-  /** Quanto mais rápido o agente fica (%): o total, pelo menos `sprintMin`. */
+  /** Quanto mais rápido o agente fica (%): o total, pelo menos `sprintMin`. No tropeço, 0 (sem gás). */
   percent: number;
-  /** d20 natural 20: acerto crítico; 1: falha crítica. */
+  /** d20 natural 20: acerto crítico; 1: tropeço. */
   crit?: SprintCrit;
-  /** Quanto a velocidade dele muda (%) até o fim da corrida: +`sprintCritPercent`, −`sprintFumblePercent` ou 0. */
+  /** Quanto a velocidade dele muda (%) até o fim da corrida: +`sprintCritPercent` ou 0. */
   permanent: number;
+  /** Tropeço: quanto tempo (s) ele perde caído. */
+  trip: number;
 }
 
 /**
  * Corrida: teste de vigor. d20 + vigor, e o total é o bônus de velocidade em % (pelo menos
- * `sprintMin`). O d20 natural 20 é acerto crítico (+`sprintCritPercent`% até o fim da corrida);
- * o 1, falha crítica (−`sprintFumblePercent`%). O gás sai do mesmo jeito.
+ * `sprintMin`). O d20 natural 20 é acerto crítico: o gás sai e ainda soma `sprintCritPercent`%
+ * até o fim da corrida. O 1 é tropeço: sem gás, ele tropeça e perde `sprintTripSeconds`.
  */
 export function resolveSprint(roll: number, agent: ChaseStats): SprintResult {
   const total = roll + (agent.vigor ?? 0);
   const percent = Math.max(CHASE_RULES.sprintMin, total);
-  if (roll >= CHASE_RULES.sprintDie) return { total, percent, crit: 'critico', permanent: CHASE_RULES.sprintCritPercent };
-  if (roll <= 1) return { total, percent, crit: 'falha', permanent: -CHASE_RULES.sprintFumblePercent };
-  return { total, percent, permanent: 0 };
+  if (roll >= CHASE_RULES.sprintDie) return { total, percent, crit: 'critico', permanent: CHASE_RULES.sprintCritPercent, trip: 0 };
+  if (roll <= 1) return { total, percent: 0, crit: 'tropeco', permanent: 0, trip: CHASE_RULES.sprintTripSeconds };
+  return { total, percent, permanent: 0, trip: 0 };
 }
 
 /**

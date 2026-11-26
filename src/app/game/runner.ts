@@ -235,6 +235,13 @@ export class RunnerRace {
     return this.act(this.agent, 'agente', 'pula');
   }
 
+  /** O agente tropeça sozinho (o tropeço do gás) e perde `seconds` caído. Já tropeçando, não soma. */
+  trip(seconds: number): boolean {
+    if (this.over || seconds <= 0 || this.agent.action === 'tropeca') return false;
+    this.stumble(this.agent, seconds * RUNNER_RULES.rowsPerSecond, 'obstaculo');
+    return true;
+  }
+
   slide(): boolean {
     return this.act(this.agent, 'agente', 'desliza');
   }

@@ -197,7 +197,7 @@
   rotate: -3deg;
   animation: slap 0.2s ease-out both;
 }
-/* d20 natural 20 ou 1: o selo do crítico, embaixo do dado */
+/* d20 natural 20: o selo do crítico, embaixo do dado */
 .sprint-crit {
   position: absolute;
   bottom: 4px;
@@ -210,10 +210,6 @@
   box-shadow: var(--drop);
   rotate: 2deg;
   animation: slap 0.2s 0.1s ease-out both;
-}
-.sprint-crit.fumble {
-  color: var(--paper-light);
-  background: var(--ink-paper);
 }
 @keyframes sprint-pop {
   0% { opacity: 0; translate: 0 60px; scale: 0.3; }

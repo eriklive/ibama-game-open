@@ -47,11 +47,13 @@
     <div class="sprint-pop" data-testid="sprint-pop" aria-hidden="true">
       <app-d20 class="sprint-die" [value]="sp.roll" [duration]="dieMs" />
       @if (sp.state === 'active') {
-        <span class="sprint-result" data-testid="sprint-result">+{{ sp.percent }}%</span>
-        @if (sp.crit) {
-          <span class="sprint-crit" [class.fumble]="sp.crit === 'falha'" data-testid="sprint-crit">
-            {{ sp.crit === 'critico' ? 'Crítico! +' + critPct + '% fixo' : 'Falha crítica! −' + fumblePct + '% fixo' }}
-          </span>
+        @if (sp.crit === 'tropeco') {
+          <span class="sprint-result" data-testid="sprint-result">Tropeçou!</span>
+        } @else {
+          <span class="sprint-result" data-testid="sprint-result">+{{ sp.percent }}%</span>
+        }
+        @if (sp.crit === 'critico') {
+          <span class="sprint-crit" data-testid="sprint-crit">Crítico! +{{ critPct }}% fixo</span>
         }
       }
     </div>

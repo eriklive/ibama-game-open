@@ -154,6 +154,19 @@ describe('RunnerRace: curvas', () => {
     expect(new RunnerRace({ obstacles: [], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 }).pose('agente').fall).toBeUndefined();
   });
 
+  it('o tropeço do gás: ele cai e perde o tempo pedido; já caído, não soma', () => {
+    const race = new RunnerRace({ obstacles: [], startAt: 0, length: 100, hexes: 4, rollEnemy: () => 20 });
+    run(race, 0.5);
+    const gap = race.gap();
+    expect(race.trip(0.5)).toBe(true);
+    expect(race.pose('agente')).toMatchObject({ action: 'tropeca', fall: 'obstaculo' });
+    expect(race.trip(0.5)).toBe(false);
+    run(race, 0.5);
+    expect(race.pose('agente').action).toBe('corre');
+    // meio segundo parado: ele abriu meio segundo de corrida
+    expect(race.gap() - gap).toBeCloseTo(0.5 * R.rowsPerSecond, 1);
+  });
+
   it('virar para o lado errado: bate na esquina', () => {
     const race = new RunnerRace({ obstacles: [], turns: [turn(10, 'direita')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     const ev = run(race, 5, () => {

@@ -514,6 +514,7 @@ borda. O que já está no jogo:
    **Perseguir?** com cada agente possível (e a chance de arrancar) e **Deixar fugir**. Com
    controle: ✕ manda o primeiro, ○ deixa fugir.
 2. **Iniciativa.** Só o agente rola: **d20 + iniciativa ≥ 8**. Falhou: hesita e ele foge normal.
+   **Crítico:** d20 natural 20 deixa o agente 10% mais rápido a corrida inteira; 1 (falha crítica), se ele ainda arrancar, 5% mais lento.
    Uma perseguição por vez; quem já correu nesta rodada não vai de novo.
    **Voz de prisão:** quem foge de uma abordagem não espera o turno inimigo. Ao fechar o auto de
    abordagem, ele foge na hora, ainda no turno de quem abordou. O primeiro a rolar é o agente que
@@ -533,7 +534,7 @@ borda. O que já está no jogo:
    consegue usar (bloqueada é parede). Chegou à borda: some do mapa e a perseguição acaba.
 4. **A corrida.** A perseguição sai do tabuleiro e vira o [Modo Corrida](#modo-corrida-aeroporto).
    **Correr!** (C, □), quantas vezes quiser: d20 + vigor vira o bônus de velocidade (%) por 5 s; acabou, 3 s de recarga e pode rolar outro d20.
-   **Crítico:** d20 natural 20 deixa o agente 10% mais rápido até o fim da corrida; 1 (falha crítica), 5% mais lento. Acumula (nunca abaixo da metade da velocidade).
+   **Crítico:** d20 natural 20 dá o gás e ainda +5% de velocidade até o fim da corrida (acumula com o da iniciativa). 1 é **tropeço**: sem gás, o agente cai (animação de tropeço) e perde 0,5 s; depois, a recarga normal.
    Só o agente acelera.
 5. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele

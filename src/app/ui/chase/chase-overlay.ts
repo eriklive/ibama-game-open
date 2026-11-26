@@ -61,7 +61,6 @@ export class ChaseOverlay {
   readonly sprintPress = output<void>();
   protected readonly dieMs = SPRINT_DIE_MS;
   protected readonly critPct = CHASE_RULES.sprintCritPercent;
-  protected readonly fumblePct = CHASE_RULES.sprintFumblePercent;
 
   protected sprintSub(sp: SprintView): string {
     switch (sp.state) {
@@ -70,17 +69,17 @@ export class ChaseOverlay {
       case 'rolling':
         return 'rolando…';
       case 'active':
-        return `+${sp.percent}% de velocidade (${this.sprintRoll(sp)})${this.critText(sp)}`;
+        return sp.crit === 'tropeco'
+          ? `tropeçou! (${this.sprintRoll(sp)})`
+          : `+${sp.percent}% de velocidade (${this.sprintRoll(sp)})${this.critText(sp)}`;
       default:
         return 'recuperando o fôlego…';
     }
   }
 
-  /** " · crítico! +10% até o fim" (ou a falha crítica); nada sem crítico. */
+  /** " · crítico! +5% até o fim"; nada sem crítico. */
   protected critText(sp: SprintView): string {
-    if (sp.crit === 'critico') return ` · crítico! +${CHASE_RULES.sprintCritPercent}% até o fim`;
-    if (sp.crit === 'falha') return ` · falha crítica: −${CHASE_RULES.sprintFumblePercent}% até o fim`;
-    return '';
+    return sp.crit === 'critico' ? ` · crítico! +${CHASE_RULES.sprintCritPercent}% até o fim` : '';
   }
 
   /** "d20 13 + 1 vigor" (ou só "d20 13", sem vigor). */
@@ -91,7 +90,7 @@ export class ChaseOverlay {
 
   protected sprintLabel(sp: SprintView): string {
     return sp.state === 'ready'
-      ? `Correr: teste de vigor, d20 + vigor, o total vira o bônus de velocidade por ${CHASE_RULES.sprintSeconds} segundos. Tirar 20 deixa o agente ${CHASE_RULES.sprintCritPercent}% mais rápido até o fim da corrida; tirar 1, ${CHASE_RULES.sprintFumblePercent}% mais lento`
+      ? `Correr: teste de vigor, d20 + vigor, o total vira o bônus de velocidade por ${CHASE_RULES.sprintSeconds} segundos. Tirar 20 deixa o agente ${CHASE_RULES.sprintCritPercent}% mais rápido até o fim da corrida; tirar 1, ele tropeça`
       : `Correr: ${this.sprintSub(sp)}`;
   }
 
