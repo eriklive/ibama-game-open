@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorWall, doorsOf, inStructure, playArea, structureView } from './maps';
-import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
+import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, reachableHexes, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -29,6 +29,8 @@ const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa um
 const RUN_SPEED = 3.6 * METER;
 /** Raio (em hexágonos) em que um garimpeiro não rendido faz o agente se abrigar na carga baixa. */
 const COVER_THREAT_RANGE = 6;
+/** Com um rendido a até tantos passos (contornando paredes), o agente não se abaixa na cobertura. */
+const COVER_SURRENDERED_RANGE = 2;
 
 /**
  * Câmera de perseguição (relativa ao agente, olhando para o inimigo): atrás e acima dele, mira à
@@ -242,15 +244,20 @@ const KICK_POSES: Record<'chamber' | 'coil' | 'strike' | 'through' | 'recoil', P
 };
 
 /**
- * Chute com o clipe `kick` (a joelhada avançando da UAL): nos pontos do clipe (s) em que ele carrega
- * agachado, chega com o joelho alto e volta. Na hora do impacto a perna estica por cima do clipe
- * (`extend`): a sola vai até ~1,3 m à frente de onde ele estava, na altura da fechadura.
+ * Chute de arrombamento (chute frontal, de empurrar) com o clipe `kick` (a joelhada avançando da
+ * UAL), em pontos do clipe (0 a 1): dá o passo e começa a subir o joelho até `load`; no slow o
+ * joelho chega no peito (`chamber`, o clipe segura o joelho lá em cima até `after`) e volta até
+ * `end`. Por cima do clipe: no recolher (`chamber`) o joelho sobe mais, o pé puxa a ponta para
+ * cima e o tronco vai para trás; no golpe (`strike`) a perna estica reto para a frente, na altura
+ * da fechadura, com a sola chapada na porta (~1,3 m à frente de onde ele estava) e o corpo atrás.
+ * Quando a porta cede, a perna vai junto (`through`); quando aguenta, ela recolhe (`recoil`).
  */
-const KICK_CLIP = { load: 0.15, hold: 0.27, peak: 0.35, after: 0.45, end: 0.87 } as const;
-const KICK_LAYER: Record<'extend' | 'through' | 'recoil', Partial<Pose>> = {
-  extend: { thigh: 0.5, calf: -1.5, foot: -0.5, spine: -0.3 },
-  through: { thigh: 0.65, calf: -1.4, foot: -0.4, spine: -0.15 },
-  recoil: { thigh: 0.15, calf: -0.5, foot: -0.2, spine: -0.1 },
+const KICK_CLIP = { load: 0.3, chamber: 0.4, after: 0.45, end: 0.87 } as const;
+const KICK_LAYER: Record<'chamber' | 'strike' | 'through' | 'recoil', Partial<Pose>> = {
+  chamber: { thigh: -0.35, calf: 0.3, foot: -0.8, spine: -0.55 },
+  strike: { thigh: 0.45, calf: -2.2, foot: -1.0, spine: -0.9 },
+  through: { thigh: 0.55, calf: -2.3, foot: -0.8, spine: -0.4 },
+  recoil: { thigh: -0.15, calf: 0.15, foot: -0.5, spine: -0.45 },
 };
 /** Distância da porta para chutar: com o clipe ele avança; sem ele, a perna procedural alcança de perto. */
 const KICK_REACH = { clip: 1.65, pose: 1.05 } as const;
@@ -486,6 +493,8 @@ export class HexBoard {
   private sightWalls = new Set<string>();
   /** Agentes agachados numa porta (pick lock): a reavaliação da cobertura não os levanta. */
   private readonly doorCrouch = new Set<string>();
+  /** Agentes já avistados por algum inimigo (ver `setSeenAgents`): não se abaixam na cobertura. */
+  private seenAgents = new Set<string>();
   private readonly enemies = new Map<string, EnemyView>();
   private readonly activeMarker: THREE.Mesh;
   private readonly focusMarker: THREE.Mesh;
@@ -1954,9 +1963,10 @@ export class HexBoard {
   }
 
   /**
-   * O chute com o clipe `kick`: carrega agachado no tempo normal; no fundo da carga a cena entra em
-   * slow e o joelho sobe devagar enquanto `onSlow` não termina (o d20 rolando); aí o slow acaba e,
-   * em velocidade cheia, o joelho chega lá em cima e a perna estica até a porta (`onImpact`).
+   * O chute com o clipe `kick`: dá o passo e sobe o joelho no tempo normal; perto do fim a cena
+   * entra em slow e o joelho chega devagar no peito, com o pé puxado e o corpo para trás, enquanto
+   * `onSlow` não termina (o d20 rolando); aí o slow acaba e, em velocidade cheia, a perna estica
+   * reto e a sola bate chapada na porta (`onImpact`).
    */
   private async kickClip(
     u: UnitView,
@@ -1973,7 +1983,11 @@ export class HexBoard {
     try {
       mixPose(pose, rest, rest, 1);
       rig.scrub('kick', 0, 0.15);
-      // 1. carrega: agacha e dá o passo de apoio (no tempo da cena)
+      const chamber = layer(KICK_LAYER.chamber);
+      const strike = layer(KICK_LAYER.strike);
+      // quanto do recolher já entrou (0 a 1), pelo ponto do clipe
+      const chambered = (at: number) => THREE.MathUtils.clamp((at - C.load) / (C.chamber - C.load), 0, 1);
+      // 1. dá o passo de apoio e começa a subir o joelho (no tempo da cena)
       let slowed = false;
       await this.sceneTween(320, (t) => {
         rig.scrub('kick', C.load * easeOut(t));
@@ -1982,7 +1996,7 @@ export class HexBoard {
           this.setSceneSlowmo(true);
         }
       });
-      // 2. slow: o joelho sobe devagar enquanto o d20 rola
+      // 2. slow: o joelho chega devagar no peito (pé puxado, corpo para trás) enquanto o d20 rola
       let at = C.load;
       if (opts.onSlow) {
         let done = false;
@@ -1993,8 +2007,9 @@ export class HexBoard {
             if (this.disposed || done) return resolve();
             const dt = (now - last) / 1000;
             last = now;
-            at += (C.hold - at) * (1 - Math.exp(-dt * 1.4));
+            at += (C.chamber - at) * (1 - Math.exp(-dt * 1.6));
             rig.scrub('kick', at);
+            mixPose(pose, rest, chamber, easeInOut(chambered(at)));
             requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
@@ -2002,19 +2017,30 @@ export class HexBoard {
         await held;
         this.setSceneSlowmo(false);
       }
-      // 3. sai do slow no gesto: o joelho chega e a perna estica na porta
+      // 3. sai do slow no gesto: termina de recolher (rápido, se o d20 não deu tempo)...
       const from = at;
-      await this.tween(110, (t) => {
+      const left = 1 - chambered(from);
+      if (left > 0.05) {
+        const start = { ...pose };
+        await this.tween(140 * left, (t) => {
+          const e = easeOut(t);
+          rig.scrub('kick', lerp(from, C.chamber, e));
+          mixPose(pose, start, chamber, e);
+        });
+      }
+      // ...e explode a perna reto para a frente: a sola bate chapada na porta, o corpo atrás
+      const strikeAt = lerp(C.chamber, C.after, 0.4);
+      await this.tween(100, (t) => {
         const e = t * t;
-        rig.scrub('kick', lerp(from, C.peak, e));
-        mixPose(pose, rest, layer(KICK_LAYER.extend), e);
+        rig.scrub('kick', lerp(C.chamber, strikeAt, e));
+        mixPose(pose, chamber, strike, e);
       });
       opts.onImpact();
-      // 4. a porta cede (a perna vai junto) ou aguenta (o pé volta)
+      // 4. a porta cede (a perna vai junto) ou aguenta (a perna recolhe)
       const hit = opts.through ? layer(KICK_LAYER.through) : layer(KICK_LAYER.recoil);
       await this.tween(180, (t) => {
-        rig.scrub('kick', lerp(C.peak, C.after, t));
-        mixPose(pose, layer(KICK_LAYER.extend), hit, easeOut(t));
+        rig.scrub('kick', lerp(strikeAt, C.after, t));
+        mixPose(pose, strike, hit, easeOut(t));
       });
       // 5. volta para o lugar
       await this.tween(480, (t) => {
@@ -2958,21 +2984,48 @@ export class HexBoard {
   /**
    * Parado ao lado de carga baixa, o agente fica agachado atrás dela — mas só se houver
    * um garimpeiro não rendido a até `COVER_THREAT_RANGE` hexágonos, sem parede no meio.
+   * Não se abaixa se já foi visto por um inimigo (esconder não adianta mais) nem se há um
+   * rendido a até `COVER_SURRENDERED_RANGE` hexágonos de caminho (contornando paredes):
+   * está de pé cuidando dele.
    */
   private restClip(u: UnitView): 'idle' | 'crouch' {
-    return this.crouchSpots.has(hexKey(u.hex)) && this.threatNear(u.hex) ? 'crouch' : 'idle';
+    if (!this.crouchSpots.has(hexKey(u.hex)) || this.seenAgents.has(u.id)) return 'idle';
+    const walls = this.coverWalls();
+    return this.threatNear(u.hex, walls) && !this.surrenderedNear(u.hex, walls) ? 'crouch' : 'idle';
+  }
+
+  /** Paredes para a cobertura: as fixas e as portas fechadas. */
+  private coverWalls(): ReadonlySet<string> {
+    const closed = [...this.doorStates.values()].filter((d) => !isOpen(d)).map((d) => hexKey(d.hex));
+    return closed.length ? new Set([...this.sightWalls, ...closed]) : this.sightWalls;
   }
 
   /** Algum inimigo à vista (não rendido, no tabuleiro) a até `COVER_THREAT_RANGE` hexágonos. */
-  private threatNear(hex: HexCoord): boolean {
-    let walls: ReadonlySet<string> = this.sightWalls;
-    const closed = [...this.doorStates.values()].filter((d) => !isOpen(d)).map((d) => hexKey(d.hex));
-    if (closed.length) walls = new Set([...walls, ...closed]);
+  private threatNear(hex: HexCoord, walls: ReadonlySet<string>): boolean {
     for (const e of this.enemies.values()) {
       if (e.gone || e.surrendered) continue;
       if (hexDistance(hex, e.hex) <= COVER_THREAT_RANGE && lineOfSight(hex, e.hex, walls)) return true;
     }
     return false;
+  }
+
+  /** Algum rendido (no tabuleiro) a até `COVER_SURRENDERED_RANGE` passos, sem atravessar parede. */
+  private surrenderedNear(hex: HexCoord, walls: ReadonlySet<string>): boolean {
+    const near = [...this.enemies.values()].filter(
+      (e) => !e.gone && e.surrendered && hexDistance(hex, e.hex) <= COVER_SURRENDERED_RANGE,
+    );
+    if (!near.length) return false;
+    const reach = reachableHexes(hex, COVER_SURRENDERED_RANGE, this.area, walls);
+    return near.some((e) => reach.has(hexKey(e.hex)));
+  }
+
+  /**
+   * Agentes já avistados por algum inimigo: não se abaixam mais na cobertura. A lista vem
+   * inteira (o jogo zera ao recomeçar a partida).
+   */
+  setSeenAgents(ids: Iterable<string>): void {
+    this.seenAgents = new Set(ids);
+    this.refreshCover();
   }
 
   /** Reavalia a pose de quem está parado (a ameaça mudou: rendeu, fugiu, andou, porta). */
@@ -4470,7 +4523,10 @@ export class HexBoard {
     const u = this.activeId ? this.units.get(this.activeId) : undefined;
     if (!u) return 0;
     const near = new Set([u.hex, ...hexNeighbors(u.hex)].map(hexKey));
-    const byWall = (key: string): boolean => [...this.doorRun(key)].some((k) => near.has(k));
+    const byWall = (key: string): boolean => {
+      for (const k of this.doorRun(key)) if (near.has(k)) return true;
+      return false;
+    };
     // casa: um giro só, de toda a parede da porta de entrada até sair, que mostra as portas e os cômodos
     for (const st of this.structures) {
       if (st.kind !== 'house') continue;
