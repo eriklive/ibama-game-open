@@ -1,4 +1,4 @@
-<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="search() || aiming() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
+<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="prop() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
   <!-- Modo Corrida: o mapa de corrida, por cima do tabuleiro (ver game/runner-session.ts) -->
   <canvas #runner class="board runner" [class.on]="runnerOn()" aria-label="Corrida: arraste para os lados para virar nas curvas, para cima para pular e para baixo para deslizar."></canvas>
@@ -504,19 +504,6 @@
         <span class="stencil">Cancelar</span>
         @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
       </button>
-    } @else if (keyPrompt()) {
-      <div class="slip key-slip" role="status" aria-live="polite" data-testid="key-hint">
-        <strong>Uma chave com a etiqueta "AVIÃO"</strong>
-        <span class="small">Pegar a chave do avião?</span>
-      </div>
-      <button type="button" class="stamp confirm" (click)="takeKey()" data-testid="key-take">
-        <span class="stamp-ring"><span class="stamp-text">Pegar!</span></span>
-        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-      </button>
-      <button type="button" class="paper side" (click)="leaveKey()" data-testid="key-leave">
-        <span class="stencil">Deixar</span>
-        @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
-      </button>
     } @else if (grouping()) {
       <div class="slip" role="status" aria-live="polite" data-testid="group-hint">
         <strong>Agrupar a equipe</strong>
@@ -589,17 +576,16 @@
           </span>
         </div>
       }
-      <!-- Inspecionar: o toque é na lupa do tabuleiro; este botão só aparece com o foco do teclado -->
+      <!-- Olhar de perto (zoom no móvel): o toque é no próprio móvel; este botão só aparece com o foco do teclado -->
       @if (inspectable(); as item) {
         <button
           type="button"
           class="paper inspect keyboard-only"
-          [disabled]="movesLeft() < searchRules.inspectCost"
-          [attr.aria-label]="'Inspecionar a ' + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'"
+          [attr.aria-label]="'Olhar de perto ' + item.at"
           data-testid="inspect"
-          (click)="inspect()">
-          <span class="stencil">Inspecionar</span>
-          <span class="typed">{{ item.furniture }} · d20 · {{ searchRules.inspectCost }} mov.</span>
+          (click)="openProp(item)">
+          <span class="stencil">Olhar de perto</span>
+          <span class="typed">{{ item.furniture }}</span>
         </button>
       }
       <!-- Conversar: colado em qualquer rendido; sem diálogo, o papel aparece bloqueado -->
@@ -644,16 +630,16 @@
         </button>
       }
       <!-- Avião: sem botão; o menu de inspecionar abre tocando no próprio avião (ver `tapTarget`) -->
-      <!-- Quadro de chaves: colado nele, procura a chave (percepção, se ninguém sabe qual é) -->
-      @if (nearPanel()) {
+      <!-- Quadro de chaves: colado nele, o botão (ou o toque no quadro) aproxima a câmera -->
+      @if (nearPanel() && !prop()) {
         <button
           type="button"
           class="paper door-btn key-btn"
-          [attr.aria-label]="keySeen() ? 'Quadro de chaves: pegar a chave do avião' : 'Quadro de chaves: procurar a chave do avião (percepção, d20)'"
+          aria-label="Quadro de chaves: olhar de perto"
           data-testid="key-panel"
-          (click)="touchKeyPanel()">
+          (click)="openProp('keys')">
           <span class="stencil">Chaves</span>
-          <span class="typed">{{ keySeen() ? 'pegar a do avião' : 'procurar · d20' }}</span>
+          <span class="typed">olhar de perto</span>
         </button>
       }
       <!-- Abordar só aparece com suspeito no raio: o toque abre o modo de abordagem -->
@@ -673,72 +659,40 @@
   </div>
 
   <!--
-    Inspeção (toque na lupa): câmera travada atrás do agente, a HUD some e só fica o que dá
-    para tocar, no mesmo lugar e no mesmo jeito dos outros modos (bilhete, carimbo e Cancelar).
+    Zoom num móvel já percebido (o quadro de chaves, o armário): câmera de frente para ele, a HUD
+    some e a peça aparece destacada. Ela se pega tocando nela (no teclado, o botão "Pegar");
+    "Fechar" volta ao tabuleiro.
   -->
-  @if (aiming(); as item) {
-    <div class="focus-stage" data-testid="inspect-focus">
-      @if (search(); as sv) {
-        <!-- uma rolagem por lance: "De novo!" recria o dado, que rola outra vez -->
-        @for (n of [sv.throw]; track n) {
-          <app-d20 class="focus-die" aria-hidden="true" [tone]="sv.pass === null ? 'gold' : sv.pass ? 'pass' : 'fail'" (rolled)="searchDieRolled($event)" />
-        }
-      }
-    </div>
+  @if (prop(); as pv) {
+    <div class="focus-stage prop-stage" data-testid="prop-focus"></div>
     <div class="aim-actions">
-      @if (search(); as sv) {
-        <div class="slip inspect-slip" [class.pass]="sv.pass === true" role="status" aria-live="polite" data-testid="search-focus">
-          @if (sv.pass === null) {
-            <strong>Rolando…</strong>
-            <span>{{ sv.who }} · {{ sv.furniture }}</span>
-            <span class="small">d20 · mais que {{ sv.target }}</span>
-          } @else if (sv.pass) {
-            <strong data-testid="search-result">Achou!</strong>
-            <span>{{ sv.seized }}</span>
-            <span class="small">tirou {{ sv.result }} no d20</span>
-          } @else {
-            <strong data-testid="search-result">Falhou</strong>
-            <span>Tirou {{ sv.result }}: nada na {{ sv.furniture }} ainda.</span>
-            <span class="small">
-              {{ movesLeft() >= searchRules.inspectCost ? 'Tentar de novo gasta ' + searchRules.inspectCost + ' mov. (resta ' + movesLeft() + ')' : 'Sem movimento para tentar de novo' }}
-            </span>
+      <div class="slip inspect-slip prop-slip" [class.pass]="pv.taken" role="status" aria-live="polite" data-testid="prop-hint">
+        <strong>{{ pv.title }}</strong>
+        @if (pv.taken) {
+          <span data-testid="prop-result">{{ pv.note }}</span>
+        } @else {
+          <span data-testid="prop-seen">{{ pv.glimpse }} Toque nela para pegar.</span>
+          @if (pv.note) {
+            <span class="small" data-testid="prop-note">{{ pv.note }}</span>
           }
-        </div>
-        @if (sv.pass === false) {
-          <button type="button" class="stamp confirm" #searchClose data-testid="search-retry"
-            [disabled]="movesLeft() < searchRules.inspectCost" (click)="retryInspect()">
-            <span class="stamp-ring">
-              <span class="stamp-small">{{ searchRules.inspectCost }} mov.</span>
-              <span class="stamp-text">De novo!</span>
-            </span>
-            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-          </button>
-          <button type="button" class="paper side" data-testid="search-close" (click)="closeSearch()">
-            <span class="stencil">Fechar</span>
-            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
-          </button>
-        } @else if (sv.pass) {
-          <button type="button" class="stamp confirm" #searchClose data-testid="search-close" (click)="closeSearch()">
-            <span class="stamp-ring"><span class="stamp-text">Fechar</span></span>
-            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-          </button>
         }
-      } @else {
-        <div class="slip inspect-slip" role="status" aria-live="polite" data-testid="inspect-hint">
-          <strong>Inspecionar a {{ item.furniture }}?</strong>
-          <span>d20 · mais que {{ searchRules.find }} acha.</span>
-          <span class="small">Cada rolagem gasta {{ searchRules.inspectCost }} mov. (resta {{ movesLeft() }})</span>
-        </div>
-        <button type="button" class="stamp confirm inspect-stamp" data-testid="inspect-go" (click)="inspect()"
-          [attr.aria-label]="'Inspecionar a ' + item.furniture + ' (d20, gasta ' + searchRules.inspectCost + ' de movimento)'">
-          <span class="stamp-ring">
-            <span class="stamp-small">d20 · {{ searchRules.inspectCost }} mov.</span>
-            <span class="stamp-text">Inspecionar</span>
-          </span>
+      </div>
+      @if (!pv.taken) {
+        <!-- pelo teclado: pegar sem tocar na peça -->
+        <button type="button" class="paper keyboard-only prop-take" data-testid="prop-take" (click)="takeProp()"
+          [attr.aria-label]="'Pegar ' + pv.item">
+          <span class="stencil">Pegar</span>
+          <span class="typed">{{ pv.item }}</span>
+        </button>
+      }
+      @if (pv.taken) {
+        <button type="button" class="stamp confirm" #propClose data-testid="prop-close" (click)="closeProp()">
+          <span class="stamp-ring"><span class="stamp-text">Fechar</span></span>
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
         </button>
-        <button type="button" class="paper side" data-testid="inspect-cancel" (click)="cancelInspect()">
-          <span class="stencil">Cancelar</span>
+      } @else {
+        <button type="button" class="paper side" #propClose data-testid="prop-close" (click)="closeProp()">
+          <span class="stencil">Fechar</span>
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
         </button>
       }

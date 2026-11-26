@@ -92,13 +92,10 @@ import {
   KEY_TAKEN,
   PlaneState,
   WITNESS_LINE,
-  keyKnown,
   leftKey,
   lockedClue,
   lookInside,
-  needsKeyRoll,
   nextToPanel,
-  seesKey,
   witness,
 } from '../../game/plane';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
@@ -122,7 +119,7 @@ import { AIM_PATTERN, APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } 
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-tablet';
 import { HexCoord, hexDistance, hexKey, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
+import { CHARACTERS, Character, GameMap, HexRect, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import { TEST_CASES, TestCase, findTestCase } from '../../game/test-cases';
 import {
@@ -174,17 +171,27 @@ export interface FieldNote {
   depth: number;
 }
 
-/** Inspeção em close-up: quem procura, onde e o resultado do d20 (quando parar). */
-interface SearchView {
+/**
+ * Zoom num móvel já percebido (o quadro de chaves, o armário de um esconderijo): a câmera fica
+ * de frente para ele, a peça (a chave do avião, a arma) aparece destacada e se pega tocando nela.
+ */
+interface PropView {
+  kind: 'keys' | 'cache';
+  /** O esconderijo (`cache`). */
+  hidden?: HiddenItem;
+  spot: HexCoord;
+  /** Título do bilhete ("Quadro de chaves", "Armário do caseiro"). */
+  title: string;
+  /** A peça ("a chave do avião", "a arma"). */
+  item: string;
+  /** O que se destaca ("Uma coronha de madeira…"). */
+  glimpse: string;
+  /** Quem olha (nome). */
   who: string;
-  furniture: string;
-  target: number;
-  result: number | null;
-  pass: boolean | null;
-  /** Aviso quando acha ("Arma apreendida!"). */
-  seized: string;
-  /** Número do lance: cada lance novo recria o `app-d20` (que rola de novo). */
-  throw: number;
+  /** A peça foi pega. */
+  taken: boolean;
+  /** O que se vê ao tocar no resto do móvel ou ao pegar a peça. */
+  note: string | null;
 }
 
 /** Teste de d20 mostrado na ficha da lateral. */
@@ -411,8 +418,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   constructor() {
     // resultado na tela: o foco vai para "Confirmar" (Enter/Espaço fecham)
     effect(() => this.rollConfirmBtn()?.nativeElement.focus({ preventScroll: true }));
-    // resultado da inspeção: o foco vai para "De novo!" (falhou) ou "Fechar"
-    effect(() => this.searchCloseBtn()?.nativeElement.focus({ preventScroll: true }));
+    // zoom num móvel: o foco vai para "Fechar" (Esc também fecha)
+    effect(() => this.propCloseBtn()?.nativeElement.focus({ preventScroll: true }));
     // ficha do d20: o foco vai para "Continuar" (o tablet do auto de abordagem foca a própria tecla)
     effect(() => this.checkCloseBtn()?.nativeElement.focus({ preventScroll: true }));
     // troca de modo no menu: o tabuleiro remonta o mundo em segundo plano
@@ -441,7 +448,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // ganha um contorno que pulsa, e só quando dá para tocar nele (a escolha da vez, sem outro modo aberto)
     effect(() => {
       const free =
-        this.phase() === 'moving-choice' && !this.search() && !this.aiming() &&
+        this.phase() === 'moving-choice' && !this.prop() &&
         !this.approaching() && !this.grouping() && !this.burning();
       this.board?.showTargetOutlines(free);
       // alvo já tocado uma vez (o caminho até ele está marcado): contorno maior e amarelo, fantasma
@@ -636,34 +643,26 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private checkSeq = 0;
   protected readonly searchRules = SEARCH_RULES;
   /**
-   * Inspeção em close-up (toque na lupa): a câmera aproxima, o d20 rola no meio da cena e o
-   * resultado fica na tela até o jogador tocar em **Fechar**.
+   * Zoom num móvel (o quadro de chaves, o armário): a câmera trava de frente para ele, a HUD
+   * some e sobram o bilhete e **Fechar**; a peça, destacada, se pega tocando nela.
    */
-  protected readonly search = signal<SearchView | null>(null);
-  /**
-   * Inspeção aberta (toque na lupa): a câmera trava atrás do agente com o móvel em foco; a
-   * HUD some e só fica o que dá para tocar (**Inspecionar!** e **Cancelar**, depois o resultado).
-   */
-  protected readonly aiming = signal<HiddenItem | null>(null);
-  /** Quem espera o d20 da inspeção parar. */
-  private searchRolled?: (value: number) => void;
-  /** Conta os lances do d20 da inspeção (cada um recria o dado). */
-  private searchThrows = 0;
-  private readonly searchCloseBtn = viewChild('searchClose', { read: ElementRef<HTMLButtonElement> });
+  protected readonly prop = signal<PropView | null>(null);
+  private readonly propCloseBtn = viewChild('propClose', { read: ElementRef<HTMLButtonElement> });
   private readonly checkCloseBtn = viewChild('checkClose', { read: ElementRef<HTMLButtonElement> });
   private readonly tablet = viewChild(ApproachTablet);
-  /** Esconderijos em que alguém reparou (o móvel ganha a lupa e pode ser inspecionado). */
+  /**
+   * Móveis em que alguém reparou (percepção ou um suspeito que contou): os esconderijos e o
+   * quadro de chaves (`KEY_PANEL_ID`). Só esses ganham o contorno e abrem o zoom.
+   */
   protected readonly noticed = signal<ReadonlySet<string>>(new Set());
   /** Esconderijos já achados (o que havia lá foi apreendido). */
   protected readonly found = signal<ReadonlySet<string>>(new Set());
-  /** Tentativas de inspecionar que falharam, por esconderijo (o botão vira "rolar de novo"). */
-  protected readonly searchFails = signal<ReadonlyMap<string, number>>(new Map());
-  /** Quem já rolou percepção em cada esconderijo (`esconderijo:agente`): uma vez por agente. */
+  /** Quem já rolou percepção em cada móvel (`móvel:agente`): uma vez por agente. */
   private readonly noticeRolled = new Set<string>();
 
-  /** Esconderijo percebido, ainda não achado, colado no agente da vez. */
+  /** Esconderijo percebido, ainda não achado, cujo móvel está colado no agente da vez. */
   protected readonly inspectable = computed<HiddenItem | null>(() => {
-    if (this.phase() !== 'moving-choice' || this.viewingOther()) return null;
+    if (this.phase() !== 'moving-choice' || this.viewingOther() || this.prop()) return null;
     const from = this.positions().get(this.active().id);
     if (!from) return null;
     const noticed = this.noticed();
@@ -924,7 +923,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private checkLessons(): void {
     const board = this.board;
     if (!board || this.destroyed || this.lesson() || this.intro() || this.menuOpen()) return;
-    if (this.phase() !== 'moving-choice' || this.approaching() || this.interrogation() || this.search()) return;
+    if (this.phase() !== 'moving-choice' || this.approaching() || this.interrogation() || this.prop()) return;
     const canvas = this.canvasRef().nativeElement;
     const w = canvas.clientWidth;
     const h = canvas.clientHeight;
@@ -1283,7 +1282,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.pickCharacter(id),
-        onClueTap: () => this.tapClue(),
+        onPropTap: (part) => this.tapProp(part),
         onTargetTap: (id) => {
           this.tapTarget(id);
           this.centerOnTarget(id);
@@ -1590,6 +1589,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (ev.key === 'Escape') this.skipMissionIntro();
       else return;
       ev.preventDefault();
+      return;
+    }
+    // zoom num móvel: Esc fecha (o foco já fica no "Fechar"; "Pegar" aparece com o Tab)
+    if (this.prop()) {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault();
+      this.closeProp();
       return;
     }
     if (this.targetPrompt()) {
@@ -2344,13 +2350,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     if (id === KEY_TARGET) {
       const panel = this.map?.keyPanel;
-      if (!panel || this.hasKey()) return null;
+      if (!panel || !this.panelNoticed()) return null;
       return {
         id,
         near: (h) => nextToPanel(h, panel),
         spare: 0,
-        far: 'Chegue colado no quadro de chaves para mexer nele',
-        act: () => void this.touchKeyPanel(),
+        far: 'Chegue colado no quadro de chaves para olhar de perto',
+        act: () => void this.openProp('keys'),
       };
     }
     if (id.startsWith(SPOT_TARGET)) {
@@ -2359,9 +2365,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return {
         id,
         near: (h) => canReach(h, item.spot),
-        spare: SEARCH_RULES.inspectCost,
-        far: `Chegue colado na ${item.furniture} para inspecionar`,
-        act: () => this.startInspect(),
+        spare: 0,
+        far: `Chegue colado ${item.at} para olhar de perto`,
+        act: () => void this.openProp(item),
       };
     }
     if (id.startsWith(NPC_TARGET)) {
@@ -2512,7 +2518,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return this.tapTargetOf(aim.id);
   });
 
-  /** Móveis com algo percebido e ainda não achado: dá para tocar neles e inspecionar. */
+  /** Móveis de esconderijos percebidos e ainda não achados: tocar neles aproxima a câmera (ver `openProp`). */
   private readonly spotTargets = computed<HiddenItem[]>(() => {
     const noticed = this.noticed();
     const found = this.found();
@@ -2521,15 +2527,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Tudo o que se toca direto no tabuleiro, com o contorno pulsante (ver `HexBoard.setTargetOutlines`):
-   * os queimáveis ainda inteiros, as portas fechadas, o quadro de chaves (enquanto a chave estiver
-   * lá) e os móveis com algo percebido. Os NPCs rendidos vão à parte (`setNpcTargets`).
+   * os queimáveis ainda inteiros, as portas fechadas, o quadro de chaves (percebido, enquanto a
+   * chave estiver lá) e os móveis dos esconderijos percebidos e ainda não achados. Os NPCs rendidos vão à parte (`setNpcTargets`).
    */
   protected readonly tapTargetList = computed<{ id: string; hexes: HexCoord[] }[]>(() => {
     const burned = this.burned();
     const list = (this.map?.burnables ?? []).filter((b) => !burned.has(b.id)).map((b) => ({ id: b.id, hexes: [...b.hexes] }));
     for (const [key, d] of this.doors()) if (!isOpen(d)) list.push({ id: DOOR_TARGET + key, hexes: [d.hex] });
     const panel = this.map?.keyPanel;
-    if (panel && !this.hasKey()) list.push({ id: KEY_TARGET, hexes: [panel.spot] });
+    if (panel && this.panelNoticed()) list.push({ id: KEY_TARGET, hexes: [panel.spot] });
     for (const h of this.spotTargets()) list.push({ id: SPOT_TARGET + h.id, hexes: [h.spot] });
     return list;
   });
@@ -2724,170 +2730,161 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.say(`${names.join(' e ')} ${why}`, 'info');
   }
 
-  // ---------- percepção e inspeção ----------
+  // ---------- zoom nos móveis: percepção e a peça destacável ----------
 
   /**
-   * Percepção passiva: quem acabou de entrar no cômodo de um esconderijo (e ainda não
-   * tinha rolado ali) rola 1d20; passando, repara no móvel. Devolve `false` se a partida
-   * foi recomeçada no meio.
+   * Percepção passiva: quem acabou de andar pelo cômodo de um móvel com algo escondido (o
+   * armário do caseiro, o fundo do hangar com o quadro de chaves) e ainda não tinha rolado ali
+   * rola 1d20. Passando, repara no móvel: ele ganha o contorno pulsante e passa a abrir o zoom.
+   * Falhando, nada se destaca. Devolve `false` se a partida foi recomeçada no meio.
    */
   private async perceive(paths: ReadonlyMap<string, HexCoord[]>): Promise<boolean> {
-    for (const item of this.map?.hidden ?? []) {
+    for (const spot of this.perceivable()) {
       for (const [who, path] of paths) {
-        if (this.noticed().has(item.id)) break;
-        if (!needsNoticeRoll(item, who, path, this.noticed(), this.noticeRolled)) continue;
-        this.noticeRolled.add(`${item.id}:${who}`);
+        if (this.noticed().has(spot.id)) break;
+        if (!needsNoticeRoll(spot, who, path, this.noticed(), this.noticeRolled)) continue;
+        this.noticeRolled.add(`${spot.id}:${who}`);
         this.phase.set('checking');
         const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice);
         if (pass === null) return false;
         if (!pass) continue;
-        this.noticed.update((s) => new Set([...s, item.id]));
-        this.board?.setClue(item.spot);
-        this.board?.keepInView(item.spot);
-        this.say(`${this.nameOf(who)} reparou em algo na ${item.furniture}!`, 'info');
+        this.noticed.update((s) => new Set([...s, spot.id]));
+        this.board?.keepInView(spot.spot);
+        this.say(`${this.nameOf(who)} reparou ${spot.what}!`, 'info');
         this.sound.play('eq.percebeu');
       }
     }
     return true;
   }
 
-  /** Toque na lupa: abre a inspeção (ou, já nela, rola o d20); senão, diz o que falta. */
-  protected tapClue(): void {
-    if (this.aiming()) {
-      if (this.search()?.pass === false) this.retryInspect();
-      else if (!this.search()) void this.inspect();
-      return;
-    }
-    if (this.phase() !== 'moving-choice' || this.approaching() || this.burning() || this.grouping()) return;
-    const item = this.inspectable();
-    if (item) {
-      if (this.movesLeft() < SEARCH_RULES.inspectCost) this.say(`Sem movimento para inspecionar a ${item.furniture} agora`, 'info');
-      else this.startInspect();
-      return;
-    }
-    const spot = (this.map?.hidden ?? []).find((h) => this.noticed().has(h.id) && !this.found().has(h.id));
-    if (spot) this.say(`Chegue colado na ${spot.furniture} para inspecionar`, 'info');
+  /** Móveis que a percepção revela: os esconderijos ainda não achados e o quadro de chaves (com a chave lá). */
+  private perceivable(): { id: string; room: HexRect; spot: HexCoord; what: string }[] {
+    const list = (this.map?.hidden ?? [])
+      .filter((h) => !this.found().has(h.id))
+      .map((h) => ({ id: h.id, room: h.room, spot: h.spot, what: `em algo ${h.at}` }));
+    const panel = this.map?.keyPanel;
+    if (panel && !this.hasKey()) list.push({ id: KEY_PANEL_ID, room: panel.room, spot: panel.spot, what: 'no quadro de chaves do fundo do hangar' });
+    return list;
   }
 
   /**
-   * Abre a inspeção do móvel percebido: a câmera gira para trás do agente da vez (mesma
-   * inclinação do jogo), com o móvel em foco, e fica travada. A HUD some; sobram
-   * **Inspecionar!** (rola o d20) e **Cancelar** (volta ao normal sem gastar nada).
+   * Toque no quadro de chaves (`keys`) ou no móvel de um esconderijo, já percebido: a câmera
+   * fica de frente para ele (`HexBoard.propCloseUp`), a HUD some e a peça (a chave do avião, a
+   * arma) aparece destacada; tocar nela pega (`tapProp`). Não gasta movimento.
    */
-  protected startInspect(): void {
-    const item = this.inspectable();
-    if (this.phase() !== 'moving-choice' || !item || this.movesLeft() < SEARCH_RULES.inspectCost) return;
-    this.focusCharacter(this.active().id);
-    this.closeBurn();
-    this.closeGrouping();
-    this.selected.set(null);
-    this.board?.setSelected(null);
-    this.board?.setReachable([]);
-    this.board?.setInputEnabled(false);
-    this.board?.closeUp(this.active().id, item.spot);
-    this.aiming.set(item);
-  }
-
-  /** **Inspecionar** (botão de teclado, □): abre a inspeção; já nela, rola o d20. */
-  protected inspect(): Promise<void> {
-    if (!this.aiming()) {
-      this.startInspect();
-      return Promise.resolve();
-    }
-    return this.rollInspect();
-  }
-
-  /** **De novo!** depois de uma falha: rola outra vez (gasta mais 1 de movimento). */
-  protected retryInspect(): void {
-    if (this.search()?.pass !== false || this.movesLeft() < SEARCH_RULES.inspectCost) return;
-    void this.rollInspect();
-  }
-
-  /**
-   * Rola o d20 da inspeção: gasta 1 de movimento a cada rolagem, o dado gira no meio da cena
-   * e para no resultado. Se achar, a arma é apreendida; se falhar, o d20 fica com o resultado
-   * e dá para tentar de novo (enquanto houver movimento) ou fechar.
-   */
-  private async rollInspect(): Promise<void> {
-    const item = this.aiming();
+  protected openProp(target: 'keys' | HiddenItem): void {
+    if (this.phase() !== 'moving-choice' || this.prop() || !this.board) return;
     const id = this.active().id;
-    if (!item || this.search()?.result === null || this.movesLeft() < SEARCH_RULES.inspectCost) return;
-    const epoch = this.epoch;
-    this.phase.set('checking');
-    this.movesLeft.update((n) => n - SEARCH_RULES.inspectCost);
-    // o `app-d20` da cena rola sozinho e avisa o resultado quando para
-    const rolled = new Promise<number>((done) => (this.searchRolled = done));
-    this.search.set({
+    const from = this.positions().get(id);
+    if (!from) return;
+    const keys = target === 'keys';
+    const spot = keys
+      ? this.nearPanel()?.spot
+      : this.noticed().has(target.id) && canReach(from, target.spot) && !this.found().has(target.id) ? target.spot : null;
+    if (!spot) return;
+    this.closeApproach();
+    this.closeGrouping();
+    this.closeBurn();
+    this.focusCharacter(id);
+    this.selected.set(null);
+    this.board.setSelected(null);
+    this.board.setReachable([]);
+    this.board.setInputEnabled(false);
+    if (!this.board.propCloseUp(id, spot, this.propInsets())) {
+      this.board.setInputEnabled(true);
+      this.refreshBoard();
+      return;
+    }
+    this.sound.play('ui.confirmar');
+    this.board.setPropHighlight(spot, true);
+    this.prop.set({
+      kind: keys ? 'keys' : 'cache',
+      hidden: keys ? undefined : target,
+      spot,
+      title: keys ? 'Quadro de chaves' : target.title,
+      item: keys ? 'a chave do avião' : `a ${target.name}`,
+      glimpse: keys ? 'A chave de etiqueta vermelha é a do avião.' : target.glimpse,
       who: this.nameOf(id),
-      furniture: item.furniture,
-      target: SEARCH_RULES.find,
-      result: null,
-      pass: null,
-      seized: item.seized,
-      throw: ++this.searchThrows,
+      taken: false,
+      note: null,
     });
-    const motion = !reducedMotion();
-    if (motion) this.haptics.vibrate(ROLL_PATTERN);
-    this.sound.play('eq.vasculhar');
-    this.sound.play('dado.d20', { delay: 0.3 });
-    const result = await rolled;
-    if (this.destroyed || this.epoch !== epoch) return;
-    const pass = beats(result, SEARCH_RULES.find);
-    this.checkSound(result, pass);
-    this.search.update((v) => v && { ...v, result, pass });
+  }
+
+  private patchProp(patch: Partial<PropView>): void {
+    this.prop.update((v) => v && { ...v, ...patch });
+  }
+
+  /**
+   * O que a papelada cobre no zoom (o bilhete e os botões, no canto de baixo à direita): em
+   * paisagem, a faixa da direita; em retrato, a de baixo. As faixas pretas também contam.
+   */
+  private propInsets(): { bottom: number; right: number } {
+    const el = this.canvasRef().nativeElement;
+    const w = Math.max(el.clientWidth || innerWidth, 1);
+    const h = Math.max(el.clientHeight || innerHeight, 1);
+    return w > h * 1.1 ? { bottom: 40 / h, right: Math.min(0.4, 270 / w) } : { bottom: Math.min(0.4, 210 / h), right: 0 };
+  }
+
+  /** Toque no zoom: na peça, pega; no resto do móvel, diz o que tem ali. */
+  private tapProp(part: 'item' | 'other'): void {
+    const v = this.prop();
+    if (!v || v.taken || this.phase() !== 'moving-choice') return;
+    if (part === 'item') {
+      this.takeProp();
+      return;
+    }
+    this.sound.play('ui.hex');
+    this.patchProp({ note: v.kind === 'keys' ? 'Só chaves de cadeado, de gaveta e um cadeado velho.' : (v.hidden?.clutter ?? 'Nada de mais.') });
+  }
+
+  /**
+   * Pega a peça (toque nela, ou ✕ / **Pegar** pelo teclado): a chave vai com a equipe (as
+   * perguntas sobre ela somem); a arma é apreendida. A peça sobe e some do móvel.
+   */
+  protected takeProp(): void {
+    const v = this.prop();
+    if (!v || v.taken || this.phase() !== 'moving-choice') return;
+    this.board?.takePropItem(v.spot);
     this.haptics.vibrate(SETTLE_PATTERN);
-    this.gamepad.rumble(pass ? 0.8 : 0.3, pass ? 0.5 : 0.2, pass ? 260 : 120);
-    if (pass) {
+    this.gamepad.rumble(0.8, 0.5, 220);
+    if (v.kind === 'keys') {
+      this.hasKey.set(true);
+      this.sound.play('eq.chave');
+      this.keySeenBy.set([]);
+      this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
+      this.closeSpeech();
+      this.patchProp({ taken: true, note: 'Chave do avião com a equipe.' });
+    } else if (v.hidden) {
+      const item = v.hidden;
       this.found.update((s) => new Set([...s, item.id]));
-      this.board?.setClue(null);
-    } else {
-      this.searchFails.update((m) => new Map(m).set(item.id, (m.get(item.id) ?? 0) + 1));
+      this.sound.play('eq.vasculhar');
+      this.patchProp({ taken: true, note: item.seized });
     }
   }
 
-  /** **Cancelar** antes de rolar: a câmera volta ao normal e nada é gasto. */
-  protected cancelInspect(): void {
-    if (!this.aiming() || this.search()) return;
-    this.aiming.set(null);
-    this.board?.endCloseUp();
-    this.board?.setInputEnabled(true);
-    if (this.phase() === 'moving-choice') this.refreshBoard();
-  }
-
-  /** **Fechar** (depois de rolar): a câmera volta e a vez segue. */
-  protected closeSearch(): void {
-    const sv = this.search();
-    const item = this.aiming();
-    if (!sv || sv.result === null || !item) return;
-    this.search.set(null);
-    this.aiming.set(null);
-    this.board?.endCloseUp();
-    this.board?.setInputEnabled(true);
-    if (sv.pass) {
-      this.say(`${sv.who} achou a ${item.name} na ${item.furniture}. ${item.seized}`, 'alert');
-    } else {
-      this.say(
-        this.movesLeft() >= SEARCH_RULES.inspectCost
-          ? `Nada na ${item.furniture}… Toque na lupa para tentar de novo (1 de movimento).`
-          : `Nada na ${item.furniture}… Sem movimento para tentar de novo agora.`,
-        'info',
-      );
+  /**
+   * **Fechar**: a câmera volta e a vez segue. Quem viu a chave e não pegou lembra disso (ver
+   * `witness`).
+   */
+  protected closeProp(): void {
+    const v = this.prop();
+    if (!v || this.phase() !== 'moving-choice') return;
+    const id = this.active().id;
+    if (v.kind === 'keys' && !v.taken) {
+      this.keySeenBy.update((l) => leftKey({ ...this.planeState(), seenBy: l }, id).seenBy);
     }
+    this.dropProp();
+    if (v.taken && v.kind === 'keys') this.say(`${v.who} pegou a chave do avião`, 'info');
+    else if (v.taken && v.hidden) this.say(`${v.who} achou a ${v.hidden.name} ${v.hidden.at}. ${v.hidden.seized}`, 'alert');
+    else if (v.kind === 'keys') this.say(`${v.who} deixou a chave no quadro`, 'info');
     this.afterMove();
   }
 
-  /** O d20 da inspeção parou. */
-  protected searchDieRolled(value: number): void {
-    const done = this.searchRolled;
-    this.searchRolled = undefined;
-    done?.(value);
-  }
-
-  /** Recomeço ou saída no meio da inspeção: some com a vista sem seguir a vez. */
-  private dropSearch(): void {
-    this.searchRolled = undefined;
-    this.search.set(null);
-    this.aiming.set(null);
+  /** Some com o zoom (recomeço, saída ou fim do **Fechar**) sem seguir a vez. */
+  private dropProp(): void {
+    const v = this.prop();
+    this.prop.set(null);
+    if (v) this.board?.setPropHighlight(v.spot, false);
     this.board?.endCloseUp();
     this.board?.setInputEnabled(true);
   }
@@ -3449,13 +3446,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.sound.play(noteKind(out) === 'confessou' ? 'eq.confessou' : 'eq.anotar');
     // entregou alguém: aparece no mapa ao encerrar (se a missão tiver essa unidade escondida)
     const hidden = out.reveal ? this.hiddenAccomplice(iv.enemyId) : null;
-    // entregou um esconderijo: conta como percebido (sem rolar percepção; a lupa aparece)
+    // entregou um esconderijo (ou o quadro de chaves): conta como percebido e ganha o contorno
     const noticed = noticedAfter(this.noticed(), out);
-    if (noticed !== this.noticed()) {
-      this.noticed.set(noticed);
-      const item = this.map?.hidden?.find((h) => h.id === out.notices);
-      if (item && !this.found().has(item.id)) this.board?.setClue(item.spot);
-    }
+    if (noticed !== this.noticed()) this.noticed.set(noticed);
     // pista nova: pode liberar perguntas (neste e em outros NPCs)
     if (out.clue && !this.clueLog().has(out.clue)) this.clueLog.update((c) => new Set([...c, out.clue!]));
     const options = dialogueOptions(iv.cls, this.dialogues().get(iv.enemyId) ?? res.memory, this.clues());
@@ -3731,16 +3724,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   // ---------- avião trancado e quadro de chaves ----------
 
-  /** Alguém já tentou olhar dentro do avião (sabe que aquela chave é a dele). */
-  private readonly planeTried = signal(false);
   /** A equipe pegou a chave. */
   protected readonly hasKey = signal(false);
   /** Quem viu a chave no quadro e deixou lá. */
   private readonly keySeenBy = signal<readonly string[]>([]);
-  /** Quem já mexeu no quadro rolando percepção (uma vez por agente). */
-  private readonly keyRolled = new Set<string>();
-  /** O agente da vez viu a chave e escolhe entre pegar e deixar. */
-  protected readonly keyPrompt = signal(false);
   /** Linha do que se vê no menu do avião ("O avião está trancado."). */
   protected readonly planeNote = signal<string | null>(null);
   /** Fala embaixo da tela, com o avatar de quem fala. */
@@ -3749,12 +3736,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** O que a equipe sabe do avião e da chave (a regra está em `plane.ts`). */
   private readonly planeState = computed<PlaneState>(() => ({
-    tried: this.planeTried(),
     hasKey: this.hasKey(),
-    // o piloto contou onde está a chave: `notices` põe o quadro entre os percebidos
-    told: this.noticed().has(KEY_PANEL_ID),
     seenBy: this.keySeenBy(),
   }));
+  /**
+   * O quadro de chaves tem o contorno e abre o zoom: alguém reparou nele (percepção no fundo do
+   * hangar) ou o piloto contou (`notices` põe o quadro entre os percebidos), e a chave está lá.
+   */
+  protected readonly panelNoticed = computed(() => !!this.map?.keyPanel && !this.hasKey() && this.noticed().has(KEY_PANEL_ID));
 
   /**
    * Avião ainda inteiro, colado no agente da vez. Não tem botão na tela: o menu de inspecionar abre
@@ -3766,12 +3755,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!from) return null;
     return (this.map?.burnables ?? []).find((t) => t.inspect && !this.burned().has(t.id) && canBurn(from, t)) ?? null;
   });
-  /** A equipe já vê a chave no quadro: dá para pegar sem rolar percepção. */
-  protected readonly keySeen = computed(() => keyKnown(this.planeState()));
-  /** Quadro de chaves colado no agente da vez (a chave ainda está lá). */
+  /** Quadro de chaves percebido, colado no agente da vez (a chave ainda está lá). */
   protected readonly nearPanel = computed(() => {
     const panel = this.map?.keyPanel;
-    if (!panel || this.hasKey() || this.phase() !== 'moving-choice' || this.viewingOther()) return null;
+    if (!panel || !this.panelNoticed() || this.phase() !== 'moving-choice' || this.viewingOther()) return null;
     const from = this.positions().get(this.active().id);
     return from && nextToPanel(from, panel) ? panel : null;
   });
@@ -3805,7 +3792,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeApproach();
     this.closeGrouping();
     this.closeBurn();
-    this.keyPrompt.set(false);
     this.focusCharacter(this.active().id);
     this.selected.set(null);
     this.board.setSelected(null);
@@ -3838,7 +3824,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sound.play('porta.destrancou');
       return;
     }
-    this.planeTried.set(true);
     this.sound.play('eq.aviao-trancado');
     this.noteClue(lockedClue(this.planeState()));
     this.planeNote.set('O avião está trancado. Pergunte ao piloto e aos ajudantes onde está a chave.');
@@ -3856,57 +3841,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.planeNote.set(null);
     this.phase.set('moving-choice');
     this.startBurn();
-  }
-
-  /**
-   * Mexer no quadro de chaves: rola percepção (uma vez por agente), a não ser que a equipe já
-   * reconheça a chave do avião (alguém tentou o avião ou o piloto contou). Vendo a chave, o
-   * agente escolhe pegar ou deixar.
-   */
-  protected async touchKeyPanel(): Promise<void> {
-    const panel = this.nearPanel();
-    if (!panel || this.phase() !== 'moving-choice' || this.keyPrompt()) return;
-    const who = this.active().id;
-    const state = this.planeState();
-    let pass = false;
-    if (needsKeyRoll(state, who, this.keyRolled)) {
-      this.keyRolled.add(who);
-      this.phase.set('checking');
-      const rolled = await this.rollCheck('notice', who, SEARCH_RULES.notice);
-      if (rolled === null) return;
-      pass = rolled;
-      this.phase.set('moving-choice');
-      this.refreshBoard();
-    } else if (!seesKey(state, false)) {
-      this.say(`${this.nameOf(who)} já olhou o quadro: só chaves de cadeado e gaveta`, 'info');
-      return;
-    }
-    if (!seesKey(state, pass)) {
-      this.say(`${this.nameOf(who)} não viu nada de interessante no quadro de chaves`, 'info');
-      return;
-    }
-    if (pass) this.sound.play('eq.percebeu');
-    this.keyPrompt.set(true);
-  }
-
-  /** Pega a chave do avião: as perguntas sobre ela somem. */
-  protected takeKey(): void {
-    if (!this.keyPrompt()) return;
-    this.keyPrompt.set(false);
-    this.hasKey.set(true);
-    this.sound.play('eq.chave');
-    this.keySeenBy.set([]);
-    this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
-    this.closeSpeech();
-    this.say(`${this.active().name} pegou a chave do avião`, 'info');
-  }
-
-  /** Deixa a chave lá: o agente lembra que viu (ver `witness`). */
-  protected leaveKey(): void {
-    if (!this.keyPrompt()) return;
-    this.keyPrompt.set(false);
-    this.keySeenBy.update((l) => leftKey({ ...this.planeState(), seenBy: l }, this.active().id).seenBy);
-    this.say(`${this.active().name} deixou a chave no quadro`, 'info');
   }
 
   // ---------- encerrar a operação ----------
@@ -3981,24 +3915,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.caughtThisRound.clear();
     this.noticed.set(new Set());
     this.found.set(new Set());
-    this.searchFails.set(new Map());
     this.noticeRolled.clear();
     this.clearChecks();
-    this.dropSearch();
+    this.dropProp();
+    this.board?.resetProps();
     this.dropInterrogation();
     this.dialogues.set(new Map());
     this.clueLog.set(new Set());
-    this.planeTried.set(false);
     this.hasKey.set(false);
     this.keySeenBy.set([]);
-    this.keyRolled.clear();
-    this.keyPrompt.set(false);
     this.planeNote.set(null);
     this.planeBurn.set(false);
     this.closeSpeech();
     this.linePools.set(new Map());
     this.fieldNotes.set([]);
-    this.board?.setClue(null);
     this.doorKey.set(null);
     this.doorBusy.set(false);
     this.breakInUntil.set(0);
@@ -4186,11 +4116,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     switch (b) {
       case 'cross':
-        if (this.keyPrompt()) this.takeKey();
-        else if (this.search()?.pass === false && this.movesLeft() >= SEARCH_RULES.inspectCost) this.retryInspect();
-        else if (this.search()) this.closeSearch();
+        if (this.prop()) { if (this.prop()!.taken) this.closeProp(); else this.takeProp(); }
         else if (this.waitingCheck()) this.closeCheck();
-        else if (this.aiming()) void this.inspect();
         else if (this.phase() === 'rolling') this.confirmRoll();
         else if (this.approaching()) { const t = this.tablet(); if (t) t.press(); else this.confirmApproach(); }
         else if (this.burning()) this.confirmBurn();
@@ -4200,9 +4127,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         else this.focusUnitUnderCursor();
         break;
       case 'circle':
-        if (this.keyPrompt()) this.leaveKey();
-        else if (this.search()) this.closeSearch();
-        else if (this.aiming()) this.cancelInspect();
+        if (this.prop()) this.closeProp();
         else if (this.approaching()) { const t = this.tablet(); if (t) t.cancel(); else this.cancelApproach(); }
         else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) this.cancelGrouping();
@@ -4215,16 +4140,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       case 'square':
         // □ abre o modo de abordagem (de novo, cancela);
         // sem ninguém no raio, queima o alvo ou inspeciona o móvel percebido ao lado
-        if (this.search()?.pass === false) this.retryInspect();
-        else if (this.aiming()) { if (!this.search()) void this.inspect(); }
+        if (this.prop()) break;
         else if (this.approaching()) { const t = this.tablet(); if (t) t.cancel(); else this.cancelApproach(); }
         else if (this.burning()) this.cancelBurn();
         else if (this.grouping()) break;
         else if (this.canApproach()) this.startApproach();
         else if (this.burnable()) this.startBurn();
         else if (this.nearPlane()) this.openPlaneMenu();
-        else if (this.nearPanel()) void this.touchKeyPanel();
-        else if (this.inspectable()) this.startInspect();
+        else if (this.nearPanel()) void this.openProp('keys');
+        else if (this.inspectable()) void this.openProp(this.inspectable()!);
         else if (this.canTalk()) void this.startInterrogation();
         else if (this.nearDoor()) this.openDoorMenu();
         break;
@@ -4232,18 +4156,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.openDebrief();
         break;
       case 'share':
-        if (this.aiming()) break;
+        if (this.prop()) break;
         // Share: agrupa (ou desagrupa) a equipe
         if (this.grouping()) this.cancelGrouping();
         else if (this.group().size) this.ungroup();
         else this.startGrouping();
         break;
       case 'triangle':
-        if (choosing && !this.approaching() && !this.burning() && !this.aiming()) this.endTurn();
+        if (choosing && !this.approaching() && !this.burning() && !this.prop()) this.endTurn();
         break;
       case 'l1':
       case 'r1': {
-        if (this.phase() === 'enemy' || this.phase() === 'chase' || this.aiming() || this.search()) break;
+        if (this.phase() === 'enemy' || this.phase() === 'chase' || this.prop()) break;
         const ids = CHARACTERS.map((c) => c.id);
         const i = ids.indexOf(this.focusedId());
         this.focusCharacter(ids[(i + (b === 'r1' ? 1 : ids.length - 1)) % ids.length]);
@@ -4280,7 +4204,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     const map = this.map;
-    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.approaching() || this.burning() || this.aiming() || this.debrief()) return;
+    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.approaching() || this.burning() || this.prop() || this.debrief()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
     const next = neighborToward(from, dir);
