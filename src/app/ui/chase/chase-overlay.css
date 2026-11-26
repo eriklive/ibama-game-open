@@ -197,6 +197,24 @@
   rotate: -3deg;
   animation: slap 0.2s ease-out both;
 }
+/* d20 natural 20 ou 1: o selo do crítico, embaixo do dado */
+.sprint-crit {
+  position: absolute;
+  bottom: 4px;
+  padding: 2px 8px;
+  font: 700 14px/1.1 var(--stencil);
+  white-space: nowrap;
+  color: var(--ink-paper);
+  background: var(--paper-light);
+  border: 2px solid var(--ink-paper);
+  box-shadow: var(--drop);
+  rotate: 2deg;
+  animation: slap 0.2s 0.1s ease-out both;
+}
+.sprint-crit.fumble {
+  color: var(--paper-light);
+  background: var(--ink-paper);
+}
 @keyframes sprint-pop {
   0% { opacity: 0; translate: 0 60px; scale: 0.3; }
   100% { opacity: 1; translate: 0 -40px; scale: 1; }

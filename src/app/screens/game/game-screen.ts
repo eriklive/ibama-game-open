@@ -26,6 +26,7 @@ import {
   initiativeCheck,
   lockRoute,
   ChaseRoute,
+  agentRate,
   resolveSprint,
   sprintRate,
   sprintTotalMs,
@@ -1963,7 +1964,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // corrida (gás): o mesmo botão de sempre, de novo a cada recarga
     let sprintAt = 0;
     let sprintPct = 0;
-    const boost = () => (sprintPct ? sprintRate(sprintPct, performance.now() - sprintAt) : 1);
+    // acertos e falhas críticas (d20 natural 20 ou 1): mudam a velocidade até o fim da corrida
+    let permanentPct = 0;
+    const boost = () => agentRate(sprintPct ? sprintRate(sprintPct, performance.now() - sprintAt) : 1, permanentPct);
     let shown = -1;
     const session = new RunnerSession({
       canvas: this.runnerRef().nativeElement,
@@ -2007,9 +2010,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sprintStart = () => {
         const roll = rollDie(CHASE_RULES.sprintDie);
         const vigor = this.chaseStats(agentId).vigor ?? 0;
-        const { percent } = resolveSprint(roll, { vigor });
+        const { percent, crit, permanent } = resolveSprint(roll, { vigor });
         const ms = sprintTotalMs();
-        const rolling: SprintView = { state: 'rolling', roll, vigor, percent, ms };
+        const rolling: SprintView = { state: 'rolling', roll, vigor, percent, ms, crit, permanent: permanentPct + permanent };
         const active: SprintView = { ...rolling, state: 'active' };
         this.chaseSprint.set(rolling);
         this.sound.play('dado.d20');
@@ -2025,8 +2028,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
             if (!swap(rolling, active)) return;
             sprintAt = performance.now();
             sprintPct = percent;
-            this.gamepad.rumble(0.4, 0.3, 200);
+            permanentPct += permanent;
+            this.gamepad.rumble(crit === 'critico' ? 0.8 : 0.4, crit === 'critico' ? 0.6 : 0.3, crit ? 350 : 200);
             this.say(`${who} deu o gás: +${percent}% de velocidade por ${CHASE_RULES.sprintSeconds} s!`, 'alert');
+            if (crit === 'critico') {
+              this.sound.play('teste.20');
+              this.say(`Acerto crítico! ${who} fica ${CHASE_RULES.sprintCritPercent}% mais rápido até o fim da corrida.`, 'alert');
+            } else if (crit === 'falha') {
+              this.sound.play('teste.falhou');
+              this.say(`Falha crítica! ${who} fica ${CHASE_RULES.sprintFumblePercent}% mais lento até o fim da corrida.`, 'alert');
+            }
           }, SPRINT_DIE_MS + 150),
           setTimeout(() => swap(active, cooldown), SPRINT_DIE_MS + 150 + ms),
           // recarregou: pode rolar outro d20

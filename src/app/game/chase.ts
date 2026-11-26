@@ -26,6 +26,9 @@
  *    - **corrida** (`resolveSprint`): o jogador pode dar um gás quantas vezes quiser. Rola
  *      teste de vigor, d20 + vigor: o total é quanto (%) o agente fica mais rápido por
  *      `sprintSeconds`. Acabou o gás, `sprintCooldownSeconds` de recarga e pode rolar outro d20.
+ *      O d20 natural conta: **20** (acerto crítico) deixa o agente `sprintCritPercent` (%) mais
+ *      rápido até o fim da corrida; **1** (falha crítica), `sprintFumblePercent` (%) mais lento.
+ *      Acumula (`permanentPercent`).
  *      Só ele acelera; o garimpeiro segue no ritmo dele.
  * 5. **Sem custo.** Perseguir não gasta movimento nem a vez do agente, e não há fôlego.
  * 6. **Vários fugindo.** Uma perseguição por vez. Com o mesmo agente no raio de dois, entra a
@@ -67,6 +70,12 @@ export const CHASE_RULES = {
   sprintSeconds: 5,
   /** Corrida: recarga (s) depois que o gás acaba, até poder rolar outro d20. */
   sprintCooldownSeconds: 3,
+  /** Corrida: tirou 20 no d20 (acerto crítico), o agente fica isto (%) mais rápido até o fim da corrida (acumula). */
+  sprintCritPercent: 10,
+  /** Corrida: tirou 1 no d20 (falha crítica), o agente fica isto (%) mais lento até o fim da corrida (acumula). */
+  sprintFumblePercent: 5,
+  /** Corrida: o agente nunca fica mais lento que isto (multiplicador), por mais falhas críticas que tire. */
+  minRate: 0.5,
   /** Corrida: entrada e saída suaves da velocidade (ms), antes e depois dos `sprintSeconds`. */
   sprintRampMs: 350,
   /** Agarrou: bônus nas rolagens do próximo interrogatório do suspeito abalado. */
@@ -319,17 +328,38 @@ const worldDelta = (a: HexCoord, b: HexCoord): [number, number] => {
 
 // ---------- corrida ----------
 
+export type SprintCrit = 'critico' | 'falha';
+
 export interface SprintResult {
   /** d20 + vigor. */
   total: number;
   /** Quanto mais rápido o agente fica (%): o total, pelo menos `sprintMin`. */
   percent: number;
+  /** d20 natural 20: acerto crítico; 1: falha crítica. */
+  crit?: SprintCrit;
+  /** Quanto a velocidade dele muda (%) até o fim da corrida: +`sprintCritPercent`, −`sprintFumblePercent` ou 0. */
+  permanent: number;
 }
 
-/** Corrida: teste de vigor. d20 + vigor, e o total é o bônus de velocidade em % (pelo menos `sprintMin`). */
+/**
+ * Corrida: teste de vigor. d20 + vigor, e o total é o bônus de velocidade em % (pelo menos
+ * `sprintMin`). O d20 natural 20 é acerto crítico (+`sprintCritPercent`% até o fim da corrida);
+ * o 1, falha crítica (−`sprintFumblePercent`%). O gás sai do mesmo jeito.
+ */
 export function resolveSprint(roll: number, agent: ChaseStats): SprintResult {
   const total = roll + (agent.vigor ?? 0);
-  return { total, percent: Math.max(CHASE_RULES.sprintMin, total) };
+  const percent = Math.max(CHASE_RULES.sprintMin, total);
+  if (roll >= CHASE_RULES.sprintDie) return { total, percent, crit: 'critico', permanent: CHASE_RULES.sprintCritPercent };
+  if (roll <= 1) return { total, percent, crit: 'falha', permanent: -CHASE_RULES.sprintFumblePercent };
+  return { total, percent, permanent: 0 };
+}
+
+/**
+ * Corrida: o multiplicador de velocidade do agente com o gás (`sprintRate`) e o que os críticos
+ * já somaram (`permanentPercent`, em %). Nunca abaixo de `minRate`.
+ */
+export function agentRate(sprint: number, permanentPercent: number): number {
+  return Math.max(CHASE_RULES.minRate, sprint + permanentPercent / 100);
 }
 
 /**

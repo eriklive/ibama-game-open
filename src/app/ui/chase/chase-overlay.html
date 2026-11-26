@@ -48,6 +48,11 @@
       <app-d20 class="sprint-die" [value]="sp.roll" [duration]="dieMs" />
       @if (sp.state === 'active') {
         <span class="sprint-result" data-testid="sprint-result">+{{ sp.percent }}%</span>
+        @if (sp.crit) {
+          <span class="sprint-crit" [class.fumble]="sp.crit === 'falha'" data-testid="sprint-crit">
+            {{ sp.crit === 'critico' ? 'Crítico! +' + critPct + '% fixo' : 'Falha crítica! −' + fumblePct + '% fixo' }}
+          </span>
+        }
       }
     </div>
   }

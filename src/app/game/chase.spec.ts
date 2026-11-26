@@ -13,6 +13,7 @@ import {
   initiativeChance,
   initiativeCheck,
   lockRoute,
+  agentRate,
   resolveSprint,
   sprintRate,
   sprintTotalMs,
@@ -305,14 +306,29 @@ describe('agilidade dos suspeitos do Aeroporto', () => {
 
 describe('corrida (teste de vigor: d20 + vigor = % de velocidade)', () => {
   it('o d20 vira o bônus em %', () => {
-    expect(resolveSprint(1, {})).toEqual({ total: 1, percent: 1 });
-    expect(resolveSprint(12, {})).toEqual({ total: 12, percent: 12 });
-    expect(resolveSprint(20, {})).toEqual({ total: 20, percent: 20 });
+    expect(resolveSprint(2, {})).toEqual({ total: 2, percent: 2, permanent: 0 });
+    expect(resolveSprint(12, {})).toEqual({ total: 12, percent: 12, permanent: 0 });
+    expect(resolveSprint(19, {})).toEqual({ total: 19, percent: 19, permanent: 0 });
+  });
+  it('d20 natural 20 é acerto crítico: +10% até o fim da corrida; 1 é falha crítica: −5%', () => {
+    expect(resolveSprint(20, {})).toEqual({ total: 20, percent: 20, crit: 'critico', permanent: 10 });
+    expect(resolveSprint(1, {})).toEqual({ total: 1, percent: 1, crit: 'falha', permanent: -5 });
+    // o vigor não faz crítico: é o dado que conta
+    expect(resolveSprint(19, { vigor: 3 }).crit).toBeUndefined();
+    expect(resolveSprint(1, { vigor: 3 })).toMatchObject({ total: 4, crit: 'falha', permanent: -5 });
+  });
+  it('os críticos somam na velocidade do agente, com ou sem gás, e ela nunca cai abaixo da metade', () => {
+    expect(agentRate(1, 0)).toBe(1);
+    expect(agentRate(1, 10)).toBeCloseTo(1.1);
+    expect(agentRate(1, 20)).toBeCloseTo(1.2);
+    expect(agentRate(1.4, 10)).toBeCloseTo(1.5);
+    expect(agentRate(1, -5)).toBeCloseTo(0.95);
+    expect(agentRate(1, -500)).toBe(CHASE_RULES.minRate);
   });
   it('o vigor soma no teste, e o bônus nunca fica abaixo de 1%', () => {
-    expect(resolveSprint(12, { vigor: 2 })).toEqual({ total: 14, percent: 14 });
+    expect(resolveSprint(12, { vigor: 2 })).toEqual({ total: 14, percent: 14, permanent: 0 });
     expect(resolveSprint(20, { vigor: 1 }).percent).toBe(21);
-    expect(resolveSprint(1, { vigor: -2 })).toEqual({ total: -1, percent: 1 });
+    expect(resolveSprint(1, { vigor: -2 })).toMatchObject({ total: -1, percent: 1 });
   });
   it('entra suave, segura 5 s e sai suave', () => {
     const ramp = CHASE_RULES.sprintRampMs;
