@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COVER_HEIGHT, GameMap, Ground, HexRect, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
-import { CharacterRig, ClipName, METER, ModelDef } from './character-model';
+import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
@@ -217,7 +217,41 @@ interface EnemyView extends Mover {
    * fica de pé, o segundo ajoelhado...), para a cena nunca repetir a mesma pose lado a lado.
    */
   cuffPose?: 'cuffed' | 'kneel';
+  /** Olhando de um lado para o outro (susto do arrombamento): gira em volta de `base`. */
+  scan?: { base: number; phase: number };
+  /** Posição de largada (vai correr): o corpo se inclina e encolhe; `stanceMix` anima a entrada e a saída. */
+  stance?: boolean;
+  stanceMix?: number;
 }
+
+/**
+ * Golpe do arrombamento, em poses por cima do `idle` (ver `POSE_BONES` em `character-model.ts`):
+ * recolhe o joelho no peito (`chamber`), segura no slow inclinado para trás com a guarda alta
+ * (`coil`) e solta a sola do pé na porta com o corpo atrás (`strike`); quando a porta cede, a
+ * perna vai junto (`through`), quando aguenta, o pé volta (`recoil`).
+ */
+const KICK_POSES: Record<'chamber' | 'coil' | 'strike' | 'through' | 'recoil', Pose> = {
+  chamber: { thigh: -1.7, calf: 2.0, foot: -0.25, thighL: -0.28, calfL: 0.5, spine: -0.1, armR: 0.55, foreR: 1.35, armL: 0.65, foreL: 1.45 },
+  coil: { thigh: -2.05, calf: 1.9, foot: -0.5, thighL: -0.36, calfL: 0.62, spine: -0.3, armR: 0.2, foreR: 1.25, armL: 0.85, foreL: 1.45 },
+  strike: { thigh: -1.5, calf: 0.05, foot: -0.55, thighL: -0.12, calfL: 0.28, spine: -0.34, armR: -0.6, foreR: 0.7, armL: 0.85, foreL: 1.1 },
+  through: { thigh: -1.25, calf: 0.1, foot: -0.3, thighL: -0.05, calfL: 0.15, spine: -0.18, armR: -0.4, foreR: 0.8, armL: 0.6, foreL: 1.2 },
+  recoil: { thigh: -1.6, calf: 0.9, foot: -0.3, thighL: -0.2, calfL: 0.4, spine: -0.16, armR: 0.1, foreR: 1.1, armL: 0.7, foreL: 1.3 },
+};
+
+/** Posição de largada de quem resistiu ao arrombamento: inclinado, joelhos dobrados, braços prontos. */
+const BOLT_STANCE: Pose = { thigh: -0.45, calf: 0.55, foot: 0.15, thighL: 0.22, calfL: 0.3, spine: 0.45, armR: -0.7, foreR: 1.3, armL: 0.8, foreL: 1.4 };
+
+/** Mistura duas poses (`t` de 0 a 1) e escreve em `out`. */
+function mixPose(out: Pose, a: Pose, b: Pose, t: number): void {
+  for (const k in out) {
+    const key = k as keyof Pose;
+    out[key] = a[key] + (b[key] - a[key]) * t;
+  }
+}
+
+/** Gira um vetor do plano XZ em volta de +Y. */
+const yawTurn = (v: THREE.Vector3, a: number): THREE.Vector3 =>
+  new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), 0, -v.x * Math.sin(a) + v.z * Math.cos(a));
 
 /** Prefixo do id de alvo dos NPCs rendidos tocáveis (`npc:<id do inimigo>`, ver `setNpcTargets`). */
 export const NPC_TARGET = 'npc:';
@@ -456,6 +490,29 @@ export class HexBoard {
    */
   private slowmo = 0;
   private slowmoGoal = 0;
+  /**
+   * Slow da cena inteira (o chute na porta, a rolagem de quem reage ao arrombamento): todo mundo
+   * desacelera junto, com as rampas da perseguição. Ver `setSceneSlowmo`.
+   */
+  private sceneSlow = 0;
+  private sceneSlowGoal = 0;
+  /**
+   * Ajuste fino da cena da porta (ver `zoomOnDoor` e `tiltCineTo`): para onde puxar o olhar, quanto,
+   * o zoom por cima do da cena e a inclinação (giro em volta do alvo e rolagem). `cineAim` persegue
+   * `cineAimGoal` devagar.
+   */
+  private cineAimGoal: { point: THREE.Vector3 | null; mix: number; zoom: number; yaw: number; roll: number } = {
+    point: null,
+    mix: 0,
+    zoom: 1,
+    yaw: 0,
+    roll: 0,
+  };
+  private readonly cineAim = { point: new THREE.Vector3(), mix: 0, zoom: 1, yaw: 0, roll: 0 };
+  /** Rolagem da câmera neste quadro (a cena da porta inclina para quem reage). */
+  private cineRollNow = 0;
+  /** Números de dano que sobem da porta ("−2"). */
+  private readonly floaters: { sprite: THREE.Sprite; born: number; from: THREE.Vector3 }[] = [];
   private readonly chaseDir = new THREE.Vector3(0, 0, 1);
 
   /** Afastamento atual da cena (1 = padrão); acompanha `cine.zoom` devagar (ver `setCineZoom`). */
@@ -923,8 +980,7 @@ export class HexBoard {
     const n = agent.clone().sub(center).setY(0);
     if (n.lengthSq() < 1e-6) n.set(0, 0, 1);
     n.normalize();
-    const turn = (v: THREE.Vector3, a: number) =>
-      new THREE.Vector3(v.x * Math.cos(a) + v.z * Math.sin(a), 0, -v.x * Math.sin(a) + v.z * Math.cos(a));
+    const turn = yawTurn;
     // a câmera de sempre olha de +Z
     const home = new THREE.Vector3(0, 0, 1);
     let aim: THREE.Vector3;
@@ -1236,7 +1292,11 @@ export class HexBoard {
     const e = this.enemies.get(id);
     if (!e) return;
     e.surrendered = surrendered;
-    if (surrendered) e.alert = false;
+    if (surrendered) {
+      e.alert = false;
+      e.stance = false;
+      e.scan = undefined;
+    }
     if (surrendered && !e.cuffPose) {
       const before = [...this.enemies.values()].filter((o) => o.cuffPose).length;
       e.cuffPose = before % 2 ? 'kneel' : 'cuffed';
@@ -1271,6 +1331,8 @@ export class HexBoard {
     this.moving = true;
     const epoch = e.epoch;
     e.running = true;
+    e.stance = false;
+    e.scan = undefined;
     for (const step of path) {
       const from = this.worldOf(e.hex);
       const to = this.worldOf(step);
@@ -1457,6 +1519,129 @@ export class HexBoard {
   /** Volta para a câmera de sempre. */
   releaseDoorFocus(): void {
     this.cine = null;
+    this.resetCineAim();
+  }
+
+  /** Arrombamento: a câmera da cena fecha na porta (o agente continua no quadro). */
+  zoomOnDoor(door: HexCoord): void {
+    const center = this.doorViews?.centerOf(hexKey(door));
+    const u = this.focusId ? this.units.get(this.focusId) : undefined;
+    if (!center || !this.cine) return;
+    // a porta no centro, puxando um pouco para o agente: o pé e a folha cabem juntos
+    if (u) center.lerp(u.group.position, 0.3);
+    this.cineAimGoal = { point: center.setY(1.25), mix: 0.75, zoom: 0.66, yaw: 0, roll: 0 };
+  }
+
+  /**
+   * Inclina a câmera da cena de leve para quem reage ao arrombamento: o olhar puxa até ele, a
+   * câmera gira um pouco em volta do alvo e rola para o lado dele.
+   */
+  tiltCineTo(hex: HexCoord): void {
+    const c = this.cine;
+    if (!c) return;
+    const p = this.worldOf(hex).setY(1.4);
+    const to = p.clone().sub(c.target).setY(0);
+    // direita da câmera, que olha ao longo de −dir
+    const right = new THREE.Vector3(c.dir.z, 0, -c.dir.x);
+    const side = Math.sign(to.dot(right)) || 1;
+    const zoom = THREE.MathUtils.clamp(0.8 + to.length() * 0.05, 0.85, 1.2);
+    this.cineAimGoal = { point: p, mix: 0.55, zoom, yaw: -side * 0.13, roll: -side * 0.05 };
+  }
+
+  /** Desfaz o zoom na porta e a inclinação: volta ao enquadramento do menu da porta. */
+  resetCineAim(): void {
+    this.cineAimGoal = { point: null, mix: 0, zoom: 1, yaw: 0, roll: 0 };
+  }
+
+  /**
+   * Slow da cena: `true` desacelera todo mundo (animações, giros, o próprio chute) e fecha um
+   * pouco o campo de visão; `false` volta rápido, no gesto. Mesmas rampas da perseguição.
+   */
+  setSceneSlowmo(on: boolean): void {
+    this.sceneSlowGoal = on && !reducedMotionQuery() ? 1 : 0;
+  }
+
+  /** Velocidade da cena agora (1 = normal; no fundo do slow, `CHASE_SLOWMO.rate`). */
+  private sceneRate(): number {
+    return slowmoRate(this.sceneSlow);
+  }
+
+  /** Como `tween`, mas no tempo da cena: desacelera junto com o slow. */
+  private sceneTween(ms: number, fn: (t: number) => void): Promise<void> {
+    let last = performance.now();
+    let t = 0;
+    return new Promise((resolve) => {
+      const step = (now: number) => {
+        t = this.disposed || ms <= 0 ? 1 : Math.min(1, t + ((now - last) / ms) * this.sceneRate());
+        last = now;
+        fn(t);
+        if (t < 1) requestAnimationFrame(step);
+        else resolve();
+      };
+      requestAnimationFrame(step);
+    });
+  }
+
+  /**
+   * Número de dano que sobe da porta, como no RPG ("−2": a resistência que o chute tirou).
+   * Pula, sobe e some em pouco mais de um segundo.
+   */
+  floatDoorDamage(door: HexCoord, text: string): void {
+    const center = this.doorViews?.centerOf(hexKey(door));
+    if (!center) return;
+    const c = document.createElement('canvas');
+    c.width = 256;
+    c.height = 160;
+    const g = c.getContext('2d');
+    if (g) {
+      g.font = '900 118px "Permanent Marker", Impact, "Arial Black", sans-serif';
+      g.textAlign = 'center';
+      g.textBaseline = 'middle';
+      g.lineJoin = 'round';
+      g.lineWidth = 16;
+      g.strokeStyle = '#2a0c06';
+      g.strokeText(text, 128, 84);
+      g.fillStyle = '#ff5a3c';
+      g.fillText(text, 128, 84);
+      g.lineWidth = 3;
+      g.strokeStyle = '#ffd0a8';
+      g.strokeText(text, 128, 84);
+    }
+    const texture = new THREE.CanvasTexture(c);
+    texture.colorSpace = THREE.SRGBColorSpace;
+    const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: texture, depthTest: false, transparent: true }));
+    sprite.renderOrder = 12;
+    // nasce na altura da folha, do lado de quem chutou, e sobe até o alto da porta
+    const u = this.focusId ? this.units.get(this.focusId) : undefined;
+    if (u) center.add(u.group.position.clone().sub(center).setY(0).setLength(0.25));
+    const from = center.setY(2.1 * METER * 0.68);
+    sprite.position.copy(from);
+    sprite.scale.set(0, 0, 1);
+    this.scene.add(sprite);
+    this.floaters.push({ sprite, born: this.clock.elapsedTime, from });
+  }
+
+  /** Sobe, pulsa e apaga os números de dano. */
+  private updateFloaters(t: number): void {
+    const LIFE = 1.35;
+    for (let i = this.floaters.length - 1; i >= 0; i--) {
+      const f = this.floaters[i];
+      const age = t - f.born;
+      if (age >= LIFE) {
+        f.sprite.removeFromParent();
+        f.sprite.material.map?.dispose();
+        f.sprite.material.dispose();
+        this.floaters.splice(i, 1);
+        continue;
+      }
+      const k = age / LIFE;
+      // estoura grande e assenta (0,15 s), depois só sobe e apaga no fim
+      const pop = age < 0.15 ? (age / 0.15) * 1.3 : age < 0.3 ? 1.3 - ((age - 0.15) / 0.15) * 0.3 : 1;
+      const h = 0.75 * pop;
+      f.sprite.scale.set(h * 1.6, h, 1);
+      f.sprite.position.set(f.from.x, f.from.y + (1 - (1 - k) ** 2) * 0.9, f.from.z);
+      f.sprite.material.opacity = k < 0.65 ? 1 : 1 - (k - 0.65) / 0.35;
+    }
   }
 
   /** Atualiza o deslocamento da cena (a largura das fichas mudou, por exemplo, ao girar o celular). */
@@ -1491,46 +1676,104 @@ export class HexBoard {
   }
 
   /**
-   * Chute frontal: recolhe o joelho, estica a perna na porta (`onImpact` roda na hora em
-   * que o pé bate) e volta. A biblioteca de clipes não tem chute: a perna é dobrada à mão
-   * por cima do `idle` (ver `CharacterRig.pose`).
+   * Chutão na porta: o agente planta o pé de apoio e recolhe o joelho no peito; aí a cena entra
+   * em slow (`onSlow` roda nessa hora: é quando a tela gira o d20) e ele segura o golpe inclinado
+   * para trás enquanto a promessa de `onSlow` não termina. Quando ela termina, o slow acaba no
+   * gesto e a sola do pé bate na porta em velocidade cheia (`onImpact`). `through` diz se a porta
+   * cede (a perna e o corpo vão junto) ou aguenta (o pé volta). A biblioteca de clipes não tem
+   * chute: as poses são feitas à mão por cima do `idle` (ver `KICK_POSES`).
    */
-  async kick(unitId: string, onImpact: () => void): Promise<void> {
+  async kick(
+    unitId: string,
+    opts: { onSlow?: () => Promise<void> | void; onImpact: () => void; through?: boolean },
+  ): Promise<void> {
     const u = this.units.get(unitId);
-    if (!u) return onImpact();
-    const rig = u.rig;
-    const pose = rig?.pose ?? { thigh: 0, calf: 0, spine: 0 };
+    if (!u) {
+      await opts.onSlow?.();
+      return opts.onImpact();
+    }
+    const pose = u.rig?.pose ?? restPose();
+    const rest = restPose();
     const pos = u.group.position;
     const fwd = new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
     const start = pos.clone();
-    const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
-    // sem modelo, a peça dá um tranco para a frente no lugar do chute
-    await this.tween(260, (t) => {
-      const e = 1 - (1 - t) * (1 - t);
-      pose.thigh = lerp(0, -1.5, e);
-      pose.calf = lerp(0, 1.7, e);
-      pose.spine = lerp(0, -0.08, e);
-    });
-    await this.tween(90, () => undefined);
-    await this.tween(110, (t) => {
-      const e = t * t;
-      pose.thigh = lerp(-1.5, -1.42, e);
-      pose.calf = lerp(1.7, 0.05, e);
-      pose.spine = lerp(-0.08, -0.22, e);
-      pos.x = start.x + fwd.x * 0.14 * e;
-      pos.z = start.z + fwd.z * 0.14 * e;
-    });
-    onImpact();
-    await this.tween(160, () => undefined);
-    await this.tween(380, (t) => {
-      const e = t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2;
-      pose.thigh = lerp(-1.42, 0, e);
-      pose.calf = lerp(0.05, 0, e);
-      pose.spine = lerp(-0.22, 0, e);
-      pos.x = start.x + fwd.x * 0.14 * (1 - e);
-      pos.z = start.z + fwd.z * 0.14 * (1 - e);
-    });
-    pose.thigh = pose.calf = pose.spine = 0;
+    const lunge = (d: number) => {
+      pos.x = start.x + fwd.x * d;
+      pos.z = start.z + fwd.z * d;
+    };
+    const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
+    const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+    const P = KICK_POSES;
+    // o golpe é montado por cima do `idle`: quem estava agachado na cobertura levanta para chutar
+    u.rig?.play('idle', 0.15);
+    try {
+      // 1. recolhe o joelho (sem modelo, a peça só dá o tranco para a frente no impacto)
+      const slow: { held?: Promise<void> } = {};
+      await this.sceneTween(300, (t) => {
+        mixPose(pose, rest, P.chamber, easeOut(t));
+        u.hop = -0.08 * easeOut(t);
+        lunge(-0.05 * easeOut(t));
+        // no meio do gesto a cena desacelera e a tela rola o d20
+        if (!slow.held && t >= 0.45 && opts.onSlow) {
+          this.setSceneSlowmo(true);
+          slow.held = Promise.resolve(opts.onSlow());
+        }
+      });
+      // 2. segura o golpe no slow até o d20 parar: o joelho sobe mais, o corpo pende para trás
+      const held = slow.held;
+      if (held) {
+        let done = false;
+        void held.then(() => (done = true));
+        const t0 = performance.now();
+        await new Promise<void>((resolve) => {
+          const step = (now: number) => {
+            if (this.disposed || done) return resolve();
+            const p = Math.min(1, (now - t0) / 900);
+            mixPose(pose, P.chamber, P.coil, easeInOut(p));
+            // tremidinha de quem está com a perna no ar, carregando o golpe
+            pose.thighL += Math.sin(now / 55) * 0.015 * p;
+            u.hop = -0.08 - 0.02 * p;
+            lunge(-0.05 - 0.04 * p);
+            requestAnimationFrame(step);
+          };
+          requestAnimationFrame(step);
+        });
+        await held;
+        this.setSceneSlowmo(false);
+      }
+      const from = { ...pose };
+      const back = -0.05 - (held ? 0.04 : 0);
+      // 3. solta a perna na porta, rápido, com o corpo atrás
+      await this.tween(95, (t) => {
+        const e = t * t;
+        mixPose(pose, from, P.strike, e);
+        u.hop = THREE.MathUtils.lerp(held ? -0.1 : -0.08, -0.04, e);
+        lunge(THREE.MathUtils.lerp(back, 0.16, e));
+      });
+      opts.onImpact();
+      // 4. a porta cede (a perna atravessa) ou aguenta (o pé volta, o corpo recua)
+      await this.tween(170, (t) => {
+        const e = easeOut(t);
+        mixPose(pose, P.strike, opts.through ? P.through : P.recoil, e);
+        lunge(opts.through ? 0.16 + 0.16 * e : 0.16 - 0.14 * e);
+      });
+      // 5. volta à base
+      const end = { ...pose };
+      const endAt = opts.through ? 0.32 : 0.02;
+      const hop = u.hop;
+      await this.tween(420, (t) => {
+        const e = easeInOut(t);
+        mixPose(pose, end, rest, e);
+        u.hop = hop * (1 - e);
+        lunge(endAt * (1 - e));
+      });
+    } finally {
+      this.setSceneSlowmo(false);
+      mixPose(pose, rest, rest, 1);
+      u.hop = 0;
+      lunge(0);
+      u.rig?.play(this.restClip(u), 0.3);
+    }
   }
 
   /** Posição na tela (px, relativa ao canvas) de um ponto acima da cabeça do inimigo; `null` longe da tela. */
@@ -1675,6 +1918,55 @@ export class HexBoard {
     e.facingGoal = Math.atan2(d.z, d.x);
   }
 
+  /**
+   * Susto do arrombamento: o inimigo vira para a porta e dá um passo para trás, num pulinho
+   * (no tempo da cena: no slow, o passo desacelera junto).
+   */
+  async enemyFlinch(id: string, door: HexCoord): Promise<void> {
+    const e = this.enemies.get(id);
+    const center = this.doorViews?.centerOf(hexKey(door)) ?? this.worldOf(door);
+    if (!e) return;
+    const from = e.group.position.clone();
+    const away = from.clone().sub(center).setY(0);
+    if (away.lengthSq() < 1e-6) away.set(0, 0, 1);
+    away.normalize();
+    e.facingGoal = Math.atan2(-away.z, -away.x);
+    e.startleAt = this.clock.elapsedTime;
+    const epoch = e.epoch;
+    await this.sceneTween(300, (t) => {
+      if (e.epoch !== epoch) return;
+      const k = 1 - (1 - t) ** 3;
+      e.group.position.x = from.x + away.x * 0.42 * k;
+      e.group.position.z = from.z + away.z * 0.42 * k;
+      e.hop = Math.sin(Math.PI * t) * 0.07;
+    });
+    if (e.epoch === epoch) e.hop = 0;
+  }
+
+  /** Liga (ou desliga) o olhar de um lado para o outro do inimigo, a partir de para onde ele olha agora. */
+  enemyLookAround(id: string, on: boolean): void {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    if (on) e.scan ??= { base: e.facingGoal, phase: 0 };
+    else if (e.scan) {
+      e.facingGoal = e.scan.base;
+      e.scan = undefined;
+    }
+  }
+
+  /**
+   * Resistiu ao arrombamento: vira de costas para a porta e entra em posição de correr (fica
+   * assim até a vez dele, quando sai correndo).
+   */
+  enemyBolt(id: string, door: HexCoord): void {
+    const e = this.enemies.get(id);
+    if (!e) return;
+    const center = this.doorViews?.centerOf(hexKey(door)) ?? this.worldOf(door);
+    e.scan = undefined;
+    e.facingGoal = Math.atan2(e.group.position.z - center.z, e.group.position.x - center.x);
+    e.stance = true;
+  }
+
   /** Anda em linha reta até `to` com um clipe; `backwards` mantém a direção e toca o clipe ao contrário. */
   private async slide(u: UnitView, to: THREE.Vector3, clip: 'walk', speed: number, backwards = false): Promise<void> {
     const from = u.group.position.clone();
@@ -1781,9 +2073,10 @@ export class HexBoard {
 
   /** Velocidade da animação de `id` agora: só quem está na perseguição desacelera. */
   private animRate(id: string): number {
+    const scene = this.sceneRate();
     const c = this.chaseLast;
-    if (!c || (c.unitId !== id && c.enemyId !== id)) return 1;
-    return slowmoRate(this.slowmo);
+    if (!c || (c.unitId !== id && c.enemyId !== id)) return scene;
+    return Math.min(scene, slowmoRate(this.slowmo));
   }
 
   // ---------- Modo Corrida ----------
@@ -1939,7 +2232,7 @@ export class HexBoard {
     if (Math.abs(goal - this.chaseBlend) < 0.002) this.chaseBlend = goal;
     const c = this.chase ?? this.chaseLast;
     // o zoom do slow acompanha a fita: mesma rampa, mesma proporção (sem ele em "menos movimento")
-    const zoomRate = reducedMotionQuery() ? 1 : slowmoRate(this.slowmo);
+    const zoomRate = reducedMotionQuery() ? 1 : slowmoRate(Math.max(this.slowmo, this.sceneSlow));
     const fov = slowmoFov(40 + CHASE_CAMERA.fovBoost * this.chaseBlend, zoomRate);
     if (Math.abs(this.camera.fov - fov) > 0.05) {
       this.camera.fov = fov;
@@ -1980,6 +2273,19 @@ export class HexBoard {
     const goal = this.cine ? 1 : 0;
     this.cineBlend += (goal - this.cineBlend) * (1 - Math.exp(-dt * 5));
     if (Math.abs(goal - this.cineBlend) < 0.002) this.cineBlend = goal;
+    this.cineRollNow = 0;
+    // zoom na porta / inclinação para quem reage: persegue o pedido devagar (~0,6 s)
+    const g = this.cineAimGoal;
+    const a = this.cineAim;
+    const ka = 1 - Math.exp(-dt * 3.4);
+    if (g.point) {
+      if (a.mix < 0.01) a.point.copy(g.point);
+      else a.point.lerp(g.point, ka);
+    }
+    a.mix += ((g.point ? g.mix : 0) - a.mix) * ka;
+    a.zoom += (g.zoom - a.zoom) * ka;
+    a.yaw += (g.yaw - a.yaw) * ka;
+    a.roll += (g.roll - a.roll) * ka;
     const c = this.cine ?? this.cineLast;
     if (!c || this.cineBlend <= 0) return dist;
     const e = this.cineBlend * this.cineBlend * (3 - 2 * this.cineBlend);
@@ -1987,14 +2293,17 @@ export class HexBoard {
     // perto o bastante para ver o chute, longe o bastante para caber quem está do outro lado
     // da porta (e o balão de fala sobre a cabeça dele)
     this.cineZoom += (c.zoom - this.cineZoom) * (1 - Math.exp(-dt * 2.5));
-    const near = 8.8 * Math.min(portrait, 2.1) * this.cineZoom;
+    const near = 8.8 * Math.min(portrait, 2.1) * this.cineZoom * a.zoom;
     const pitch = THREE.MathUtils.degToRad(31);
-    const pos = c.target
+    const target = a.mix > 0.001 ? c.target.clone().lerp(a.point, a.mix) : c.target;
+    const dir = Math.abs(a.yaw) > 1e-4 ? yawTurn(c.dir, a.yaw) : c.dir;
+    const pos = target
       .clone()
-      .addScaledVector(c.dir, Math.cos(pitch) * near)
-      .setY(c.target.y + Math.sin(pitch) * near);
+      .addScaledVector(dir, Math.cos(pitch) * near)
+      .setY(target.y + Math.sin(pitch) * near);
     this.camera.position.lerp(pos, e);
-    look.lerp(c.target, e);
+    look.lerp(target, e);
+    this.cineRollNow = a.roll * e;
     this.viewShift.x += c.offsetPx * e;
     return THREE.MathUtils.lerp(dist, near, e);
   }
@@ -3597,6 +3906,7 @@ export class HexBoard {
     dist = this.blendCine(dt, look, dist);
     dist = this.blendChase(dt, look, dist);
     this.camera.lookAt(look);
+    if (Math.abs(this.cineRollNow) > 1e-4) this.camera.rotateZ(this.cineRollNow);
     this.updateOccluders(dt);
     // a cena da porta empurra a vista para a esquerda das fichas; o close-up, para cima da papelada
     const { x: vx, y: vy } = this.viewShift;
@@ -3930,6 +4240,13 @@ export class HexBoard {
       const step = dt / ramp;
       this.slowmo = this.slowmoGoal > this.slowmo ? Math.min(1, this.slowmo + step) : Math.max(0, this.slowmo - step);
     }
+    if (this.sceneSlow !== this.sceneSlowGoal) {
+      const ramp = this.sceneSlowGoal > this.sceneSlow ? CHASE_SLOWMO.slowRamp : CHASE_SLOWMO.resumeRamp;
+      const step = dt / ramp;
+      this.sceneSlow =
+        this.sceneSlowGoal > this.sceneSlow ? Math.min(1, this.sceneSlow + step) : Math.max(0, this.sceneSlow - step);
+    }
+    const sceneRate = this.sceneRate();
 
     const bob = Math.sin(t * 2.4) * 0.08;
     const lk = 1 - Math.exp(-dt * 8);
@@ -3965,8 +4282,21 @@ export class HexBoard {
     }
 
     for (const e of this.enemies.values()) {
+      // olhando de um lado para o outro (o susto do arrombamento)
+      if (e.scan) {
+        e.scan.phase += dt * sceneRate * 4.4;
+        e.facingGoal = e.scan.base + Math.sin(e.scan.phase) * 0.75;
+      }
+      // posição de largada: entra e sai em ~0,15 s
+      const mixGoal = e.stance ? 1 : 0;
+      const mix0 = e.stanceMix ?? 0;
+      if (mix0 !== mixGoal) {
+        const m = mix0 + (mixGoal - mix0) * (1 - Math.exp(-dt * sceneRate * 9));
+        e.stanceMix = Math.abs(m - mixGoal) < 0.002 ? mixGoal : m;
+        if (e.rig) mixPose(e.rig.pose, restPose(), BOLT_STANCE, e.stanceMix);
+      }
       e.rig?.update(dt * this.animRate(e.id));
-      e.facing += angleDelta(e.facing, e.facingGoal) * (1 - Math.exp(-dt * 12));
+      e.facing += angleDelta(e.facing, e.facingGoal) * (1 - Math.exp(-dt * 12 * sceneRate));
       e.group.rotation.y = -e.facing;
       e.presence += ((e.gone ? 0 : 1) - e.presence) * (1 - Math.exp(-dt * 7));
       const visible = e.presence > 0.02 && this.stream.inLoadRadius(e.group.position.x, e.group.position.z);
@@ -3977,7 +4307,8 @@ export class HexBoard {
       // rendido fica abaixado
       const crouch = e.surrendered && !e.rig ? -0.08 : 0;
       const startle = e.startleAt === undefined ? 0 : waveBump(t - e.startleAt, 0.32) * 0.4;
-      e.group.position.y = e.baseY + crouch + e.hop + startle + jitter - (1 - e.presence) * 0.5;
+      const stance = (e.stanceMix ?? 0) * (-0.05 + Math.abs(Math.sin(t * 7)) * 0.025);
+      e.group.position.y = e.baseY + crouch + e.hop + startle + jitter + stance - (1 - e.presence) * 0.5;
       e.alertSprite.position.y = e.signY + Math.sin(t * 6) * 0.06;
       e.shadow.position.set(e.group.position.x, 0.01, e.group.position.z);
       e.shadow.scale.setScalar(Math.max(0.001, e.presence * (1 - e.hop * 0.6)));
@@ -4059,6 +4390,7 @@ export class HexBoard {
     }
 
     this.updateFires(t);
+    this.updateFloaters(t);
     this.doorViews?.update(dt);
     for (const [id, sp] of this.speeches) if (t >= sp.until) this.silence(id);
 

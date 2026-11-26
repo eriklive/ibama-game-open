@@ -113,6 +113,28 @@ describe('resolveDoor', () => {
     expect(d.broken).toBe(true);
     expect(doorNeed('abrir', d)).toBe(0);
   });
+
+  it('cada chute que não arromba tira 2 de resistência, nunca abaixo de 1', () => {
+    let d = door('trancada');
+    const miss = resolveDoor('arrombar', d, 5);
+    expect(miss).toMatchObject({ pass: false, damage: 2 });
+    d = applyDoor(d, miss);
+    expect(doorNeed('arrombar', d)).toBe(10);
+    // o 10 que antes não passava agora arromba
+    expect(resolveDoor('arrombar', d, 10).pass).toBe(true);
+    for (let i = 0; i < 5; i++) d = applyDoor(d, resolveDoor('arrombar', d, 1));
+    expect(doorNeed('arrombar', d)).toBe(1);
+    // a encostada também cede: 3 → 1
+    expect(doorNeed('arrombar', applyDoor(door('encostada'), resolveDoor('arrombar', door('encostada'), 1)))).toBe(1);
+  });
+
+  it('o desgaste não mexe na fechadura nem na bloqueada', () => {
+    const d = door('trancada', { damage: 4 });
+    expect(doorNeed('pick', d)).toBe(DOOR_RULES.lock);
+    expect(resolveDoor('arrombar', door('bloqueada'), 20).damage).toBe(0);
+    expect(doorNeed('arrombar', door('bloqueada', { damage: 30 }))).toBe(Infinity);
+    expect(resolveDoor('pick', d, 1).damage).toBe(0);
+  });
 });
 
 describe('portas do mapa', () => {

@@ -279,9 +279,15 @@ sempre abertas.
   □ no controle) abre o **menu da porta**: a câmera gira 45° e aproxima até enquadrar a porta e o agente,
   a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Destrancar** e **Abrir**.
   A ficha que depende de rolagem traz o **d20** com o número a tirar; as outras, um círculo vazio.
-- **Arrombar** é um chute: o agente encosta, o d20 gira na ficha da esquerda e para quando o pé bate. Se
-  passar, a porta abre com força para dentro, bate na parede e fica **arrombada** (aberta para sempre); se
-  não, só treme. Arrombar uma porta que **não estava trancada** faz o inimigo mais perto (a até 4
+- **Arrombar** é um chutão: a câmera **fecha na porta**, o agente planta o pé de apoio e recolhe o joelho
+  no peito; aí a cena entra em **slow** e o d20 gira na ficha da esquerda com a perna no ar (ele segura o
+  golpe inclinado para trás, a guarda alta). Quando o dado para, o slow acaba no gesto e a sola do pé bate
+  na porta em velocidade cheia. Se passar, a porta abre com força para dentro, bate na parede e fica
+  **arrombada** (aberta para sempre) e a perna atravessa junto; se não, só treme e o pé volta.
+- **Cada chute tira 2 de resistência** da porta (`DOOR_RULES.kickDamage`): um **−2** vermelho sobe da porta,
+  como dano no RPG, e o próximo arrombamento daquela porta precisa de 2 a menos (trancada: 12 → 10 → 8…;
+  nunca menos que 1). A ficha **Arrombar** mostra quanto a porta já cedeu. A bloqueada não perde
+  resistência (nunca passa), e o desgaste não mexe na fechadura do **Destrancar**. Arrombar uma porta que **não estava trancada** faz o inimigo mais perto (a até 4
   hexágonos) olhar para o agente e soltar uma fala num balão ("Precisava disso não, senhor.", "Pô, a porta
   tava aberta!").
 - **Arrombar com sucesso** (a porta cede) assusta quem está do outro lado:
@@ -293,7 +299,13 @@ sempre abertas.
   - quem está **mais longe** no cômodo tenta correr, mas só se tiver **atitude**: d20 **mais que 12**.
     Sem atitude, fica parado onde está;
   - cada rolagem aparece na ficha do d20 (o verde é sempre o que é bom para a equipe). Chutar uma porta
-    que já estava aberta não assusta ninguém (só rende a fala do morador).
+    que já estava aberta não assusta ninguém (só rende a fala do morador);
+  - **reação:** no estouro da porta, todo mundo do cômodo vira para ela e dá **um passo para trás**. Depois,
+    um de cada vez (do mais perto ao mais longe), a câmera **inclina de leve** para ele (puxa o olhar, gira um
+    pouco em volta e rola para o lado dele), ele **olha de um lado para o outro** e a rolagem vem em
+    **slow**. Quando o dado para, o slow acaba: se ele **passou** (resistiu ou teve atitude), **vira de
+    costas** para a porta e fica em **posição de correr** (sai correndo na vez dele); se **falhou** perto da
+    porta, já entra na **rendição**.
 - **Destrancar** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
   dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0). Qualquer um pode
   tentar; o **Agente** soma a perícia **Gazua +6** (o número a tirar já aparece descontado, nunca abaixo de 1).

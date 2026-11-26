@@ -30,6 +30,11 @@ export const DOOR_RULES = {
   pickCost: 1,
   /** Até quantos hexágonos da porta um inimigo vê o arrombamento à toa e comenta. */
   witnessRange: 4,
+  /**
+   * Resistência que cada chute tira da porta: o próximo arrombamento precisa de 2 a menos
+   * (nunca menos que 1). Aparece como "−2" subindo da porta, igual a dano no RPG.
+   */
+  kickDamage: 2,
 } as const;
 
 /**
@@ -66,6 +71,8 @@ export interface Door {
   lock: number;
   /** Arrombada: fica aberta (e torta) para sempre. */
   broken: boolean;
+  /** Resistência que os chutes já tiraram (desconta do arrombamento; ver `DOOR_RULES.kickDamage`). */
+  damage?: number;
 }
 
 /** Dá para passar pela porta. */
@@ -83,7 +90,10 @@ export function doorNeed(action: DoorAction, door: Door, pickBonus = 0): number 
     case 'arrombar':
       if (door.state === 'bloqueada' && !door.broken) return Infinity;
       if (open) return 0;
-      return door.state === 'encostada' ? DOOR_RULES.breakClosed : DOOR_RULES.breakLocked;
+      return Math.max(
+        1,
+        (door.state === 'encostada' ? DOOR_RULES.breakClosed : DOOR_RULES.breakLocked) - (door.damage ?? 0),
+      );
     case 'pick':
       if (open) return null;
       if (door.state === 'bloqueada') return Infinity;
@@ -121,6 +131,8 @@ export interface DoorOutcome {
   reaction: boolean;
   /** Movimento gasto. */
   cost: number;
+  /** Resistência que o chute tirou da porta (0 fora do arrombamento de uma porta fechada que cede). */
+  damage: number;
 }
 
 export function resolveDoor(action: DoorAction, door: Door, roll: number, pickBonus = 0): DoorOutcome {
@@ -137,6 +149,7 @@ export function resolveDoor(action: DoorAction, door: Door, roll: number, pickBo
     pass,
     reaction: breaking && unlocked && !door.broken,
     cost,
+    damage: action === 'arrombar' && rolled && need !== Infinity ? DOOR_RULES.kickDamage : 0,
   };
 }
 
@@ -144,6 +157,7 @@ export function resolveDoor(action: DoorAction, door: Door, roll: number, pickBo
 export function applyDoor(door: Door, out: DoorOutcome): Door {
   if (out.broken) return { ...door, broken: true };
   if (out.opened) return { ...door, state: 'aberta' };
+  if (out.damage) return { ...door, damage: (door.damage ?? 0) + out.damage };
   return door;
 }
 
