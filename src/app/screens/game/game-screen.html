@@ -190,7 +190,8 @@
     </section>
   }
 
-  @if (notice(); as n) {
+  <!-- no menu da porta o aviso vai para dentro das fichas (ver .door-notice) -->
+  @if (phase() !== 'door' ? notice() : null; as n) {
     <div class="telegram" [class.alert]="n.tone === 'alert'" role="status" aria-live="assertive" data-testid="notice">
       {{ n.text }}
     </div>
@@ -335,7 +336,16 @@
             </button>
           </li>
         }
+        <li>
+          <button type="button" class="door-opt door-opt-back" [style.--i]="3" [style.--tilt]="'.5deg'" [disabled]="doorBusy()" aria-label="Voltar ao tabuleiro" data-testid="door-opt-back" (click)="closeDoorMenu()">
+            <span class="door-opt-name">Voltar</span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+          </button>
+        </li>
       </ul>
+      @if (notice(); as n) {
+        <p class="door-notice" [class.alert]="n.tone === 'alert'" role="status" aria-live="assertive" data-testid="notice">{{ n.text }}</p>
+      }
     </aside>
   }
 

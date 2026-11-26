@@ -750,7 +750,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const k = this.doorKey();
     return k ? (this.doors().get(k) ?? null) : null;
   });
-  /** Fichas do menu da porta: arrombar, destrancar e abrir. */
+  /** Fichas do menu da porta: arrombar, destrancar e abrir (a de voltar fica no próprio menu). */
   protected readonly doorOptions = computed<DoorOption[]>(() => {
     const door = this.openDoor();
     if (!door) return [];
@@ -2992,6 +2992,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected closeDoorMenu(): void {
     if (this.phase() !== 'door' || this.doorBusy()) return;
     this.doorKey.set(null);
+    this.notice.set(null);
     this.board?.releaseDoorFocus();
     removeEventListener('resize', this.onDoorResize);
     this.afterMove();
@@ -4380,7 +4381,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private say(text: string, tone: 'alert' | 'info'): void {
     this.notice.set({ text, tone });
     clearTimeout(this.noticeTimer);
-    this.noticeTimer = setTimeout(() => this.notice.set(null), 2600);
+    // no menu da porta o aviso fica nas fichas até sair do menu (ver `closeDoorMenu`)
+    if (this.phase() !== 'door') this.noticeTimer = setTimeout(() => this.notice.set(null), 2600);
   }
 
   private wait(ms: number): Promise<void> {

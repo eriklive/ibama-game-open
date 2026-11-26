@@ -812,6 +812,18 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .door-opt.locked:hover .door-lock .shackle { animation: door-rattle .35s; }
 @keyframes door-rattle { 25% { rotate: -10deg; } 75% { rotate: 10deg; } }
 .door-text { min-width: 0; }
+/* Voltar: a mesma ficha, sem o espaço do ícone, com o texto em vermelho */
+.door-opt.door-opt-back { grid-template-columns: minmax(0, 1fr); padding-left: 16px; }
+.door-opt-back .door-opt-name { color: var(--red-text); }
+/* aviso do menu da porta: um bilhete logo abaixo das fichas (fica até sair do menu) */
+.door-notice {
+  margin: 4px 0 0; padding: 8px 12px;
+  background: var(--paper-light); box-shadow: var(--drop);
+  font-size: 13px; line-height: 1.25; text-align: center; text-transform: uppercase;
+  transform: rotate(-1.5deg);
+  animation: slap .25s ease-out both;
+}
+.door-notice.alert { color: var(--red); outline: 3px solid var(--red); outline-offset: -6px; padding: 12px 14px; }
 .door-opt-name { display: block; font-family: var(--stencil); font-weight: 700; font-size: 26px; line-height: 1; text-transform: uppercase; overflow-wrap: anywhere; }
 .door-opt-need { display: block; margin-top: 3px; font-size: 12px; line-height: 1.2; }
 .door-opt-need.never { color: var(--red-text); }
@@ -850,7 +862,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   .door-opt { padding-block: 5px; }
 }
 @media (prefers-reduced-motion: reduce) {
-  .door-sheet, .door-opt, .door-state, .door-back, .door-back-arrow, .door-btn, .photo.hero, .photo.hero .photo-img, .end-turn { animation: none; }
+  .door-sheet, .door-opt, .door-notice, .door-state, .door-back, .door-back-arrow, .door-btn, .photo.hero, .photo.hero .photo-img, .end-turn { animation: none; }
 }
 
 /* ---------- avião trancado, quadro de chaves e fala embaixo da tela ---------- */
