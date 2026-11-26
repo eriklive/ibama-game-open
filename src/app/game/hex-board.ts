@@ -267,10 +267,10 @@ function mixPose(out: Pose, a: Pose, b: Pose, t: number): void {
 }
 
 /** Giro máximo da câmera para mostrar uma porta ao lado do agente da vez (ver `doorYawGoal`). */
-const DOOR_CAMERA_YAW = THREE.MathUtils.degToRad(32);
+const DOOR_CAMERA_YAW = THREE.MathUtils.degToRad(45);
 
-/** Giro da câmera com o agente da vez dentro da casa ou junto de uma porta dela: 15° para a esquerda. */
-const HOUSE_CAMERA_YAW = THREE.MathUtils.degToRad(-15);
+/** Giro da câmera com o agente da vez dentro da casa ou junto de uma porta dela: 25° para a esquerda. */
+const HOUSE_CAMERA_YAW = THREE.MathUtils.degToRad(-25);
 
 /** Gira um vetor do plano XZ em volta de +Y. */
 const yawTurn = (v: THREE.Vector3, a: number): THREE.Vector3 =>
