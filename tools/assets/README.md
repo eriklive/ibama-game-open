@@ -63,6 +63,11 @@ refit, **sem baixar os pacotes da Quaternius**.
     - `slide`: `Slide_Start` + `Slide_Exit` (UAL 2), deita deslizando e levanta correndo;
     - `trip`: um trecho de `Jump_Land` (UAL 1), agacha com as mãos perto do chão e se recupera;
     - `crash`: `Hit_Knockback` + `Slide_Exit` (UAL 2), bate, cai de costas e levanta correndo.
+  - Clipes que só existem nas versões pagas (também CC0) vêm avulsos de `cc0-clips/` (ver o README
+    da pasta):
+    - `kick`: `Melee_Knee` (UAL 2), base do arrombamento: carrega agachado, avança com o joelho alto
+      e volta. A perna estica por cima, à mão, na hora do impacto (`HexBoard.kickClip`);
+    - `look`: `Idle_LookAround_Loop` (UAL 1), o NPC olha de um lado para o outro no susto.
 
     O jogo não toca os gestos no relógio: percorre cada um do começo ao fim no tempo da regra
     (`CharacterRig.scrub`), então o pulo dura o que o pulo dura em `runner.ts`.

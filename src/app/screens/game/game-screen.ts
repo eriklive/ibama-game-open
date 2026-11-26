@@ -3072,7 +3072,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         board.crouchAtDoor(id, false);
         await this.wait(450);
       } else {
-        await board.stepToDoor(id, door.hex, 1.05);
+        await board.stepToDoor(id, door.hex, board.kickReach(id));
         if (stale()) return;
         // a câmera fecha na porta; o agente recolhe o joelho, a cena entra em slow e o d20 rola
         // com a perna no ar; quando o dado para, o slow acaba e o pé bate na porta

@@ -279,10 +279,10 @@ sempre abertas.
   □ no controle) abre o **menu da porta**: a câmera gira 45° e aproxima até enquadrar a porta e o agente,
   a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Destrancar** e **Abrir**.
   A ficha que depende de rolagem traz o **d20** com o número a tirar; as outras, um círculo vazio.
-- **Arrombar** é um chutão: a câmera **fecha na porta**, o agente planta o pé de apoio e recolhe o joelho
-  no peito; aí a cena entra em **slow** e o d20 gira na ficha da esquerda com a perna no ar (ele segura o
-  golpe inclinado para trás, a guarda alta). Quando o dado para, o slow acaba no gesto e a sola do pé bate
-  na porta em velocidade cheia. Se passar, a porta abre com força para dentro, bate na parede e fica
+- **Arrombar** é um chutão: a câmera **fecha na porta**, o agente carrega agachado e dá o passo de apoio;
+  aí a cena entra em **slow** e o d20 gira na ficha da esquerda enquanto ele avança com o joelho subindo
+  devagar. Quando o dado para, o slow acaba no gesto e, em velocidade cheia, a perna estica e a sola do pé
+  bate na porta (clipe `kick`, a joelhada `Melee_Knee` da Quaternius, com a perna esticada por cima). Se passar, a porta abre com força para dentro, bate na parede e fica
   **arrombada** (aberta para sempre) e a perna atravessa junto; se não, só treme e o pé volta.
 - **Cada chute tira 2 de resistência** da porta (`DOOR_RULES.kickDamage`): um **−2** vermelho sobe da porta,
   como dano no RPG, e o próximo arrombamento daquela porta precisa de 2 a menos (trancada: 12 → 10 → 8…;
@@ -302,7 +302,8 @@ sempre abertas.
     que já estava aberta não assusta ninguém (só rende a fala do morador);
   - **reação:** no estouro da porta, todo mundo do cômodo vira para ela e dá **um passo para trás**. Depois,
     um de cada vez (do mais perto ao mais longe), a câmera **inclina de leve** para ele (puxa o olhar, gira um
-    pouco em volta e rola para o lado dele), ele **olha de um lado para o outro** e a rolagem vem em
+    pouco em volta e rola para o lado dele), ele **olha de um lado para o outro** (clipe `look`, o
+    `Idle_LookAround_Loop` da Quaternius) e a rolagem vem em
     **slow**. Quando o dado para, o slow acaba: se ele **passou** (resistiu ou teve atitude), **vira de
     costas** para a porta e fica em **posição de correr** (sai correndo na vez dele); se **falhou** perto da
     porta, já entra na **rendição**.

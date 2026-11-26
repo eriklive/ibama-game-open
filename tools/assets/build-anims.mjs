@@ -1,7 +1,8 @@
 // Gera public/assets/anims/humanoid-base.glb (só esqueleto + clipes) a partir das duas
 // bibliotecas CC0 da Quaternius: Universal Animation Library (UAL1) e Universal Animation
 // Library 2 (UAL2). As duas usam o mesmo esqueleto de 65 ossos dos nossos personagens, então os
-// clipes ligam pelo nome do osso, sem retarget.
+// clipes ligam pelo nome do osso, sem retarget. Alguns clipes que não estão nas versões Standard
+// (só nas pagas, também CC0) vêm avulsos de `cc0-clips/` (ver o README dessa pasta).
 // Uso: ver tools/assets/README.md
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
@@ -22,6 +23,9 @@ const io = new NodeIO().registerExtensions(ALL_EXTENSIONS).registerDependencies(
 
 /** Clipes em loop, inteiros, só renomeados. */
 const LOOPS = { Idle_Loop: 'idle', Walk_Loop: 'walk', Jog_Fwd_Loop: 'run', Crouch_Idle_Loop: 'crouch', Sprint_Loop: 'sprint' };
+
+/** Clipes avulsos de `cc0-clips/` (um GLB por clipe, no mesmo esqueleto): fonte → arquivo. */
+const EXTRA = { knee: 'melee-knee.glb', look: 'idle-look-around-loop.glb' };
 
 /**
  * Gestos do Modo Corrida: pedaços de clipes (`[início, fim]` em segundos) emendados num clipe só.
@@ -48,13 +52,19 @@ const GESTURES = {
     ['ual2', 'Hit_Knockback', 0.0, 0.45],
     ['ual2', 'Slide_Exit', 0.0, 0.49],
   ],
+  // arrombamento: carrega agachado, sobe o joelho avançando e volta (a perna estica por cima, à mão)
+  kick: [['knee', 'Melee_Knee', 0.0, 0.87]],
+  // susto do arrombamento: olha para um lado e para o outro (loop)
+  look: [['look', 'Idle_LookAround_Loop', 0.0, 4.6]],
 };
 const GAP = 0.08;
 
+const here0 = path.dirname(fileURLToPath(import.meta.url));
 const docs = {
   ual1: await io.read(path.join(UAL1, 'Unreal-Godot/UAL1_Standard.glb')),
   ual2: await io.read(path.join(UAL2, 'Unreal-Godot/UAL2_Standard.glb')),
 };
+for (const [src, file] of Object.entries(EXTRA)) docs[src] = await io.read(path.join(here0, 'cc0-clips', file));
 
 // ---------- trilhas como dados ----------
 

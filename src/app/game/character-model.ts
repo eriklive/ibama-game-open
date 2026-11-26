@@ -11,7 +11,8 @@ import { buildCuffClips } from './cuff-poses';
  * `tools/assets/build-anims.mjs`). Os loops tocam no relógio (`play`); os gestos do Modo Corrida
  * (`jump`, `slide`, `trip`, `crash`) são percorridos no tempo da regra (`scrub`). `cuffed` e `kneel`
  * (suspeito algemado, de pé e ajoelhado) não vêm do arquivo: são montados por código a partir do
- * `idle` (`cuff-poses.ts`).
+ * `idle` (`cuff-poses.ts`). `kick` (o arrombamento, percorrido com `scrub`) e `look` (olha de um lado
+ * para o outro, em loop) vêm de clipes CC0 avulsos (`tools/assets/cc0-clips`).
  */
 export type ClipName =
   | 'idle'
@@ -24,7 +25,9 @@ export type ClipName =
   | 'trip'
   | 'crash'
   | 'cuffed'
-  | 'kneel';
+  | 'kneel'
+  | 'kick'
+  | 'look';
 
 /** Modelo 3D de um personagem (ver docs/esqueletos-e-movimentacao.md). */
 export interface ModelDef {
@@ -268,6 +271,11 @@ export class CharacterRig {
   private action(name: ClipName): THREE.AnimationAction | undefined {
     const fallback = CLIP_FALLBACK[name];
     return this.actions.get(name) ?? (fallback ? this.actions.get(fallback) : undefined);
+  }
+
+  /** A biblioteca tem o clipe `name` (sem contar o de reserva). */
+  has(name: ClipName): boolean {
+    return this.actions.has(name);
   }
 
   /** O clipe em loop agora é `name`. */
