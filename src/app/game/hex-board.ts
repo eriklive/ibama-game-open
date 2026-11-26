@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorsOf, inStructure, playArea, structureView } from './maps';
-import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
+import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, reachableHexes, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
 import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
@@ -29,6 +29,8 @@ const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa um
 const RUN_SPEED = 3.6 * METER;
 /** Raio (em hexágonos) em que um garimpeiro não rendido faz o agente se abrigar na carga baixa. */
 const COVER_THREAT_RANGE = 6;
+/** Com um rendido a até tantos passos (contornando paredes), o agente não se abaixa na cobertura. */
+const COVER_SURRENDERED_RANGE = 2;
 
 /**
  * Câmera de perseguição (relativa ao agente, olhando para o inimigo): atrás e acima dele, mira à
@@ -486,6 +488,8 @@ export class HexBoard {
   private sightWalls = new Set<string>();
   /** Agentes agachados numa porta (pick lock): a reavaliação da cobertura não os levanta. */
   private readonly doorCrouch = new Set<string>();
+  /** Agentes já avistados por algum inimigo (ver `setSeenAgents`): não se abaixam na cobertura. */
+  private seenAgents = new Set<string>();
   private readonly enemies = new Map<string, EnemyView>();
   private readonly activeMarker: THREE.Mesh;
   private readonly focusMarker: THREE.Mesh;
@@ -2935,21 +2939,48 @@ export class HexBoard {
   /**
    * Parado ao lado de carga baixa, o agente fica agachado atrás dela — mas só se houver
    * um garimpeiro não rendido a até `COVER_THREAT_RANGE` hexágonos, sem parede no meio.
+   * Não se abaixa se já foi visto por um inimigo (esconder não adianta mais) nem se há um
+   * rendido a até `COVER_SURRENDERED_RANGE` hexágonos de caminho (contornando paredes):
+   * está de pé cuidando dele.
    */
   private restClip(u: UnitView): 'idle' | 'crouch' {
-    return this.crouchSpots.has(hexKey(u.hex)) && this.threatNear(u.hex) ? 'crouch' : 'idle';
+    if (!this.crouchSpots.has(hexKey(u.hex)) || this.seenAgents.has(u.id)) return 'idle';
+    const walls = this.coverWalls();
+    return this.threatNear(u.hex, walls) && !this.surrenderedNear(u.hex, walls) ? 'crouch' : 'idle';
+  }
+
+  /** Paredes para a cobertura: as fixas e as portas fechadas. */
+  private coverWalls(): ReadonlySet<string> {
+    const closed = [...this.doorStates.values()].filter((d) => !isOpen(d)).map((d) => hexKey(d.hex));
+    return closed.length ? new Set([...this.sightWalls, ...closed]) : this.sightWalls;
   }
 
   /** Algum inimigo à vista (não rendido, no tabuleiro) a até `COVER_THREAT_RANGE` hexágonos. */
-  private threatNear(hex: HexCoord): boolean {
-    let walls: ReadonlySet<string> = this.sightWalls;
-    const closed = [...this.doorStates.values()].filter((d) => !isOpen(d)).map((d) => hexKey(d.hex));
-    if (closed.length) walls = new Set([...walls, ...closed]);
+  private threatNear(hex: HexCoord, walls: ReadonlySet<string>): boolean {
     for (const e of this.enemies.values()) {
       if (e.gone || e.surrendered) continue;
       if (hexDistance(hex, e.hex) <= COVER_THREAT_RANGE && lineOfSight(hex, e.hex, walls)) return true;
     }
     return false;
+  }
+
+  /** Algum rendido (no tabuleiro) a até `COVER_SURRENDERED_RANGE` passos, sem atravessar parede. */
+  private surrenderedNear(hex: HexCoord, walls: ReadonlySet<string>): boolean {
+    const near = [...this.enemies.values()].filter(
+      (e) => !e.gone && e.surrendered && hexDistance(hex, e.hex) <= COVER_SURRENDERED_RANGE,
+    );
+    if (!near.length) return false;
+    const reach = reachableHexes(hex, COVER_SURRENDERED_RANGE, this.area, walls);
+    return near.some((e) => reach.has(hexKey(e.hex)));
+  }
+
+  /**
+   * Agentes já avistados por algum inimigo: não se abaixam mais na cobertura. A lista vem
+   * inteira (o jogo zera ao recomeçar a partida).
+   */
+  setSeenAgents(ids: Iterable<string>): void {
+    this.seenAgents = new Set(ids);
+    this.refreshCover();
   }
 
   /** Reavalia a pose de quem está parado (a ameaça mudou: rendeu, fugiu, andou, porta). */

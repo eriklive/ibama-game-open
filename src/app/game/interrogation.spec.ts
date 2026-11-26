@@ -401,8 +401,13 @@ describe('custo e ação de conversa', () => {
     expect(questionCost(1)).toBe(0);
     expect(questionCost(3)).toBe(0);
     // nova entrada, conta de novo
-    expect(questionCost(0)).toBe(1);
+    expect(questionCost(0, { moveCost: 1 })).toBe(1);
     expect(questionCost(0, { moveCost: 2 })).toBe(2);
+  });
+
+  it('conversar não gasta movimento: o alcance para no hexágono colado no rendido', () => {
+    expect(INTERROGATION_RULES.moveCost).toBe(0);
+    expect(questionCost(0)).toBe(0);
   });
 
   it('todo rendido ao lado mostra a ação; sem diálogo, bloqueada', () => {
