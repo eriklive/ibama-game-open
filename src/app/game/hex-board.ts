@@ -1,8 +1,8 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorsOf, inStructure, playArea, structureView } from './maps';
-import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, sameHex, worldToHex } from './hex';
+import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorWall, doorsOf, inStructure, playArea, structureView } from './maps';
+import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, reachableHexes, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
-import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
+import { CharacterRig, ClipName, LegPose, METER, ModelDef, Pose, restLeg, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import { wallFloorShape } from './house-plan';
@@ -42,6 +42,8 @@ const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa um
 const RUN_SPEED = 3.6 * METER;
 /** Raio (em hexágonos) em que um garimpeiro não rendido faz o agente se abrigar na carga baixa. */
 const COVER_THREAT_RANGE = 6;
+/** Com um rendido a até tantos passos (contornando paredes), o agente não se abaixa na cobertura. */
+const COVER_SURRENDERED_RANGE = 2;
 
 /**
  * Câmera de perseguição (relativa ao agente, olhando para o inimigo): atrás e acima dele, mira à
@@ -241,32 +243,42 @@ interface EnemyView extends Mover {
 }
 
 /**
- * Golpe do arrombamento, em poses por cima do `idle` (ver `POSE_BONES` em `character-model.ts`):
- * recolhe o joelho no peito (`chamber`), segura no slow inclinado para trás com a guarda alta
- * (`coil`) e solta a sola do pé na porta com o corpo atrás (`strike`); quando a porta cede, a
- * perna vai junto (`through`), quando aguenta, o pé volta (`recoil`).
+ * Chute de arrombamento (chute frontal, de empurrar), feito à mão por cima do `idle`. O clipe
+ * `kick` (a joelhada `Melee_Knee` da UAL) não entra: ele começa levando a perna para trás e, somado
+ * às poses, a perna recuava antes de subir. A perna do chute vai no espaço do corpo
+ * (`CharacterRig.leg`: `hip`, `knee`, `ankle`); o resto (perna de apoio, tronco, braços) na camada
+ * local (`POSE_BONES`), onde `thigh`, `calf` e `foot` ficam em 0.
+ *
+ * Do repouso o pé sai do chão direto para a frente e para cima: o joelho sobe (`lift`) até o peito,
+ * dobrado, com a ponta do pé puxada para cima (`chamber`); no slow ele segura lá em cima, um pouco
+ * mais alto e com o corpo atrás (`coil`); aí a perna estica reto para a frente, na altura da
+ * fechadura, e a sola bate chapada na porta (`strike`). Quando a porta cede, a perna vai junto
+ * (`through`); quando aguenta, ela recolhe (`recoil`); depois o pé desce e volta à base.
+ *
+ * Até o impacto o pé nunca recua: da base (`KICK_LEG_IDLE`) ao recolher, `hip` e o ângulo da canela
+ * (`hip - knee`) só crescem de uma pose para a próxima (a mistura é em linha reta), e no golpe a
+ * canela gira toda para a frente enquanto a coxa desce até a horizontal (conferido renderizando o
+ * modelo de lado, quadro a quadro).
  */
-const KICK_POSES: Record<'chamber' | 'coil' | 'strike' | 'through' | 'recoil', Pose> = {
-  chamber: { thigh: -1.7, calf: 2.0, foot: -0.25, thighL: -0.28, calfL: 0.5, spine: -0.1, armR: 0.55, foreR: 1.35, armL: 0.65, foreL: 1.45 },
-  coil: { thigh: -2.05, calf: 1.9, foot: -0.5, thighL: -0.36, calfL: 0.62, spine: -0.3, armR: 0.2, foreR: 1.25, armL: 0.85, foreL: 1.45 },
-  strike: { thigh: -1.5, calf: 0.05, foot: -0.55, thighL: -0.12, calfL: 0.28, spine: -0.34, armR: -0.6, foreR: 0.7, armL: 0.85, foreL: 1.1 },
-  through: { thigh: -1.25, calf: 0.1, foot: -0.3, thighL: -0.05, calfL: 0.15, spine: -0.18, armR: -0.4, foreR: 0.8, armL: 0.6, foreL: 1.2 },
-  recoil: { thigh: -1.6, calf: 0.9, foot: -0.3, thighL: -0.2, calfL: 0.4, spine: -0.16, armR: 0.1, foreR: 1.1, armL: 0.7, foreL: 1.3 },
+type KickFrame = Pose & Omit<LegPose, 'weight'>;
+type KickStage = 'lift' | 'chamber' | 'coil' | 'strike' | 'through' | 'recoil';
+const kickFrame = (leg: Omit<LegPose, 'weight'>, body: Partial<Pose>): KickFrame => ({ ...restPose(), ...body, ...leg });
+const KICK_POSES: Record<KickStage, KickFrame> = {
+  lift: kickFrame({ hip: 0.9, knee: 1.15, ankle: 0.35 }, { thighL: -0.08, calfL: 0.16, spine: -0.04, armR: 0.3, foreR: 0.9, armL: 0.35, foreL: 1.0 }),
+  chamber: kickFrame({ hip: 2.0, knee: 1.6, ankle: 0.6 }, { thighL: -0.16, calfL: 0.32, spine: -0.12, armR: 0.55, foreR: 1.35, armL: 0.65, foreL: 1.45 }),
+  coil: kickFrame({ hip: 2.15, knee: 1.75, ankle: 0.7 }, { thighL: -0.2, calfL: 0.4, spine: -0.26, armR: 0.25, foreR: 1.25, armL: 0.8, foreL: 1.45 }),
+  strike: kickFrame({ hip: 1.7, knee: 0.05, ankle: 0.15 }, { thighL: -0.08, calfL: 0.16, spine: -0.32, armR: -0.55, foreR: 0.7, armL: 0.8, foreL: 1.1 }),
+  through: kickFrame({ hip: 1.55, knee: 0.1, ankle: 0.1 }, { thighL: -0.04, calfL: 0.08, spine: -0.18, armR: -0.4, foreR: 0.8, armL: 0.6, foreL: 1.2 }),
+  recoil: kickFrame({ hip: 1.65, knee: 1.4, ankle: 0.4 }, { thighL: -0.12, calfL: 0.24, spine: -0.15, armR: 0.1, foreR: 1.1, armL: 0.7, foreL: 1.3 }),
 };
-
 /**
- * Chute com o clipe `kick` (a joelhada avançando da UAL): nos pontos do clipe (s) em que ele carrega
- * agachado, chega com o joelho alto e volta. Na hora do impacto a perna estica por cima do clipe
- * (`extend`): a sola vai até ~1,3 m à frente de onde ele estava, na altura da fechadura.
+ * A perna do chute parada como no `idle` (a de trás, um pouco atrás e com o joelho solto): é de
+ * onde a subida começa e onde a descida termina, para a troca entre o clipe e a pose não esticar
+ * a perna nem afundar o pé no chão.
  */
-const KICK_CLIP = { load: 0.15, hold: 0.27, peak: 0.35, after: 0.45, end: 0.87 } as const;
-const KICK_LAYER: Record<'extend' | 'through' | 'recoil', Partial<Pose>> = {
-  extend: { thigh: 0.5, calf: -1.5, foot: -0.5, spine: -0.3 },
-  through: { thigh: 0.65, calf: -1.4, foot: -0.4, spine: -0.15 },
-  recoil: { thigh: 0.15, calf: -0.5, foot: -0.2, spine: -0.1 },
-};
-/** Distância da porta para chutar: com o clipe ele avança; sem ele, a perna procedural alcança de perto. */
-const KICK_REACH = { clip: 1.65, pose: 1.05 } as const;
+const KICK_LEG_IDLE: Omit<LegPose, 'weight'> = { hip: -0.05, knee: 0.25, ankle: 0.3 };
+/** Distância da porta para chutar: a perna esticada, com o tranco do corpo, chega na folha. */
+const KICK_REACH = 1.15;
 
 /** Posição de largada de quem resistiu ao arrombamento: inclinado, joelhos dobrados, braços prontos. */
 const BOLT_STANCE: Pose = { thigh: -0.45, calf: 0.55, foot: 0.15, thighL: 0.22, calfL: 0.3, spine: 0.45, armR: -0.7, foreR: 1.3, armL: 0.8, foreL: 1.4 };
@@ -499,6 +511,8 @@ export class HexBoard {
   private sightWalls = new Set<string>();
   /** Agentes agachados numa porta (pick lock): a reavaliação da cobertura não os levanta. */
   private readonly doorCrouch = new Set<string>();
+  /** Agentes já avistados por algum inimigo (ver `setSeenAgents`): não se abaixam na cobertura. */
+  private seenAgents = new Set<string>();
   private readonly enemies = new Map<string, EnemyView>();
   private readonly activeMarker: THREE.Mesh;
   private readonly focusMarker: THREE.Mesh;
@@ -524,6 +538,11 @@ export class HexBoard {
   private readonly wallMeshes: THREE.Object3D[] = [];
   /** Peças dos telhados, que esmaecem como as paredes enquanto o telhado está no lugar. */
   private readonly roofMeshes: { mesh: THREE.Object3D; roof: THREE.Object3D }[] = [];
+  /**
+   * Cópias do telhado e das paredes das estruturas na camada do contorno (ver `TargetOutline`):
+   * com o telhado no lugar, o alvo que ele (ou a parede) cobre fica sem contorno.
+   */
+  private readonly shellOccluders: { copy: THREE.Mesh; mesh: THREE.Object3D; roof: THREE.Object3D }[] = [];
   private treeFadeClock = 0;
   private occlusionClock = 0;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
@@ -679,6 +698,8 @@ export class HexBoard {
   private activeId: string | null = null;
   /** Giro (rad, em volta de +Y) da câmera para ver de frente a porta ao lado do agente da vez. */
   private doorYaw = 0;
+  /** Trecho reto de parede de cada porta (chaves dos hexágonos), ver `doorRun`. */
+  private readonly doorRuns = new Map<string, Set<string>>();
   private focusId: string | null = null;
   private moving = false;
   private inputEnabled = true;
@@ -1868,19 +1889,20 @@ export class HexBoard {
     u.rig?.play(down ? 'crouch' : this.restClip(u), down ? 0.35 : 0.45);
   }
 
-  /**
-   * Chutão na porta: o agente planta o pé de apoio e recolhe o joelho no peito; aí a cena entra
-   * em slow (`onSlow` roda nessa hora: é quando a tela gira o d20) e ele segura o golpe inclinado
-   * para trás enquanto a promessa de `onSlow` não termina. Quando ela termina, o slow acaba no
-   * gesto e a sola do pé bate na porta em velocidade cheia (`onImpact`). `through` diz se a porta
-   * cede (a perna e o corpo vão junto) ou aguenta (o pé volta). A biblioteca de clipes não tem
-   * chute: as poses são feitas à mão por cima do `idle` (ver `KICK_POSES`).
-   */
   /** De quão longe da porta o agente chuta (ver `KICK_REACH`). */
-  kickReach(unitId: string): number {
-    return this.units.get(unitId)?.rig?.has('kick') ? KICK_REACH.clip : KICK_REACH.pose;
+  kickReach(_unitId: string): number {
+    return KICK_REACH;
   }
 
+  /**
+   * Chutão na porta (ver `KICK_POSES`): do repouso o joelho sobe direto até o peito, com o pé
+   * puxado para cima; no meio do gesto a cena entra em slow (`onSlow` roda nessa hora: é quando a
+   * tela gira o d20) e ele segura o joelho lá em cima, com o corpo atrás, enquanto a promessa de
+   * `onSlow` não termina. Quando ela termina, o slow acaba no gesto e a perna estica: a sola do pé
+   * bate na porta em velocidade cheia (`onImpact`, uma vez só). `through` diz se a porta cede (a
+   * perna e o corpo vão junto) ou aguenta (a perna recolhe). Tudo por cima do `idle`, sem o clipe
+   * `kick`: a perna do chute só segue as poses, sem outro movimento misturado.
+   */
   async kick(
     unitId: string,
     opts: { onSlow?: () => Promise<void> | void; onImpact: () => void; through?: boolean },
@@ -1890,9 +1912,21 @@ export class HexBoard {
       await opts.onSlow?.();
       return opts.onImpact();
     }
-    if (u.rig?.has('kick')) return this.kickClip(u, u.rig, opts);
     const pose = u.rig?.pose ?? restPose();
-    const rest = restPose();
+    const leg = u.rig?.leg ?? restLeg();
+    const rest: KickFrame = { ...restPose(), ...KICK_LEG_IDLE };
+    const cur: KickFrame = { ...rest };
+    // escreve a mistura de `a` e `b` no corpo (camada local) e na perna do chute
+    const mix = (a: KickFrame, b: KickFrame, t: number) => {
+      for (const k in cur) {
+        const key = k as keyof KickFrame;
+        cur[key] = a[key] + (b[key] - a[key]) * t;
+      }
+      for (const k in pose) pose[k as keyof Pose] = cur[k as keyof Pose];
+      leg.hip = cur.hip;
+      leg.knee = cur.knee;
+      leg.ankle = cur.ankle;
+    };
     const pos = u.group.position;
     const fwd = new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
     const start = pos.clone();
@@ -1902,24 +1936,28 @@ export class HexBoard {
     };
     const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
     const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+    const lerp = THREE.MathUtils.lerp;
     const P = KICK_POSES;
-    // o golpe é montado por cima do `idle`: quem estava agachado na cobertura levanta para chutar
+    // a perna fica só com as poses: quem estava agachado na cobertura (ou andando) volta ao `idle`
     u.rig?.play('idle', 0.15);
     try {
-      // 1. recolhe o joelho (sem modelo, a peça só dá o tranco para a frente no impacto)
-      const slow: { held?: Promise<void> } = {};
-      await this.sceneTween(300, (t) => {
-        mixPose(pose, rest, P.chamber, easeOut(t));
-        u.hop = -0.08 * easeOut(t);
-        lunge(-0.05 * easeOut(t));
+      // 1. o pé sai do chão e o joelho sobe direto até o peito (passando por `lift`, sem recuar);
+      // a perna sai do `idle` para a pose logo no começo da subida
+      let held: Promise<void> | undefined;
+      await this.sceneTween(340, (t) => {
+        const e = easeOut(t);
+        if (e < 0.45) mix(rest, P.lift, e / 0.45);
+        else mix(P.lift, P.chamber, (e - 0.45) / 0.55);
+        leg.weight = easeOut(Math.min(1, t / 0.2));
+        u.hop = -0.03 * e;
         // no meio do gesto a cena desacelera e a tela rola o d20
-        if (!slow.held && t >= 0.45 && opts.onSlow) {
+        if (!held && t >= 0.45 && opts.onSlow) {
           this.setSceneSlowmo(true);
-          slow.held = Promise.resolve(opts.onSlow());
+          held = Promise.resolve(opts.onSlow());
         }
       });
-      // 2. segura o golpe no slow até o d20 parar: o joelho sobe mais, o corpo pende para trás
-      const held = slow.held;
+      leg.weight = 1;
+      // 2. segura o joelho no peito no slow até o d20 parar: sobe mais um pouco, o corpo pende para trás
       if (held) {
         let done = false;
         void held.then(() => (done = true));
@@ -1928,11 +1966,10 @@ export class HexBoard {
           const step = (now: number) => {
             if (this.disposed || done) return resolve();
             const p = Math.min(1, (now - t0) / 900);
-            mixPose(pose, P.chamber, P.coil, easeInOut(p));
+            mix(P.chamber, P.coil, easeInOut(p));
             // tremidinha de quem está com a perna no ar, carregando o golpe
-            pose.thighL += Math.sin(now / 55) * 0.015 * p;
-            u.hop = -0.08 - 0.02 * p;
-            lunge(-0.05 - 0.04 * p);
+            pose.thighL += Math.sin(now / 55) * 0.012 * p;
+            u.hop = -0.03 - 0.01 * p;
             requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
@@ -1940,113 +1977,41 @@ export class HexBoard {
         await held;
         this.setSceneSlowmo(false);
       }
-      const from = { ...pose };
-      const back = -0.05 - (held ? 0.04 : 0);
-      // 3. solta a perna na porta, rápido, com o corpo atrás
-      await this.tween(95, (t) => {
+      // 3. a perna estica reto para a frente, rápido, e a sola bate na porta com o corpo atrás
+      const from = { ...cur };
+      const hop0 = u.hop;
+      await this.tween(110, (t) => {
         const e = t * t;
-        mixPose(pose, from, P.strike, e);
-        u.hop = THREE.MathUtils.lerp(held ? -0.1 : -0.08, -0.04, e);
-        lunge(THREE.MathUtils.lerp(back, 0.16, e));
+        mix(from, P.strike, e);
+        u.hop = lerp(hop0, -0.02, e);
+        lunge(0.12 * e);
       });
       opts.onImpact();
-      // 4. a porta cede (a perna atravessa) ou aguenta (o pé volta, o corpo recua)
-      await this.tween(170, (t) => {
+      // 4. a porta cede (a perna atravessa) ou aguenta (a perna recolhe, o corpo volta)
+      const hit = opts.through ? P.through : P.recoil;
+      await this.tween(180, (t) => {
         const e = easeOut(t);
-        mixPose(pose, P.strike, opts.through ? P.through : P.recoil, e);
-        lunge(opts.through ? 0.16 + 0.16 * e : 0.16 - 0.14 * e);
+        mix(P.strike, hit, e);
+        lunge(opts.through ? 0.12 + 0.2 * e : 0.12 * (1 - e));
       });
-      // 5. volta à base
-      const end = { ...pose };
-      const endAt = opts.through ? 0.32 : 0.02;
+      // 5. o pé desce e volta à base (a perna devolvida ao `idle` no fim da descida)
+      const end = { ...cur };
+      const endAt = opts.through ? 0.32 : 0;
       const hop = u.hop;
       await this.tween(420, (t) => {
         const e = easeInOut(t);
-        mixPose(pose, end, rest, e);
+        mix(end, rest, e);
+        leg.weight = 1 - easeInOut(Math.max(0, (t - 0.4) / 0.6));
         u.hop = hop * (1 - e);
         lunge(endAt * (1 - e));
       });
     } finally {
       this.setSceneSlowmo(false);
-      mixPose(pose, rest, rest, 1);
+      Object.assign(pose, restPose());
+      Object.assign(leg, restLeg());
       u.hop = 0;
       lunge(0);
       u.rig?.play(this.restClip(u), 0.3);
-    }
-  }
-
-  /**
-   * O chute com o clipe `kick`: carrega agachado no tempo normal; no fundo da carga a cena entra em
-   * slow e o joelho sobe devagar enquanto `onSlow` não termina (o d20 rolando); aí o slow acaba e,
-   * em velocidade cheia, o joelho chega lá em cima e a perna estica até a porta (`onImpact`).
-   */
-  private async kickClip(
-    u: UnitView,
-    rig: CharacterRig,
-    opts: { onSlow?: () => Promise<void> | void; onImpact: () => void; through?: boolean },
-  ): Promise<void> {
-    const C = KICK_CLIP;
-    const pose = rig.pose;
-    const rest = restPose();
-    const layer = (p: Partial<Pose>): Pose => ({ ...rest, ...p });
-    const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
-    const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
-    const lerp = THREE.MathUtils.lerp;
-    try {
-      mixPose(pose, rest, rest, 1);
-      rig.scrub('kick', 0, 0.15);
-      // 1. carrega: agacha e dá o passo de apoio (no tempo da cena)
-      let slowed = false;
-      await this.sceneTween(320, (t) => {
-        rig.scrub('kick', C.load * easeOut(t));
-        if (!slowed && t >= 0.7 && opts.onSlow) {
-          slowed = true;
-          this.setSceneSlowmo(true);
-        }
-      });
-      // 2. slow: o joelho sobe devagar enquanto o d20 rola
-      let at = C.load;
-      if (opts.onSlow) {
-        let done = false;
-        const held = Promise.resolve(opts.onSlow()).then(() => (done = true));
-        let last = performance.now();
-        await new Promise<void>((resolve) => {
-          const step = (now: number) => {
-            if (this.disposed || done) return resolve();
-            const dt = (now - last) / 1000;
-            last = now;
-            at += (C.hold - at) * (1 - Math.exp(-dt * 1.4));
-            rig.scrub('kick', at);
-            requestAnimationFrame(step);
-          };
-          requestAnimationFrame(step);
-        });
-        await held;
-        this.setSceneSlowmo(false);
-      }
-      // 3. sai do slow no gesto: o joelho chega e a perna estica na porta
-      const from = at;
-      await this.tween(110, (t) => {
-        const e = t * t;
-        rig.scrub('kick', lerp(from, C.peak, e));
-        mixPose(pose, rest, layer(KICK_LAYER.extend), e);
-      });
-      opts.onImpact();
-      // 4. a porta cede (a perna vai junto) ou aguenta (o pé volta)
-      const hit = opts.through ? layer(KICK_LAYER.through) : layer(KICK_LAYER.recoil);
-      await this.tween(180, (t) => {
-        rig.scrub('kick', lerp(C.peak, C.after, t));
-        mixPose(pose, layer(KICK_LAYER.extend), hit, easeOut(t));
-      });
-      // 5. volta para o lugar
-      await this.tween(480, (t) => {
-        rig.scrub('kick', lerp(C.after, C.end, t));
-        mixPose(pose, hit, rest, easeInOut(Math.min(1, t * 1.6)));
-      });
-    } finally {
-      this.setSceneSlowmo(false);
-      mixPose(pose, rest, rest, 1);
-      rig.play(this.restClip(u), 0.25);
     }
   }
 
@@ -2850,14 +2815,30 @@ export class HexBoard {
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
       this.structures.push({ kind, rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
+      const shell: THREE.Mesh[] = [];
       roof?.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) this.roofMeshes.push({ mesh: o, roof });
+        if (!(o as THREE.Mesh).isMesh) return;
+        this.roofMeshes.push({ mesh: o, roof });
+        shell.push(o as THREE.Mesh);
       });
       for (const child of built.children) {
         if (child === roof || child === lamps) continue;
         child.traverse((o) => {
-          if ((o as THREE.Mesh).isMesh) this.wallMeshes.push(o);
+          if (!(o as THREE.Mesh).isMesh) return;
+          this.wallMeshes.push(o);
+          shell.push(o as THREE.Mesh);
         });
+      }
+      // cópias que tapam o contorno enquanto o telhado está no lugar (filhas das peças)
+      for (const mesh of roof ? shell : []) {
+        const copy = new THREE.Mesh(mesh.geometry, this.targetOutline.occluder);
+        copy.layers.set(OUTLINE_LAYER);
+        copy.castShadow = copy.receiveShadow = false;
+        // antes dos alvos na máscara: a profundidade já está lá quando eles são desenhados
+        copy.renderOrder = -10;
+        copy.userData['outline'] = true;
+        mesh.add(copy);
+        this.shellOccluders.push({ copy, mesh, roof: roof! });
       }
       this.addScenery(built);
       // névoa dos cômodos: fica no interior (some com o telhado no lugar), fora do cenário
@@ -3005,21 +2986,48 @@ export class HexBoard {
   /**
    * Parado ao lado de carga baixa, o agente fica agachado atrás dela — mas só se houver
    * um garimpeiro não rendido a até `COVER_THREAT_RANGE` hexágonos, sem parede no meio.
+   * Não se abaixa se já foi visto por um inimigo (esconder não adianta mais) nem se há um
+   * rendido a até `COVER_SURRENDERED_RANGE` hexágonos de caminho (contornando paredes):
+   * está de pé cuidando dele.
    */
   private restClip(u: UnitView): 'idle' | 'crouch' {
-    return this.crouchSpots.has(hexKey(u.hex)) && this.threatNear(u.hex) ? 'crouch' : 'idle';
+    if (!this.crouchSpots.has(hexKey(u.hex)) || this.seenAgents.has(u.id)) return 'idle';
+    const walls = this.coverWalls();
+    return this.threatNear(u.hex, walls) && !this.surrenderedNear(u.hex, walls) ? 'crouch' : 'idle';
+  }
+
+  /** Paredes para a cobertura: as fixas e as portas fechadas. */
+  private coverWalls(): ReadonlySet<string> {
+    const closed = [...this.doorStates.values()].filter((d) => !isOpen(d)).map((d) => hexKey(d.hex));
+    return closed.length ? new Set([...this.sightWalls, ...closed]) : this.sightWalls;
   }
 
   /** Algum inimigo à vista (não rendido, no tabuleiro) a até `COVER_THREAT_RANGE` hexágonos. */
-  private threatNear(hex: HexCoord): boolean {
-    let walls: ReadonlySet<string> = this.sightWalls;
-    const closed = [...this.doorStates.values()].filter((d) => !isOpen(d)).map((d) => hexKey(d.hex));
-    if (closed.length) walls = new Set([...walls, ...closed]);
+  private threatNear(hex: HexCoord, walls: ReadonlySet<string>): boolean {
     for (const e of this.enemies.values()) {
       if (e.gone || e.surrendered) continue;
       if (hexDistance(hex, e.hex) <= COVER_THREAT_RANGE && lineOfSight(hex, e.hex, walls)) return true;
     }
     return false;
+  }
+
+  /** Algum rendido (no tabuleiro) a até `COVER_SURRENDERED_RANGE` passos, sem atravessar parede. */
+  private surrenderedNear(hex: HexCoord, walls: ReadonlySet<string>): boolean {
+    const near = [...this.enemies.values()].filter(
+      (e) => !e.gone && e.surrendered && hexDistance(hex, e.hex) <= COVER_SURRENDERED_RANGE,
+    );
+    if (!near.length) return false;
+    const reach = reachableHexes(hex, COVER_SURRENDERED_RANGE, this.area, walls);
+    return near.some((e) => reach.has(hexKey(e.hex)));
+  }
+
+  /**
+   * Agentes já avistados por algum inimigo: não se abaixam mais na cobertura. A lista vem
+   * inteira (o jogo zera ao recomeçar a partida).
+   */
+  setSeenAgents(ids: Iterable<string>): void {
+    this.seenAgents = new Set(ids);
+    this.refreshCover();
   }
 
   /** Reavalia a pose de quem está parado (a ameaça mudou: rendeu, fugiu, andou, porta). */
@@ -4393,6 +4401,12 @@ export class HexBoard {
     return true;
   }
 
+  /** A peça (ou um pai dela) está esmaecida, mais transparente que opaca (ver `updateOccluders`). */
+  private fadedOut(object: THREE.Object3D): boolean {
+    for (let o: THREE.Object3D | null = object; o; o = o.parent) if ((this.occluders.get(o)?.alpha ?? 1) <= 0.5) return true;
+    return false;
+  }
+
   /** Fim do fade: materiais originais de volta, cópias descartadas, visível conforme o raio carregado. */
   private releaseFade(object: THREE.Object3D): void {
     const e = this.occluders.get(object);
@@ -4411,7 +4425,8 @@ export class HexBoard {
     const meshes: OccluderFade['meshes'] = [];
     object.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
+      // as cópias do contorno (camada própria) ficam como estão
+      if (!mesh.isMesh || mesh.userData['outline']) return;
       const original = mesh.material;
       const base = new Map<THREE.Material, number>();
       const clone = (m: THREE.Material): THREE.Material => {
@@ -4508,23 +4523,28 @@ export class HexBoard {
   }
 
   /**
-   * Agente da vez num hexágono vizinho de uma porta: a câmera gira um pouco para o lado em que
-   * ele está, para a porta não ficar de quina (as portas das paredes laterais somem de frente).
+   * Agente da vez junto do trecho reto de parede de uma porta (a porta ou qualquer hexágono da
+   * mesma parede, ver `doorRun`): a câmera gira um pouco para o lado em que ele está, para a
+   * porta não ficar de quina (as portas das paredes laterais somem de frente).
    */
   private doorYawGoal(): number {
     const u = this.activeId ? this.units.get(this.activeId) : undefined;
     if (!u) return 0;
     const near = new Set([u.hex, ...hexNeighbors(u.hex)].map(hexKey));
-    // casa: um giro só, da porta de entrada até sair, que mostra as portas e os cômodos
+    const byWall = (key: string): boolean => {
+      for (const k of this.doorRun(key)) if (near.has(k)) return true;
+      return false;
+    };
+    // casa: um giro só, de toda a parede da porta de entrada até sair, que mostra as portas e os cômodos
     for (const st of this.structures) {
       if (st.kind !== 'house') continue;
-      if (inStructure(u.hex, st.rect) || st.doors.some((d) => near.has(hexKey(d)))) return HOUSE_CAMERA_YAW;
+      if (inStructure(u.hex, st.rect) || st.doors.some((d) => byWall(hexKey(d)))) return HOUSE_CAMERA_YAW;
     }
     const doors = this.doorViews;
     if (!doors) return 0;
     let best: { yaw: number; d: number } | null = null;
     for (const key of doors.keys()) {
-      if (!near.has(key)) continue;
+      if (!byWall(key)) continue;
       const center = doors.centerOf(key)!;
       const normal = doors.normalOf(key)!;
       const away = u.group.position.clone().sub(center).setY(0);
@@ -4537,6 +4557,17 @@ export class HexBoard {
       if (!best || d < best.d) best = { yaw, d };
     }
     return best?.yaw ?? 0;
+  }
+
+  /** Trecho reto de parede da porta (chaves dos hexágonos), ver `doorWall`. */
+  private doorRun(key: string): Set<string> {
+    let run = this.doorRuns.get(key);
+    if (!run) {
+      const [col, row] = key.split(',').map(Number);
+      run = new Set(doorWall(this.map, { col, row }).map(hexKey));
+      this.doorRuns.set(key, run);
+    }
+    return run;
   }
 
   /** Põe a câmera inclinada `pitchDeg` sobre `target`, afastada conforme `zoom`; devolve a distância. */
@@ -4744,6 +4775,9 @@ export class HexBoard {
       // respira devagar: dá para tocar; o tocado uma vez pulsa rápido, quase branco no pico
       const t = this.clock.elapsedTime;
       const hulls = [...this.outlined.values()].flatMap((o) => o.hulls);
+      // estrutura fechada tapa o contorno; aberta, ou a peça esmaecida (tapando alguém, ou a
+      // estrutura no close-up), não
+      for (const o of this.shellOccluders) o.copy.visible = o.roof.visible && !this.fadedOut(o.mesh);
       this.targetOutline.render(hulls, 0.5 + Math.sin(t * 2.5) * 0.5, this.armedTarget ? 0.5 + Math.sin(t * 7) * 0.5 : 0);
     }
     if (this.labels.size || this.aimFx || this.flashes.size) {

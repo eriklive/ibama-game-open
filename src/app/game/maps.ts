@@ -530,6 +530,31 @@ export const structureRect = (map: GameMap, kind: StructureKind): HexRect | unde
 export const doorsOf = (map: GameMap, rect: HexRect): HexCoord[] =>
   (map.doors ?? []).filter((d) => inStructure(d, rect));
 
+/**
+ * Trecho reto da parede que contém a porta: ela e os hexágonos de parede (ou porta) seguidos na
+ * mesma linha, dentro da planta da estrutura, até a esquina. As paredes de fundo e de frente
+ * correm numa fileira; as laterais e as divisórias, numa coluna (como em `DoorViews`). A
+ * divisória para antes das paredes de fora (senão quem passa atrás da casa também contaria).
+ */
+export function doorWall(map: GameMap, door: HexCoord): HexCoord[] {
+  const run = [door];
+  const rect = map.structures?.find((st) => inStructure(door, st.rect))?.rect;
+  if (!rect) return run;
+  const solid = new Set([...map.walls, ...(map.doors ?? [])].map(hexKey));
+  const { col, row } = door;
+  const horizontal = row === rect.rows[0] || row === rect.rows[1];
+  const outer = horizontal || col === rect.cols[0] || col === rect.cols[1];
+  for (const dir of [-1, 1]) {
+    for (let i = 1; ; i++) {
+      const h = horizontal ? { col: col + dir * i, row } : { col, row: row + dir * i };
+      if (!inStructure(h, rect) || !solid.has(hexKey(h))) break;
+      if (!outer && (h.row === rect.rows[0] || h.row === rect.rows[1])) break;
+      run.push(h);
+    }
+  }
+  return run;
+}
+
 export const findMap = (id: string | null | undefined): GameMap | undefined =>
   MAPS.find((m) => m.id === id && m.available);
 

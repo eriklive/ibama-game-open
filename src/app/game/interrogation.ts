@@ -38,10 +38,12 @@ export const INTERROGATION_RULES = {
   /** Raio da aura em volta do suspeito rendido (hexágonos). */
   auraRadius: 1,
   /**
-   * Custo, seguindo a inspeção: a **primeira pergunta de cada entrada** gasta `moveCost` de
-   * movimento (entrar e sair sem perguntar não gasta). `endsTurn` encerra a vez ao sair.
+   * Custo: a **primeira pergunta de cada entrada** gasta `moveCost` de movimento (entrar e sair
+   * sem perguntar não gasta). Zero: o alcance para conversar conta só os passos até o hexágono
+   * colado no rendido, e quem já está colado conversa mesmo sem movimento (issue #116).
+   * `endsTurn` encerra a vez ao sair.
    */
-  moveCost: 1,
+  moveCost: 0,
   endsTurn: false,
 } as const;
 

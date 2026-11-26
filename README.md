@@ -198,7 +198,8 @@ O hangar tem carga empilhada para os agentes se esconderem e planejarem a aproxi
 - **Cobertura baixa** (sacos no palete e gaiolas vazias): ninguém passa, mas o inimigo enxerga por
   cima. Só não vê o agente que está **colado nela, do lado de lá** (o último hexágono antes dele, na
   linha do olhar, é a carga). O cone vermelho já mostra essa "sombra" atrás da carga. Parado ao lado de
-  carga baixa, o agente fica agachado. Na fuga, a carga baixa (e a mesa) é obstáculo: a rota travada
+  carga baixa, o agente fica agachado — se houver garimpeiro não rendido à vista. Não se abaixa se já foi
+  avistado por um inimigo nem se há um rendido a até 2 hexágonos de caminho (contornando paredes). Na fuga, a carga baixa (e a mesa) é obstáculo: a rota travada
   dá a volta nela.
 - **Decoração** (galões de gasolina e botijão): não bloqueia nada.
 
@@ -281,11 +282,14 @@ sempre abertas.
   □ no controle) abre o **menu da porta**: a câmera gira 45° e aproxima até enquadrar a porta e o agente,
   a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Destrancar** e **Abrir**.
   A ficha que depende de rolagem traz o **d20** com o número a tirar; as outras, um círculo vazio.
-- **Arrombar** é um chutão: a câmera **fecha na porta**, o agente carrega agachado e dá o passo de apoio;
-  aí a cena entra em **slow** e o d20 gira na ficha da esquerda enquanto ele avança com o joelho subindo
-  devagar. Quando o dado para, o slow acaba no gesto e, em velocidade cheia, a perna estica e a sola do pé
-  bate na porta (clipe `kick`, a joelhada `Melee_Knee` da Quaternius, com a perna esticada por cima). Se passar, a porta abre com força para dentro, bate na parede e fica
-  **arrombada** (aberta para sempre) e a perna atravessa junto; se não, só treme e o pé volta.
+- **Arrombar** é um chute frontal de arrombamento: a câmera **fecha na porta** e, do repouso, o pé sai
+  do chão direto para a frente e para cima, com o joelho subindo até o peito e a ponta do pé puxada para
+  cima; aí a cena entra em **slow** e o d20 gira na ficha da esquerda enquanto ele segura o joelho lá em
+  cima, com o corpo para trás. Quando o dado para, o slow acaba no gesto e, em velocidade cheia, a perna
+  estica reto e a sola do pé bate chapada na porta, na altura da fechadura (poses feitas à mão por cima do
+  `idle`, com a perna do chute no espaço do corpo; a joelhada `Melee_Knee` não entra, porque começa levando
+  a perna para trás). Se passar, a porta abre com força para dentro, bate na parede e fica
+  **arrombada** (aberta para sempre) e a perna atravessa junto; se não, só treme e a perna recolhe.
 - **Cada chute tira 2 de resistência** da porta (`DOOR_RULES.kickDamage`): um **−2** vermelho sobe da porta,
   como dano no RPG, e o próximo arrombamento daquela porta precisa de 2 a menos (trancada: 12 → 10 → 8…;
   nunca menos que 1). A ficha **Arrombar** mostra quanto a porta já cedeu. A bloqueada não perde
@@ -337,8 +341,8 @@ Quem não se rendeu não conversa.
   amarelo** pulsante no próprio modelo (acompanha a pose de algemado). Tocar nele, colado, abre a
   conversa; de longe, marca o caminho mais curto até a aura (contorno grosso, fantasma do agente no
   destino, pontos correndo e o balão "Toque de novo para ir · N passos") e o segundo toque anda até lá e
-  já abre a conversa. O caminho precisa deixar sobrando o movimento da primeira pergunta; sem isso, o
-  caminho aparece em cinza com "Longe demais para interagir". Quem **não tem interação** fica sem
+  já abre a conversa. O alcance conta só os passos até o hexágono colado no rendido (não até o
+  hexágono dele); colado, conversa mesmo sem movimento. Sem passos para chegar, o caminho aparece em cinza com "Longe demais para interagir". Quem **não tem interação** fica sem
   contorno e, ao toque, mostra o balão cinza **"Nenhuma interação"** sobre a cabeça. O hexágono do
   rendido também vale como tocar nele. No tabuleiro: `setNpcTargets` (alvos `npc:<id>`) e
   `flashTargetLabel` (balão passageiro, reaproveitável para outros alvos); na tela, `tapTargetOf` diz
@@ -380,8 +384,8 @@ Quem não se rendeu não conversa.
 - **Confissão que entrega o esconderijo:** se o caseiro confessar em "Tem arma na casa?" ("Tem sim, tá
   no quartinho de trás."), o armário conta como **já percebido**: ganha o contorno sem ninguém rolar
   percepção, e **Investigar a casa** fica cumprido. Apreender a arma ainda pede o toque nela. No dado, é `notices: '<id do esconderijo>'` na resposta.
-- **Custo:** a **primeira pergunta de cada conversa gasta 1 de movimento** (entrar e
-  sair sem perguntar não gasta) e a vez continua. Ficam em `INTERROGATION_RULES` (`moveCost`,
+- **Custo:** conversar **não gasta movimento** e a vez continua (a primeira pergunta de cada conversa
+  gastaria `moveCost`, hoje 0). Ficam em `INTERROGATION_RULES` (`moveCost`,
   `endsTurn`).
 - **Caderneta de campo:** cada resposta vira uma anotação (*declarou*, *sinal* ou *confessou*), que sai
   no **relatório da operação**; ao encerrar, um telegrama resume.
