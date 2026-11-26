@@ -24,7 +24,7 @@ import type { PathTurn, Side } from './runner-path';
 
 export const RUNNER_RULES = {
   /** Velocidade dos dois (fileiras do caminho por segundo). */
-  rowsPerSecond: 5.5,
+  rowsPerSecond: 8.25,
   /** Fileiras do caminho por hexágono do placar (o mapa é esticado ~2,5× na corrida). */
   rowsPerHex: 2,
   /** Encostou: a esta distância (fileiras) ele está agarrado. */
@@ -36,10 +36,10 @@ export const RUNNER_RULES = {
   /** Pulo e deslize (s): o gesto cobre o obstáculo se estiver no ar (ou no chão) ao passar. */
   jumpSeconds: 0.6,
   slideSeconds: 0.7,
-  /** Curva: a quantas fileiras da esquina ← e → passam a virar (~0,9 s de corrida). */
-  turnWindow: 5,
+  /** Curva: a quantas fileiras da esquina ← e → passam a virar (~0,85 s de corrida). */
+  turnWindow: 7,
   /** Curva: até quantas fileiras depois da esquina ainda dá para virar. */
-  turnGrace: 0.6,
+  turnGrace: 0.9,
   /** Garimpeiro: d20 + agilidade, pelo menos isto, em cada obstáculo de pular ou deslizar. */
   enemyDC: 8,
   /** Ele some antes do fim do caminho (fileiras). */
@@ -233,6 +233,13 @@ export class RunnerRace {
 
   jump(): boolean {
     return this.act(this.agent, 'agente', 'pula');
+  }
+
+  /** O agente tropeça sozinho (o tropeço do gás) e perde `seconds` caído. Já tropeçando, não soma. */
+  trip(seconds: number): boolean {
+    if (this.over || seconds <= 0 || this.agent.action === 'tropeca') return false;
+    this.stumble(this.agent, seconds * RUNNER_RULES.rowsPerSecond, 'obstaculo');
+    return true;
   }
 
   slide(): boolean {

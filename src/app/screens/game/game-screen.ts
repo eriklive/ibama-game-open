@@ -26,6 +26,7 @@ import {
   initiativeCheck,
   lockRoute,
   ChaseRoute,
+  agentRate,
   resolveSprint,
   sprintRate,
   sprintTotalMs,
@@ -1737,7 +1738,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.say(backup ? `${this.nameOf(agentId)} hesitou! Quem vai?` : `${this.nameOf(agentId)} hesitou. ${enemy.name} corre!`, 'alert');
       return false;
     }
-    await this.runChase(enemy.id, agentId, path, epoch, caught);
+    // d20 natural 20 ou 1 na iniciativa: muda a velocidade dele a corrida inteira
+    const { crit, permanent } = initiativeCheck(ini.roll, stats);
+    if (crit === 'critico') this.say(`Acerto crítico! ${this.nameOf(agentId)} arranca ${permanent}% mais rápido nesta corrida.`, 'alert');
+    else if (crit === 'falha') this.say(`Falha crítica! ${this.nameOf(agentId)} arranca ${-permanent}% mais lento nesta corrida.`, 'alert');
+    await this.runChase(enemy.id, agentId, path, epoch, caught, permanent);
     return true;
   }
 
@@ -1904,9 +1909,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * `runnerSteps`). Distância 0: agarrou, ele se rende abalado. Rota no fim: ele escapa (e foge do
    * mapa, se chegou à borda).
    */
-  private async runChase(enemyId: string, agentId: string, agentPath: HexCoord[], epoch: number, caught: Set<string>): Promise<void> {
+  private async runChase(
+    enemyId: string,
+    agentId: string,
+    agentPath: HexCoord[],
+    epoch: number,
+    caught: Set<string>,
+    startPct = 0,
+  ): Promise<void> {
     try {
-      await this.chaseSteps(enemyId, agentId, agentPath, epoch, caught);
+      await this.chaseSteps(enemyId, agentId, agentPath, epoch, caught, startPct);
     } finally {
       // terminou, ou a partida recomeçou no meio: a câmera sobe, a faixa some e o placar sai
       this.resetSlow();
@@ -1918,7 +1930,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
   }
 
-  private async chaseSteps(enemyId: string, agentId: string, agentPath: HexCoord[], epoch: number, caught: Set<string>): Promise<void> {
+  private async chaseSteps(
+    enemyId: string,
+    agentId: string,
+    agentPath: HexCoord[],
+    epoch: number,
+    caught: Set<string>,
+    startPct: number,
+  ): Promise<void> {
     const alive = () => !this.destroyed && this.epoch === epoch;
     const enemy = this.enemy(enemyId)!;
     const agentFrom = this.positions().get(agentId)!;
@@ -1935,7 +1954,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const track = [agentFrom, ...agentPath, ...route.flee];
     const n = agentPath.length;
     // a perseguição troca o tabuleiro pelo mapa de corrida (ver game/runner-session.ts)
-    return this.runnerSteps(enemyId, agentId, route, track, n, alive, caught);
+    return this.runnerSteps(enemyId, agentId, route, track, n, alive, caught, startPct);
   }
 
   /**
@@ -1951,6 +1970,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     n: number,
     alive: () => boolean,
     caught: Set<string>,
+    startPct: number,
   ): Promise<void> {
     const board = this.board!;
     const enemy = this.enemy(enemyId)!;
@@ -1963,7 +1983,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // corrida (gás): o mesmo botão de sempre, de novo a cada recarga
     let sprintAt = 0;
     let sprintPct = 0;
-    const boost = () => (sprintPct ? sprintRate(sprintPct, performance.now() - sprintAt) : 1);
+    // críticos (d20 natural 20 na iniciativa ou no gás, 1 na iniciativa): mudam a velocidade até o fim da corrida
+    let permanentPct = startPct;
+    const boost = () => agentRate(sprintPct ? sprintRate(sprintPct, performance.now() - sprintAt) : 1, permanentPct);
     let shown = -1;
     const session = new RunnerSession({
       canvas: this.runnerRef().nativeElement,
@@ -2007,9 +2029,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sprintStart = () => {
         const roll = rollDie(CHASE_RULES.sprintDie);
         const vigor = this.chaseStats(agentId).vigor ?? 0;
-        const { percent } = resolveSprint(roll, { vigor });
-        const ms = sprintTotalMs();
-        const rolling: SprintView = { state: 'rolling', roll, vigor, percent, ms };
+        const { percent, crit, permanent, trip } = resolveSprint(roll, { vigor });
+        // tropeço: sem gás, o selo fica só o tempo de ler e a recarga começa
+        const ms = crit === 'tropeco' ? 1200 : sprintTotalMs();
+        const rolling: SprintView = { state: 'rolling', roll, vigor, percent, ms, crit, permanent: permanentPct + permanent };
         const active: SprintView = { ...rolling, state: 'active' };
         this.chaseSprint.set(rolling);
         this.sound.play('dado.d20');
@@ -2023,10 +2046,24 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.timers.push(
           setTimeout(() => {
             if (!swap(rolling, active)) return;
+            if (crit === 'tropeco') {
+              // tirou 1: sem gás, ele tropeça e perde `sprintTripSeconds`
+              session.race.trip(trip);
+              this.gamepad.rumble(0.7, 0.4, 220);
+              this.haptics.vibrate(60);
+              this.sound.play('teste.falhou');
+              this.say(`${who} tropeçou na arrancada e perdeu terreno!`, 'alert');
+              return;
+            }
             sprintAt = performance.now();
             sprintPct = percent;
-            this.gamepad.rumble(0.4, 0.3, 200);
+            permanentPct += permanent;
+            this.gamepad.rumble(crit ? 0.8 : 0.4, crit ? 0.6 : 0.3, crit ? 350 : 200);
             this.say(`${who} deu o gás: +${percent}% de velocidade por ${CHASE_RULES.sprintSeconds} s!`, 'alert');
+            if (crit === 'critico') {
+              this.sound.play('teste.20');
+              this.say(`Acerto crítico! ${who} fica ${CHASE_RULES.sprintCritPercent}% mais rápido até o fim da corrida.`, 'alert');
+            }
           }, SPRINT_DIE_MS + 150),
           setTimeout(() => swap(active, cooldown), SPRINT_DIE_MS + 150 + ms),
           // recarregou: pode rolar outro d20

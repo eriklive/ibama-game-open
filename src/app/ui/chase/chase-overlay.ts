@@ -1,5 +1,5 @@
 import { Component, input, output } from '@angular/core';
-import { CHASE_RULES, type Side } from '../../game/chase';
+import { CHASE_RULES, type Side, type SprintCrit } from '../../game/chase';
 import { D20 } from '../dice/d20';
 
 /** Placar da perseguição: distância até ele e quanto da rota travada já foi. */
@@ -26,6 +26,10 @@ export interface SprintView {
   percent: number;
   /** Quanto dura (ms) a fase atual (`active` ou `cooldown`), para a barrinha do botão. */
   ms: number;
+  /** d20 natural 20 (acerto crítico) ou 1 (falha crítica). */
+  crit?: SprintCrit;
+  /** Quanto os críticos já mudaram a velocidade do agente nesta corrida (%), contando este. */
+  permanent?: number;
 }
 
 /** Escolha de alvo aberta: quem escolhe, quantos fogem e qual está em prévia (`null`: nenhum). */
@@ -56,6 +60,7 @@ export class ChaseOverlay {
   readonly sprint = input<SprintView | null>(null);
   readonly sprintPress = output<void>();
   protected readonly dieMs = SPRINT_DIE_MS;
+  protected readonly critPct = CHASE_RULES.sprintCritPercent;
 
   protected sprintSub(sp: SprintView): string {
     switch (sp.state) {
@@ -64,10 +69,17 @@ export class ChaseOverlay {
       case 'rolling':
         return 'rolando…';
       case 'active':
-        return `+${sp.percent}% de velocidade (${this.sprintRoll(sp)})`;
+        return sp.crit === 'tropeco'
+          ? `tropeçou! (${this.sprintRoll(sp)})`
+          : `+${sp.percent}% de velocidade (${this.sprintRoll(sp)})${this.critText(sp)}`;
       default:
         return 'recuperando o fôlego…';
     }
+  }
+
+  /** " · crítico! +5% até o fim"; nada sem crítico. */
+  protected critText(sp: SprintView): string {
+    return sp.crit === 'critico' ? ` · crítico! +${CHASE_RULES.sprintCritPercent}% até o fim` : '';
   }
 
   /** "d20 13 + 1 vigor" (ou só "d20 13", sem vigor). */
@@ -78,7 +90,7 @@ export class ChaseOverlay {
 
   protected sprintLabel(sp: SprintView): string {
     return sp.state === 'ready'
-      ? `Correr: teste de vigor, d20 + vigor, o total vira o bônus de velocidade por ${CHASE_RULES.sprintSeconds} segundos`
+      ? `Correr: teste de vigor, d20 + vigor, o total vira o bônus de velocidade por ${CHASE_RULES.sprintSeconds} segundos. Tirar 20 deixa o agente ${CHASE_RULES.sprintCritPercent}% mais rápido até o fim da corrida; tirar 1, ele tropeça`
       : `Correr: ${this.sprintSub(sp)}`;
   }
 

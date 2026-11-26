@@ -514,6 +514,7 @@ borda. O que já está no jogo:
    **Perseguir?** com cada agente possível (e a chance de arrancar) e **Deixar fugir**. Com
    controle: ✕ manda o primeiro, ○ deixa fugir.
 2. **Iniciativa.** Só o agente rola: **d20 + iniciativa ≥ 8**. Falhou: hesita e ele foge normal.
+   **Crítico:** d20 natural 20 deixa o agente 10% mais rápido a corrida inteira; 1 (falha crítica), se ele ainda arrancar, 5% mais lento.
    Uma perseguição por vez; quem já correu nesta rodada não vai de novo.
    **Voz de prisão:** quem foge de uma abordagem não espera o turno inimigo. Ao fechar o auto de
    abordagem, ele foge na hora, ainda no turno de quem abordou. O primeiro a rolar é o agente que
@@ -533,6 +534,7 @@ borda. O que já está no jogo:
    consegue usar (bloqueada é parede). Chegou à borda: some do mapa e a perseguição acaba.
 4. **A corrida.** A perseguição sai do tabuleiro e vira o [Modo Corrida](#modo-corrida-aeroporto).
    **Correr!** (C, □), quantas vezes quiser: d20 + vigor vira o bônus de velocidade (%) por 5 s; acabou, 3 s de recarga e pode rolar outro d20.
+   **Crítico:** d20 natural 20 dá o gás e ainda +5% de velocidade até o fim da corrida (acumula com o da iniciativa). 1 é **tropeço**: sem gás, o agente cai (animação de tropeço) e perde 0,5 s; depois, a recarga normal.
    Só o agente acelera.
 5. **Fim.** Distância 0: **agarrou**. Ele se rende **abalado**: +2 a favor do agente no próximo
    interrogatório (some depois da primeira conversa ou no fim da rodada seguinte). Rota no fim: ele
@@ -577,7 +579,7 @@ estilo do Temple Run: o agente corre sempre no meio da pista.
      por trás dele e sai pela porta dos fundos do oeste **virando à direita** (2 curvas no hangar);
    - **à esquerda**: tudo espelhado.
 
-   A mata espelha junto. Ela tem **4 curvas**: vai para um lado, sobe, volta e sobe de novo.
+   A mata espelha junto. Ela tem **8 curvas**: vai para um lado, sobe, volta e sobe, duas vezes (o caminho ficou ~50% mais longo quando a corrida acelerou: ~294 fileiras no A, ~280 no B).
 4. **Onde começa.** A zona tática em que o suspeito estava escolhe a zona de largada: pista (com 2
    hexágonos de beira), pátio, hangar, fundos ou mata. **Fora da pista é sempre o trecho de mata.**
    Da casa, por enquanto, também vai para a mata.
@@ -588,7 +590,7 @@ estilo do Temple Run: o agente corre sempre no meio da pista.
    - O avião, pousado de barriga, fica colado na pista e a asa (a 1,57 m) passa por cima do meio
      dela: é preciso deslizar.
    - A porta dos fundos é do tamanho da pista.
-6. **A corrida** (`RunnerRace`, em `src/app/game/runner.ts`). Os dois correm a 5,5 fileiras/s e o
+6. **A corrida** (`RunnerRace`, em `src/app/game/runner.ts`). Os dois correm a 8,25 fileiras/s e o
    agente corre sozinho, sempre no meio da pista (não há troca de faixa). O jogador só faz os
    gestos:
 
@@ -598,14 +600,14 @@ estilo do Temple Run: o agente corre sempre no meio da pista.
    | Pular | ↑, W ou espaço | arrastar para cima | ✕ | tora, galões, sacos, gaiolas, caixote baixo |
    | Deslizar | ↓ ou S | arrastar para baixo | ○ | lona, galho, asa do avião |
 
-   - **Curva:** a 5 fileiras da esquina (~0,9 s), aparece "← Curva à esquerda!" e ←/→ vira. Longe de
+   - **Curva:** a 7 fileiras da esquina (~0,85 s), aparece "← Curva à esquerda!" e ←/→ vira. Longe de
      uma curva, ←/→ não faz nada. O agente **não vira sozinho**: até o jogador virar, ele corre reto
      para a esquina. Se não virar, ou virar para o lado errado, ele **bate na curva** e perde **2
      hexágonos**; aí encaixa no caminho e segue. A câmera acompanha a direção do agente
      (`setChaseFollow`).
    - **Bater num obstáculo** (passar sem o gesto certo): o agente tropeça e perde **1 hexágono**.
    - **O garimpeiro** também corre no meio e vira sempre. Em cada obstáculo ele rola **d20 + agilidade ≥ 8**; se falhar, tropeça e o agente ganha 1 hexágono.
-   - **Correr!** (C, □) continua igual. A animação de corrida toca 15% mais rápida que o clipe.
+   - **Correr!** (C, □) continua igual. A animação de corrida toca 1,575× a velocidade do clipe.
    - **Distância 0: agarrou.** Ele se rende, abalado.
    - **Ele chegou ao fim do caminho: fugiu.**
 7. **A volta** (`tacticalIndex`). Onde cada um parou na corrida vira um hexágono da pista tática (o

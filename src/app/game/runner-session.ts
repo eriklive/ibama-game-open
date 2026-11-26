@@ -33,9 +33,9 @@ const STUMBLE_LEAN = 0.35;
 const TURN_BLEND = 0.22;
 /**
  * Velocidade da animação de corrida (1 = a do clipe). O sprint do clipe corre 8,25 m/s e a pista
- * anda ~7,2 m/s: a 1,05 a passada fica um pouco longa, mas o ritmo das pernas é o de quem foge.
+ * anda ~10,7 m/s: a 1,575 o ritmo das pernas acompanha a pista.
  */
-const RUN_ANIM = 1.05;
+const RUN_ANIM = 1.575;
 /**
  * "Drift" na curva: o corpo inclina para dentro, proporcional a quanto a direção gira (rad por
  * fileira), até `DRIFT_MAX`. `DRIFT_LOOK` é quanto (fileiras) à frente e atrás se mede o giro.

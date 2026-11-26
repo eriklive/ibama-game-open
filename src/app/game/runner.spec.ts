@@ -154,6 +154,19 @@ describe('RunnerRace: curvas', () => {
     expect(new RunnerRace({ obstacles: [], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 }).pose('agente').fall).toBeUndefined();
   });
 
+  it('o tropeço do gás: ele cai e perde o tempo pedido; já caído, não soma', () => {
+    const race = new RunnerRace({ obstacles: [], startAt: 0, length: 100, hexes: 4, rollEnemy: () => 20 });
+    run(race, 0.5);
+    const gap = race.gap();
+    expect(race.trip(0.5)).toBe(true);
+    expect(race.pose('agente')).toMatchObject({ action: 'tropeca', fall: 'obstaculo' });
+    expect(race.trip(0.5)).toBe(false);
+    run(race, 0.5);
+    expect(race.pose('agente').action).toBe('corre');
+    // meio segundo parado: ele abriu meio segundo de corrida
+    expect(race.gap() - gap).toBeCloseTo(0.5 * R.rowsPerSecond, 1);
+  });
+
   it('virar para o lado errado: bate na esquina', () => {
     const race = new RunnerRace({ obstacles: [], turns: [turn(10, 'direita')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     const ev = run(race, 5, () => {
@@ -181,12 +194,13 @@ describe('RunnerRace: curvas', () => {
   it('o agente não vira sozinho: a esquina fica presa até ele virar certo (ou bater nela)', () => {
     const ok = new RunnerRace({ obstacles: [], turns: [turn(10, 'esquerda'), turn(30, 'direita')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
     expect(ok.heldTurn()).toBe(0);
-    run(ok, 1.8);
+    // a 8 fileiras: dentro da janela da primeira esquina
+    run(ok, 8 / R.rowsPerSecond);
     ok.turn(-1);
     // virou certo: a próxima esquina é que fica presa
     expect(ok.heldTurn()).toBe(1);
     const wrong = new RunnerRace({ obstacles: [], turns: [turn(10, 'esquerda')], startAt: 0, length: 100, hexes: 2, rollEnemy: () => 20 });
-    run(wrong, 1.8);
+    run(wrong, 8 / R.rowsPerSecond);
     wrong.turn(1);
     // virou errado: segue reto até bater na esquina; bateu, o caminho segue
     expect(wrong.heldTurn()).toBe(0);

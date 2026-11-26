@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MAPS } from './maps';
-import { aeroportoZone, raceA, raceB, runnerStart, trackObstacles } from './runner-maps';
+import { aeroportoZone, raceA, raceB, raceLength, runnerStart, trackObstacles } from './runner-maps';
 import { pathTurns } from './runner-path';
 
 const aero = MAPS.find((m) => m.id === 'aeroporto')!;
@@ -20,12 +20,14 @@ describe('Modo Corrida: zonas do Aeroporto', () => {
 });
 
 describe('Modo Corrida: as curvas', () => {
-  it('mapa A, garimpeiro à direita: no hangar, esquerda (por trás do avião) e direita (porta); na mata, 4 curvas', () => {
-    expect(sides(raceA('direita'))).toEqual(['esquerda', 'direita', 'direita', 'esquerda', 'esquerda', 'direita']);
+  it('mapa A, garimpeiro à direita: no hangar, esquerda (por trás do avião) e direita (porta); na mata, 8 curvas', () => {
+    const forest = ['direita', 'esquerda', 'esquerda', 'direita'];
+    expect(sides(raceA('direita'))).toEqual(['esquerda', 'direita', ...forest, ...forest]);
   });
 
   it('mapa A, garimpeiro à esquerda: tudo espelhado', () => {
-    expect(sides(raceA('esquerda'))).toEqual(['direita', 'esquerda', 'esquerda', 'direita', 'direita', 'esquerda']);
+    const forest = ['esquerda', 'direita', 'direita', 'esquerda'];
+    expect(sides(raceA('esquerda'))).toEqual(['direita', 'esquerda', ...forest, ...forest]);
   });
 
   it('o avião fica do lado de onde a pista vira por trás dele', () => {
@@ -44,8 +46,25 @@ describe('Modo Corrida: as curvas', () => {
     expect(left.obstacles.find((o) => o.kind === 'wing')!.lanes).toContain(2);
   });
 
-  it('mapa B: a lateral reta e as 4 curvas da mata', () => {
-    expect(sides(raceB('direita'))).toHaveLength(4);
+  it('mapa B: a lateral reta e as 8 curvas da mata', () => {
+    expect(sides(raceB('direita'))).toHaveLength(8);
+  });
+
+  it('a mata cresceu: o caminho ficou ~50% mais longo, para a corrida mais rápida durar o mesmo', () => {
+    // antes: ~197 fileiras no A e ~186 no B
+    expect(raceLength(raceA('direita'))).toBeGreaterThan(280);
+    expect(raceLength(raceB('direita'))).toBeGreaterThan(270);
+  });
+
+  it('nenhum obstáculo da mata cai fora do trecho dele nem colado numa esquina', () => {
+    for (const race of [raceA('direita'), raceB('esquerda')]) {
+      for (const o of race.obstacles) {
+        const seg = race.path[o.seg];
+        const next = race.path[o.seg + 1]?.at ?? raceLength(race);
+        expect(o.d).toBeGreaterThan(3);
+        expect(seg.at + o.d).toBeLessThan(next - 3);
+      }
+    }
   });
 });
 
