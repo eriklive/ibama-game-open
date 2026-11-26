@@ -579,7 +579,7 @@ estilo do Temple Run: o agente corre sempre no meio da pista.
      por trás dele e sai pela porta dos fundos do oeste **virando à direita** (2 curvas no hangar);
    - **à esquerda**: tudo espelhado.
 
-   A mata espelha junto. Ela tem **8 curvas**: vai para um lado, sobe, volta e sobe, duas vezes (o caminho ficou ~50% mais longo quando a corrida acelerou: ~294 fileiras no A, ~280 no B).
+   A mata espelha junto. Ela tem **8 curvas**: vai para um lado, sobe, volta e sobe, duas vezes (o caminho ficou mais longo quando a corrida acelerou: ~328 fileiras no A, ~314 no B). Cada obstáculo tem pelo menos 9 fileiras livres antes (8 depois de uma curva).
 4. **Onde começa.** A zona tática em que o suspeito estava escolhe a zona de largada: pista (com 2
    hexágonos de beira), pátio, hangar, fundos ou mata. **Fora da pista é sempre o trecho de mata.**
    Da casa, por enquanto, também vai para a mata.
