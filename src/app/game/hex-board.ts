@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, reachableHexes, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
-import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
+import { CharacterRig, ClipName, LegPose, METER, ModelDef, Pose, restLeg, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
 import { wallFloorShape } from './house-plan';
@@ -230,37 +230,42 @@ interface EnemyView extends Mover {
 }
 
 /**
- * Golpe do arrombamento, em poses por cima do `idle` (ver `POSE_BONES` em `character-model.ts`):
- * recolhe o joelho no peito (`chamber`), segura no slow inclinado para trás com a guarda alta
- * (`coil`) e solta a sola do pé na porta com o corpo atrás (`strike`); quando a porta cede, a
- * perna vai junto (`through`), quando aguenta, o pé volta (`recoil`).
+ * Chute de arrombamento (chute frontal, de empurrar), feito à mão por cima do `idle`. O clipe
+ * `kick` (a joelhada `Melee_Knee` da UAL) não entra: ele começa levando a perna para trás e, somado
+ * às poses, a perna recuava antes de subir. A perna do chute vai no espaço do corpo
+ * (`CharacterRig.leg`: `hip`, `knee`, `ankle`); o resto (perna de apoio, tronco, braços) na camada
+ * local (`POSE_BONES`), onde `thigh`, `calf` e `foot` ficam em 0.
+ *
+ * Do repouso o pé sai do chão direto para a frente e para cima: o joelho sobe (`lift`) até o peito,
+ * dobrado, com a ponta do pé puxada para cima (`chamber`); no slow ele segura lá em cima, um pouco
+ * mais alto e com o corpo atrás (`coil`); aí a perna estica reto para a frente, na altura da
+ * fechadura, e a sola bate chapada na porta (`strike`). Quando a porta cede, a perna vai junto
+ * (`through`); quando aguenta, ela recolhe (`recoil`); depois o pé desce e volta à base.
+ *
+ * Até o impacto o pé nunca recua: da base (`KICK_LEG_IDLE`) ao recolher, `hip` e o ângulo da canela
+ * (`hip - knee`) só crescem de uma pose para a próxima (a mistura é em linha reta), e no golpe a
+ * canela gira toda para a frente enquanto a coxa desce até a horizontal (conferido renderizando o
+ * modelo de lado, quadro a quadro).
  */
-const KICK_POSES: Record<'chamber' | 'coil' | 'strike' | 'through' | 'recoil', Pose> = {
-  chamber: { thigh: -1.7, calf: 2.0, foot: -0.25, thighL: -0.28, calfL: 0.5, spine: -0.1, armR: 0.55, foreR: 1.35, armL: 0.65, foreL: 1.45 },
-  coil: { thigh: -2.05, calf: 1.9, foot: -0.5, thighL: -0.36, calfL: 0.62, spine: -0.3, armR: 0.2, foreR: 1.25, armL: 0.85, foreL: 1.45 },
-  strike: { thigh: -1.5, calf: 0.05, foot: -0.55, thighL: -0.12, calfL: 0.28, spine: -0.34, armR: -0.6, foreR: 0.7, armL: 0.85, foreL: 1.1 },
-  through: { thigh: -1.25, calf: 0.1, foot: -0.3, thighL: -0.05, calfL: 0.15, spine: -0.18, armR: -0.4, foreR: 0.8, armL: 0.6, foreL: 1.2 },
-  recoil: { thigh: -1.6, calf: 0.9, foot: -0.3, thighL: -0.2, calfL: 0.4, spine: -0.16, armR: 0.1, foreR: 1.1, armL: 0.7, foreL: 1.3 },
+type KickFrame = Pose & Omit<LegPose, 'weight'>;
+type KickStage = 'lift' | 'chamber' | 'coil' | 'strike' | 'through' | 'recoil';
+const kickFrame = (leg: Omit<LegPose, 'weight'>, body: Partial<Pose>): KickFrame => ({ ...restPose(), ...body, ...leg });
+const KICK_POSES: Record<KickStage, KickFrame> = {
+  lift: kickFrame({ hip: 0.9, knee: 1.15, ankle: 0.35 }, { thighL: -0.08, calfL: 0.16, spine: -0.04, armR: 0.3, foreR: 0.9, armL: 0.35, foreL: 1.0 }),
+  chamber: kickFrame({ hip: 2.0, knee: 1.6, ankle: 0.6 }, { thighL: -0.16, calfL: 0.32, spine: -0.12, armR: 0.55, foreR: 1.35, armL: 0.65, foreL: 1.45 }),
+  coil: kickFrame({ hip: 2.15, knee: 1.75, ankle: 0.7 }, { thighL: -0.2, calfL: 0.4, spine: -0.26, armR: 0.25, foreR: 1.25, armL: 0.8, foreL: 1.45 }),
+  strike: kickFrame({ hip: 1.7, knee: 0.05, ankle: 0.15 }, { thighL: -0.08, calfL: 0.16, spine: -0.32, armR: -0.55, foreR: 0.7, armL: 0.8, foreL: 1.1 }),
+  through: kickFrame({ hip: 1.55, knee: 0.1, ankle: 0.1 }, { thighL: -0.04, calfL: 0.08, spine: -0.18, armR: -0.4, foreR: 0.8, armL: 0.6, foreL: 1.2 }),
+  recoil: kickFrame({ hip: 1.65, knee: 1.4, ankle: 0.4 }, { thighL: -0.12, calfL: 0.24, spine: -0.15, armR: 0.1, foreR: 1.1, armL: 0.7, foreL: 1.3 }),
 };
-
 /**
- * Chute de arrombamento (chute frontal, de empurrar) com o clipe `kick` (a joelhada avançando da
- * UAL), em pontos do clipe (0 a 1): dá o passo e começa a subir o joelho até `load`; no slow o
- * joelho chega no peito (`chamber`, o clipe segura o joelho lá em cima até `after`) e volta até
- * `end`. Por cima do clipe: no recolher (`chamber`) o joelho sobe mais, o pé puxa a ponta para
- * cima e o tronco vai para trás; no golpe (`strike`) a perna estica reto para a frente, na altura
- * da fechadura, com a sola chapada na porta (~1,3 m à frente de onde ele estava) e o corpo atrás.
- * Quando a porta cede, a perna vai junto (`through`); quando aguenta, ela recolhe (`recoil`).
+ * A perna do chute parada como no `idle` (a de trás, um pouco atrás e com o joelho solto): é de
+ * onde a subida começa e onde a descida termina, para a troca entre o clipe e a pose não esticar
+ * a perna nem afundar o pé no chão.
  */
-const KICK_CLIP = { load: 0.3, chamber: 0.4, after: 0.45, end: 0.87 } as const;
-const KICK_LAYER: Record<'chamber' | 'strike' | 'through' | 'recoil', Partial<Pose>> = {
-  chamber: { thigh: -0.35, calf: 0.3, foot: -0.8, spine: -0.55 },
-  strike: { thigh: 0.45, calf: -2.2, foot: -1.0, spine: -0.9 },
-  through: { thigh: 0.55, calf: -2.3, foot: -0.8, spine: -0.4 },
-  recoil: { thigh: -0.15, calf: 0.15, foot: -0.5, spine: -0.45 },
-};
-/** Distância da porta para chutar: com o clipe ele avança; sem ele, a perna procedural alcança de perto. */
-const KICK_REACH = { clip: 1.65, pose: 1.05 } as const;
+const KICK_LEG_IDLE: Omit<LegPose, 'weight'> = { hip: -0.05, knee: 0.25, ankle: 0.3 };
+/** Distância da porta para chutar: a perna esticada, com o tranco do corpo, chega na folha. */
+const KICK_REACH = 1.15;
 
 /** Posição de largada de quem resistiu ao arrombamento: inclinado, joelhos dobrados, braços prontos. */
 const BOLT_STANCE: Pose = { thigh: -0.45, calf: 0.55, foot: 0.15, thighL: 0.22, calfL: 0.3, spine: 0.45, armR: -0.7, foreR: 1.3, armL: 0.8, foreL: 1.4 };
@@ -1848,19 +1853,20 @@ export class HexBoard {
     u.rig?.play(down ? 'crouch' : this.restClip(u), down ? 0.35 : 0.45);
   }
 
-  /**
-   * Chutão na porta: o agente planta o pé de apoio e recolhe o joelho no peito; aí a cena entra
-   * em slow (`onSlow` roda nessa hora: é quando a tela gira o d20) e ele segura o golpe inclinado
-   * para trás enquanto a promessa de `onSlow` não termina. Quando ela termina, o slow acaba no
-   * gesto e a sola do pé bate na porta em velocidade cheia (`onImpact`). `through` diz se a porta
-   * cede (a perna e o corpo vão junto) ou aguenta (o pé volta). A biblioteca de clipes não tem
-   * chute: as poses são feitas à mão por cima do `idle` (ver `KICK_POSES`).
-   */
   /** De quão longe da porta o agente chuta (ver `KICK_REACH`). */
-  kickReach(unitId: string): number {
-    return this.units.get(unitId)?.rig?.has('kick') ? KICK_REACH.clip : KICK_REACH.pose;
+  kickReach(_unitId: string): number {
+    return KICK_REACH;
   }
 
+  /**
+   * Chutão na porta (ver `KICK_POSES`): do repouso o joelho sobe direto até o peito, com o pé
+   * puxado para cima; no meio do gesto a cena entra em slow (`onSlow` roda nessa hora: é quando a
+   * tela gira o d20) e ele segura o joelho lá em cima, com o corpo atrás, enquanto a promessa de
+   * `onSlow` não termina. Quando ela termina, o slow acaba no gesto e a perna estica: a sola do pé
+   * bate na porta em velocidade cheia (`onImpact`, uma vez só). `through` diz se a porta cede (a
+   * perna e o corpo vão junto) ou aguenta (a perna recolhe). Tudo por cima do `idle`, sem o clipe
+   * `kick`: a perna do chute só segue as poses, sem outro movimento misturado.
+   */
   async kick(
     unitId: string,
     opts: { onSlow?: () => Promise<void> | void; onImpact: () => void; through?: boolean },
@@ -1870,9 +1876,21 @@ export class HexBoard {
       await opts.onSlow?.();
       return opts.onImpact();
     }
-    if (u.rig?.has('kick')) return this.kickClip(u, u.rig, opts);
     const pose = u.rig?.pose ?? restPose();
-    const rest = restPose();
+    const leg = u.rig?.leg ?? restLeg();
+    const rest: KickFrame = { ...restPose(), ...KICK_LEG_IDLE };
+    const cur: KickFrame = { ...rest };
+    // escreve a mistura de `a` e `b` no corpo (camada local) e na perna do chute
+    const mix = (a: KickFrame, b: KickFrame, t: number) => {
+      for (const k in cur) {
+        const key = k as keyof KickFrame;
+        cur[key] = a[key] + (b[key] - a[key]) * t;
+      }
+      for (const k in pose) pose[k as keyof Pose] = cur[k as keyof Pose];
+      leg.hip = cur.hip;
+      leg.knee = cur.knee;
+      leg.ankle = cur.ankle;
+    };
     const pos = u.group.position;
     const fwd = new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
     const start = pos.clone();
@@ -1882,24 +1900,28 @@ export class HexBoard {
     };
     const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
     const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+    const lerp = THREE.MathUtils.lerp;
     const P = KICK_POSES;
-    // o golpe é montado por cima do `idle`: quem estava agachado na cobertura levanta para chutar
+    // a perna fica só com as poses: quem estava agachado na cobertura (ou andando) volta ao `idle`
     u.rig?.play('idle', 0.15);
     try {
-      // 1. recolhe o joelho (sem modelo, a peça só dá o tranco para a frente no impacto)
-      const slow: { held?: Promise<void> } = {};
-      await this.sceneTween(300, (t) => {
-        mixPose(pose, rest, P.chamber, easeOut(t));
-        u.hop = -0.08 * easeOut(t);
-        lunge(-0.05 * easeOut(t));
+      // 1. o pé sai do chão e o joelho sobe direto até o peito (passando por `lift`, sem recuar);
+      // a perna sai do `idle` para a pose logo no começo da subida
+      let held: Promise<void> | undefined;
+      await this.sceneTween(340, (t) => {
+        const e = easeOut(t);
+        if (e < 0.45) mix(rest, P.lift, e / 0.45);
+        else mix(P.lift, P.chamber, (e - 0.45) / 0.55);
+        leg.weight = easeOut(Math.min(1, t / 0.2));
+        u.hop = -0.03 * e;
         // no meio do gesto a cena desacelera e a tela rola o d20
-        if (!slow.held && t >= 0.45 && opts.onSlow) {
+        if (!held && t >= 0.45 && opts.onSlow) {
           this.setSceneSlowmo(true);
-          slow.held = Promise.resolve(opts.onSlow());
+          held = Promise.resolve(opts.onSlow());
         }
       });
-      // 2. segura o golpe no slow até o d20 parar: o joelho sobe mais, o corpo pende para trás
-      const held = slow.held;
+      leg.weight = 1;
+      // 2. segura o joelho no peito no slow até o d20 parar: sobe mais um pouco, o corpo pende para trás
       if (held) {
         let done = false;
         void held.then(() => (done = true));
@@ -1908,11 +1930,10 @@ export class HexBoard {
           const step = (now: number) => {
             if (this.disposed || done) return resolve();
             const p = Math.min(1, (now - t0) / 900);
-            mixPose(pose, P.chamber, P.coil, easeInOut(p));
+            mix(P.chamber, P.coil, easeInOut(p));
             // tremidinha de quem está com a perna no ar, carregando o golpe
-            pose.thighL += Math.sin(now / 55) * 0.015 * p;
-            u.hop = -0.08 - 0.02 * p;
-            lunge(-0.05 - 0.04 * p);
+            pose.thighL += Math.sin(now / 55) * 0.012 * p;
+            u.hop = -0.03 - 0.01 * p;
             requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
@@ -1920,130 +1941,41 @@ export class HexBoard {
         await held;
         this.setSceneSlowmo(false);
       }
-      const from = { ...pose };
-      const back = -0.05 - (held ? 0.04 : 0);
-      // 3. solta a perna na porta, rápido, com o corpo atrás
-      await this.tween(95, (t) => {
+      // 3. a perna estica reto para a frente, rápido, e a sola bate na porta com o corpo atrás
+      const from = { ...cur };
+      const hop0 = u.hop;
+      await this.tween(110, (t) => {
         const e = t * t;
-        mixPose(pose, from, P.strike, e);
-        u.hop = THREE.MathUtils.lerp(held ? -0.1 : -0.08, -0.04, e);
-        lunge(THREE.MathUtils.lerp(back, 0.16, e));
+        mix(from, P.strike, e);
+        u.hop = lerp(hop0, -0.02, e);
+        lunge(0.12 * e);
       });
       opts.onImpact();
-      // 4. a porta cede (a perna atravessa) ou aguenta (o pé volta, o corpo recua)
-      await this.tween(170, (t) => {
+      // 4. a porta cede (a perna atravessa) ou aguenta (a perna recolhe, o corpo volta)
+      const hit = opts.through ? P.through : P.recoil;
+      await this.tween(180, (t) => {
         const e = easeOut(t);
-        mixPose(pose, P.strike, opts.through ? P.through : P.recoil, e);
-        lunge(opts.through ? 0.16 + 0.16 * e : 0.16 - 0.14 * e);
+        mix(P.strike, hit, e);
+        lunge(opts.through ? 0.12 + 0.2 * e : 0.12 * (1 - e));
       });
-      // 5. volta à base
-      const end = { ...pose };
-      const endAt = opts.through ? 0.32 : 0.02;
+      // 5. o pé desce e volta à base (a perna devolvida ao `idle` no fim da descida)
+      const end = { ...cur };
+      const endAt = opts.through ? 0.32 : 0;
       const hop = u.hop;
       await this.tween(420, (t) => {
         const e = easeInOut(t);
-        mixPose(pose, end, rest, e);
+        mix(end, rest, e);
+        leg.weight = 1 - easeInOut(Math.max(0, (t - 0.4) / 0.6));
         u.hop = hop * (1 - e);
         lunge(endAt * (1 - e));
       });
     } finally {
       this.setSceneSlowmo(false);
-      mixPose(pose, rest, rest, 1);
+      Object.assign(pose, restPose());
+      Object.assign(leg, restLeg());
       u.hop = 0;
       lunge(0);
       u.rig?.play(this.restClip(u), 0.3);
-    }
-  }
-
-  /**
-   * O chute com o clipe `kick`: dá o passo e sobe o joelho no tempo normal; perto do fim a cena
-   * entra em slow e o joelho chega devagar no peito, com o pé puxado e o corpo para trás, enquanto
-   * `onSlow` não termina (o d20 rolando); aí o slow acaba e, em velocidade cheia, a perna estica
-   * reto e a sola bate chapada na porta (`onImpact`).
-   */
-  private async kickClip(
-    u: UnitView,
-    rig: CharacterRig,
-    opts: { onSlow?: () => Promise<void> | void; onImpact: () => void; through?: boolean },
-  ): Promise<void> {
-    const C = KICK_CLIP;
-    const pose = rig.pose;
-    const rest = restPose();
-    const layer = (p: Partial<Pose>): Pose => ({ ...rest, ...p });
-    const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
-    const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
-    const lerp = THREE.MathUtils.lerp;
-    try {
-      mixPose(pose, rest, rest, 1);
-      rig.scrub('kick', 0, 0.15);
-      const chamber = layer(KICK_LAYER.chamber);
-      const strike = layer(KICK_LAYER.strike);
-      // quanto do recolher já entrou (0 a 1), pelo ponto do clipe
-      const chambered = (at: number) => THREE.MathUtils.clamp((at - C.load) / (C.chamber - C.load), 0, 1);
-      // 1. dá o passo de apoio e começa a subir o joelho (no tempo da cena)
-      let slowed = false;
-      await this.sceneTween(320, (t) => {
-        rig.scrub('kick', C.load * easeOut(t));
-        if (!slowed && t >= 0.7 && opts.onSlow) {
-          slowed = true;
-          this.setSceneSlowmo(true);
-        }
-      });
-      // 2. slow: o joelho chega devagar no peito (pé puxado, corpo para trás) enquanto o d20 rola
-      let at = C.load;
-      if (opts.onSlow) {
-        let done = false;
-        const held = Promise.resolve(opts.onSlow()).then(() => (done = true));
-        let last = performance.now();
-        await new Promise<void>((resolve) => {
-          const step = (now: number) => {
-            if (this.disposed || done) return resolve();
-            const dt = (now - last) / 1000;
-            last = now;
-            at += (C.chamber - at) * (1 - Math.exp(-dt * 1.6));
-            rig.scrub('kick', at);
-            mixPose(pose, rest, chamber, easeInOut(chambered(at)));
-            requestAnimationFrame(step);
-          };
-          requestAnimationFrame(step);
-        });
-        await held;
-        this.setSceneSlowmo(false);
-      }
-      // 3. sai do slow no gesto: termina de recolher (rápido, se o d20 não deu tempo)...
-      const from = at;
-      const left = 1 - chambered(from);
-      if (left > 0.05) {
-        const start = { ...pose };
-        await this.tween(140 * left, (t) => {
-          const e = easeOut(t);
-          rig.scrub('kick', lerp(from, C.chamber, e));
-          mixPose(pose, start, chamber, e);
-        });
-      }
-      // ...e explode a perna reto para a frente: a sola bate chapada na porta, o corpo atrás
-      const strikeAt = lerp(C.chamber, C.after, 0.4);
-      await this.tween(100, (t) => {
-        const e = t * t;
-        rig.scrub('kick', lerp(C.chamber, strikeAt, e));
-        mixPose(pose, chamber, strike, e);
-      });
-      opts.onImpact();
-      // 4. a porta cede (a perna vai junto) ou aguenta (a perna recolhe)
-      const hit = opts.through ? layer(KICK_LAYER.through) : layer(KICK_LAYER.recoil);
-      await this.tween(180, (t) => {
-        rig.scrub('kick', lerp(strikeAt, C.after, t));
-        mixPose(pose, strike, hit, easeOut(t));
-      });
-      // 5. volta para o lugar
-      await this.tween(480, (t) => {
-        rig.scrub('kick', lerp(C.after, C.end, t));
-        mixPose(pose, hit, rest, easeInOut(Math.min(1, t * 1.6)));
-      });
-    } finally {
-      this.setSceneSlowmo(false);
-      mixPose(pose, rest, rest, 1);
-      rig.play(this.restClip(u), 0.25);
     }
   }
 
