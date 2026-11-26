@@ -282,11 +282,12 @@ sempre abertas.
   □ no controle) abre o **menu da porta**: a câmera gira 45° e aproxima até enquadrar a porta e o agente,
   a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Destrancar** e **Abrir**.
   A ficha que depende de rolagem traz o **d20** com o número a tirar; as outras, um círculo vazio.
-- **Arrombar** é um chutão: a câmera **fecha na porta**, o agente carrega agachado e dá o passo de apoio;
-  aí a cena entra em **slow** e o d20 gira na ficha da esquerda enquanto ele avança com o joelho subindo
-  devagar. Quando o dado para, o slow acaba no gesto e, em velocidade cheia, a perna estica e a sola do pé
-  bate na porta (clipe `kick`, a joelhada `Melee_Knee` da Quaternius, com a perna esticada por cima). Se passar, a porta abre com força para dentro, bate na parede e fica
-  **arrombada** (aberta para sempre) e a perna atravessa junto; se não, só treme e o pé volta.
+- **Arrombar** é um chute frontal de arrombamento: a câmera **fecha na porta**, o agente dá o passo de apoio
+  e sobe o joelho; aí a cena entra em **slow** e o d20 gira na ficha da esquerda enquanto ele recolhe o
+  joelho até o peito, com a ponta do pé puxada para cima e o corpo para trás. Quando o dado para, o slow
+  acaba no gesto e, em velocidade cheia, a perna estica reto e a sola do pé bate chapada na porta (clipe
+  `kick`, a joelhada `Melee_Knee` da Quaternius, com o recolher e o golpe por cima). Se passar, a porta abre com força para dentro, bate na parede e fica
+  **arrombada** (aberta para sempre) e a perna atravessa junto; se não, só treme e a perna recolhe.
 - **Cada chute tira 2 de resistência** da porta (`DOOR_RULES.kickDamage`): um **−2** vermelho sobe da porta,
   como dano no RPG, e o próximo arrombamento daquela porta precisa de 2 a menos (trancada: 12 → 10 → 8…;
   nunca menos que 1). A ficha **Arrombar** mostra quanto a porta já cedeu. A bloqueada não perde

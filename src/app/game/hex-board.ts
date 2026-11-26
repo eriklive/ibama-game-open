@@ -244,15 +244,20 @@ const KICK_POSES: Record<'chamber' | 'coil' | 'strike' | 'through' | 'recoil', P
 };
 
 /**
- * Chute com o clipe `kick` (a joelhada avançando da UAL): nos pontos do clipe (s) em que ele carrega
- * agachado, chega com o joelho alto e volta. Na hora do impacto a perna estica por cima do clipe
- * (`extend`): a sola vai até ~1,3 m à frente de onde ele estava, na altura da fechadura.
+ * Chute de arrombamento (chute frontal, de empurrar) com o clipe `kick` (a joelhada avançando da
+ * UAL), em pontos do clipe (0 a 1): dá o passo e começa a subir o joelho até `load`; no slow o
+ * joelho chega no peito (`chamber`, o clipe segura o joelho lá em cima até `after`) e volta até
+ * `end`. Por cima do clipe: no recolher (`chamber`) o joelho sobe mais, o pé puxa a ponta para
+ * cima e o tronco vai para trás; no golpe (`strike`) a perna estica reto para a frente, na altura
+ * da fechadura, com a sola chapada na porta (~1,3 m à frente de onde ele estava) e o corpo atrás.
+ * Quando a porta cede, a perna vai junto (`through`); quando aguenta, ela recolhe (`recoil`).
  */
-const KICK_CLIP = { load: 0.15, hold: 0.27, peak: 0.35, after: 0.45, end: 0.87 } as const;
-const KICK_LAYER: Record<'extend' | 'through' | 'recoil', Partial<Pose>> = {
-  extend: { thigh: 0.5, calf: -1.5, foot: -0.5, spine: -0.3 },
-  through: { thigh: 0.65, calf: -1.4, foot: -0.4, spine: -0.15 },
-  recoil: { thigh: 0.15, calf: -0.5, foot: -0.2, spine: -0.1 },
+const KICK_CLIP = { load: 0.3, chamber: 0.4, after: 0.45, end: 0.87 } as const;
+const KICK_LAYER: Record<'chamber' | 'strike' | 'through' | 'recoil', Partial<Pose>> = {
+  chamber: { thigh: -0.35, calf: 0.3, foot: -0.8, spine: -0.55 },
+  strike: { thigh: 0.45, calf: -2.2, foot: -1.0, spine: -0.9 },
+  through: { thigh: 0.55, calf: -2.3, foot: -0.8, spine: -0.4 },
+  recoil: { thigh: -0.15, calf: 0.15, foot: -0.5, spine: -0.45 },
 };
 /** Distância da porta para chutar: com o clipe ele avança; sem ele, a perna procedural alcança de perto. */
 const KICK_REACH = { clip: 1.65, pose: 1.05 } as const;
@@ -1951,9 +1956,10 @@ export class HexBoard {
   }
 
   /**
-   * O chute com o clipe `kick`: carrega agachado no tempo normal; no fundo da carga a cena entra em
-   * slow e o joelho sobe devagar enquanto `onSlow` não termina (o d20 rolando); aí o slow acaba e,
-   * em velocidade cheia, o joelho chega lá em cima e a perna estica até a porta (`onImpact`).
+   * O chute com o clipe `kick`: dá o passo e sobe o joelho no tempo normal; perto do fim a cena
+   * entra em slow e o joelho chega devagar no peito, com o pé puxado e o corpo para trás, enquanto
+   * `onSlow` não termina (o d20 rolando); aí o slow acaba e, em velocidade cheia, a perna estica
+   * reto e a sola bate chapada na porta (`onImpact`).
    */
   private async kickClip(
     u: UnitView,
@@ -1970,7 +1976,11 @@ export class HexBoard {
     try {
       mixPose(pose, rest, rest, 1);
       rig.scrub('kick', 0, 0.15);
-      // 1. carrega: agacha e dá o passo de apoio (no tempo da cena)
+      const chamber = layer(KICK_LAYER.chamber);
+      const strike = layer(KICK_LAYER.strike);
+      // quanto do recolher já entrou (0 a 1), pelo ponto do clipe
+      const chambered = (at: number) => THREE.MathUtils.clamp((at - C.load) / (C.chamber - C.load), 0, 1);
+      // 1. dá o passo de apoio e começa a subir o joelho (no tempo da cena)
       let slowed = false;
       await this.sceneTween(320, (t) => {
         rig.scrub('kick', C.load * easeOut(t));
@@ -1979,7 +1989,7 @@ export class HexBoard {
           this.setSceneSlowmo(true);
         }
       });
-      // 2. slow: o joelho sobe devagar enquanto o d20 rola
+      // 2. slow: o joelho chega devagar no peito (pé puxado, corpo para trás) enquanto o d20 rola
       let at = C.load;
       if (opts.onSlow) {
         let done = false;
@@ -1990,8 +2000,9 @@ export class HexBoard {
             if (this.disposed || done) return resolve();
             const dt = (now - last) / 1000;
             last = now;
-            at += (C.hold - at) * (1 - Math.exp(-dt * 1.4));
+            at += (C.chamber - at) * (1 - Math.exp(-dt * 1.6));
             rig.scrub('kick', at);
+            mixPose(pose, rest, chamber, easeInOut(chambered(at)));
             requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
@@ -1999,19 +2010,30 @@ export class HexBoard {
         await held;
         this.setSceneSlowmo(false);
       }
-      // 3. sai do slow no gesto: o joelho chega e a perna estica na porta
+      // 3. sai do slow no gesto: termina de recolher (rápido, se o d20 não deu tempo)...
       const from = at;
-      await this.tween(110, (t) => {
+      const left = 1 - chambered(from);
+      if (left > 0.05) {
+        const start = { ...pose };
+        await this.tween(140 * left, (t) => {
+          const e = easeOut(t);
+          rig.scrub('kick', lerp(from, C.chamber, e));
+          mixPose(pose, start, chamber, e);
+        });
+      }
+      // ...e explode a perna reto para a frente: a sola bate chapada na porta, o corpo atrás
+      const strikeAt = lerp(C.chamber, C.after, 0.4);
+      await this.tween(100, (t) => {
         const e = t * t;
-        rig.scrub('kick', lerp(from, C.peak, e));
-        mixPose(pose, rest, layer(KICK_LAYER.extend), e);
+        rig.scrub('kick', lerp(C.chamber, strikeAt, e));
+        mixPose(pose, chamber, strike, e);
       });
       opts.onImpact();
-      // 4. a porta cede (a perna vai junto) ou aguenta (o pé volta)
+      // 4. a porta cede (a perna vai junto) ou aguenta (a perna recolhe)
       const hit = opts.through ? layer(KICK_LAYER.through) : layer(KICK_LAYER.recoil);
       await this.tween(180, (t) => {
-        rig.scrub('kick', lerp(C.peak, C.after, t));
-        mixPose(pose, layer(KICK_LAYER.extend), hit, easeOut(t));
+        rig.scrub('kick', lerp(strikeAt, C.after, t));
+        mixPose(pose, strike, hit, easeOut(t));
       });
       // 5. volta para o lugar
       await this.tween(480, (t) => {
