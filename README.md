@@ -307,12 +307,15 @@ sempre abertas.
   - cada rolagem aparece na ficha do d20 (o verde é sempre o que é bom para a equipe). Chutar uma porta
     que já estava aberta não assusta ninguém (só rende a fala do morador);
   - **reação:** no estouro da porta, todo mundo do cômodo vira para ela e dá **um passo para trás**. Depois,
-    um de cada vez (do mais perto ao mais longe), a câmera **inclina de leve** para ele (puxa o olhar, gira um
-    pouco em volta e rola para o lado dele), ele **olha de um lado para o outro** (clipe `look`, o
-    `Idle_LookAround_Loop` da Quaternius) e a rolagem vem em
-    **slow**. Quando o dado para, o slow acaba: se ele **passou** (resistiu ou teve atitude), **vira de
-    costas** para a porta e fica em **posição de correr** (sai correndo na vez dele); se **falhou** perto da
-    porta, já entra na **rendição**.
+    um de cada vez (do mais perto ao mais longe), a câmera **fecha nele** (fica no centro da tela, com uma
+    inclinação de leve para o lado dele) e **some tudo o que tapa a vista** (paredes, telhado, móveis, outro
+    cenário), ele **olha de um lado para o outro** (clipe `look`, o `Idle_LookAround_Loop` da Quaternius) e
+    a rolagem vem em **slow**, mais devagar (`BREAK_IN_SCENE` em `game/break-in-scene.ts`). Nessa cena a
+    HUD e as fichas da porta saem: ficam só a ficha do d20 (maior, embaixo no meio) e os avisos. Quando o
+    dado para, o slow acaba: se ele **passou** (resistiu ou teve atitude), **vira de costas** para a porta e
+    fica em **posição de correr** (sai correndo na vez dele); se **falhou** perto da porta, já entra na
+    **rendição**. O aviso diz se ele se rendeu ou não, e o jogo espera o **Confirmar** (✕ no controle,
+    Enter no teclado) para seguir; depois do último, câmera, cenário e HUD voltam ao menu da porta.
 - **Destrancar** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
   dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0). Qualquer um pode
   tentar; o **Agente** soma a perícia **Gazua +6** (o número a tirar já aparece descontado, nunca abaixo de 1).

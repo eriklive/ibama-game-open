@@ -5,6 +5,7 @@ import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx'
 import { CharacterRig, ClipName, LegPose, METER, ModelDef, Pose, restLeg, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
+import { BREAK_IN_SCENE, viewBlockers } from './break-in-scene';
 import { wallFloorShape } from './house-plan';
 import {
   HANGAR_INTERIOR,
@@ -594,6 +595,11 @@ export class HexBoard {
     roll: 0,
   };
   private readonly cineAim = { point: new THREE.Vector3(), mix: 0, zoom: 1, yaw: 0, roll: 0 };
+  /**
+   * Garimpeiro em foco na cena do arrombamento (ver `focusBreakIn`): o que ficar entre a câmera
+   * e ele some de vez (paredes, telhado, móveis, outro cenário) enquanto durar.
+   */
+  private breakInFocus: string | null = null;
   /** Rolagem da câmera neste quadro (a cena da porta inclina para quem reage). */
   private cineRollNow = 0;
   /** Números de dano que sobem da porta ("−2"). */
@@ -1741,6 +1747,7 @@ export class HexBoard {
   /** Volta para a câmera de sempre. */
   releaseDoorFocus(): void {
     this.cine = null;
+    this.breakInFocus = null;
     this.resetCineAim();
   }
 
@@ -1768,6 +1775,25 @@ export class HexBoard {
     const side = Math.sign(to.dot(right)) || 1;
     const zoom = THREE.MathUtils.clamp(0.8 + to.length() * 0.05, 0.85, 1.2);
     this.cineAimGoal = { point: p, mix: 0.55, zoom, yaw: -side * 0.13, roll: -side * 0.05 };
+  }
+
+  /**
+   * Cena de quem reage ao arrombamento: a câmera da porta fecha no garimpeiro `enemyId`, com ele
+   * no centro e uma inclinação de leve para o lado dele, e tudo o que ficar entre a câmera e
+   * ele (paredes, telhado, móveis, outro cenário) some enquanto durar. `null` encerra: o
+   * cenário volta e a câmera fica onde está até `resetCineAim`.
+   */
+  focusBreakIn(enemyId: string | null): void {
+    const e = enemyId ? this.enemies.get(enemyId) : undefined;
+    this.breakInFocus = e ? enemyId : null;
+    this.occlusionClock = 0;
+    const c = this.cine;
+    if (!e || !c) return;
+    const p = e.group.position.clone().setY(this.groundAt(e.group.position.x, e.group.position.z) + 1.2);
+    const right = new THREE.Vector3(c.dir.z, 0, -c.dir.x);
+    const side = Math.sign(p.clone().sub(c.target).setY(0).dot(right)) || 1;
+    const s = BREAK_IN_SCENE;
+    this.cineAimGoal = { point: p, mix: 1, zoom: s.zoom, yaw: -side * s.yaw, roll: -side * s.roll };
   }
 
   /** Desfaz o zoom na porta e a inclinação: volta ao enquadramento do menu da porta. */
@@ -4253,11 +4279,14 @@ export class HexBoard {
   private updateOccluders(dt: number): void {
     const v = this.inspect;
     const closeUp = !!v?.hideOccluders && this.inspectBlend >= 0.3;
+    // cena do arrombamento: o que tapa o garimpeiro em foco some de vez, como no close-up
+    const focus = !v && this.breakInFocus ? this.enemies.get(this.breakInFocus) : undefined;
+    const hiding = closeUp || !!focus;
     if (closeUp || !v) {
       this.occlusionClock -= dt;
       if (this.occlusionClock <= 0) {
         this.occlusionClock = 0.1;
-        const blockers = closeUp ? this.sceneryBlockers(v!) : this.wallBlockers();
+        const blockers = closeUp ? this.sceneryBlockers(v!) : focus ? this.focusBlockers(focus) : this.wallBlockers();
         for (const o of blockers) {
           if (!this.occluders.has(o)) this.occluders.set(o, this.fadeEntry(o));
         }
@@ -4269,7 +4298,7 @@ export class HexBoard {
     if (!this.occluders.size) return;
 
     // no close-up o que tapa some de vez; na vista normal a parede fica translúcida
-    const floor = closeUp ? 0 : WALL_FADE_ALPHA;
+    const floor = hiding ? 0 : WALL_FADE_ALPHA;
     const k = 1 - Math.exp(-dt * 9);
     for (const [o, e] of this.occluders) {
       e.alpha += ((e.hide ? floor : 1) - e.alpha) * k;
@@ -4307,6 +4336,39 @@ export class HexBoard {
     }
     this.raycaster.far = Infinity;
     return blockers;
+  }
+
+  /**
+   * Cena do arrombamento: o que fica entre a câmera e o garimpeiro em foco (pés, peito e
+   * cabeça): paredes e telhado das estruturas (só as peças que tapam), móveis e carga, e o
+   * resto do cenário (o avião, por exemplo).
+   */
+  private focusBlockers(e: EnemyView): Set<THREE.Object3D> {
+    const base = e.group.position;
+    const ground = this.groundAt(base.x, base.z);
+    const points = BREAK_IN_SCENE.bodyHeights.map((h) => base.clone().setY(ground + h));
+    const candidates = new Set<THREE.Object3D>(this.wallMeshes);
+    for (const r of this.roofMeshes) if (r.roof.visible) candidates.add(r.mesh);
+    // móveis do raio carregado (os de fora não estão sendo desenhados)
+    for (const m of this.cargoModels.values()) if (this.drawnAbove(m)) candidates.add(m);
+    // as estruturas entram peça por peça (paredes e telhado, acima), nunca inteiras: assim a
+    // casa em que ele está fica de pé e nenhuma peça esmaece duas vezes (dentro e fora do grupo)
+    const shells = new Set(this.structures.map((st) => st.object));
+    for (const sc of this.scenery) {
+      if (shells.has(sc.object)) continue;
+      if (!sc.object.visible && !this.occluders.has(sc.object)) continue;
+      candidates.add(sc.object);
+    }
+    return viewBlockers(this.camera.position, points, candidates, {
+      shown: (hit, root) => this.shownUnder(hit, root),
+    });
+  }
+
+  /** Os pais da peça (acima dela) estão todos à mostra: ela está na cena desenhada. */
+  private drawnAbove(object: THREE.Object3D): boolean {
+    if (!object.parent) return false;
+    for (let o: THREE.Object3D | null = object.parent; o; o = o.parent) if (!o.visible) return false;
+    return true;
   }
 
   /**
