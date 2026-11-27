@@ -30,6 +30,7 @@ Um módulo por sistema, reaproveitando as regras puras que já existiam (`enemie
 | `turn.ts` | ciclo do turno: rolagem, andar, gastar movimento, passar a vez |
 | `enemy-turn.ts` | inimigos: patrulha, avistar, fuga, fim da rodada |
 | `group.ts` | grupo: agrupar (com o Comando), desagrupar, andar em fila, troca de vagas |
+| `doors.ts` | portas: abrir, destrancar (Gazua), arrombar (com dano) e a reação do cômodo |
 | `index.ts` | junta tudo: `GameAction`, `validateAction`, `applyAction` |
 
 Como já funciona:
@@ -41,6 +42,14 @@ Como já funciona:
   turno. Agrupar, andar com os companheiros seguindo o rastro do líder e a troca de vagas no
   começo e no fim da vez viram ações resolvidas (`planRally`, `planMove`, `planReline`), com
   o custo do Comando decidido pelo motor.
+- **Portas:** o estado de cada porta e o bônus de intimidação do arrombamento estão no motor.
+  A ação leva o d20 já sorteado (`planDoor`) e o resultado sai de `doorOutcome`, igual para
+  todos; a tela aplica a ação na hora em que o resultado aparece (o empurrão, o "destrancou",
+  o impacto do chute). No arrombamento, `planBreakIn` acha o cômodo do outro lado e rola o
+  d20 de cada inimigo; a cena só mostra, um por um.
+- **Mapa:** o `World` que o motor recebe tem só o que é fixo no mapa (área, paredes, carga,
+  estruturas). O que muda na partida (as portas fechadas) sai do estado, com `sightBlockers`
+  e `solidOf`.
 - **Turno inimigo:** cada inimigo que age vira **uma** ação já resolvida (`planPatrolAct`,
   `planFleeAct`): o caminho inteiro, em que passo avistou alguém e se fugiu do mapa. O
   componente aplica a ação e só depois anima; o cone de visão na tela segue o passo animado
@@ -49,9 +58,8 @@ Como já funciona:
 
 **Transitório:** a ação `patchEnemy` muda um inimigo direto. Ela existe só para os sistemas
 que ainda mexem nos inimigos por fora do motor (abordagem, perseguição, interrogatório,
-revelar escondido, casos de teste) e some quando o último deles migrar. Também ficam no
-componente, por enquanto, o laço do turno inimigo (porque a perseguição se intercala nele) e
-o mapa que o motor recebe (`World`, porque as portas ainda não estão no estado).
+revelar escondido, casos de teste) e some quando o último deles migrar. Também fica no
+componente, por enquanto, o laço do turno inimigo (porque a perseguição se intercala nele).
 
 ## Ordem do trabalho
 
@@ -63,7 +71,7 @@ servidor vem depois, quando o jogo inteiro rodar no motor.
 2. ~~Motor do ciclo do turno.~~
 3. ~~Turno inimigo e visão.~~
 4. ~~Grupo (agrupar, fila, Comando).~~
-5. Portas (e o `World` passa a sair do estado).
+5. ~~Portas (e o `World` só com o que é fixo no mapa).~~
 6. Abordagem e rendição.
 7. Percepção, móveis e avião/chaves.
 8. Interrogatório.

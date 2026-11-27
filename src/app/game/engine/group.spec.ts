@@ -20,9 +20,10 @@ import {
 const AREA = rectArea(14, 14);
 const world = (solid: string[] = []): World => ({
   area: AREA,
-  walls: new Set(solid),
+  blocked: new Set(solid),
   lowCover: new Set(),
-  solid: new Set(solid),
+  roomWalls: new Set(),
+  structures: [],
 });
 
 const team = (positions: Record<string, HexCoord>, captain: string | null = 'ana'): GameState =>

@@ -18,7 +18,7 @@ import {
   spotted,
 } from '../enemies';
 import { HexCoord, hexKey } from '../hex';
-import { GameState, World, findEnemy, isHex } from './state';
+import { GameState, World, findEnemy, isHex, sightBlockers, solidOf } from './state';
 import { stepByStep } from './turn';
 
 /** O que um inimigo avistou: o agente e onde ele estava (o inimigo vira para lá). */
@@ -77,7 +77,7 @@ const agentsOf = (state: GameState): Map<string, HexCoord> =>
 /** Onde o inimigo `id` não pode pisar: o sólido do mapa, os agentes e os outros inimigos. */
 export function blockedFor(state: GameState, id: string, world: World): Set<string> {
   return new Set([
-    ...world.solid,
+    ...solidOf(state, world),
     ...Object.values(state.positions).map(hexKey),
     ...state.enemies.filter((e) => e.id !== id && onBoard(e)).map((e) => hexKey(e.hex)),
   ]);
@@ -109,6 +109,7 @@ export function planPatrolAct(
     rng,
   );
   const agents = agentsOf(state);
+  const sight = sightBlockers(state, world);
   const base = {
     type: 'enemyPatrol' as const,
     enemy: id,
@@ -121,7 +122,7 @@ export function planPatrolAct(
   for (const hex of plan.path) {
     at = walked(at, [hex]);
     path.push({ ...hex });
-    const who = spotted(at, agents, world.area, world.walls, world.lowCover);
+    const who = spotted(at, agents, world.area, sight, world.lowCover);
     if (who) return { ...base, path, spotted: { agent: who, at: { ...agents.get(who)! } } };
   }
   return { ...base, path };
@@ -160,9 +161,10 @@ export function firstSighting(
   world: World,
   only?: string,
 ): { enemy: string; sighting: Sighting } | null {
+  const sight = sightBlockers(state, world);
   for (const e of state.enemies) {
     if (only && e.id !== only) continue;
-    const who = spotted(e, agents, world.area, world.walls, world.lowCover);
+    const who = spotted(e, agents, world.area, sight, world.lowCover);
     if (who) return { enemy: e.id, sighting: { agent: who, at: { ...agents.get(who)! } } };
   }
   return null;
