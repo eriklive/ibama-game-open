@@ -399,6 +399,8 @@ const PROP_CAM = {
 const CABIN_CAM = {
   pitch: THREE.MathUtils.degToRad(10),
   doorRate: 6,
+  /** Quão rápido a câmera alcança o ponto pedido no trilho painel ↔ fundo (por segundo). */
+  panRate: 8,
 } as const;
 
 /**
@@ -655,7 +657,18 @@ export class HexBoard {
    * Interior do avião, montado só com alguém dentro (ver `enterPlaneCabin`): o grupo, as peças
    * que se pegam (como as dos móveis, para o destaque e o "pegar") e quem entrou (some do tabuleiro).
    */
-  private cabin: { group: THREE.Group; parts: Map<string, PropInfo>; agentId: string } | null = null;
+  private cabin: {
+    group: THREE.Group;
+    parts: Map<string, PropInfo>;
+    agentId: string;
+    /**
+     * Trilho da câmera dentro do avião: do painel (`front`, t = 0) ao fundo (`back`, t = 1), no
+     * mundo. Deslizar o dedo (ou o direcional) pede um ponto (`goal`); `t` vai atrás, suave.
+     */
+    track: { front: THREE.Vector3; back: THREE.Vector3; t: number; goal: number };
+  } | null = null;
+  /** Distância da câmera ao ponto mirado no close-up (para converter o arrasto em mundo). */
+  private inspectNear = 1;
   /** Giro da porta da cabine do avião (atual e pedido; ver `setPlaneDoor`). */
   private planeDoorAngle = 0;
   private planeDoorGoal = 0;
@@ -1285,10 +1298,11 @@ export class HexBoard {
     const info = group.userData['cabin'] as CabinInfo;
     const parts = new Map<string, PropInfo>();
     for (const [id, p] of info.items) parts.set(id, { facing: info.facing, focus: info.focus, ...p });
-    this.cabin = { group, parts, agentId };
-    pl.visible = false;
     const box = info.focus.clone().applyMatrix4(group.matrixWorld);
     const center = box.getCenter(new THREE.Vector3());
+    const back = info.back.clone().applyMatrix4(group.matrixWorld).getCenter(new THREE.Vector3());
+    this.cabin = { group, parts, agentId, track: { front: center.clone(), back, t: 0, goal: 0 } };
+    pl.visible = false;
     const size = box.getSize(new THREE.Vector3());
     const dir = info.facing.clone().transformDirection(group.matrixWorld).setY(0).normalize();
     const side = new THREE.Vector3(-dir.z, 0, dir.x);
@@ -1311,6 +1325,81 @@ export class HexBoard {
     this.tapStart = null;
     this.pinchDist = 0;
     return true;
+  }
+
+  /**
+   * Desliza a vista da cabine pelo trilho painel ↔ fundo: `delta` em frações do trilho
+   * (positivo vai para o fundo). Fora do avião, nada.
+   */
+  panCabin(delta: number): void {
+    const tr = this.cabin?.track;
+    if (!tr) return;
+    tr.goal = THREE.MathUtils.clamp(tr.goal + delta, 0, 1);
+    if (reducedMotionQuery()) this.stepCabinPan(Infinity);
+  }
+
+  /**
+   * Desliza a vista da cabine para um lado da tela (`1`: direita, `-1`: esquerda), um passo de
+   * `step` do trilho: o lado que é o fundo depende de como a câmera olha.
+   */
+  panCabinSide(side: 1 | -1, step = 0.25): void {
+    const tr = this.cabin?.track;
+    if (!tr) return;
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).setY(0);
+    const toBack = tr.back.clone().sub(tr.front).setY(0);
+    this.panCabin(side * Math.sign(right.dot(toBack) || 1) * step);
+  }
+
+  /** Leva a câmera da cabine para o ponto pedido do trilho (e o close-up mira lá). */
+  private stepCabinPan(dt: number): void {
+    const c = this.cabin;
+    const v = this.inspect;
+    if (!c || !v) return;
+    const tr = c.track;
+    const diff = tr.goal - tr.t;
+    if (diff === 0) return;
+    tr.t = Math.abs(diff) < 1e-3 || !Number.isFinite(dt) ? tr.goal : tr.t + diff * (1 - Math.exp(-dt * CABIN_CAM.panRate));
+    v.target.lerpVectors(tr.front, tr.back, tr.t);
+  }
+
+  /**
+   * Arrasto na cabine (px na tela): o conteúdo acompanha o dedo, como uma rolagem. Converte o
+   * movimento em mundo pela distância da câmera e projeta no trilho.
+   */
+  private dragCabin(dx: number, dy: number): void {
+    const c = this.cabin;
+    const v = this.inspect;
+    if (!c || !v) return;
+    const tr = c.track;
+    const axis = tr.back.clone().sub(tr.front).setY(0);
+    const len = axis.length();
+    if (len < 1e-6) return;
+    axis.divideScalar(len);
+    const h = Math.max(1, this.canvas.clientHeight);
+    const perPx = (2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2)) * this.inspectNear) / h;
+    // direita e "para dentro" da tela, no chão
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).setY(0).normalize();
+    const away = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 2).setY(0).normalize().negate();
+    const world = right.multiplyScalar(-dx * perPx).addScaledVector(away, dy * perPx);
+    this.panCabin(world.dot(axis) / len);
+  }
+
+  /**
+   * A peça da cabine que está na vista agora (a mais perto do meio da tela), para o ✕ do
+   * controle pegar. `null` se nenhuma aparece.
+   */
+  cabinItemInView(): string | null {
+    const c = this.cabin;
+    if (!c) return null;
+    let best: { id: string; d: number } | null = null;
+    for (const [id, info] of c.parts) {
+      if (!info.item.visible || this.taking?.info === info) continue;
+      const p = new THREE.Box3().setFromObject(info.item).getCenter(new THREE.Vector3()).project(this.camera);
+      if (p.z > 1 || Math.abs(p.x) > 0.95 || Math.abs(p.y) > 0.95) continue;
+      const d = Math.hypot(p.x, p.y);
+      if (!best || d < best.d) best = { id, d };
+    }
+    return best?.id ?? null;
   }
 
   /** Liga (ou apaga) o destaque das peças que ainda estão na cabine. */
@@ -4417,6 +4506,7 @@ export class HexBoard {
     const look = new THREE.Vector3();
     let dist = this.updatePerspectiveCamera(dt, look);
     this.viewShift.x = this.viewShift.y = 0;
+    this.stepCabinPan(dt);
     dist = this.blendInspect(dt, look, dist);
     dist = this.blendCine(dt, look, dist);
     dist = this.blendChase(dt, look, dist);
@@ -4736,6 +4826,7 @@ export class HexBoard {
       near = c.dist * Math.min(portrait, c.portraitMax);
     }
     const pitch = v.pitch ?? (v.frame === 'prop' ? PROP_CAM.pitch : c.pitch);
+    this.inspectNear = near;
     const pos = v.target
       .clone()
       .addScaledVector(v.dir, Math.cos(pitch) * near)
@@ -5238,6 +5329,8 @@ export class HexBoard {
     // vista de inspeção (e o enquadramento de grupo): a câmera fica travada
     if (this.inspect || this.group) {
       if (this.tapStart && Math.hypot(cur.x - this.tapStart.x, cur.y - this.tapStart.y) > 10) this.dragged = true;
+      // dentro do avião, arrastar desliza a vista entre o painel e o fundo
+      if (this.cabin && this.inspect && this.dragged && this.pointers.size === 1) this.dragCabin(cur.x - prev.x, cur.y - prev.y);
       return;
     }
 
@@ -5277,6 +5370,11 @@ export class HexBoard {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
+    // dentro do avião, a rodinha também desliza a vista (para baixo vai ao fundo)
+    if (this.cabin && this.inspect) {
+      this.panCabin(Math.sign(e.deltaY || e.deltaX) * 0.12);
+      return;
+    }
     if (this.inspect || this.group) return;
     this.setZoom(this.zoom * (e.deltaY > 0 ? 1.1 : 0.9));
   };

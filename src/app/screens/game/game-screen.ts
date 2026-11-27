@@ -110,6 +110,7 @@ import {
   cabinItemsLeft,
   cabinStep,
   cabinSummary,
+  CABIN_NOTICE_ID,
   canEnterPlane,
   planeDoorSpot,
 } from '../../game/plane-cabin';
@@ -1645,11 +1646,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.closeProp();
       return;
     }
-    // dentro do avião: Esc sai
+    // dentro do avião: Esc sai; as setas deslizam a vista entre o painel e o fundo
     if (this.cabinInside()) {
-      if (ev.key !== 'Escape') return;
+      if (ev.key === 'Escape') this.leavePlane();
+      else if (ev.key === 'ArrowRight' || ev.key === 'd' || ev.key === 'D') this.board?.panCabinSide(1);
+      else if (ev.key === 'ArrowLeft' || ev.key === 'a' || ev.key === 'A') this.board?.panCabinSide(-1);
+      else return;
       ev.preventDefault();
-      this.leavePlane();
       return;
     }
     if (this.targetPrompt()) {
@@ -4045,6 +4048,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.phase.set('cabin');
     }
     this.cabinEvent({ type: 'arrived' });
+    // percepção na porta: passando, o GPS e o rádio aparecem destacados lá dentro; falhando,
+    // continuam lá (e tocáveis), só sem o destaque
+    const spotted = await this.perceiveCabin(id);
+    if (spotted === null || this.epoch !== epoch || this.cabinState().stage !== 'opening') return;
+    this.phase.set('cabin');
     board.setPlaneDoor(true);
     this.sound.play('porta.abrir');
     this.later(reducedMotion() ? 150 : 750, () => {
@@ -4057,7 +4065,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         this.afterMove();
         return;
       }
-      board.setCabinHighlight(true);
+      board.setCabinHighlight(spotted);
       this.cabinEvent({ type: 'opened' });
       this.sound.play('eq.closeup');
       addEventListener('resize', this.onCabinResize);
@@ -4065,6 +4073,27 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   private readonly onCabinResize = (): void => this.board?.setCloseUpInsets(this.propInsets());
+
+  /**
+   * Rolagem de percepção de quem entra no avião (uma vez por agente, como a dos móveis): passando
+   * (ou se alguém da equipe já reparou), as peças da cabine ficam destacadas. Sem nada para achar,
+   * não rola. Devolve `null` se a partida foi recomeçada no meio.
+   */
+  private async perceiveCabin(who: string): Promise<boolean | null> {
+    if (!this.cabinLeft().length) return false;
+    if (this.noticed().has(CABIN_NOTICE_ID)) return true;
+    const key = `${CABIN_NOTICE_ID}:${who}`;
+    if (this.noticeRolled.has(key)) return false;
+    this.noticeRolled.add(key);
+    this.phase.set('checking');
+    const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice);
+    if (pass === null) return null;
+    if (pass) {
+      this.noticed.update((s) => new Set([...s, CABIN_NOTICE_ID]));
+      this.sound.play('eq.percebeu');
+    }
+    return pass;
+  }
 
   /** Toque na cabine: na peça, pega; no resto, diz o que tem ali. */
   private tapCabin(part: string): void {
@@ -4546,12 +4575,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (option && !option.disabled) void this.doorAction(option.action);
       return;
     }
-    // dentro do avião: ✕ pega a próxima peça (o GPS, depois o rádio), ○ sai
+    // dentro do avião: ✕ pega a peça que está na vista, ○ sai; o direcional desliza a vista
     if (this.phase() === 'cabin') {
-      const next = this.cabinLeft()[0];
+      const inView = this.board?.cabinItemInView();
       if (b === 'circle') this.leavePlane();
-      else if (b === 'cross' && next) this.takeCabin(next.id);
-      else if (b === 'cross') this.leavePlane();
+      else if (b === 'cross' && inView) this.takeCabin(inView);
+      else if (b === 'cross') this.tapCabin('other');
       return;
     }
     // menu do avião: ○ volta; ✕ olha dentro, □ queima
@@ -4651,6 +4680,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     const map = this.map;
+    if (this.phase() === 'cabin' && this.cabinInside()) {
+      if (dir.x) this.board?.panCabinSide(dir.x > 0 ? 1 : -1);
+      return;
+    }
     if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.phase() === 'cabin' || this.approaching() || this.burning() || this.prop() || this.debrief()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
