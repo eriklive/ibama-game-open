@@ -752,6 +752,24 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   }
 }
 
+/* cena de quem reage ao arrombamento: a câmera fecha no garimpeiro e a papelada toda sai;
+   ficam só a ficha do d20 (maior, embaixo no meio, para acompanhar a rolagem) e os avisos */
+.game.break-in-cine :is(.corner, .goal, .left, .actions, .end-op, .speech) { opacity: 0; pointer-events: none; }
+.game.break-in-cine .telegram,
+.game.door-focus.break-in-cine .telegram {
+  top: calc(24px + var(--safe-top)); bottom: auto;
+  left: 50%; max-width: min(360px, calc(100% - 40px));
+  font-size: 16px;
+}
+.game.break-in-cine .checks {
+  left: 50%; bottom: calc(18px + var(--safe-bottom));
+  transform: translateX(-50%) scale(1.3);
+  transform-origin: 50% 100%;
+}
+@media (max-height: 520px) {
+  .game.break-in-cine .checks { transform: translateX(-50%) scale(1.05); }
+}
+
 .game { --door-w: calc(min(300px, 40vw) + 14px); }
 /* chama a atenção: a seta empurra o tempo todo; de tempos em tempos o botão balança e ganha um halo */
 @keyframes door-nudge { 0%, 100% { translate: 0 0; } 50% { translate: -4px 0; } }

@@ -86,6 +86,7 @@ import {
   rollsDie,
   spawnDoors,
 } from '../../game/door';
+import { BREAK_IN_SCENE, breakInVerdict } from '../../game/break-in-scene';
 import { BURN_RULES, Burnable, burnTarget, canBurn, seeFire } from '../../game/burn';
 import {
   KEY_PANEL_ID,
@@ -215,6 +216,8 @@ interface CheckView {
   pass: boolean | null;
   /** O resultado já foi visto e o jogo espera o **Continuar**. */
   waiting?: boolean;
+  /** Texto do botão que fecha a ficha (padrão: "Continuar"). */
+  confirmText?: string;
   /** De quem é o dado: o do garimpeiro é vermelho e fica à direita das fichas da equipe. */
   side: CheckSide;
 }
@@ -747,6 +750,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly doorKey = signal<string | null>(null);
   /** Animação de porta em andamento: as fichas ficam travadas. */
   protected readonly doorBusy = signal(false);
+  /**
+   * Cena de quem reage ao arrombamento (ver `breakIn`): a câmera fecha no garimpeiro, a HUD e
+   * as fichas da porta saem, e só ficam a ficha do d20 e os avisos até o **Confirmar**.
+   */
+  protected readonly breakInCine = signal(false);
   protected readonly doorStateLabel = DOOR_STATE_LABEL;
 
   /** Portas coladas no agente da vez (dá para interagir). */
@@ -3153,7 +3161,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /**
    * Põe a ficha do d20 da porta na tela: o dado 3D cai já em `value` (o resultado sorteado) e
    * leva `duration` ms para parar, a mesma hora em que a ação resolve (no chute, o impacto).
-   * A função devolvida pinta o dado de verde ou vermelho e carimba.
+   * A função devolvida pinta o dado de verde ou vermelho e carimba; com `hold`, a ficha fica na
+   * tela até `confirmDoorCheck` (senão, some sozinha uns segundos depois).
    */
   private startDoorCheck(
     kicker: string,
@@ -3164,6 +3173,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     value: number,
     duration: number,
     side: CheckSide = 'team',
+    hold = false,
   ): (result: number, pass: boolean) => void {
     clearTimeout(this.doorCheckTimer);
     if (this.doorCheckId !== undefined) this.dropCheck(this.doorCheckId);
@@ -3175,6 +3185,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.patchCheck(id, { result, pass });
       this.checkSound(result, pass);
       this.haptics.vibrate(SETTLE_PATTERN);
+      // `hold`: a ficha fica até o botão (ver `confirmDoorCheck`)
+      if (hold) return;
       this.doorCheckTimer = setTimeout(() => {
         if (this.doorCheckId === id) this.doorCheckId = undefined;
         this.dropCheck(id);
@@ -3214,50 +3226,69 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const r of rolls) void board.enemyFlinch(r.enemy.id, doorHex);
     if (rolls.length) await this.wait(380);
     if (stale()) return false;
-    for (const r of rolls) {
-      const e = r.enemy;
-      const resist = r.test === 'resist';
-      // a câmera inclina para ele, que olha de um lado para o outro; a rolagem vem em slow
-      board.tiltCineTo(e.hex);
-      board.enemyLookAround(e.id, true);
-      await this.wait(650);
-      if (stale()) return false;
-      board.setSceneSlowmo(true);
-      const reveal = this.startDoorCheck(
-        resist ? 'Resistir à rendição' : 'Atitude para correr',
-        e.name,
-        resist ? `resiste com ${r.need} ou mais` : `corre com mais que ${r.need}`,
-        resist ? 'Rendido!' : 'Ficou parado',
-        resist ? 'Resistiu: vai correr' : 'Vai correr',
-        r.roll,
-        1000,
-        'enemy',
-      );
-      await this.wait(1000);
-      board.setSceneSlowmo(false);
-      if (stale()) return false;
-      reveal(r.roll, r.outcome !== 'flee');
-      board.enemyLookAround(e.id, false);
-      const facing = facingBetween(e.hex, doorHex);
-      if (r.outcome === 'surrender') {
-        // falhou: rende na hora
-        board.setEnemyFacing(e.id, facing);
-        if (!rolls.slice(0, rolls.indexOf(r)).some((o) => o.outcome === 'surrender')) this.sound.play('ini.rende', { at: e.hex });
-        this.updateEnemy(e.id, { status: 'surrendered', facing });
-        board.setEnemySurrendered(e.id, true);
-      } else if (r.outcome === 'flee') {
-        // passou: vira de costas e fica pronto para correr (sai na vez dele)
-        this.updateEnemy(e.id, { status: 'alert', facing });
-        board.setEnemyAlert(e.id, true);
-        board.enemyBolt(e.id, doorHex);
-      } else {
-        board.setEnemyFacing(e.id, facing);
-        this.updateEnemy(e.id, { facing });
+    // a cena de cada um: a HUD e as fichas da porta saem (só ficam a ficha do d20 e os avisos),
+    // a câmera fecha nele com o cenário da frente escondido, e o jogo espera o Confirmar
+    if (rolls.length) {
+      this.breakInCine.set(true);
+      board.setDoorFocusOffset(0);
+    }
+    try {
+      for (const r of rolls) {
+        const e = r.enemy;
+        const resist = r.test === 'resist';
+        // a câmera fecha nele, que olha de um lado para o outro; a rolagem vem em slow
+        board.focusBreakIn(e.id);
+        board.enemyLookAround(e.id, true);
+        await this.wait(BREAK_IN_SCENE.lookMs);
+        if (stale()) return false;
+        board.setSceneSlowmo(true);
+        const reveal = this.startDoorCheck(
+          resist ? 'Resistir à rendição' : 'Atitude para correr',
+          e.name,
+          resist ? `resiste com ${r.need} ou mais` : `corre com mais que ${r.need}`,
+          resist ? 'Rendido!' : 'Ficou parado',
+          resist ? 'Resistiu: vai correr' : 'Vai correr',
+          r.roll,
+          BREAK_IN_SCENE.rollMs,
+          'enemy',
+          true,
+        );
+        await this.wait(BREAK_IN_SCENE.rollMs);
+        board.setSceneSlowmo(false);
+        if (stale()) return false;
+        reveal(r.roll, r.outcome !== 'flee');
+        board.enemyLookAround(e.id, false);
+        const facing = facingBetween(e.hex, doorHex);
+        if (r.outcome === 'surrender') {
+          // falhou: rende na hora
+          board.setEnemyFacing(e.id, facing);
+          if (!rolls.slice(0, rolls.indexOf(r)).some((o) => o.outcome === 'surrender')) this.sound.play('ini.rende', { at: e.hex });
+          this.updateEnemy(e.id, { status: 'surrendered', facing });
+          board.setEnemySurrendered(e.id, true);
+        } else if (r.outcome === 'flee') {
+          // passou: vira de costas e fica pronto para correr (sai na vez dele)
+          this.updateEnemy(e.id, { status: 'alert', facing });
+          board.setEnemyAlert(e.id, true);
+          board.enemyBolt(e.id, doorHex);
+        } else {
+          board.setEnemyFacing(e.id, facing);
+          this.updateEnemy(e.id, { facing });
+        }
+        board.startleEnemy(e.id);
+        this.refreshVision();
+        this.say(breakInVerdict(r), r.outcome === 'surrender' ? 'info' : 'alert');
+        await this.wait(BREAK_IN_SCENE.reactMs);
+        if (stale()) return false;
+        // o carimbo e o aviso ficam até o jogador confirmar
+        if (!(await this.confirmDoorCheck())) return false;
       }
-      board.startleEnemy(e.id);
-      this.refreshVision();
-      await this.wait(1100);
-      if (stale()) return false;
+    } finally {
+      if (rolls.length && !stale()) {
+        board.focusBreakIn(null);
+        board.setDoorFocusOffset(this.doorPanelWidth() / 2);
+        this.notice.set(null);
+        this.breakInCine.set(false);
+      }
     }
     board.resetCineAim();
     this.checkAllSpotted(this.positions());
@@ -3273,6 +3304,24 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       'alert',
     );
     return true;
+  }
+
+  /**
+   * Espera o **Confirmar** na ficha do d20 da porta (a de `startDoorCheck` com `hold`) e tira a
+   * ficha da tela. Devolve `false` se a partida foi recomeçada no meio.
+   */
+  private async confirmDoorCheck(): Promise<boolean> {
+    const id = this.doorCheckId;
+    if (id === undefined || !this.checks().some((c) => c.id === id)) return true;
+    const epoch = this.epoch;
+    // um instante para o carimbo aparecer antes do botão (evita fechar sem querer)
+    await this.wait(450);
+    if (this.destroyed || this.epoch !== epoch) return false;
+    const closed = new Promise<void>((done) => this.checkDone.set(id, done));
+    this.patchCheck(id, { waiting: true, confirmText: BREAK_IN_SCENE.confirm });
+    await closed;
+    if (this.doorCheckId === id) this.doorCheckId = undefined;
+    return !this.destroyed && this.epoch === epoch;
   }
 
   /** Arrombou uma porta sem tranca: o inimigo mais perto (que esteja vendo) comenta. */
@@ -4010,6 +4059,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.fieldNotes.set([]);
     this.doorKey.set(null);
     this.doorBusy.set(false);
+    this.breakInCine.set(false);
     this.breakInUntil.set(0);
     clearTimeout(this.doorCheckTimer);
     this.board?.releaseDoorFocus();
@@ -4332,6 +4382,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     // menu da porta: ○ volta; ✕ arromba, □ destranca, △ abre
     if (this.phase() === 'door') {
+      // cena do arrombamento: só o Confirmar da ficha
+      if (this.breakInCine()) {
+        if (b === 'cross' && this.waitingCheck()) this.closeCheck();
+        return;
+      }
       const act: Partial<Record<PadButton, DoorAction>> = { cross: 'arrombar', square: 'pick', triangle: 'abrir' };
       const option = this.doorOptions().find((o) => o.action === act[b]);
       if (b === 'circle') this.closeDoorMenu();

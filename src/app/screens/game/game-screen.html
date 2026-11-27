@@ -1,4 +1,4 @@
-<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="prop() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
+<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="prop() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'" [class.break-in-cine]="breakInCine()">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
   <!-- Modo Corrida: o mapa de corrida, por cima do tabuleiro (ver game/runner-session.ts) -->
   <canvas #runner class="board runner" [class.on]="runnerOn()" aria-label="Corrida: arraste para os lados para virar nas curvas, para cima para pular e para baixo para deslizar."></canvas>
@@ -256,8 +256,9 @@
     </section>
   }
 
-  <!-- no menu da porta o aviso vai para dentro das fichas (ver .door-notice) -->
-  @if (phase() !== 'door' ? notice() : null; as n) {
+  <!-- no menu da porta o aviso vai para dentro das fichas (ver .door-notice); na cena do
+       arrombamento as fichas saem e o aviso volta para o telegrama -->
+  @if (phase() !== 'door' || breakInCine() ? notice() : null; as n) {
     <div class="telegram" [class.alert]="n.tone === 'alert'" role="status" aria-live="assertive" data-testid="notice">
       {{ n.text }}
     </div>
@@ -359,8 +360,9 @@
     }
   </div>
 
-  <!-- Menu da porta: a câmera gira e aproxima; as ações ficam em fichas na direita -->
-  @if (phase() === 'door' && openDoor(); as door) {
+  <!-- Menu da porta: a câmera gira e aproxima; as ações ficam em fichas na direita (saem na
+       cena de quem reage ao arrombamento e voltam depois do Confirmar) -->
+  @if (phase() === 'door' && !breakInCine() ? openDoor() : null; as door) {
     <aside class="door-sheet" aria-label="Ações da porta" data-testid="door-sheet">
       <div class="door-head">
         <span class="door-kicker">Porta · {{ active().name }}</span>
@@ -541,7 +543,7 @@
           }
           @if (ck.waiting) {
             <button type="button" class="check-close" #checkClose data-testid="check-close" (click)="closeCheck(ck.id)">
-              Continuar &#8250;
+              {{ ck.confirmText ?? 'Continuar' }} &#8250;
               @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
             </button>
           }
