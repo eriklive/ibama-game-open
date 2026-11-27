@@ -34,15 +34,16 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 ## Lobby
 
 O lobby (`src/app/screens/lobby`, palco em `src/app/game/lobby-viewer.ts`) mostra Ana, Bruno e
-Clara lado a lado, com o nome e a classe de cada um. Tocar num agente o **destaca** (luz em cima,
-anel amarelo, um passo à frente; os outros ficam na penumbra) e abre o **menu suspenso** à direita:
+Clara lado a lado, bem juntos, num palco que ocupa a tela toda, com o nome e a classe de cada um.
+Tocar num agente o **destaca**: a câmera se aproxima dele, **da cintura para cima**, a luz acende
+em cima dele (os outros ficam na penumbra) e abre o **menu suspenso** à direita:
 
 - **Trocar personagem** — bloqueado por enquanto (em breve);
 - **Ficha de personagem** — abre a ficha daquele agente;
-- **Voltar** — fecha o menu e tira o destaque.
+- **Voltar** — fecha o menu, tira o destaque e a câmera volta para a fila inteira.
 
-O **Voltar** do cabeçalho leva de volta ao menu de fases. No web, a fila anda para a esquerda
-para o menu caber sem cobrir ninguém; no celular, a fila fica no pé do palco e o menu, no alto.
+O **Voltar** do cabeçalho leva de volta ao menu de fases. No web, o palco abre espaço à direita
+para o menu não cobrir o agente; no celular, o agente fica no pé do palco e o menu, no alto.
 Controle: esquerda/direita escolhe o agente, cima/baixo anda pelo menu, ✕ confirma, ○ volta e
 Options inicia a missão.
 

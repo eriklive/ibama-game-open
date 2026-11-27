@@ -25,6 +25,11 @@ interface MenuItem {
   locked?: boolean;
 }
 
+/** No web (a partir desta largura), o menu fica ao lado do agente, numa faixa à direita. */
+const WIDE_QUERY = '(min-width: 600px)';
+/** Largura dessa faixa (px): o menu e as margens dele (ver lobby-screen.css). */
+const MENU_INSET = 262;
+
 const MENU: readonly MenuItem[] = [
   { id: 'trocar', label: 'Trocar personagem', locked: true },
   { id: 'ficha', label: 'Ficha de personagem' },
@@ -33,7 +38,7 @@ const MENU: readonly MenuItem[] = [
 
 /**
  * Lobby da fase: a equipe de pé, lado a lado, antes da missão. Tocar num agente o destaca (luz e
- * passo à frente) e abre o menu dele à direita: trocar personagem (em breve), a ficha (atributos,
+ * câmera da cintura para cima) e abre o menu dele à direita: trocar personagem (em breve), a ficha (atributos,
  * classe, modelo 3D) e voltar. Daqui se volta ao menu de fases ou se começa a missão.
  */
 @Component({
@@ -68,6 +73,8 @@ export class LobbyScreen implements AfterViewInit, OnDestroy {
   private readonly stage = viewChild<ElementRef<HTMLElement>>('stage');
   private viewer?: LobbyViewer;
   protected readonly viewerFailed = signal(false);
+  /** Onde cada agente está na tela (fração da largura do palco), para as plaquinhas. */
+  private readonly xs = signal<number[] | null>(null);
   protected readonly loading = signal(false);
 
   private readonly stopPad = this.gamepad.listen({
@@ -79,11 +86,9 @@ export class LobbyScreen implements AfterViewInit, OnDestroy {
     const host = this.stage()?.nativeElement;
     if (!host) return;
     try {
-      this.viewer = new LobbyViewer(
-        host,
-        CHARACTERS.map((c) => c.color),
-      );
-      this.viewer.select(this.selected());
+      this.viewer = new LobbyViewer(host, CHARACTERS.length);
+      this.viewer.onLayout = (xs) => this.xs.set(xs);
+      this.viewer.select(this.selected(), this.menuInset());
       this.loading.set(true);
       this.viewer
         .load(CHARACTERS.map((c) => c.model))
@@ -97,6 +102,29 @@ export class LobbyScreen implements AfterViewInit, OnDestroy {
   ngOnDestroy(): void {
     this.stopPad();
     this.viewer?.dispose();
+  }
+
+  /** Toque no palco 3D: escolhe o agente que estiver ali. */
+  protected tapStage(e: MouseEvent): void {
+    const i = this.viewer?.hit(e.clientX, e.clientY);
+    if (i !== null && i !== undefined) this.pick(i);
+  }
+
+  /**
+   * Posição da plaquinha: embaixo do agente na fila; com um em destaque (a câmera perto dele),
+   * as três lado a lado no meio, para trocar de agente.
+   */
+  protected plateLeft(i: number): string {
+    const xs = this.xs();
+    if (this.selected() === null && xs) return `${(xs[i] * 100).toFixed(2)}%`;
+    const center = MENU_INSET / 2;
+    return `calc(50% - ${this.menuInset() ? center : 0}px + ${(i - (CHARACTERS.length - 1) / 2) * 104}px)`;
+  }
+
+  /** Faixa à direita que o menu ocupa (px): só no web, com um agente em destaque. */
+  private menuInset(): number {
+    const wide = globalThis.matchMedia?.(WIDE_QUERY).matches ?? false;
+    return wide && this.selected() !== null ? MENU_INSET : 0;
   }
 
   /** Toca num agente: destaca e abre o menu dele (tocar de novo fecha). */
@@ -136,7 +164,7 @@ export class LobbyScreen implements AfterViewInit, OnDestroy {
   private setSelected(i: number | null): void {
     this.selected.set(i);
     this.menuFocus.set(1);
-    this.viewer?.select(i);
+    this.viewer?.select(i, this.menuInset());
     // guarda no endereço, para o "voltar" da ficha (e do navegador) cair no mesmo agente
     const agente = i === null ? null : CHARACTERS[i].id;
     this.router.navigate([], { relativeTo: this.route, queryParams: { agente }, replaceUrl: true });
