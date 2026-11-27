@@ -16,10 +16,13 @@ import {
   buildFuelProps,
   buildHangar,
   buildHouse,
+  PLANE_DOOR,
+  PLANE_DOOR_OPEN,
   buildPlane,
   buildRoomFog,
 } from './scenery';
-import { PropInfo, buildDiningTable } from './prop-models';
+import { CabinInfo, PropInfo, buildDiningTable, buildPlaneInterior, disposeModel } from './prop-models';
+import { CABIN_GPS, CABIN_RADIO } from './plane-cabin';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
@@ -390,6 +393,15 @@ const PROP_CAM = {
 } as const;
 
 /**
+ * Dentro do avião (ver `HexBoard.enterPlaneCabin`): a câmera olha pela porta, quase na altura dos
+ * olhos, abaixo do teto da cabine (para o rádio preso nele aparecer). A porta abre em ~0,7 s.
+ */
+const CABIN_CAM = {
+  pitch: THREE.MathUtils.degToRad(10),
+  doorRate: 6,
+} as const;
+
+/**
  * Close-up no próprio tabuleiro (ver `HexBoard.closeUp`): `object` mira entre um objeto e o
  * agente (inspeção do móvel); `pair` enquadra o agente e outra pessoa em pé, de lado
  * (interrogatório). `insets` diz quanto da tela a papelada cobre (frações da altura, embaixo,
@@ -416,6 +428,8 @@ interface CloseUpView {
   frame: 'object' | 'pair' | 'prop';
   fit?: { w: number; h: number };
   insets: CloseUpInsets;
+  /** Inclinação própria (radianos); sem ela, a do enquadramento (ver `PROP_CAM`, `INSPECT_CAM`). */
+  pitch?: number;
   /** Pontos (mundo) que a câmera precisa enxergar: o agente e o objeto / a pessoa. */
   subjects: THREE.Vector3[];
   /** Estruturas em que a dupla está (o telhado já some; as paredes não esmaecem). */
@@ -490,6 +504,11 @@ export interface HexBoardCallbacks {
    * a arma), `other` no resto do móvel.
    */
   onPropTap?(part: 'item' | 'other'): void;
+  /**
+   * Toque dentro do avião (ver `enterPlaneCabin`): o id da peça tocada (o GPS, o rádio) ou
+   * `other` no resto da cabine.
+   */
+  onCabinTap?(part: string): void;
 }
 
 /**
@@ -632,6 +651,14 @@ export class HexBoard {
   private readonly glowing = new Set<PropInfo>();
   /** Peça sendo pega: sobe e some (ver `takePropItem`). */
   private taking: { info: PropInfo; t0: number; y: number } | null = null;
+  /**
+   * Interior do avião, montado só com alguém dentro (ver `enterPlaneCabin`): o grupo, as peças
+   * que se pegam (como as dos móveis, para o destaque e o "pegar") e quem entrou (some do tabuleiro).
+   */
+  private cabin: { group: THREE.Group; parts: Map<string, PropInfo>; agentId: string } | null = null;
+  /** Giro da porta da cabine do avião (atual e pedido; ver `setPlaneDoor`). */
+  private planeDoorAngle = 0;
+  private planeDoorGoal = 0;
   /** Personagens escondidos por taparem a vista do zoom no móvel. */
   private readonly propHidden = new Set<string>();
   /** Alvos da missão (queimar): um ícone de chama flutua sobre cada um até ele queimar. */
@@ -1207,6 +1234,121 @@ export class HexBoard {
     if (!info) return;
     this.unglow(info);
     info.item.visible = false;
+  }
+
+  // ---------- dentro do avião ----------
+
+  /**
+   * Abre (ou fecha) a porta da cabine do avião: gira na dobradiça da frente, para fora. Com
+   * `instant` (ou "menos movimento"), vai direto.
+   */
+  setPlaneDoor(open: boolean, instant = false): void {
+    this.planeDoorGoal = open ? PLANE_DOOR_OPEN : 0;
+    if (instant || reducedMotionQuery()) this.planeDoorAngle = this.planeDoorGoal;
+    this.posePlaneDoor();
+  }
+
+  private updatePlaneDoor(dt: number): void {
+    const diff = this.planeDoorGoal - this.planeDoorAngle;
+    if (diff === 0) return;
+    this.planeDoorAngle = Math.abs(diff) < 1e-3 ? this.planeDoorGoal : this.planeDoorAngle + diff * (1 - Math.exp(-dt * CABIN_CAM.doorRate));
+    this.posePlaneDoor();
+  }
+
+  private posePlaneDoor(): void {
+    const door = this.planeModel?.getObjectByName(PLANE_DOOR);
+    if (door) door.rotation.y = this.planeDoorAngle;
+  }
+
+  /** Se há alguém dentro do avião (o interior está montado). */
+  get inCabin(): boolean {
+    return !!this.cabin;
+  }
+
+  /**
+   * Entra no avião: só agora o interior é montado (`buildPlaneInterior`, sem as peças de `taken`),
+   * no lugar do avião, que some por fora enquanto durar; o agente `agentId` também some (está lá
+   * dentro). A câmera trava olhando pela porta, como no zoom de um móvel (`insets`: o que a
+   * papelada cobre); os toques na cabine vão para `onCabinTap`. Devolve `false` sem avião.
+   */
+  enterPlaneCabin(agentId: string, taken: ReadonlySet<string>, insets: CloseUpInsets = { bottom: 0, right: 0 }): boolean {
+    const pl = this.planeModel;
+    const u = this.units.get(agentId);
+    if (!pl || !u) return false;
+    this.leavePlaneCabin();
+    pl.updateWorldMatrix(true, false);
+    const at = new THREE.Vector3().setFromMatrixPosition(pl.matrixWorld);
+    const group = buildPlaneInterior(CABIN_GPS, CABIN_RADIO, taken);
+    group.position.set(at.x, this.groundAt(at.x, at.z), at.z);
+    this.scene.add(group);
+    group.updateWorldMatrix(true, true);
+    const info = group.userData['cabin'] as CabinInfo;
+    const parts = new Map<string, PropInfo>();
+    for (const [id, p] of info.items) parts.set(id, { facing: info.facing, focus: info.focus, ...p });
+    this.cabin = { group, parts, agentId };
+    pl.visible = false;
+    const box = info.focus.clone().applyMatrix4(group.matrixWorld);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const dir = info.facing.clone().transformDirection(group.matrixWorld).setY(0).normalize();
+    const side = new THREE.Vector3(-dir.z, 0, dir.x);
+    this.inspect = {
+      target: center,
+      dir,
+      frame: 'prop',
+      fit: { w: Math.abs(size.x * side.x) + Math.abs(size.z * side.z), h: size.y },
+      insets,
+      pitch: CABIN_CAM.pitch,
+      subjects: [center],
+      rooms: new Set(this.structures.filter((st) => inStructure(u.hex, st.rect)).map((st) => st.object)),
+      hideOccluders: true,
+    };
+    this.propOpen = null;
+    this.occlusionClock = 0;
+    this.inspectLast = this.inspect;
+    if (reducedMotionQuery()) this.inspectBlend = 1;
+    this.pointers.clear();
+    this.tapStart = null;
+    this.pinchDist = 0;
+    return true;
+  }
+
+  /** Liga (ou apaga) o destaque das peças que ainda estão na cabine. */
+  setCabinHighlight(on: boolean): void {
+    for (const info of this.cabin?.parts.values() ?? []) {
+      info.glow.visible = on && info.item.visible;
+      if (info.glow.visible) this.glowing.add(info);
+      else this.unglow(info);
+    }
+  }
+
+  /** Pegou a peça `id` da cabine: sobe um pouco, encolhe e some (como a dos móveis). */
+  takeCabinItem(id: string): void {
+    const info = this.cabin?.parts.get(id);
+    if (!info || !info.item.visible) return;
+    if (this.taking) this.finishTaking();
+    this.unglow(info);
+    if (reducedMotionQuery()) {
+      info.item.visible = false;
+      return;
+    }
+    this.taking = { info, t0: performance.now(), y: info.item.position.y };
+  }
+
+  /**
+   * Sai do avião: o interior é desmontado e descartado, o avião e o agente voltam a aparecer e a
+   * câmera volta, suave, para a de sempre. A porta continua como está (ver `setPlaneDoor`).
+   */
+  leavePlaneCabin(): void {
+    const c = this.cabin;
+    if (!c) return;
+    if (this.taking && [...c.parts.values()].includes(this.taking.info)) this.finishTaking();
+    for (const info of c.parts.values()) this.unglow(info);
+    this.cabin = null;
+    this.scene.remove(c.group);
+    disposeModel(c.group);
+    if (this.planeModel) this.planeModel.visible = true;
+    this.endCloseUp();
   }
 
   /** Recomeço: as peças voltam para os móveis, sem destaque. */
@@ -4593,7 +4735,7 @@ export class HexBoard {
       const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
       near = c.dist * Math.min(portrait, c.portraitMax);
     }
-    const pitch = v.frame === 'prop' ? PROP_CAM.pitch : c.pitch;
+    const pitch = v.pitch ?? (v.frame === 'prop' ? PROP_CAM.pitch : c.pitch);
     const pos = v.target
       .clone()
       .addScaledVector(v.dir, Math.cos(pitch) * near)
@@ -4758,7 +4900,7 @@ export class HexBoard {
     for (const u of this.units.values()) {
       const active = u.id === this.activeId;
       u.group.visible = u.shadow.visible =
-        this.stream.inLoadRadius(u.group.position.x, u.group.position.z) && !this.blocksProp(u.group);
+        this.stream.inLoadRadius(u.group.position.x, u.group.position.z) && !this.blocksProp(u.group) && u.id !== this.cabin?.agentId;
       if (u.rig) {
         // personagem com modelo: fica de pé sobre o hexágono (acompanha a flutuação do caminho)
         // e vira suavemente para onde vai; quem está na vez é marcado só pelo anel
@@ -4867,6 +5009,7 @@ export class HexBoard {
     field.flush();
 
     this.updateProps(t);
+    this.updatePlaneDoor(dt);
     if (this.outlinesOn && this.outlined.size) {
       this.updateAimFx(t);
     }
@@ -5180,6 +5323,18 @@ export class HexBoard {
     // no close-up só o móvel em zoom responde, mesmo com o resto travado
     if (this.moving || (!this.inputEnabled && !this.inspect)) return;
 
+    // dentro do avião: o GPS, o rádio (pelas áreas de toque) ou o resto da cabine
+    if (this.cabin && this.inspect) {
+      for (const [id, info] of this.cabin.parts) {
+        if (!info.item.visible || this.taking?.info === info) continue;
+        if (this.raycaster.intersectObject(info.hit, false).length) {
+          this.callbacks.onCabinTap?.(id);
+          return;
+        }
+      }
+      if (this.raycaster.intersectObject(this.cabin.group, true).length) this.callbacks.onCabinTap?.('other');
+      return;
+    }
     // zoom num móvel: a peça destacável (pela área de toque, um pouco maior que ela) ou o resto
     const prop = this.inspect?.frame === 'prop' ? this.propOpen : null;
     if (prop) {

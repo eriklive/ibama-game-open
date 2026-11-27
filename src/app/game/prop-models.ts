@@ -746,3 +746,213 @@ export function buildNightstand(x: number, z: number): THREE.Group {
   g.add(shade);
   return g;
 }
+
+// ---------- interior do avião ----------
+
+/** Peças da cabine que se pegam (o GPS, o rádio): malha, área de toque e destaque, por id. */
+export type CabinParts = Pick<PropInfo, 'item' | 'hit' | 'glow'>;
+
+/** O que o tabuleiro precisa do interior do avião (fica em `userData.cabin` do grupo). */
+export interface CabinInfo {
+  /** Para onde a câmera fica (do meio da cabine para fora, pela porta), no chão. */
+  facing: THREE.Vector3;
+  /** Caixa a enquadrar (no espaço do grupo). */
+  focus: THREE.Box3;
+  /** As peças destacáveis por id (`CABIN_GPS`, `CABIN_RADIO`). */
+  items: Map<string, CabinParts>;
+}
+
+const CAB = {
+  skin: 0xd9d4c3,
+  floor: 0x5d5f58,
+  floorWorn: 0x76776c,
+  stain: 0x34352f,
+  wall: 0xa9a48f,
+  wallDark: 0x8a8573,
+  rib: 0xbdb7a0,
+  glass: 0x2c3c44,
+  dash: 0x2e3133,
+  dashEdge: 0x4b4f52,
+  gauge: 0xd8d2bb,
+  gaugeRim: 0x8d9296,
+  seat: 0x6b4a33,
+  seatDark: 0x4f3524,
+  foam: 0xd8c48a,
+  tape: 0x8f9396,
+  yoke: 0x34383c,
+  grip: 0x7a5f45,
+  gpsBody: 0x2a2c2e,
+  gpsScreen: 0x9fd08a,
+  radio: 0x4a5a3c,
+  radioFace: 0x1f2326,
+  strap: 0xc9a03a,
+} as const;
+
+/**
+ * Interior do teco-teco (issue #125), em corte: sem a parede do lado da porta (oeste, −X), por
+ * onde a câmera olha. Nariz para +Z, como `buildPlane`. Só é montado quando alguém entra (ver
+ * `HexBoard.enterPlaneCabin`) e é descartado ao sair (`disposeModel`).
+ *
+ * - Cockpit básico e gasto: painel com mostradores (um faltando, fios soltos do lado do
+ *   copiloto), manche de avião na frente do banco do piloto, pedais e manete.
+ * - Banco do piloto gasto: rasgado, com espuma aparecendo e fita prateada em X.
+ * - O **GPS** preso no painel, atrás do manche; o **rádio** preso no teto, com o microfone
+ *   pendurado. Cada um é uma peça destacável (`gpsId`, `radioId`); as de `taken` já saem sem.
+ * - O fundo da fuselagem vazio: só trilhos dos bancos tirados, argolas de amarração, manchas de
+ *   combustível e uma cinta largada.
+ *
+ * Medidas em metros (cabine de 1,3 m de largura, 1,4 m de altura e 4 m de comprimento).
+ */
+export function buildPlaneInterior(gpsId: string, radioId: string, taken: ReadonlySet<string> = new Set()): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const W = 1.3;
+  const H = 1.4;
+  const y0 = 0.4; // piso da cabine (a barriga fica embaixo)
+  const zF = 1.4; // parede de fogo (frente)
+  const zR = -2.6; // antepara do fundo
+  const L = zF - zR;
+  const zc = (zF + zR) / 2;
+  const top = y0 + H;
+  const far = W / 2; // parede de longe (+X)
+  const near = -W / 2; // lado aberto (a porta)
+
+  // barriga, piso e o desgaste do piso no cockpit
+  p.box(W + 0.08, y0, L, CAB.skin, 0, y0 / 2, zc);
+  p.box(W, 0.04, L, CAB.floor, 0, y0 + 0.02, zc);
+  p.box(W - 0.2, 0.006, 1.2, CAB.floorWorn, 0, y0 + 0.042, 0.6);
+  // parede de longe, com janelas e cavernas (nervuras)
+  p.box(0.05, H, L, CAB.wall, far + 0.025, y0 + H / 2, zc);
+  p.box(0.02, 0.42, 1.0, CAB.glass, far - 0.005, y0 + 1.0, 0.55);
+  p.box(0.02, 0.32, 0.45, CAB.glass, far - 0.005, y0 + 1.0, -0.9);
+  for (let z = zR + 0.4; z < zF; z += 0.55) p.box(0.04, H, 0.05, CAB.rib, far - 0.015, y0 + H / 2, z);
+  // teto e as cavernas dele
+  p.box(W + 0.05, 0.05, L, CAB.wallDark, 0, top + 0.025, zc);
+  for (let z = zR + 0.4; z < zF; z += 0.55) p.box(W, 0.04, 0.05, CAB.rib, 0, top - 0.02, z);
+  // lado da porta (cortado, para a câmera): só a soleira, a longarina de cima e os montantes das pontas
+  p.box(0.05, 0.18, L, CAB.wall, near - 0.025, y0 + 0.09, zc);
+  p.box(0.05, 0.1, L, CAB.wall, near - 0.025, top - 0.05, zc);
+  for (const z of [zF - 0.05, zR + 0.05]) p.box(0.05, H, 0.06, CAB.wallDark, near - 0.025, y0 + H / 2, z);
+  // frente: parede de fogo e para-brisa inclinado; fundo: antepara
+  p.box(W, 0.75, 0.05, CAB.wallDark, 0, y0 + 0.375, zF);
+  p.box(W - 0.06, 0.62, 0.03, CAB.glass, 0, y0 + 1.08, zF - 0.12, [-0.35, 0, 0]);
+  p.box(W, H, 0.05, CAB.wallDark, 0, y0 + H / 2, zR);
+
+  // painel: caixa escura, lábio de cima mais claro (gasto nas quinas)
+  const pz = zF - 0.26; // face do painel
+  p.box(W - 0.04, 0.3, 0.22, CAB.dash, 0, y0 + 0.8, zF - 0.15);
+  p.box(W - 0.04, 0.03, 0.26, CAB.dashEdge, 0, y0 + 0.965, zF - 0.15);
+  // mostradores do lado do piloto (+X); um arrancado (buraco escuro)
+  const gauges: [number, number, boolean][] = [
+    [0.12, 0.86, true], [0.52, 0.86, true], [0.12, 0.74, true], [0.52, 0.74, false], [0.2, 0.74, true],
+  ];
+  for (const [x, y, ok] of gauges) {
+    p.cyl(0.045, 0.045, 0.02, CAB.gaugeRim, x, y0 + y, pz - 0.005, [Math.PI / 2, 0, 0], 12);
+    p.cyl(0.037, 0.037, 0.022, ok ? CAB.gauge : C.black, x, y0 + y, pz - 0.008, [Math.PI / 2, 0, 0], 12);
+    if (ok) p.box(0.004, 0.03, 0.004, C.red, x, y0 + y + 0.01, pz - 0.021, [0, 0, 0.6]);
+  }
+  // lado do copiloto: tampa lisa e o buraco do rádio velho, com fios soltos
+  p.box(0.36, 0.2, 0.01, CAB.dashEdge, -0.3, y0 + 0.8, pz - 0.006);
+  p.box(0.16, 0.06, 0.012, C.black, -0.3, y0 + 0.78, pz - 0.01);
+  for (const [dx, c] of [[-0.03, C.red], [0, 0xe0b12c], [0.03, 0x2f6fb0]] as const) {
+    p.cyl(0.004, 0.004, 0.12, c, -0.3 + dx, y0 + 0.71, pz - 0.02, [0, 0, dx * 4], 5);
+  }
+  // manete no meio
+  p.cyl(0.008, 0.008, 0.1, C.steel, 0, y0 + 0.72, pz - 0.05, [Math.PI / 2, 0, 0], 6);
+  p.cyl(0.022, 0.022, 0.03, C.black, 0, y0 + 0.72, pz - 0.1, [Math.PI / 2, 0, 0], 10);
+
+  // manche (volante de avião) na frente do banco do piloto: coluna, cubo e os chifres
+  const yx = 0.3;
+  const yy = y0 + 0.66;
+  p.cyl(0.02, 0.02, 0.32, CAB.yoke, yx, yy, pz - 0.16, [Math.PI / 2, 0, 0], 8);
+  p.box(0.07, 0.07, 0.05, CAB.yoke, yx, yy, pz - 0.33);
+  p.box(0.3, 0.04, 0.04, CAB.yoke, yx, yy, pz - 0.35);
+  for (const s of [-1, 1]) {
+    p.box(0.045, 0.14, 0.05, CAB.grip, yx + s * 0.15, yy + 0.05, pz - 0.35);
+    p.box(0.047, 0.03, 0.052, CAB.yoke, yx + s * 0.15, yy + 0.125, pz - 0.35);
+  }
+  // o manche do copiloto foi tirado: só o furo da coluna
+  p.cyl(0.03, 0.03, 0.012, C.black, -0.3, yy, pz - 0.005, [Math.PI / 2, 0, 0], 10);
+  // pedais
+  for (const s of [-1, 1]) p.box(0.07, 0.12, 0.03, C.steelDark, yx + s * 0.09, y0 + 0.12, zF - 0.28, [-0.5, 0, 0]);
+  // suporte do GPS (fica no painel quando o GPS sai)
+  p.box(0.05, 0.05, 0.03, C.steelDark, yx, y0 + 0.9, pz - 0.015);
+
+  // banco do piloto gasto: trilhos, base, assento rasgado com fita em X, encosto e cabeceira
+  const sx = 0.3;
+  const sz = 0.05;
+  for (const s of [-1, 1]) p.box(0.04, 0.03, 0.62, C.steelDark, sx + s * 0.18, y0 + 0.055, sz);
+  p.box(0.42, 0.16, 0.42, C.steelDark, sx, y0 + 0.15, sz);
+  p.box(0.48, 0.1, 0.48, CAB.seat, sx, y0 + 0.28, sz);
+  p.box(0.44, 0.012, 0.03, CAB.seatDark, sx, y0 + 0.334, sz - 0.08);
+  p.box(0.15, 0.014, 0.12, CAB.foam, sx + 0.08, y0 + 0.335, sz + 0.1, [0, 0.4, 0]);
+  p.box(0.22, 0.008, 0.045, CAB.tape, sx - 0.08, y0 + 0.337, sz - 0.02, [0, 0.7, 0]);
+  p.box(0.22, 0.008, 0.045, CAB.tape, sx - 0.08, y0 + 0.338, sz - 0.02, [0, -0.7, 0]);
+  const tilt: [number, number, number] = [-0.18, 0, 0];
+  p.box(0.48, 0.62, 0.1, CAB.seat, sx, y0 + 0.64, sz - 0.25, tilt);
+  p.box(0.13, 0.2, 0.012, CAB.foam, sx - 0.1, y0 + 0.7, sz - 0.19, tilt);
+  p.box(0.04, 0.5, 0.012, CAB.seatDark, sx + 0.12, y0 + 0.64, sz - 0.19, tilt);
+  p.box(0.26, 0.14, 0.08, CAB.seatDark, sx, y0 + 1.02, sz - 0.32, tilt);
+
+  // fundo vazio: trilhos dos bancos tirados, argolas, manchas de combustível e uma cinta largada
+  for (const z of [sz, -1.0]) for (const s of [-1, 1]) p.box(0.04, 0.02, 0.6, C.steelDark, (z === sz ? -0.3 : 0) + s * 0.2, y0 + 0.05, z);
+  for (const [x, z] of [[-0.45, -0.6], [0.45, -0.6], [-0.45, -2.2], [0.45, -2.2]]) {
+    p.ring(0.035, 0.008, C.steel, x, y0 + 0.045, z, [Math.PI / 2, 0, 0]);
+  }
+  for (const [x, z, r] of [[-0.1, -1.5, 0.26], [0.2, -2.0, 0.18], [-0.25, -0.5, 0.14]]) {
+    p.cyl(r, r, 0.004, CAB.stain, x, y0 + 0.042, z, undefined, 12);
+  }
+  p.box(0.05, 0.006, 1.1, CAB.strap, 0.1, y0 + 0.045, -1.6, [0, 0.35, 0]);
+  p.box(0.06, 0.02, 0.05, C.steel, 0.29, y0 + 0.05, -1.1);
+  // suportes do rádio no teto
+  const rx = 0.08;
+  const rz = 0.55;
+  for (const s of [-1, 1]) p.box(0.02, 0.06, 0.02, C.steelDark, rx + s * 0.1, top - 0.06, rz);
+  g.add(body(p));
+
+  const items = new Map<string, CabinParts>();
+  // GPS: caixinha preta com tela verde, presa no suporte do painel, atrás do manche
+  if (!taken.has(gpsId)) {
+    const k = new Parts();
+    k.box(0.16, 0.105, 0.04, CAB.gpsBody, yx, y0 + 0.9, pz - 0.05);
+    k.box(0.115, 0.07, 0.006, CAB.gpsScreen, yx - 0.012, y0 + 0.9, pz - 0.072);
+    for (const dy of [0.025, -0.005]) k.box(0.018, 0.018, 0.008, CAB.dashEdge, yx + 0.058, y0 + 0.9 + dy, pz - 0.072);
+    k.cyl(0.008, 0.008, 0.07, CAB.gpsBody, yx + 0.06, y0 + 0.98, pz - 0.05, undefined, 6);
+    const gps = detachable(k, 0.008, 0.05);
+    g.add(gps.item);
+    items.set(gpsId, gps);
+  }
+  // rádio: caixa verde-oliva pendurada no teto, frente para a porta, e o microfone no cabo
+  if (!taken.has(radioId)) {
+    const k = new Parts();
+    const ry = top - 0.14;
+    k.box(0.24, 0.08, 0.18, CAB.radio, rx, ry, rz);
+    k.box(0.006, 0.06, 0.16, CAB.radioFace, rx - 0.123, ry, rz);
+    for (const dz of [-0.05, 0.05]) k.cyl(0.012, 0.012, 0.02, C.brass, rx - 0.13, ry, rz + dz, [0, 0, Math.PI / 2], 8);
+    k.box(0.004, 0.02, 0.05, CAB.gpsScreen, rx - 0.127, ry + 0.012, rz);
+    k.cyl(0.006, 0.006, 0.3, C.black, rx - 0.08, ry - 0.18, rz - 0.06, [0.2, 0, 0.15], 5);
+    k.box(0.05, 0.08, 0.03, C.black, rx - 0.1, ry - 0.36, rz - 0.09);
+    const radio = detachable(k, 0.008, 0.05);
+    g.add(radio.item);
+    items.set(radioId, radio);
+  }
+
+  const focus = new THREE.Box3(new THREE.Vector3(m(near), m(y0), m(-1.3)), new THREE.Vector3(m(far), m(top), m(zF)));
+  g.userData['cabin'] = { facing: new THREE.Vector3(-0.8, 0, -0.6).normalize(), focus, items } satisfies CabinInfo;
+  return g;
+}
+
+/**
+ * Descarta um modelo montado aqui (o interior do avião, ao sair): geometrias e materiais
+ * próprios. Os materiais compartilhados (o dos corpos, o das áreas de toque) ficam.
+ */
+export function disposeModel(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry.dispose();
+    for (const g of (mesh.userData['outlineParts'] as THREE.BufferGeometry[] | undefined) ?? []) g.dispose();
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) if (mat !== bodyMaterial && mat !== hitMaterial) mat.dispose();
+  });
+}
