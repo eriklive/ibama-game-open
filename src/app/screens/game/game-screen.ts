@@ -17,6 +17,8 @@ import {
   Sighting,
   World,
   applyAction,
+  approachPreview,
+  approachZonesFor,
   doorOutcome,
   firstSighting,
   initialGameState,
@@ -24,6 +26,7 @@ import {
   isLed,
   lineOf,
   planFleeAct,
+  planApproach,
   planBreakIn,
   planDoor,
   planMove,
@@ -82,8 +85,6 @@ import {
   known,
   lineOfSight,
   onBoard,
-  resolveApproach,
-  rollEscape,
   spawnEnemy,
   stationary,
   visionHexes,
@@ -1249,17 +1250,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * intimidação, +1 enquanto estiver agrupado e +1 com o Capitão no grupo; a zona de rolagem e a
    * de fuga vêm logo depois (ver `approachRulesFor` em `stats.ts`).
    */
-  protected readonly activeApproach = computed(() =>
-    approachRulesFor(this.roster.loadout(this.active().id), this.grouped(), APPROACH_RULES, this.breakInBoost(), this.led()),
-  );
+  protected readonly activeApproach = computed(() => approachZonesFor(this.core()));
   /** Quem se renderia, quem rolaria o teste de fuga e quem correria se o agente da vez abordasse agora. */
-  protected readonly approachPlan = computed(() => {
-    const from = this.positions().get(this.active().id);
-    // só quem o agente alcança direto (sem parede nem porta fechada no meio)
-    return from
-      ? resolveApproach(from, this.enemies(), this.activeApproach(), this.walls())
-      : { surrender: [], roll: [], flee: [] };
-  });
+  // só quem o agente alcança direto (sem parede nem porta fechada no meio); vem do motor
+  protected readonly approachPlan = computed(() => approachPreview(this.core(), this.world()));
   protected readonly canApproach = computed(() => this.approachCount() > 0);
   /** Inimigos que a missão pede para render (o alvo, como o Caseiro Jô): a prévia avisa a chance deles. */
   protected readonly missionTargets = computed(
@@ -3764,18 +3758,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private executeApproach(): void {
     if (this.phase() !== 'moving-choice') return;
     const from = this.positions().get(this.active().id);
-    const plan = this.approachPlan();
     if (!from || this.approachCount() === 0) return;
-    const rolled = plan.roll.map((c) => rollEscape(c, () => rollDie(APPROACH_RULES.escapeDie)));
-    const surrender = [...plan.surrender, ...rolled.filter((r) => !r.passed).map((r) => r.enemy)];
-    const flee = [...rolled.filter((r) => r.passed).map((r) => r.enemy), ...plan.flee];
+    // o motor rola o teste de fuga de cada um e decide quem se rende e quem corre
+    const { act, surrender, flee } = planApproach(this.core(), this.world(), this.rng);
+    if (!this.dispatch(act)) return;
     this.approaching.set(false);
     this.board?.frameRing(null);
     this.paintApproachZones();
     this.phase.set('ending');
     const motion = !reducedMotion();
-    for (const e of surrender) this.updateEnemy(e.id, { status: 'surrendered', facing: facingBetween(e.hex, from) });
-    for (const e of flee) this.updateEnemy(e.id, { status: 'alert', facing: facingBetween(e.hex, from) });
     // voz de prisão: quem não se rendeu foge na hora, depois do auto (o mais perto de quem abordou primeiro)
     this.flight = {
       agentId: this.active().id,
