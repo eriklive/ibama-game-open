@@ -26,15 +26,21 @@ Um módulo por sistema, reaproveitando as regras puras que já existiam (`enemie
 
 | Módulo | O que tem |
 |---|---|
-| `state.ts` | `GameState`, estado inicial e auxiliares |
+| `state.ts` | `GameState`, estado inicial, `World` (o mapa) e auxiliares |
 | `turn.ts` | ciclo do turno: rolagem, andar, gastar movimento, passar a vez |
 | `enemy-turn.ts` | inimigos: patrulha, avistar, fuga, fim da rodada |
+| `group.ts` | grupo: agrupar (com o Comando), desagrupar, andar em fila, troca de vagas |
 | `index.ts` | junta tudo: `GameAction`, `validateAction`, `applyAction` |
 
 Como já funciona:
 
 - **Rolagem:** os dados de movimento são sorteados **antes** da animação (o `app-d4` recebe o
-  valor em `value` e só cai nele).
+  valor em `value` e só cai nele). A ação leva só os dados: o motor soma vigor, grupo e
+  Liderança, porque a escalação (atributos de cada agente e o Capitão) faz parte do estado.
+- **Grupo:** o motor guarda quem está agrupado, a fila e quantas vezes o Comando foi usado no
+  turno. Agrupar, andar com os companheiros seguindo o rastro do líder e a troca de vagas no
+  começo e no fim da vez viram ações resolvidas (`planRally`, `planMove`, `planReline`), com
+  o custo do Comando decidido pelo motor.
 - **Turno inimigo:** cada inimigo que age vira **uma** ação já resolvida (`planPatrolAct`,
   `planFleeAct`): o caminho inteiro, em que passo avistou alguém e se fugiu do mapa. O
   componente aplica a ação e só depois anima; o cone de visão na tela segue o passo animado
@@ -45,7 +51,7 @@ Como já funciona:
 que ainda mexem nos inimigos por fora do motor (abordagem, perseguição, interrogatório,
 revelar escondido, casos de teste) e some quando o último deles migrar. Também ficam no
 componente, por enquanto, o laço do turno inimigo (porque a perseguição se intercala nele) e
-o mapa que o motor recebe (`EnemyWorld`, porque as portas ainda não estão no estado).
+o mapa que o motor recebe (`World`, porque as portas ainda não estão no estado).
 
 ## Ordem do trabalho
 
@@ -56,8 +62,8 @@ servidor vem depois, quando o jogo inteiro rodar no motor.
 1. ~~Dados decididos antes da animação.~~
 2. ~~Motor do ciclo do turno.~~
 3. ~~Turno inimigo e visão.~~
-4. Grupo (agrupar, fila, Comando).
-5. Portas (e o `EnemyWorld` passa a sair do estado).
+4. ~~Grupo (agrupar, fila, Comando).~~
+5. Portas (e o `World` passa a sair do estado).
 6. Abordagem e rendição.
 7. Percepção, móveis e avião/chaves.
 8. Interrogatório.
