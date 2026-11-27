@@ -31,6 +31,7 @@ Um módulo por sistema, reaproveitando as regras puras que já existiam (`enemie
 | `enemy-turn.ts` | inimigos: patrulha, avistar, fuga, fim da rodada |
 | `group.ts` | grupo: agrupar (com o Comando), desagrupar, andar em fila, troca de vagas |
 | `doors.ts` | portas: abrir, destrancar (Gazua), arrombar (com dano) e a reação do cômodo |
+| `approach.ts` | abordagem: faixas do agente, prévia e o teste de fuga de cada suspeito |
 | `index.ts` | junta tudo: `GameAction`, `validateAction`, `applyAction` |
 
 Como já funciona:
@@ -47,6 +48,10 @@ Como já funciona:
   todos; a tela aplica a ação na hora em que o resultado aparece (o empurrão, o "destrancou",
   o impacto do chute). No arrombamento, `planBreakIn` acha o cômodo do outro lado e rola o
   d20 de cada inimigo; a cena só mostra, um por um.
+- **Abordagem:** as faixas (rendição, rolagem, fuga) saem do motor (`approachZonesFor`), com
+  intimidação, grupo, Liderança e o bônus do arrombamento; a prévia do tablet é
+  `approachPreview`, e `planApproach` rola o teste de fuga de cada um e decide quem se rende e
+  quem corre. A voz de prisão (perseguição) que vem depois ainda é do componente.
 - **Mapa:** o `World` que o motor recebe tem só o que é fixo no mapa (área, paredes, carga,
   estruturas). O que muda na partida (as portas fechadas) sai do estado, com `sightBlockers`
   e `solidOf`.
@@ -57,8 +62,8 @@ Como já funciona:
 - **Sorteio:** quem vagueia sorteia o destino com o `rng` da partida, e o destino viaja na ação.
 
 **Transitório:** a ação `patchEnemy` muda um inimigo direto. Ela existe só para os sistemas
-que ainda mexem nos inimigos por fora do motor (abordagem, perseguição, interrogatório,
-revelar escondido, casos de teste) e some quando o último deles migrar. Também fica no
+que ainda mexem nos inimigos por fora do motor (perseguição, interrogatório, revelar
+escondido, casos de teste) e some quando o último deles migrar. Também fica no
 componente, por enquanto, o laço do turno inimigo (porque a perseguição se intercala nele).
 
 ## Ordem do trabalho
@@ -72,7 +77,7 @@ servidor vem depois, quando o jogo inteiro rodar no motor.
 3. ~~Turno inimigo e visão.~~
 4. ~~Grupo (agrupar, fila, Comando).~~
 5. ~~Portas (e o `World` só com o que é fixo no mapa).~~
-6. Abordagem e rendição.
+6. ~~Abordagem e rendição.~~
 7. Percepção, móveis e avião/chaves.
 8. Interrogatório.
 9. Queima e fim da operação.
