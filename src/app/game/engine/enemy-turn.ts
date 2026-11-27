@@ -17,23 +17,9 @@ import {
   planPatrol,
   spotted,
 } from '../enemies';
-import { HexArea, HexCoord, hexKey } from '../hex';
-import { GameState, findEnemy, isHex } from './state';
+import { HexCoord, hexKey } from '../hex';
+import { GameState, World, findEnemy, isHex } from './state';
 import { stepByStep } from './turn';
-
-/**
- * O mapa como o motor precisa dele. Por enquanto quem monta é o componente (as portas ainda
- * não estão no estado); no servidor, sai do mapa e do estado da sala.
- */
-export interface EnemyWorld {
-  readonly area: HexArea;
-  /** O que bloqueia a visão (paredes, carga alta, portas fechadas). */
-  readonly walls: ReadonlySet<string>;
-  /** Carga baixa: esconde quem está colado nela, do lado de lá. */
-  readonly lowCover: ReadonlySet<string>;
-  /** O que ninguém atravessa (paredes, toda a carga, portas fechadas). */
-  readonly solid: ReadonlySet<string>;
-}
 
 /** O que um inimigo avistou: o agente e onde ele estava (o inimigo vira para lá). */
 export interface Sighting {
@@ -89,7 +75,7 @@ const agentsOf = (state: GameState): Map<string, HexCoord> =>
   new Map(Object.entries(state.positions));
 
 /** Onde o inimigo `id` não pode pisar: o sólido do mapa, os agentes e os outros inimigos. */
-export function blockedFor(state: GameState, id: string, world: EnemyWorld): Set<string> {
+export function blockedFor(state: GameState, id: string, world: World): Set<string> {
   return new Set([
     ...world.solid,
     ...Object.values(state.positions).map(hexKey),
@@ -111,7 +97,7 @@ function walked(enemy: EnemyState, path: readonly HexCoord[]): EnemyState {
 export function planPatrolAct(
   state: GameState,
   id: string,
-  world: EnemyWorld,
+  world: World,
   rng: () => number,
 ): Extract<EnemyAction, { type: 'enemyPatrol' }> {
   const enemy = findEnemy(state, id)!;
@@ -145,7 +131,7 @@ export function planPatrolAct(
 export function planFleeAct(
   state: GameState,
   id: string,
-  world: EnemyWorld,
+  world: World,
 ): Extract<EnemyAction, { type: 'enemyFlee' }> {
   const enemy = findEnemy(state, id)!;
   const agents = Object.values(state.positions);
@@ -171,7 +157,7 @@ export function planFleeAct(
 export function firstSighting(
   state: GameState,
   agents: ReadonlyMap<string, HexCoord>,
-  world: EnemyWorld,
+  world: World,
   only?: string,
 ): { enemy: string; sighting: Sighting } | null {
   for (const e of state.enemies) {

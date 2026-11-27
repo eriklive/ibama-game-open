@@ -12,15 +12,23 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { Rng, rollDice, rollDie, sum } from '../../game/dice';
 import {
-  EnemyWorld,
   GameAction,
   GameState,
   Sighting,
+  World,
   applyAction,
   firstSighting,
   initialGameState,
+  isGrouped,
+  isLed,
+  lineOf,
   planFleeAct,
+  planMove,
   planPatrolAct,
+  planRally,
+  planReline,
+  rallyFree,
+  rallyOptions,
   validateAction,
 } from '../../game/engine';
 import {
@@ -127,14 +135,10 @@ import { IntroTarget, STRUCTURE_TOP, introTargets } from '../../game/mission-int
 import { IntroMark, MissionIntro } from '../../ui/mission-intro/mission-intro';
 import { LESSONS, LessonId, insideScreen, lessonDue, markSeen, readSeen } from '../../game/tactical-board';
 import { TacticalBoard } from '../../ui/tactical-board/tactical-board';
-import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
+import { CLASS_INFO, CLASS_RULES, skillBonus, SKILLS } from '../../game/agent-class';
 import {
   GROUP_RULES,
   RallyPlan,
-  followLeader,
-  lineMoves,
-  lineSwapPaths,
-  rallyPoints,
   suggestedRally,
   toBack,
   toFront,
@@ -168,7 +172,7 @@ import {
   talkTarget,
 } from '../../game/interrogation';
 import { npcClass } from '../../game/npc-dialogue';
-import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../game/stats';
+import { approachRulesFor, signed, statBreakdown } from '../../game/stats';
 
 /** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
 const MISSION_DEADLINE = 5;
@@ -285,7 +289,6 @@ const namesOf = (es: readonly EnemyState[]): string => {
 };
 
 /** A equipe inteira, junta (como a partida começa). */
-const wholeTeam = (): ReadonlySet<string> => new Set(CHARACTERS.map((c) => c.id));
 
 /** Teclas do Modo Corrida. */
 const RUNNER_KEYS: Record<string, 'left' | 'right' | 'up' | 'down'> = {
@@ -377,8 +380,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * muda por `dispatch`: no multiplayer, é o que vai e volta pelo servidor.
    */
   private readonly core = signal<GameState>(this.initialCore());
+  // cada leitura pega a mesma referência enquanto aquela parte do estado não muda: quem depende
+  // dela (alcance, bloqueios, auras) só recalcula quando precisa
+  private readonly positionsRecord = computed(() => this.core().positions);
   protected readonly positions = computed<ReadonlyMap<string, HexCoord>>(
-    () => new Map(Object.entries(this.core().positions)),
+    () => new Map(Object.entries(this.positionsRecord())),
   );
   protected readonly activeIndex = computed(() => this.core().activeIndex);
   /** Turno global: aumenta a cada vez que um personagem começa a jogar. */
@@ -1067,21 +1073,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Agentes agrupados (andam juntos e ganham movimento extra); vazio = cada um por si.
-   * A equipe chega junta: a partida começa com todos no grupo.
+   * A equipe chega junta: a partida começa com todos no grupo. Vem do motor (`engine/group.ts`).
    */
-  protected readonly group = signal<ReadonlySet<string>>(wholeTeam());
-  /**
-   * Ordem da fila do grupo, da frente para trás (ver `toFront` / `toBack`). Quem saiu do grupo
-   * não conta; quem falta entra no fim, na ordem da equipe.
-   */
-  private readonly groupLine = signal<readonly string[]>(CHARACTERS.map((c) => c.id));
+  private readonly groupIds = computed(() => this.core().group);
+  protected readonly group = computed<ReadonlySet<string>>(() => new Set(this.groupIds()));
+  /** Ordem da fila do grupo, da frente para trás (ver `toFront` / `toBack`). */
+  private readonly groupLine = computed(() => this.core().groupLine);
   /** A vez está passando (a fila do grupo se arrumando antes do próximo). */
   private passing = false;
-  private readonly line = computed(() => {
-    const group = this.group();
-    const kept = this.groupLine().filter((id) => group.has(id));
-    return [...kept, ...CHARACTERS.map((c) => c.id).filter((id) => group.has(id) && !kept.includes(id))];
-  });
+  /** Capitão e ordem da equipe, como o motor guarda. */
+  private readonly coreCaptain = computed(() => this.core().captain);
+  private readonly order = computed(() => this.core().order);
+  // fila e Liderança dependem só do grupo, da fila e do Capitão (não do resto do estado)
+  private readonly line = computed(() =>
+    lineOf({ group: this.groupIds(), groupLine: this.groupLine(), order: this.order() }),
+  );
   protected readonly groupBonus = GROUP_RULES.moveBonus;
   protected readonly groupApproachBonus = GROUP_RULES.approachBonus;
   protected readonly leaderBonus = CLASS_RULES.leadership;
@@ -1093,10 +1099,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return c.id === this.captainId();
   }
   /** O grupo tem o Capitão: quem está nele ganha a Liderança. */
-  protected readonly led = computed(() => {
-    const id = this.captainId();
-    return !!id && this.group().has(id);
-  });
+  protected readonly led = computed(() => isLed({ captain: this.coreCaptain(), group: this.groupIds() }));
   /** Bônus de grupo de movimento e de intimidação (com a Liderança, se o Capitão estiver no grupo). */
   protected readonly groupMove = computed(() => GROUP_RULES.moveBonus + (this.led() ? CLASS_RULES.leadership.vigor : 0));
   protected readonly groupInt = computed(
@@ -1109,12 +1112,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   );
   /** Gazua do agente da vez (0 para quem não tem a perícia). */
   protected readonly pickBonus = computed(() => skillBonus(this.roster.classOf(this.active().id), 'gazua'));
-  /** Vezes que o Comando já foi usado neste turno. */
-  private readonly commandsUsed = signal(0);
   /** O Agrupar do agente da vez sai de graça (Comando do Capitão, ainda não usado no turno). */
-  protected readonly freeRally = computed(() =>
-    commandFree(this.roster.classOf(this.active().id), this.commandsUsed()),
-  );
+  protected readonly freeRally = computed(() => rallyFree(this.core()));
   protected readonly classInfo = CLASS_INFO;
 
   /** Atributos de um agente em campo (com o bônus do grupo, se ele estiver agrupado). */
@@ -1145,13 +1144,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected inGroup(c: Character): boolean {
     return this.group().has(c.id);
   }
-  protected readonly grouped = computed(() => this.group().has(this.active().id));
+  protected readonly grouped = computed(() =>
+    isGrouped({ group: this.groupIds(), order: this.order(), activeIndex: this.activeIndex() }),
+  );
 
   /** Pontos de encontro possíveis com o movimento que resta ao agente da vez. */
   private readonly rallyPlans = computed<Map<string, RallyPlan>>(() => {
     const map = this.map;
-    if (!map || this.phase() !== 'moving-choice' || this.group().size) return new Map();
-    return rallyPoints(this.active().id, this.positions(), this.movesLeft(), this.area, this.enemyWalls());
+    if (!map || this.phase() !== 'moving-choice') return new Map();
+    return rallyOptions(this.core(), this.world());
   });
   protected readonly canGroup = computed(() => CHARACTERS.length > 1 && this.rallyPlans().size > 0);
   protected readonly rallyPlan = computed(() => {
@@ -1412,7 +1413,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const active = this.active();
     // fim do turno anterior: a partida vai para o save automático da sessão
     this.autosave();
-    this.commandsUsed.set(0);
     this.closeApproach();
     this.closeGrouping();
     this.closeBurn();
@@ -1437,16 +1437,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Devolve `false` se a partida recomeçou no meio.
    */
   private async reorderLine(next: readonly string[]): Promise<boolean> {
-    const line = this.line();
     const epoch = this.epoch;
-    const moves = lineMoves(line, next, this.positions());
-    const paths = moves.size && this.board ? lineSwapPaths(moves, this.positions(), this.area, this.enemyWalls()) : null;
-    if (!paths) return true;
+    const act = this.board ? planReline(this.core(), next, this.world()) : null;
+    if (!act) return true;
     this.phase.set('walking');
-    await this.board!.moveUnits(next[0], paths);
+    await this.board!.moveUnits(next[0], new Map(Object.entries(act.paths).map(([id, p]) => [id, [...p]])));
     if (this.destroyed || this.epoch !== epoch) return false;
-    this.dispatch({ type: 'place', positions: Object.fromEntries(moves) });
-    this.groupLine.set(next);
+    this.dispatch(act);
     return true;
   }
 
@@ -1461,8 +1458,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.dieResults = [];
     // o resultado sai antes da animação: os dados só mostram o que já foi decidido
     const values = rollDice(MOVE_DICE.count, MOVE_DICE.sides, this.rng);
-    const movement = turnMovement(sum(values), this.roster.loadout(this.active().id), this.grouped(), this.led());
-    this.dispatch({ type: 'roll', dice: values, movement });
+    // o motor soma vigor, grupo e Liderança
+    this.dispatch({ type: 'roll', dice: values });
     this.rollValues.set(values);
     this.rollKeys.set(Array.from({ length: MOVE_DICE.count }, (_, i) => `${seq}-${i}`));
     // no celular, os dados "quicam" na mão (a não ser que a animação esteja reduzida)
@@ -1579,7 +1576,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Patrulha um trecho. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
   private async patrol(enemy: EnemyState, epoch: number): Promise<boolean> {
     // o motor decide o trecho inteiro (e em que passo ele avista alguém); a tela só anima
-    const act = planPatrolAct(this.core(), enemy.id, this.enemyWorld(), this.rng);
+    const act = planPatrolAct(this.core(), enemy.id, this.world(), this.rng);
     if (!this.dispatch(act)) return false;
     if (!act.path.length) {
       if (this.board!.isCovered(enemy.hex)) return false;
@@ -1596,7 +1593,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Foge para a borda. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
   private async flee(enemy: EnemyState, epoch: number): Promise<boolean> {
-    const act = planFleeAct(this.core(), enemy.id, this.enemyWorld());
+    const act = planFleeAct(this.core(), enemy.id, this.world());
     if (!this.dispatch(act)) return false;
     const covered = this.board!.isCovered(enemy.hex);
     if (act.cornered) {
@@ -2362,7 +2359,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Se o inimigo em patrulha enxerga algum agente, entra em alerta. Devolve se avistou. */
   private checkSpotted(enemyId: string, agents: ReadonlyMap<string, HexCoord> = this.positions()): boolean {
     if (!this.map) return false;
-    const seen = firstSighting(this.core(), agents, this.enemyWorld(), enemyId);
+    const seen = firstSighting(this.core(), agents, this.world(), enemyId);
     if (!seen) return false;
     const { agent, at } = seen.sighting;
     if (!this.dispatch({ type: 'spot', enemy: enemyId, agent, at })) return false;
@@ -2688,19 +2685,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!path.length) return;
     this.sound.play('ui.confirmar');
     const id = this.active().id;
-    const paths = new Map([[id, path]]);
-    let left: string[] = [];
-    if (this.grouped()) {
-      // os companheiros seguem o rastro do líder
-      const followers = new Map([...this.positions()].filter(([o]) => o !== id && this.group().has(o)));
-      const plan = followLeader(this.positions().get(id)!, path, followers, this.area, this.enemyWalls());
-      for (const [o, p] of plan.paths) paths.set(o, p);
-      left = plan.left;
-    }
-    if (!(await this.walkUnits(id, paths, path.length))) return;
-    // a fila segue o rastro: o líder na frente, depois quem ocupou a vaga logo atrás dele…
-    if (this.grouped()) this.groupLine.set([...paths.keys()]);
-    if (left.length) this.leaveGroup(left, 'ficou para trás');
+    // agrupado, os companheiros seguem o rastro do líder e a fila fica na ordem em que andaram
+    const act = planMove(this.core(), path, this.world());
+    const paths = new Map(Object.entries(act.paths).map(([who, p]) => [who, [...p]]));
+    if (!(await this.walkUnits(id, paths, act))) return;
+    if (act.left?.length) this.sayLeft(act.left, 'ficou para trás');
     // andou até um alvo tocado: chegando colado, a ação dele já abre
     const aimed = this.aimedTarget();
     const aim = aimed && sameHex(aimed.hex, target) ? aimed : null;
@@ -2714,9 +2703,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Anda com um ou mais agentes ao mesmo tempo, conferindo a visão dos inimigos a cada passo.
-   * Quando todos chegam, o movimento vira estado (e gasta `cost`).
+   * Quando todos chegam, a ação (`commit`, já planejada pelo motor) vira estado.
    */
-  private async walkUnits(leaderId: string, paths: ReadonlyMap<string, HexCoord[]>, cost: number): Promise<boolean> {
+  private async walkUnits(
+    leaderId: string,
+    paths: ReadonlyMap<string, HexCoord[]>,
+    commit: GameAction,
+  ): Promise<boolean> {
     const epoch = this.epoch;
     this.phase.set('walking');
     this.selected.set(null);
@@ -2731,7 +2724,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.checkAllSpotted(live);
     });
     if (this.destroyed || this.epoch !== epoch) return false;
-    return this.dispatch({ type: 'move', paths: Object.fromEntries(paths), cost });
+    return this.dispatch(commit);
   }
 
   /**
@@ -2795,13 +2788,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const id = this.active().id;
     this.closeGrouping();
     const free = this.freeRally();
-    const cost = rallyCost(plan.cost, this.roster.classOf(id), this.commandsUsed());
-    if (!(await this.walkUnits(id, plan.paths, cost))) return;
+    // o motor junta a equipe, põe quem chamou na frente da fila e decide se o Comando paga
+    const act = planRally(this.core(), plan.point, this.world());
+    if (!act || !(await this.walkUnits(id, plan.paths, act))) return;
     this.sound.play('eq.agrupar');
-    this.group.set(wholeTeam());
-    // quem chamou o grupo fica na frente da fila
-    this.groupLine.set(toFront(this.line(), id));
-    if (free) this.commandsUsed.update((n) => n + 1);
     this.say(
       `${free ? 'Comando do Capitão: agrupou sem gastar movimento! ' : 'Equipe agrupada! '}` +
         `Juntos: +${this.groupMove()} de movimento e +${this.groupInt()} de intimidação` +
@@ -2815,16 +2805,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Desfaz o grupo: cada um volta a andar por conta própria. */
   protected ungroup(): void {
     if (this.phase() !== 'moving-choice' || !this.group().size) return;
-    this.group.set(new Set());
+    if (!this.dispatch({ type: 'ungroup' })) return;
     this.sound.play('eq.desagrupar');
     this.say('Equipe desagrupada: cada um por si', 'info');
     this.refreshBoard();
   }
 
-  /** Tira agentes do grupo; com menos de dois, o grupo acaba. */
-  private leaveGroup(ids: string[], why: string): void {
-    const next = new Set([...this.group()].filter((id) => !ids.includes(id)));
-    this.group.set(next.size > 1 ? next : new Set());
+  /** Avisa quem saiu do grupo (o motor já tirou; com menos de dois, o grupo acaba). */
+  private sayLeft(ids: readonly string[], why: string): void {
     const names = ids.map((id) => CHARACTERS.find((c) => c.id === id)?.name ?? id);
     this.say(`${names.join(' e ')} ${why}`, 'info');
   }
@@ -4077,7 +4065,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const path = door && !sameHex(door, from) ? pathTo(reachableHexes(from, Number.MAX_SAFE_INTEGER, this.area, blocked), door) : [];
     if (path.length) {
       // ir até a porta do avião não gasta movimento
-      if (!(await this.walkUnits(id, new Map([[id, path]]), 0))) return;
+      if (!(await this.walkUnits(id, new Map([[id, path]]), { type: 'move', paths: { [id]: path }, cost: 0 }))) {
+        return;
+      }
       if (this.epoch !== epoch || this.phase() !== 'walking') {
         this.dropCabin();
         return;
@@ -4242,8 +4232,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.resetSlow();
     this.closeApproach();
     this.core.set(this.initialCore());
-    this.group.set(wholeTeam());
-    this.groupLine.set(CHARACTERS.map((c) => c.id));
     this.passing = false;
     this.closeGrouping();
     this.board?.placeUnits(this.positions());
@@ -4357,10 +4345,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       activeIndex: Math.min(Math.max(0, s.activeIndex), CHARACTERS.length - 1),
       positions: { ...fresh.positions, ...Object.fromEntries(s.positions) },
       enemies: s.enemies,
+      group: s.group,
+      groupLine: s.groupLine,
     });
     this.board?.placeUnits(this.positions());
-    this.group.set(new Set(s.group));
-    this.groupLine.set(s.groupLine);
     this.board?.placeEnemies(
       this.enemies().map((e) => ({
         ...e,
@@ -4807,7 +4795,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /** O mapa como o motor precisa dele (as portas ainda vivem aqui). */
-  private enemyWorld(): EnemyWorld {
+  private world(): World {
     return { area: this.area, walls: this.walls(), lowCover: this.lowCover, solid: this.solid() };
   }
 
@@ -4870,11 +4858,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private initialCore(): GameState {
     const starts = CHARACTERS.map((c, i) => [c.id, { ...(this.map?.starts[i] ?? { col: 0, row: 0 }) }] as const);
-    return initialGameState(
-      CHARACTERS.map((c) => c.id),
-      Object.fromEntries(starts),
-      this.initialEnemies(),
-    );
+    return initialGameState({
+      order: CHARACTERS.map((c) => c.id),
+      positions: Object.fromEntries(starts),
+      enemies: this.initialEnemies(),
+      // a escalação da ficha: o motor calcula movimento, grupo e Comando com ela
+      loadouts: Object.fromEntries(CHARACTERS.map((c) => [c.id, this.roster.loadout(c.id)])),
+      captain: this.roster.captain(),
+    });
   }
 
   /**
