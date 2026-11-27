@@ -31,6 +31,7 @@ import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
 import { OUTLINE_LAYER, TargetOutline } from './target-outline';
 import { AuraLayer, AuraStyle, AuraTextures, createAuraTextures, splitHot } from './aura-layer';
 import { BASE_PITCH, INTRO, ScreenEllipse, easeInOutCubic, introZoom } from './mission-intro';
+import { frameGroup } from './group-frame';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
@@ -76,6 +77,9 @@ const RING_VIEW = {
   /** Velocidade da transição (maior, mais rápida). */
   rate: 4.5,
 };
+
+/** Velocidade da transição do enquadramento de grupo (`frameGroupOn`; maior, mais rápida). */
+const GROUP_VIEW_RATE = 4;
 
 export const SECONDS_PER_HEX = (HEX_STEP * HEX_SIZE) / RUN_SPEED;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
@@ -741,6 +745,13 @@ export class HexBoard {
   private ring: { target: THREE.Vector3; zoom: number; pitch: number } | null = null;
   private ringLast: { target: THREE.Vector3; zoom: number; pitch: number } | null = null;
   private ringBlend = 0;
+  /**
+   * Enquadramento de um grupo (o agente e o que ele vai queimar, ver `frameGroupOn`): por cima da
+   * câmera de jogo, que fica onde estava e volta ao sair. `groupLast` segura a saída da transição.
+   */
+  private group: { target: THREE.Vector3; zoom: number } | null = null;
+  private groupLast: { target: THREE.Vector3; zoom: number } | null = null;
+  private groupBlend = 0;
   private inspectLast: CloseUpView | null = null;
   private inspectBlend = 0;
   /** Deslocamento da vista neste quadro (px): a cena da porta empurra para o lado, o close-up para cima. */
@@ -1320,6 +1331,33 @@ export class HexBoard {
     if (reducedMotionQuery()) this.ringBlend = 1;
   }
 
+  /**
+   * Aproxima suave até os hexágonos (o agente e o que ele vai queimar) caberem juntos no meio
+   * da tela, com folga (a conta está em `group-frame.ts`). A câmera de jogo fica onde estava:
+   * `null` volta para ela, também suave. Enquanto durar, arrastar e dar zoom não mexem na câmera.
+   */
+  frameGroupOn(hexes: readonly HexCoord[] | null): void {
+    if (!hexes?.length || this.inspect || this.intro) {
+      if (this.group) this.groupLast = this.group;
+      this.group = null;
+      return;
+    }
+    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
+    const f = frameGroup(
+      hexes.map((h) => this.worldOf(h)),
+      {
+        fovDeg: this.camera.fov,
+        aspect: this.camera.aspect,
+        pitchDeg: this.pitchDeg,
+        distPerZoom: 11.5 * Math.min(portrait, 2.3),
+        lead: this.camera.aspect < 1 ? 1.4 : 0.3,
+      },
+    );
+    if (!f) return;
+    this.group = { target: new THREE.Vector3(f.x, 0, f.z), zoom: f.zoom };
+    if (reducedMotionQuery()) this.groupBlend = 1;
+  }
+
   /** Desloca a câmera só o necessário para o hexágono ficar longe das bordas da tela. */
   keepInView(hex: HexCoord): void {
     if (this.inspect || this.intro) return;
@@ -1334,7 +1372,7 @@ export class HexBoard {
 
   /** Arrasta a câmera (em unidades de tela: x direita, y baixo), proporcional ao zoom. */
   panBy(dx: number, dy: number): void {
-    if (this.inspect || this.intro || this.ring) return;
+    if (this.inspect || this.intro || this.ring || this.group) return;
     this.camGoal.x += dx * this.zoom;
     this.camGoal.z += dy * this.zoom * 1.3;
     this.clampGoal();
@@ -1342,7 +1380,7 @@ export class HexBoard {
 
   /** Aproxima (< 1) ou afasta (> 1) a câmera. */
   zoomBy(factor: number): void {
-    if (this.inspect || this.intro || this.ring) return;
+    if (this.inspect || this.intro || this.ring || this.group) return;
     this.setZoom(this.zoom * factor);
   }
 
@@ -4511,6 +4549,18 @@ export class HexBoard {
     const k = 1 - Math.exp(-dt * 6);
     this.stepIntro();
     this.camTarget.lerp(this.camGoal, k);
+    // enquadramento de um grupo (ver `frameGroupOn`): mistura com a câmera de jogo
+    const gGoal = this.group ? 1 : 0;
+    this.groupBlend += (gGoal - this.groupBlend) * (1 - Math.exp(-dt * GROUP_VIEW_RATE));
+    if (Math.abs(gGoal - this.groupBlend) < 0.002) this.groupBlend = gGoal;
+    const g = this.group ?? this.groupLast;
+    let base = this.camTarget;
+    let baseZoom = this.zoom;
+    if (g && this.groupBlend > 0) {
+      const e = easeInOutCubic(this.groupBlend);
+      base = new THREE.Vector3().lerpVectors(this.camTarget, g.target, e);
+      baseZoom = THREE.MathUtils.lerp(this.zoom, g.zoom, e);
+    } else this.groupLast = null;
     // vista do tablet de abordagem (ver `frameRing`): mistura os parâmetros, não as posições
     const goal = this.ring ? 1 : 0;
     this.ringBlend += (goal - this.ringBlend) * (1 - Math.exp(-dt * RING_VIEW.rate));
@@ -4519,8 +4569,8 @@ export class HexBoard {
     if (v && this.ringBlend > 0) {
       const e = easeInOutCubic(this.ringBlend);
       return this.placePerspective(
-        new THREE.Vector3().lerpVectors(this.camTarget, v.target, e),
-        THREE.MathUtils.lerp(this.zoom, v.zoom, e),
+        new THREE.Vector3().lerpVectors(base, v.target, e),
+        THREE.MathUtils.lerp(baseZoom, v.zoom, e),
         THREE.MathUtils.lerp(this.pitchDeg, v.pitch, e),
         look,
       );
@@ -4528,7 +4578,7 @@ export class HexBoard {
     this.ringLast = null;
     this.doorYaw += (this.doorYawGoal() - this.doorYaw) * (1 - Math.exp(-dt * 2.5));
     if (Math.abs(this.doorYaw) < 1e-4) this.doorYaw = 0;
-    return this.placePerspective(this.camTarget, this.zoom, this.pitchDeg, look, this.doorYaw);
+    return this.placePerspective(base, baseZoom, this.pitchDeg, look, this.doorYaw);
   }
 
   /**
@@ -4635,7 +4685,7 @@ export class HexBoard {
     const lk = 1 - Math.exp(-dt * 8);
     // monta em segundo plano o que entrou no raio (e muda o centro, se a câmera foi longe)
     // (na vista do tablet de abordagem, em volta de para onde a câmera foi)
-    const sc = this.ring && this.ringBlend > 0.5 ? this.ring.target : this.camTarget;
+    const sc = this.ring && this.ringBlend > 0.5 ? this.ring.target : this.group && this.groupBlend > 0.5 ? this.group.target : this.camTarget;
     this.stream.update(sc.x, sc.z, STREAM_BUDGET_MS);
     this.updateStructure();
     for (const f of this.roomFogs) {
@@ -4980,8 +5030,8 @@ export class HexBoard {
     if (!prev) return;
     const cur = { x: e.clientX, y: e.clientY };
     this.pointers.set(e.pointerId, cur);
-    // vista de inspeção: a câmera fica travada
-    if (this.inspect) {
+    // vista de inspeção (e o enquadramento de grupo): a câmera fica travada
+    if (this.inspect || this.group) {
       if (this.tapStart && Math.hypot(cur.x - this.tapStart.x, cur.y - this.tapStart.y) > 10) this.dragged = true;
       return;
     }
@@ -5022,7 +5072,7 @@ export class HexBoard {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    if (this.inspect) return;
+    if (this.inspect || this.group) return;
     this.setZoom(this.zoom * (e.deltaY > 0 ? 1.1 : 0.9));
   };
 
