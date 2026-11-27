@@ -8,7 +8,7 @@
   </header>
 
   <section class="maps" aria-labelledby="maps-title">
-    <h2 id="maps-title">Escolha o mapa</h2>
+    <h2 id="maps-title">Escolha a fase</h2>
     <ul role="list">
       @for (map of maps; track map.id) {
         <li>
@@ -26,8 +26,8 @@
               }
             </span>
             <span class="info">
-              <span class="name">{{ map.name }}</span>
-              <span class="sub">{{ map.subtitle }}</span>
+              <span class="name">{{ phaseTitle(map) }}</span>
+              <span class="sub">{{ map.available ? map.subtitle : 'Em breve' }}</span>
             </span>
             <span class="state">
               @if (!map.available) {

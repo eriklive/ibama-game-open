@@ -52,6 +52,11 @@ export interface GameMap {
   rows: number;
   /** Disponível para jogar agora. */
   available: boolean;
+  /**
+   * Número da fase no menu inicial ("Fase 1: Hangar"). Sem ele, o mapa não aparece no menu
+   * (o campo de teste continua jogável pelo endereço `#/jogo/teste-12x12`).
+   */
+  phase?: number;
   /** Posições iniciais, uma por personagem (na ordem de `CHARACTERS`). */
   starts: { col: number; row: number }[];
   /** Hexágonos com parede: bloqueiam passagem e visão. */
@@ -343,8 +348,10 @@ export const MAPS: GameMap[] = [
   },
   {
     id: 'aeroporto',
-    name: 'Aeroporto',
-    subtitle: 'Missão circular · pista de terra, hangar e mata',
+    // o aeroporto inteiro é a fase do hangar
+    name: 'Hangar',
+    phase: 1,
+    subtitle: 'Aeroporto · pista de terra, hangar e mata',
     ...AEROPORTO,
     // a casa: a entrada está só encostada; a divisória, trancada. No hangar, a porta dos
     // fundos do oeste está trancada (fechadura mais fácil) e a do leste, bloqueada
@@ -464,9 +471,22 @@ export const MAPS: GameMap[] = [
     ],
   },
   {
-    id: 'missao-1-hangar',
-    name: 'Missão 1 · Hangar',
+    id: 'garimpo',
+    name: 'Garimpo',
     subtitle: 'Em breve',
+    phase: 2,
+    cols: 27,
+    rows: 11,
+    available: false,
+    starts: [{ col: 2, row: 6 }, { col: 1, row: 5 }, { col: 1, row: 7 }],
+    walls: [],
+    enemies: [],
+  },
+  {
+    id: 'zona-de-dragagem',
+    name: 'Zona de dragagem',
+    subtitle: 'Em breve',
+    phase: 3,
     cols: 27,
     rows: 11,
     available: false,
@@ -475,6 +495,12 @@ export const MAPS: GameMap[] = [
     enemies: [],
   },
 ];
+
+/** As fases do menu inicial, em ordem (as bloqueadas aparecem, mas não abrem). */
+export const PHASES: GameMap[] = MAPS.filter((m) => m.phase).sort((a, b) => a.phase! - b.phase!);
+
+/** Título da fase no menu e no lobby ("Fase 1: Hangar"); mapas fora do menu usam só o nome. */
+export const phaseTitle = (map: GameMap): string => (map.phase ? `Fase ${map.phase}: ${map.name}` : map.name);
 
 /** Distância (em hexágonos) a partir da qual o interior de uma estrutura deixa de ser desenhado. */
 export const STRUCTURE_SIGHT = 6;
