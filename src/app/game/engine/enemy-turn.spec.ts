@@ -17,9 +17,10 @@ import {
 const AREA = rectArea(12, 12);
 const world = (walls: string[] = []): World => ({
   area: AREA,
-  walls: new Set(walls),
+  blocked: new Set(walls),
   lowCover: new Set(),
-  solid: new Set(walls),
+  roomWalls: new Set(),
+  structures: [],
 });
 
 const game = (agents: Record<string, HexCoord>, ...spawns: EnemySpawn[]): GameState =>

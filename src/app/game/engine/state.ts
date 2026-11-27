@@ -7,12 +7,14 @@
  * - `applyAction` é puro: mesma entrada, mesma saída, sem relógio nem animação.
  *
  * O estado cresce um sistema por vez: hoje tem o ciclo do turno (`turn.ts`), os inimigos
- * (`enemy-turn.ts`) e o grupo (`group.ts`). Portas, abordagem e o resto ainda vivem no
- * componente.
+ * (`enemy-turn.ts`), o grupo (`group.ts`) e as portas (`doors.ts`). Abordagem e o resto
+ * ainda vivem no componente.
  */
 import { AgentClass, classOf } from '../agent-class';
+import { Door, isOpen } from '../door';
 import { EnemyState, onBoard } from '../enemies';
 import { HexArea, HexCoord, hexKey } from '../hex';
+import type { HexRect } from '../maps';
 import { Loadout, ZERO_STATS } from '../stats';
 
 export interface GameState {
@@ -43,6 +45,13 @@ export interface GameState {
   readonly groupLine: readonly string[];
   /** Vezes que o Comando do Capitão já foi usado neste turno. */
   readonly commandsUsed: number;
+  /** Portas comuns do mapa, pelo hexágono (`hexKey`). Fechadas, bloqueiam passagem e visão. */
+  readonly doors: Readonly<Record<string, Door>>;
+  /**
+   * Arrombamento recente: a equipe ganha intimidação até o começo desta rodada. `0` = sem
+   * bônus (ver `BREAK_IN_RULES`).
+   */
+  readonly breakInUntil: number;
 }
 
 export interface NewGame {
@@ -51,6 +60,7 @@ export interface NewGame {
   enemies?: readonly EnemyState[];
   loadouts?: Readonly<Record<string, Loadout>>;
   captain?: string | null;
+  doors?: Readonly<Record<string, Door>>;
 }
 
 /** Começo da partida: a equipe chega junta (todos no grupo), na ordem da equipe. */
@@ -68,22 +78,47 @@ export function initialGameState(game: NewGame): GameState {
     group: [...game.order],
     groupLine: [...game.order],
     commandsUsed: 0,
+    doors: Object.fromEntries(Object.entries(game.doors ?? {}).map(([k, d]) => [k, { ...d }])),
+    breakInUntil: 0,
   };
 }
 
 /**
- * O mapa como o motor precisa dele. Por enquanto quem monta é o componente (as portas ainda
- * não estão no estado); no servidor, sai do mapa e do estado da sala.
+ * O que é fixo no mapa, como o motor precisa dele: sai do mapa e não muda na partida (no
+ * servidor, é montado uma vez por sala). O que muda (as portas) está no `GameState`; junte os
+ * dois com `sightBlockers` e `solidOf`.
  */
 export interface World {
   readonly area: HexArea;
-  /** O que bloqueia a visão (paredes, carga alta, portas fechadas). */
-  readonly walls: ReadonlySet<string>;
-  /** Carga baixa: esconde quem está colado nela, do lado de lá. */
+  /** Paredes, árvores, avião e carga alta: bloqueiam passagem e visão. */
+  readonly blocked: ReadonlySet<string>;
+  /** Carga baixa: bloqueia passagem; esconde quem está colado nela, do lado de lá. */
   readonly lowCover: ReadonlySet<string>;
-  /** O que ninguém atravessa (paredes, toda a carga, portas fechadas). */
-  readonly solid: ReadonlySet<string>;
+  /** Só as paredes das estruturas (separam os cômodos; ver `roomBehind`). */
+  readonly roomWalls: ReadonlySet<string>;
+  /** Plantas das estruturas (casas, hangar). */
+  readonly structures: readonly HexRect[];
 }
+
+/** Portas fechadas agora (pelo `hexKey`). */
+export const closedDoors = (state: Pick<GameState, 'doors'>): Set<string> =>
+  new Set(
+    Object.entries(state.doors)
+      .filter(([, d]) => !isOpen(d))
+      .map(([k]) => k),
+  );
+
+/** O que bloqueia a visão: o fixo do mapa e as portas fechadas. */
+export const sightBlockers = (state: Pick<GameState, 'doors'>, world: World): Set<string> =>
+  new Set([...world.blocked, ...closedDoors(state)]);
+
+/** O que ninguém atravessa: o fixo do mapa, toda a carga e as portas fechadas. */
+export const solidOf = (state: Pick<GameState, 'doors'>, world: World): Set<string> =>
+  new Set([...world.blocked, ...world.lowCover, ...closedDoors(state)]);
+
+/** Rodada (o "Turno N" do bilhete): uma volta de toda a equipe. */
+export const roundOf = (state: Pick<GameState, 'turn' | 'order'>): number =>
+  Math.floor((state.turn - 1) / state.order.length) + 1;
 
 export const activeAgent = (state: Pick<GameState, 'order' | 'activeIndex'>): string =>
   state.order[state.activeIndex];
@@ -96,7 +131,7 @@ export const positionsOf = (state: GameState): Map<string, HexCoord> =>
 
 /** Onde os agentes não passam: o sólido do mapa e os inimigos no tabuleiro. */
 export const enemyWalls = (state: GameState, world: World): Set<string> =>
-  new Set([...world.solid, ...state.enemies.filter(onBoard).map((e) => hexKey(e.hex))]);
+  new Set([...solidOf(state, world), ...state.enemies.filter(onBoard).map((e) => hexKey(e.hex))]);
 
 export const loadoutOf = (state: GameState, id: string): Loadout =>
   state.loadouts[id] ?? { attributes: ZERO_STATS };

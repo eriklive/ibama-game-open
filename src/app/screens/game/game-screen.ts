@@ -17,18 +17,23 @@ import {
   Sighting,
   World,
   applyAction,
+  doorOutcome,
   firstSighting,
   initialGameState,
   isGrouped,
   isLed,
   lineOf,
   planFleeAct,
+  planBreakIn,
+  planDoor,
   planMove,
   planPatrolAct,
   planRally,
   planReline,
   rallyFree,
   rallyOptions,
+  sightBlockers,
+  solidOf,
   validateAction,
 } from '../../game/engine';
 import {
@@ -91,14 +96,10 @@ import {
   DOOR_RULES,
   Door,
   DoorAction,
-  applyDoor,
   doorChance,
   doorNeed,
   isOpen,
   nextToDoor,
-  resolveBreakIn,
-  resolveDoor,
-  roomBehind,
   rollsDie,
   spawnDoors,
 } from '../../game/door';
@@ -147,7 +148,7 @@ import { AIM_PATTERN, APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } 
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-tablet';
 import { HexCoord, hexDistance, hexKey, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, HexRect, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
+import { CHARACTERS, Character, GameMap, HexRect, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import { SLOT_COUNT, SAVE_VERSION, SaveGames, SaveId, SaveState, savedAtLabel } from '../../game/save-game';
 import { TEST_CASES, TestCase, findTestCase } from '../../game/test-cases';
@@ -362,15 +363,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly lowCover = this.map ? lowCoverHexes(this.map) : new Set<string>();
   /** Só há perseguição nos mapas com Modo Corrida; nos outros, quem corre só foge. */
   protected readonly hasChase = hasRunner(this.map?.id);
-  /** Portas comuns (ver `door.ts`): fechadas, bloqueiam passagem e visão como parede. */
-  protected readonly doors = signal<ReadonlyMap<string, Door>>(this.initialDoors());
-  private readonly closedDoors = computed(
-    () => new Set([...this.doors()].filter(([, d]) => !isOpen(d)).map(([k]) => k)),
+  /**
+   * Portas comuns (ver `door.ts`): fechadas, bloqueiam passagem e visão como parede. Vêm do
+   * motor (`engine/doors.ts`); a referência só muda quando alguma porta muda.
+   */
+  private readonly doorsRecord = computed(() => this.core().doors);
+  protected readonly doors = computed<ReadonlyMap<string, Door>>(
+    () => new Map(Object.entries(this.doorsRecord())),
   );
   /** O que bloqueia a visão: paredes e afins, mais as portas fechadas. */
-  private readonly walls = computed(() => new Set([...this.fixedWalls, ...this.closedDoors()]));
+  private readonly walls = computed(() => sightBlockers({ doors: this.doorsRecord() }, this.world()));
   /** Tudo o que ninguém atravessa (paredes, toda a carga e as portas fechadas). */
-  private readonly solid = computed(() => new Set([...this.fixedWalls, ...this.lowCover, ...this.closedDoors()]));
+  private readonly solid = computed(() => solidOf({ doors: this.doorsRecord() }, this.world()));
   /** Onde se joga: o círculo da missão (ou o retângulo do mapa de teste). */
   private readonly area = this.map ? playArea(this.map) : rectArea(0, 0);
   protected readonly diceSides = MOVE_DICE.sides;
@@ -783,7 +787,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Arrombamento recente: a equipe ganha intimidação até o começo deste turno (rodada).
    * `0` = sem bônus. Ver `BREAK_IN_RULES`.
    */
-  protected readonly breakInUntil = signal(0);
+  protected readonly breakInUntil = computed(() => this.core().breakInUntil);
   /** Intimidação extra da equipe agora (o arrombamento assusta por alguns turnos). */
   protected readonly breakInBoost = computed(() =>
     this.round() < this.breakInUntil() ? BREAK_IN_RULES.intimidation : 0,
@@ -3102,12 +3106,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const epoch = this.epoch;
     const stale = () => this.destroyed || this.epoch !== epoch;
     const id = this.active().id;
-    const roll = rollDie(DOOR_RULES.die);
-    const out = resolveDoor(action, door, roll, gazua);
+    // o motor sorteia o d20 e decide o resultado; a tela anima e aplica quando ele aparece
+    const act = planDoor(this.core(), hexKey(door.hex), action, this.rng);
+    const out = doorOutcome(this.core(), act);
+    const roll = act.roll;
+    let committed = false;
+    const commit = () => {
+      if (committed || stale()) return;
+      committed = true;
+      this.dispatch(act);
+    };
     this.doorBusy.set(true);
-    this.dispatch({ type: 'spend', cost: out.cost });
     const settle = (mode: 'swing' | 'slam') => {
-      this.doors.update((m) => new Map(m).set(hexKey(door.hex), applyDoor(door, out)));
+      commit();
       board.setDoors(this.doors());
       board.pushDoor(door.hex, id, mode);
       this.refreshVision();
@@ -3179,7 +3190,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
             if (out.pass) settle('slam');
             else {
               // a porta aguenta, mas cede um pouco: o próximo chute precisa de menos
-              this.doors.update((m) => new Map(m).set(hexKey(door.hex), applyDoor(door, out)));
+              commit();
               board.setDoors(this.doors());
               board.pushDoor(door.hex, id, 'rattle');
             }
@@ -3203,6 +3214,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (stale()) return;
       await board.stepBack(id);
     } finally {
+      // o que não mudou a porta (trancada que não abriu, fechadura que não cedeu) também conta:
+      // o movimento do destrancar é gasto do mesmo jeito
+      commit();
       if (!stale()) this.doorBusy.set(false);
     }
   }
@@ -3259,18 +3273,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const map = this.map;
     const board = this.board;
     if (!map || !board) return true;
-    this.breakInUntil.set(this.round() + BREAK_IN_RULES.rounds);
-    const rect = map.structures?.find((st) => inStructure(doorHex, st.rect))?.rect;
-    const agent = this.positions().get(agentId);
-    const rolls: BreakInRoll[] =
-      rect && agent
-        ? resolveBreakIn(
-            doorHex,
-            roomBehind(doorHex, agent, rect, new Set([...map.walls.map(hexKey), ...this.closedDoors()])),
-            this.enemies(),
-            () => rollDie(DOOR_RULES.die),
-          )
-        : [];
+    // o motor acha o cômodo do outro lado, rola o d20 de cada um e aplica tudo (e o bônus da
+    // equipe); a cena abaixo só mostra, um por um
+    const { act, rolls } = planBreakIn(this.core(), hexKey(doorHex), agentId, this.world(), this.rng);
+    this.dispatch(act);
     // o estouro da porta: todo mundo do cômodo dá um passo para trás, de frente para ela
     for (const r of rolls) void board.enemyFlinch(r.enemy.id, doorHex);
     if (rolls.length) await this.wait(380);
@@ -3312,16 +3318,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
           // falhou: rende na hora
           board.setEnemyFacing(e.id, facing);
           if (!rolls.slice(0, rolls.indexOf(r)).some((o) => o.outcome === 'surrender')) this.sound.play('ini.rende', { at: e.hex });
-          this.updateEnemy(e.id, { status: 'surrendered', facing });
           board.setEnemySurrendered(e.id, true);
         } else if (r.outcome === 'flee') {
           // passou: vira de costas e fica pronto para correr (sai na vez dele)
-          this.updateEnemy(e.id, { status: 'alert', facing });
           board.setEnemyAlert(e.id, true);
           board.enemyBolt(e.id, doorHex);
         } else {
           board.setEnemyFacing(e.id, facing);
-          this.updateEnemy(e.id, { facing });
         }
         board.startleEnemy(e.id);
         this.refreshVision();
@@ -4260,11 +4263,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.doorKey.set(null);
     this.doorBusy.set(false);
     this.breakInCine.set(false);
-    this.breakInUntil.set(0);
     clearTimeout(this.doorCheckTimer);
     this.board?.releaseDoorFocus();
     this.board?.setSceneSlowmo(false);
-    this.doors.set(this.initialDoors());
     this.board?.setDoors(this.doors(), true);
     this.burned.set(new Set());
     this.closeBurn();
@@ -4347,6 +4348,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       enemies: s.enemies,
       group: s.group,
       groupLine: s.groupLine,
+      doors: Object.fromEntries(s.doors),
+      breakInUntil: s.breakInUntil,
     });
     this.board?.placeUnits(this.positions());
     this.board?.placeEnemies(
@@ -4357,7 +4360,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         gone: e.status === 'hidden' || e.status === 'fled',
       })),
     );
-    this.doors.set(new Map(s.doors));
     this.board?.setDoors(this.doors(), true);
     this.noticed.set(new Set(s.noticed));
     this.found.set(new Set(s.found));
@@ -4374,7 +4376,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.hasKey.set(s.hasKey);
     this.keySeenBy.set(s.keySeenBy);
     this.planeNote.set(s.planeNote);
-    this.breakInUntil.set(s.breakInUntil);
     // o que já foi pego some dos móveis; o que já queimou volta a arder
     for (const h of this.map?.hidden ?? []) if (this.found().has(h.id)) this.board?.hidePropItem(h.spot);
     const panel = this.map?.keyPanel;
@@ -4795,8 +4796,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /** O mapa como o motor precisa dele (as portas ainda vivem aqui). */
+  /** O que é fixo no mapa, como o motor precisa (as portas vêm do estado). */
+  private worldMap?: World;
   private world(): World {
-    return { area: this.area, walls: this.walls(), lowCover: this.lowCover, solid: this.solid() };
+    return (this.worldMap ??= {
+      area: this.area,
+      blocked: this.fixedWalls,
+      lowCover: this.lowCover,
+      roomWalls: new Set((this.map?.walls ?? []).map(hexKey)),
+      structures: (this.map?.structures ?? []).map((st) => st.rect),
+    });
   }
 
   /** Paredes, carga e inimigos no tabuleiro: o que bloqueia os agentes (sem contar os outros agentes). */
@@ -4865,6 +4874,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       // a escalação da ficha: o motor calcula movimento, grupo e Comando com ela
       loadouts: Object.fromEntries(CHARACTERS.map((c) => [c.id, this.roster.loadout(c.id)])),
       captain: this.roster.captain(),
+      doors: Object.fromEntries(this.initialDoors()),
     });
   }
 
