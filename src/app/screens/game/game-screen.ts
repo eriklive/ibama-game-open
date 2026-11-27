@@ -10,7 +10,19 @@ import {
   viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { rollDie, sum } from '../../game/dice';
+import { Rng, rollDice, rollDie, sum } from '../../game/dice';
+import {
+  EnemyWorld,
+  GameAction,
+  GameState,
+  Sighting,
+  applyAction,
+  firstSighting,
+  initialGameState,
+  planFleeAct,
+  planPatrolAct,
+  validateAction,
+} from '../../game/engine';
 import {
   CHASE_RULES,
   ChaseAgent,
@@ -54,16 +66,12 @@ import {
   EnemyState,
   canAct,
   facingBetween,
-  isBorder,
   known,
   lineOfSight,
   onBoard,
-  planFlee,
-  planPatrol,
   resolveApproach,
   rollEscape,
   spawnEnemy,
-  spotted,
   stationary,
   visionHexes,
 } from '../../game/enemies';
@@ -364,14 +372,25 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly area = this.map ? playArea(this.map) : rectArea(0, 0);
   protected readonly diceSides = MOVE_DICE.sides;
 
-  protected readonly positions = signal<ReadonlyMap<string, HexCoord>>(this.initialPositions());
-  protected readonly activeIndex = signal(0);
+  /**
+   * Estado da partida no motor (vez, posições, movimento, inimigos; ver `game/engine/`). Só
+   * muda por `dispatch`: no multiplayer, é o que vai e volta pelo servidor.
+   */
+  private readonly core = signal<GameState>(this.initialCore());
+  protected readonly positions = computed<ReadonlyMap<string, HexCoord>>(
+    () => new Map(Object.entries(this.core().positions)),
+  );
+  protected readonly activeIndex = computed(() => this.core().activeIndex);
   /** Turno global: aumenta a cada vez que um personagem começa a jogar. */
-  protected readonly turn = signal(1);
+  protected readonly turn = computed(() => this.core().turn);
+  /** Sorteio da partida (dados, destino de quem vagueia). No multiplayer, quem sorteia é o servidor. */
+  private readonly rng: Rng = Math.random;
   protected readonly phase = signal<Phase>('rolling');
-  /** Valores sorteados nesta rolagem. */
+  /** Valores da rolagem à mostra: só aparecem quando os dados param (o estado já os tem antes). */
   protected readonly dice = signal<number[]>(Array(MOVE_DICE.count).fill(1));
   protected readonly rolled = signal(0);
+  /** Valor imposto a cada `app-d4`: o resultado é sorteado antes e o dado só cai nele. */
+  protected readonly rollValues = signal<readonly number[]>([]);
   /**
    * Um `app-d4` por chave: cada rolagem ganha chaves novas, então os dados são recriados e
    * lançados de novo. Cada um sorteia o seu valor e avisa quando para (`dieRolled`).
@@ -379,11 +398,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly rollKeys = signal<readonly string[]>([]);
   private rollSeq = 0;
   private dieResults: number[] = [];
-  protected readonly movesLeft = signal(0);
+  protected readonly movesLeft = computed(() => this.core().movesLeft);
   protected readonly selected = signal<HexCoord | null>(null);
   /** Personagem em foco na interface (tocado no tabuleiro ou no retrato). */
   protected readonly focusedId = signal<string>(CHARACTERS[0].id);
-  protected readonly enemies = signal<readonly EnemyState[]>(this.initialEnemies());
+  protected readonly enemies = computed<readonly EnemyState[]>(() => this.core().enemies);
+  /**
+   * Inimigo no meio da animação: o estado já tem o fim do trecho, mas o cone de visão segue
+   * o passo que está na tela.
+   */
+  private enemyView: Pick<EnemyState, 'id' | 'hex' | 'facing' | 'status'> | null = null;
   /** Último acontecimento com inimigos (avistou, correu, fugiu…), mostrado num aviso. */
   protected readonly notice = signal<{ text: string; tone: 'alert' | 'info' } | null>(null);
   private noticeTimer?: ReturnType<typeof setTimeout>;
@@ -1421,7 +1445,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.phase.set('walking');
     await this.board!.moveUnits(next[0], paths);
     if (this.destroyed || this.epoch !== epoch) return false;
-    this.positions.update((m) => new Map([...m, ...moves]));
+    this.dispatch({ type: 'place', positions: Object.fromEntries(moves) });
     this.groupLine.set(next);
     return true;
   }
@@ -1435,6 +1459,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.rolled.set(0);
     const seq = ++this.rollSeq;
     this.dieResults = [];
+    // o resultado sai antes da animação: os dados só mostram o que já foi decidido
+    const values = rollDice(MOVE_DICE.count, MOVE_DICE.sides, this.rng);
+    const movement = turnMovement(sum(values), this.roster.loadout(this.active().id), this.grouped(), this.led());
+    this.dispatch({ type: 'roll', dice: values, movement });
+    this.rollValues.set(values);
     this.rollKeys.set(Array.from({ length: MOVE_DICE.count }, (_, i) => `${seq}-${i}`));
     // no celular, os dados "quicam" na mão (a não ser que a animação esteja reduzida)
     if (!reducedMotion()) this.haptics.vibrate(ROLL_PATTERN);
@@ -1446,10 +1475,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.destroyed || this.phase() !== 'rolling' || !this.rollKeys().includes(key)) return;
     this.dieResults[index] = value;
     if (this.dieResults.filter(Number.isFinite).length < MOVE_DICE.count) return;
-    const final = [...this.dieResults];
+    const final = [...this.core().dice];
     this.dice.set(final);
     this.rolled.set(sum(final));
-    this.movesLeft.set(turnMovement(sum(final), this.roster.loadout(this.active().id), this.grouped(), this.led()));
     this.gamepad.rumble(0.3, 0.2, 120);
     this.haptics.vibrate(SETTLE_PATTERN);
   }
@@ -1493,8 +1521,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   private nextCharacter(): void {
-    this.activeIndex.update((i) => (i + 1) % CHARACTERS.length);
-    this.turn.update((t) => t + 1);
+    this.dispatch({ type: 'nextAgent' });
     this.startTurn();
   }
 
@@ -1544,42 +1571,35 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     if (stale()) return;
     // o abalado de uma rodada atrás passa
-    for (const e of this.enemies()) if (e.shaken && !caught.has(e.id)) this.updateEnemy(e.id, { shaken: false });
+    this.dispatch({ type: 'clearShaken', except: [...caught] });
     this.announceIfOver();
     this.nextCharacter();
   }
 
   /** Patrulha um trecho. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
   private async patrol(enemy: EnemyState, epoch: number): Promise<boolean> {
-    const plan = planPatrol(enemy, ENEMY_RULES.patrolSteps, this.area, this.blockedFor(enemy.id));
-    this.updateEnemy(enemy.id, { waypoint: plan.waypoint, dir: plan.dir, target: plan.target });
-    if (!plan.path.length) {
+    // o motor decide o trecho inteiro (e em que passo ele avista alguém); a tela só anima
+    const act = planPatrolAct(this.core(), enemy.id, this.enemyWorld(), this.rng);
+    if (!this.dispatch(act)) return false;
+    if (!act.path.length) {
       if (this.board!.isCovered(enemy.hex)) return false;
       this.say(`${enemy.name} espera: o caminho está bloqueado`, 'info');
       return true;
     }
-    const shown = await this.walkEnemy(enemy.id, plan.path, (hex) => {
-      if (this.epoch !== epoch) return false;
-      const prev = this.enemy(enemy.id)!.hex;
-      this.updateEnemy(enemy.id, { hex, facing: facingBetween(prev, hex) });
-      this.refreshVision();
-      // ao avistar alguém, para onde está
-      return !this.checkSpotted(enemy.id);
-    });
-    // dá tempo de ver o "!" antes de seguir
-    if (this.enemy(enemy.id)?.status === 'alert') {
-      await this.wait(900);
-      return true;
-    }
-    return shown;
+    const shown = await this.walkEnemy(enemy, act.path, () => this.epoch === epoch);
+    if (this.epoch !== epoch || !act.spotted) return shown;
+    // o caminho já termina onde ele avistou: mostra o "!" e dá tempo de ver antes de seguir
+    this.showSpotted(enemy.id, act.spotted);
+    await this.wait(900);
+    return true;
   }
 
   /** Foge para a borda. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
   private async flee(enemy: EnemyState, epoch: number): Promise<boolean> {
-    const agents = [...this.positions().values()];
-    const plan = planFlee(enemy.hex, ENEMY_RULES.fleeSteps, this.area, this.blockedFor(enemy.id), agents);
+    const act = planFleeAct(this.core(), enemy.id, this.enemyWorld());
+    if (!this.dispatch(act)) return false;
     const covered = this.board!.isCovered(enemy.hex);
-    if (plan.cornered) {
+    if (act.cornered) {
       if (!covered) {
         this.say(`${enemy.name} está encurralado!`, 'info');
         this.sound.play('ini.encurralado');
@@ -1587,22 +1607,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return !covered;
     }
     let shown = false;
-    if (plan.path.length) {
+    if (act.path.length) {
       if (!covered) this.say(`${enemy.name} corre para a borda!`, 'alert');
-      shown = await this.walkEnemy(
-        enemy.id,
-        plan.path,
-        (hex) => {
-          if (this.epoch !== epoch) return false;
-          this.updateEnemy(enemy.id, { hex, facing: facingBetween(this.enemy(enemy.id)!.hex, hex) });
-          return true;
-        },
-        1.8,
-      );
+      shown = await this.walkEnemy(enemy, act.path, () => this.epoch === epoch, 1.8);
     }
     if (this.epoch !== epoch) return shown;
-    if (isBorder(this.enemy(enemy.id)!.hex, this.area)) {
-      this.updateEnemy(enemy.id, { status: 'fled' });
+    if (act.fled) {
       this.say(`${enemy.name} fugiu do mapa!`, 'alert');
       this.sound.play('ini.foge', { at: this.enemy(enemy.id)!.hex });
       await this.board!.removeEnemy(enemy.id);
@@ -2143,7 +2153,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (!alive()) return;
       // onde a corrida os deixou, no tabuleiro
       const at = session.tacticalResult();
-      this.positions.update((m) => new Map(m).set(agentId, at.agent));
+      this.dispatch({ type: 'place', positions: { [agentId]: at.agent } });
       this.updateEnemy(enemyId, { hex: at.enemy, facing: facingBetween(at.agent, at.enemy) });
       board.endChaseRun(agentId, at.agent, enemyId, at.enemy);
       board.setChaseCamera(agentId, enemyId);
@@ -2282,18 +2292,43 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * de `moveEnemy`. Devolve se algum trecho apareceu na tela.
    */
   private async walkEnemy(
-    id: string,
-    path: HexCoord[],
+    enemy: EnemyState,
+    path: readonly HexCoord[],
     onStep: (hex: HexCoord) => boolean,
     speed = 1,
   ): Promise<boolean> {
     const board = this.board!;
+    const { id, status } = enemy;
     const hiddenStep = (from: HexCoord, to: HexCoord) => board.isCovered(from) && board.isCovered(to);
+    // o passo que está na tela (o estado já tem o fim do trecho): o cone de visão segue ele
+    let view = { id, status, hex: enemy.hex, facing: enemy.facing };
+    const step = (hex: HexCoord): boolean => {
+      view = { ...view, hex, facing: facingBetween(view.hex, hex) };
+      this.enemyView = view;
+      this.refreshVision();
+      return onStep(hex);
+    };
+    try {
+      return await this.walkEnemySteps(board, id, path, step, hiddenStep, () => view.hex, speed);
+    } finally {
+      this.enemyView = null;
+      this.refreshVision();
+    }
+  }
+
+  private async walkEnemySteps(
+    board: HexBoard,
+    id: string,
+    path: readonly HexCoord[],
+    onStep: (hex: HexCoord) => boolean,
+    hiddenStep: (from: HexCoord, to: HexCoord) => boolean,
+    at: () => HexCoord,
+    speed: number,
+  ): Promise<boolean> {
     let shown = false;
     let i = 0;
     while (i < path.length) {
-      const from = this.enemy(id)?.hex;
-      if (!from) return shown;
+      const from = at();
       if (hiddenStep(from, path[i])) {
         board.jumpEnemy(id, path[i]);
         this.enemySteps(path[i], speed, true);
@@ -2318,7 +2353,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         },
         speed,
       );
-      if (stopped || hexKey(this.enemy(id)?.hex ?? from) !== hexKey(path[j - 1])) return shown;
+      if (stopped || hexKey(at()) !== hexKey(path[j - 1])) return shown;
       i = j;
     }
     return shown;
@@ -2326,24 +2361,29 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Se o inimigo em patrulha enxerga algum agente, entra em alerta. Devolve se avistou. */
   private checkSpotted(enemyId: string, agents: ReadonlyMap<string, HexCoord> = this.positions()): boolean {
-    const map = this.map;
+    if (!this.map) return false;
+    const seen = firstSighting(this.core(), agents, this.enemyWorld(), enemyId);
+    if (!seen) return false;
+    const { agent, at } = seen.sighting;
+    if (!this.dispatch({ type: 'spot', enemy: enemyId, agent, at })) return false;
+    this.showSpotted(enemyId, seen.sighting);
+    return true;
+  }
+
+  /** Mostra que o inimigo avistou alguém (o estado já está em alerta): "!", giro, som e aviso. */
+  private showSpotted(enemyId: string, { agent: who }: Sighting): void {
     const enemy = this.enemy(enemyId);
-    if (!map || !enemy) return false;
-    const who = spotted(enemy, agents, this.area, this.walls(), this.lowCover);
-    if (!who) return false;
-    const agent = agents.get(who)!;
+    if (!enemy) return;
     // quem foi visto não se abaixa mais na cobertura
     this.seenAgents.add(who);
     this.board?.setSeenAgents(this.seenAgents);
     // vira para quem viu
-    this.updateEnemy(enemyId, { status: 'alert', facing: facingBetween(enemy.hex, agent) });
-    this.board?.setEnemyFacing(enemyId, facingBetween(enemy.hex, agent));
+    this.board?.setEnemyFacing(enemyId, enemy.facing);
     this.board?.setEnemyAlert(enemyId, true);
     this.refreshVision();
     this.gamepad.rumble(0.7, 0.4, 260);
     this.sound.spotted();
     this.say(`${enemy.name} avistou ${this.nameOf(who)}! Vai correr para a borda.`, 'alert');
-    return true;
   }
 
   /** Agentes já avistados por algum inimigo na partida (não se abaixam na cobertura). */
@@ -2657,11 +2697,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       for (const [o, p] of plan.paths) paths.set(o, p);
       left = plan.left;
     }
-    if (!(await this.walkUnits(id, paths))) return;
+    if (!(await this.walkUnits(id, paths, path.length))) return;
     // a fila segue o rastro: o líder na frente, depois quem ocupou a vaga logo atrás dele…
     if (this.grouped()) this.groupLine.set([...paths.keys()]);
     if (left.length) this.leaveGroup(left, 'ficou para trás');
-    this.movesLeft.update((n) => n - path.length);
     // andou até um alvo tocado: chegando colado, a ação dele já abre
     const aimed = this.aimedTarget();
     const aim = aimed && sameHex(aimed.hex, target) ? aimed : null;
@@ -2673,8 +2712,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (goal && here && this.phase() === 'moving-choice' && goal.near(here)) goal.act();
   }
 
-  /** Anda com um ou mais agentes ao mesmo tempo, conferindo a visão dos inimigos a cada passo. */
-  private async walkUnits(leaderId: string, paths: ReadonlyMap<string, HexCoord[]>): Promise<boolean> {
+  /**
+   * Anda com um ou mais agentes ao mesmo tempo, conferindo a visão dos inimigos a cada passo.
+   * Quando todos chegam, o movimento vira estado (e gasta `cost`).
+   */
+  private async walkUnits(leaderId: string, paths: ReadonlyMap<string, HexCoord[]>, cost: number): Promise<boolean> {
     const epoch = this.epoch;
     this.phase.set('walking');
     this.selected.set(null);
@@ -2689,12 +2731,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.checkAllSpotted(live);
     });
     if (this.destroyed || this.epoch !== epoch) return false;
-    this.positions.update((m) => {
-      const next = new Map(m);
-      for (const [who, p] of paths) if (p.length) next.set(who, p.at(-1)!);
-      return next;
-    });
-    return true;
+    return this.dispatch({ type: 'move', paths: Object.fromEntries(paths), cost });
   }
 
   /**
@@ -2759,13 +2796,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.closeGrouping();
     const free = this.freeRally();
     const cost = rallyCost(plan.cost, this.roster.classOf(id), this.commandsUsed());
-    if (!(await this.walkUnits(id, plan.paths))) return;
+    if (!(await this.walkUnits(id, plan.paths, cost))) return;
     this.sound.play('eq.agrupar');
     this.group.set(wholeTeam());
     // quem chamou o grupo fica na frente da fila
     this.groupLine.set(toFront(this.line(), id));
     if (free) this.commandsUsed.update((n) => n + 1);
-    this.movesLeft.update((n) => Math.max(0, n - cost));
     this.say(
       `${free ? 'Comando do Capitão: agrupou sem gastar movimento! ' : 'Equipe agrupada! '}` +
         `Juntos: +${this.groupMove()} de movimento e +${this.groupInt()} de intimidação` +
@@ -3081,7 +3117,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const roll = rollDie(DOOR_RULES.die);
     const out = resolveDoor(action, door, roll, gazua);
     this.doorBusy.set(true);
-    this.movesLeft.update((n) => n - out.cost);
+    this.dispatch({ type: 'spend', cost: out.cost });
     const settle = (mode: 'swing' | 'slam') => {
       this.doors.update((m) => new Map(m).set(hexKey(door.hex), applyDoor(door, out)));
       board.setDoors(this.doors());
@@ -3562,7 +3598,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.dialogues.update((m) => new Map(m).set(iv.enemyId, res.memory));
     // a primeira pergunta de cada entrada gasta o movimento (como a rolagem da inspeção)
     const cost = questionCost(iv.asked);
-    if (cost) this.movesLeft.update((n) => Math.max(0, n - cost));
+    if (cost) this.dispatch({ type: 'spend', cost });
     // o cartão feito fica marcado na hora; a réplica só aparece depois da resposta
     this.patchInterrogation({
       busy: true,
@@ -4040,7 +4076,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const door = planeDoorSpot(plane.hexes, blocked);
     const path = door && !sameHex(door, from) ? pathTo(reachableHexes(from, Number.MAX_SAFE_INTEGER, this.area, blocked), door) : [];
     if (path.length) {
-      if (!(await this.walkUnits(id, new Map([[id, path]])))) return;
+      // ir até a porta do avião não gasta movimento
+      if (!(await this.walkUnits(id, new Map([[id, path]]), 0))) return;
       if (this.epoch !== epoch || this.phase() !== 'walking') {
         this.dropCabin();
         return;
@@ -4204,13 +4241,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.clearTimers();
     this.resetSlow();
     this.closeApproach();
-    this.positions.set(this.initialPositions());
+    this.core.set(this.initialCore());
     this.group.set(wholeTeam());
     this.groupLine.set(CHARACTERS.map((c) => c.id));
     this.passing = false;
     this.closeGrouping();
     this.board?.placeUnits(this.positions());
-    this.enemies.set(this.initialEnemies());
     this.flight = null;
     this.ranThisRound.clear();
     this.caughtThisRound.clear();
@@ -4252,8 +4288,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     this.refreshVision();
     this.notice.set(null);
-    this.activeIndex.set(0);
-    this.turn.set(1);
   }
 
   // ---------- saves (ver `save-game.ts`) ----------
@@ -4315,12 +4349,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private applySave(s: SaveState): void {
     this.resetMatch();
     this.roster.confirm(s.roster.points, s.roster.captain);
-    const positions = new Map(s.positions);
-    this.positions.set(positions);
-    this.board?.placeUnits(positions);
+    // o que é do motor (vez, posições, inimigos) volta de uma vez
+    const fresh = this.initialCore();
+    this.core.set({
+      ...fresh,
+      turn: s.turn,
+      activeIndex: Math.min(Math.max(0, s.activeIndex), CHARACTERS.length - 1),
+      positions: { ...fresh.positions, ...Object.fromEntries(s.positions) },
+      enemies: s.enemies,
+    });
+    this.board?.placeUnits(this.positions());
     this.group.set(new Set(s.group));
     this.groupLine.set(s.groupLine);
-    this.enemies.set(s.enemies);
     this.board?.placeEnemies(
       this.enemies().map((e) => ({
         ...e,
@@ -4358,8 +4398,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sound.ignite(t.id, t.hexes, !!t.inspect);
     }
     this.refreshVision();
-    this.activeIndex.set(Math.min(Math.max(0, s.activeIndex), CHARACTERS.length - 1));
-    this.turn.set(s.turn);
     this.rollSeq++;
     this.rollKeys.set([]);
     this.phase.set('rolling');
@@ -4429,7 +4467,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const epoch = this.epoch;
     const positions = new Map(this.positions());
     for (const [id, hex] of Object.entries(testCase.agents ?? {})) positions.set(id, { ...hex });
-    this.positions.set(positions);
+    this.dispatch({ type: 'place', positions: Object.fromEntries(positions) });
     this.board?.placeUnits(positions);
     const { agent } = testCase.start;
     const agentHex = positions.get(agent)!;
@@ -4447,7 +4485,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     this.refreshVision();
     const index = CHARACTERS.findIndex((c) => c.id === testCase.active);
-    this.activeIndex.set(Math.max(0, index));
+    this.dispatch({ type: 'setActive', agent: CHARACTERS[Math.max(0, index)].id });
     const active = this.active();
     this.focusedId.set(active.id);
     this.board?.setActive(active.id);
@@ -4763,8 +4801,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
   }
 
+  /** Muda um inimigo direto: só para os sistemas que ainda não migraram para o motor. */
   private updateEnemy(id: string, patch: Partial<EnemyState>): void {
-    this.enemies.update((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    this.dispatch({ type: 'patchEnemy', enemy: id, patch });
+  }
+
+  /** O mapa como o motor precisa dele (as portas ainda vivem aqui). */
+  private enemyWorld(): EnemyWorld {
+    return { area: this.area, walls: this.walls(), lowCover: this.lowCover, solid: this.solid() };
   }
 
   /** Paredes, carga e inimigos no tabuleiro: o que bloqueia os agentes (sem contar os outros agentes). */
@@ -4773,19 +4817,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /** Hexágonos que um inimigo não pode atravessar: paredes, agentes e os outros inimigos. */
-  private blockedFor(enemyId: string): Set<string> {
-    return new Set([
-      ...this.solid(),
-      ...[...this.positions().values()].map(hexKey),
-      ...this.onBoardEnemies().filter((e) => e.id !== enemyId).map((e) => hexKey(e.hex)),
-    ]);
-  }
 
   /** Pinta no tabuleiro o que os inimigos em patrulha enxergam. */
   private refreshVision(): void {
     const map = this.map;
     if (!map) return;
+    const view = this.enemyView;
     const keys = this.enemies()
+      .map((e) => (view && e.id === view.id ? { ...e, ...view } : e))
       .filter((e) => e.status === 'patrol')
       .flatMap((e) =>
         visionHexes(e, this.area, this.walls(), ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, this.lowCover).map(hexKey),
@@ -4829,8 +4868,27 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return new Promise((r) => this.later(reducedMotion() ? Math.min(ms, 150) : ms, r));
   }
 
-  private initialPositions(): Map<string, HexCoord> {
-    return new Map(CHARACTERS.map((c, i) => [c.id, { ...(this.map?.starts[i] ?? { col: 0, row: 0 }) }]));
+  private initialCore(): GameState {
+    const starts = CHARACTERS.map((c, i) => [c.id, { ...(this.map?.starts[i] ?? { col: 0, row: 0 }) }] as const);
+    return initialGameState(
+      CHARACTERS.map((c) => c.id),
+      Object.fromEntries(starts),
+      this.initialEnemies(),
+    );
+  }
+
+  /**
+   * Única entrada do estado do turno: confere a ação e aplica. No multiplayer, a ação vai ao
+   * servidor, que confere de novo e a devolve para todos.
+   */
+  private dispatch(action: GameAction): boolean {
+    const why = validateAction(this.core(), action);
+    if (why) {
+      console.error(`Ação recusada (${action.type}): ${why}`);
+      return false;
+    }
+    this.core.update((s) => applyAction(s, action));
+    return true;
   }
 
   private later(ms: number, fn: () => void): void {
