@@ -105,11 +105,9 @@ import {
   CabinState,
   INITIAL_CABIN,
   cabinBuilt,
-  cabinClutter,
   cabinItem,
   cabinItemsLeft,
   cabinStep,
-  cabinSummary,
   CABIN_NOTICE_ID,
   canEnterPlane,
   planeDoorSpot,
@@ -4002,11 +4000,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly cabinInside = computed(() => cabinBuilt(this.cabinState()));
   /** Peças que ainda estão na cabine (o GPS, o rádio). */
   protected readonly cabinLeft = computed(() => cabinItemsLeft(this.found()));
-  /** O que a ficha da cabine diz do que sobrou. */
-  protected readonly cabinText = computed(() => cabinSummary(this.found()));
-  /** Última coisa vista ou pega na cabine. */
-  protected readonly cabinNote = signal<string | null>(null);
-  /** Quem está dentro (nome, para a ficha). */
+  /** Quem está dentro (nome, para o aviso ao sair). */
   protected readonly cabinWho = computed(() => {
     const id = this.cabinState().agent;
     return id ? this.nameOf(id) : '';
@@ -4031,7 +4025,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     board.releaseDoorFocus();
     removeEventListener('resize', this.onDoorResize);
     this.planeNote.set(null);
-    this.cabinNote.set(null);
     this.cabinEvent({ type: 'enter', agent: id });
     this.phase.set('cabin');
     board.focus(id);
@@ -4103,7 +4096,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     this.sound.play('ui.hex');
-    this.cabinNote.set(cabinClutter(this.cabinState()));
     this.cabinEvent({ type: 'poke' });
   }
 
@@ -4117,7 +4109,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.8, 0.5, 220);
     this.sound.play('eq.vasculhar');
-    this.cabinNote.set(item.seized);
   }
 
   /** **Sair do avião**: o interior é descartado, a câmera volta, a porta fecha e a vez segue. */
@@ -4136,7 +4127,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private dropCabin(): void {
     const was = this.cabinState().stage;
     this.cabinEvent({ type: 'closed' });
-    this.cabinNote.set(null);
     removeEventListener('resize', this.onCabinResize);
     if (was === 'outside') return;
     this.board?.leavePlaneCabin();

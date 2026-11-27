@@ -775,19 +775,12 @@
 
   <!--
     Dentro do avião (issue #125): a câmera olha o painel pela porta aberta; deslizar mostra o fundo.
-    A ficha não conta o que tem lá: o GPS e o rádio só aparecem destacados se a percepção passou,
+    Sem bilhete na tela: o GPS e o rádio só aparecem destacados se a percepção passou,
     e se pegam tocando neles. "Sair do avião" desmonta o interior e volta ao tabuleiro.
   -->
   @if (cabinInside()) {
     <div class="focus-stage prop-stage" data-testid="cabin-focus"></div>
     <div class="aim-actions">
-      <div class="slip inspect-slip cabin-slip" [class.pass]="!cabinLeft().length" role="status" aria-live="polite" data-testid="cabin-hint">
-        <strong>Cabine do avião · {{ cabinWho() }}</strong>
-        <span data-testid="cabin-seen">{{ cabinText() }}</span>
-        @if (cabinNote(); as note) {
-          <span class="small" data-testid="cabin-note">{{ note }}</span>
-        }
-      </div>
       <div class="cabin-actions">
         <button type="button" class="door-opt door-opt-back cabin-leave" style="--tilt: -1.5deg" data-testid="cabin-leave" (click)="leavePlane()" aria-label="Sair do avião e voltar ao tabuleiro">
           <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>

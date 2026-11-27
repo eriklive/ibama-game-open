@@ -405,8 +405,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .prop-slip { width: 184px; }
 .aim-actions .prop-take { position: absolute; right: 108px; bottom: 0; width: 136px; }
 .prop-take:not(:focus-visible) { opacity: 0; }
-/* dentro do avião: o bilhete da cabine e, à direita, os botões de pegar e o de sair, em pilha */
-.cabin-slip { width: 190px; right: 136px; bottom: 0; }
+/* dentro do avião: à direita, os botões de pegar e o de sair, em pilha */
 .cabin-actions { position: absolute; right: 0; bottom: 0; width: 124px; display: flex; flex-direction: column-reverse; gap: 8px; }
 .cabin-actions .cabin-btn { position: relative; width: 92px; height: 42px; transform: rotate(2deg); }
 .cabin-actions .cabin-btn:nth-child(2) { transform: rotate(-2deg); }
