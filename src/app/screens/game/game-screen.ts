@@ -4073,7 +4073,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const door = planeDoorSpot(plane.hexes, blocked);
     const path = door && !sameHex(door, from) ? pathTo(reachableHexes(from, Number.MAX_SAFE_INTEGER, this.area, blocked), door) : [];
     if (path.length) {
-      if (!(await this.walkUnits(id, new Map([[id, path]])))) return;
+      // ir até a porta do avião não gasta movimento
+      if (!(await this.walkUnits(id, new Map([[id, path]]), 0))) return;
       if (this.epoch !== epoch || this.phase() !== 'walking') {
         this.dropCabin();
         return;
@@ -4319,12 +4320,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private applySave(s: SaveState): void {
     this.resetMatch();
     this.roster.confirm(s.roster.points, s.roster.captain);
-    const positions = new Map(s.positions);
-    this.positions.set(positions);
-    this.board?.placeUnits(positions);
+    // o que é do motor (vez, posições, inimigos) volta de uma vez
+    const fresh = this.initialCore();
+    this.core.set({
+      ...fresh,
+      turn: s.turn,
+      activeIndex: Math.min(Math.max(0, s.activeIndex), CHARACTERS.length - 1),
+      positions: { ...fresh.positions, ...Object.fromEntries(s.positions) },
+      enemies: s.enemies,
+    });
+    this.board?.placeUnits(this.positions());
     this.group.set(new Set(s.group));
     this.groupLine.set(s.groupLine);
-    this.enemies.set(s.enemies);
     this.board?.placeEnemies(
       this.enemies().map((e) => ({
         ...e,
@@ -4362,8 +4369,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.sound.ignite(t.id, t.hexes, !!t.inspect);
     }
     this.refreshVision();
-    this.activeIndex.set(Math.min(Math.max(0, s.activeIndex), CHARACTERS.length - 1));
-    this.turn.set(s.turn);
     this.rollSeq++;
     this.rollKeys.set([]);
     this.phase.set('rolling');
