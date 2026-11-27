@@ -473,62 +473,198 @@ const shadeMat = (): THREE.MeshStandardMaterial =>
   (shadeMaterial ??= new THREE.MeshStandardMaterial({ color: 0xf1e2b8, emissive: 0xffc768, emissiveIntensity: 0.55, roughness: 0.7 }));
 
 /**
- * Mesa da sala, de tábuas grossas: 1,25 × 0,8 m, 76 cm de altura, com um banco do outro lado.
- * O almoço do caseiro (prato esmaltado com arroz, feijão e um pedaço de carne, garfo e
- * caneca) fica no lado oeste (−X), de quem come olhando para o leste; no meio, uma panela
- * tampada e a garrafa térmica; um pano de prato dobrado na ponta.
+ * Mesa comprida da sala, de tábuas grossas: `L` × 0,85 m (comprimento em metros, no sentido
+ * norte–sul, +Z), 76 cm de altura, com um banco comprido do outro lado (leste). O almoço do
+ * caseiro (prato esmaltado com arroz, feijão e um pedaço de carne, garfo e caneca) fica no lado
+ * oeste (−X), na altura `seat` (metros a partir do meio da mesa, em Z), de quem come olhando
+ * para o leste; perto dele, uma panela tampada e a garrafa térmica. Nas pontas, um pano de
+ * prato dobrado e, na mesa comprida, uma pilha de pratos e um rádio de pilha.
  */
-export function buildDiningTable(): THREE.Group {
+export function buildDiningTable(L = 1.25, seat = 0): THREE.Group {
   const g = new THREE.Group();
   const p = new Parts();
-  const L = 1.25;
-  const D = 0.8;
+  const D = 0.85;
   const H = 0.76;
   const t = 0.045;
   // tampo: quatro tábuas no comprimento, de tons um pouco diferentes
   const tones = [C.plankLight, C.plank, 0xab7c48, C.plankLight];
-  tones.forEach((tone, i) => p.box(L, t, D / 4 - 0.006, tone, 0, H - t / 2, -D / 2 + D / 8 + (i * D) / 4, undefined, { outline: true }));
-  // saia embaixo do tampo e as pernas, levemente afinadas
-  for (const z of [-1, 1]) p.box(L - 0.16, 0.1, 0.025, C.plankDark, 0, H - t - 0.05, z * (D / 2 - 0.07));
-  for (const x of [-1, 1]) p.box(0.025, 0.1, D - 0.16, C.plankDark, x * (L / 2 - 0.08), H - t - 0.05, 0);
-  for (const x of [-1, 1]) {
-    for (const z of [-1, 1]) p.add(new THREE.CylinderGeometry(m(0.03), m(0.025), m(H - t), 4, 1), C.plankDark, x * (L / 2 - 0.08), (H - t) / 2, z * (D / 2 - 0.07), [0, Math.PI / 4, 0]);
-    // travessa baixa entre as pernas de cada cabeceira
-    p.box(0.03, 0.04, D - 0.16, C.plankDark, x * (L / 2 - 0.08), 0.16, 0);
+  tones.forEach((tone, i) => p.box(D / 4 - 0.006, t, L, tone, -D / 2 + D / 8 + (i * D) / 4, H - t / 2, 0, undefined, { outline: true }));
+  // saia embaixo do tampo e as pernas, levemente afinadas (a mesa comprida tem um par no meio)
+  for (const x of [-1, 1]) p.box(0.025, 0.1, L - 0.16, C.plankDark, x * (D / 2 - 0.07), H - t - 0.05, 0);
+  for (const z of [-1, 1]) p.box(D - 0.16, 0.1, 0.025, C.plankDark, 0, H - t - 0.05, z * (L / 2 - 0.08));
+  const legs = L > 1.8 ? [-1, 0, 1] : [-1, 1];
+  for (const z of legs) {
+    const lz = z * (L / 2 - 0.08);
+    for (const x of [-1, 1]) p.add(new THREE.CylinderGeometry(m(0.03), m(0.025), m(H - t), 4, 1), C.plankDark, x * (D / 2 - 0.07), (H - t) / 2, lz, [0, Math.PI / 4, 0]);
+    // travessa baixa entre as pernas de cada par
+    p.box(D - 0.16, 0.04, 0.03, C.plankDark, 0, 0.16, lz);
   }
-  p.box(L - 0.16, 0.04, 0.03, C.plankDark, 0, 0.16, 0);
-  // banco do outro lado (leste): assento de tábua e dois pés de cavalete
-  const bx = L / 2 + 0.22;
-  p.box(0.3, 0.04, 0.95, C.plank, bx, 0.45, 0, undefined, { outline: true });
-  for (const z of [-1, 1]) {
-    p.box(0.26, 0.43, 0.04, C.plankDark, bx, 0.215, z * 0.36);
-  }
-  p.box(0.04, 0.05, 0.7, C.plankDark, bx, 0.12, 0);
+  p.box(0.03, 0.04, L - 0.16, C.plankDark, 0, 0.16, 0);
+  // banco comprido do outro lado (leste): assento de tábua e pés de cavalete
+  const bx = D / 2 + 0.3;
+  const bl = L - 0.3;
+  p.box(0.3, 0.04, bl, C.plank, bx, 0.45, 0, undefined, { outline: true });
+  for (const z of legs) p.box(0.26, 0.43, 0.04, C.plankDark, bx, 0.215, z * (bl / 2 - 0.12));
+  p.box(0.04, 0.05, bl - 0.24, C.plankDark, bx, 0.12, 0);
 
   const y = H;
-  // prato esmaltado (branco de borda azul) com a comida
-  const px = -0.36;
-  const pz = 0.05;
+  // prato esmaltado (branco de borda azul) com a comida, na frente de quem come
+  const px = -0.22;
+  const pz = seat;
   p.cyl(0.13, 0.1, 0.025, 0xf2f0e8, px, y + 0.0125, pz, undefined, 16);
   p.cyl(0.131, 0.131, 0.006, 0x2f5fa0, px, y + 0.024, pz, undefined, 16);
   p.dome(0.075, 0xf4efe2, px - 0.03, y + 0.022, pz - 0.03); // arroz
-  p.dome(0.055, 0x4a2a1c, px + 0.05, y + 0.022, pz + 0.03); // feijão
-  p.box(0.07, 0.025, 0.05, 0x7a3b22, px + 0.0, y + 0.035, pz + 0.07, [0, 0.4, 0]); // carne
-  p.box(0.012, 0.006, 0.17, C.steel, px - 0.17, y + 0.003, pz + 0.01); // garfo
+  p.dome(0.055, 0x4a2a1c, px + 0.03, y + 0.022, pz + 0.05); // feijão
+  p.box(0.05, 0.025, 0.07, 0x7a3b22, px + 0.07, y + 0.035, pz, [0, 0.4, 0]); // carne
+  p.box(0.012, 0.006, 0.17, C.steel, px - 0.02, y + 0.003, pz + 0.18); // garfo
   // caneca de alumínio com asa
-  p.cyl(0.04, 0.038, 0.09, 0xb9c0c4, -0.2, y + 0.045, -0.24, undefined, 12);
-  p.ring(0.025, 0.006, 0xb9c0c4, -0.2, y + 0.05, -0.29, [0, Math.PI / 2, 0]);
+  p.cyl(0.04, 0.038, 0.09, 0xb9c0c4, -0.24, y + 0.045, pz - 0.26, undefined, 12);
+  p.ring(0.025, 0.006, 0xb9c0c4, -0.29, y + 0.05, pz - 0.26);
   // panela de alumínio tampada, com os cabos
-  p.cyl(0.13, 0.12, 0.12, 0xa9b0b4, 0.1, y + 0.06, -0.05, undefined, 16);
-  p.cyl(0.135, 0.135, 0.015, 0x9aa1a5, 0.1, y + 0.128, -0.05, undefined, 16);
-  p.cyl(0.02, 0.02, 0.025, C.black, 0.1, y + 0.145, -0.05, undefined, 8);
-  for (const s of [-1, 1]) p.box(0.06, 0.015, 0.03, C.black, 0.1 + s * 0.16, y + 0.1, -0.05);
+  const nz = pz - 0.55;
+  p.cyl(0.13, 0.12, 0.12, 0xa9b0b4, 0.05, y + 0.06, nz, undefined, 16);
+  p.cyl(0.135, 0.135, 0.015, 0x9aa1a5, 0.05, y + 0.128, nz, undefined, 16);
+  p.cyl(0.02, 0.02, 0.025, C.black, 0.05, y + 0.145, nz, undefined, 8);
+  for (const s of [-1, 1]) p.box(0.03, 0.015, 0.06, C.black, 0.05, y + 0.1, nz + s * 0.16);
   // garrafa térmica vermelha
-  p.cyl(0.055, 0.055, 0.26, C.toolRed, 0.38, y + 0.13, 0.2, undefined, 12);
-  p.cyl(0.045, 0.05, 0.06, 0xe9e2c9, 0.38, y + 0.29, 0.2, undefined, 12);
-  // pano de prato dobrado
-  p.box(0.22, 0.012, 0.16, C.rag, 0.42, y + 0.006, -0.22, [0, 0.25, 0]);
-  p.box(0.22, 0.004, 0.025, 0xe9e2c9, 0.42, y + 0.013, -0.22, [0, 0.25, 0]);
+  p.cyl(0.055, 0.055, 0.26, C.toolRed, 0.2, y + 0.13, pz + 0.4, undefined, 12);
+  p.cyl(0.045, 0.05, 0.06, 0xe9e2c9, 0.2, y + 0.29, pz + 0.4, undefined, 12);
+  // pano de prato dobrado numa ponta
+  const ez = L / 2 - 0.2;
+  p.box(0.16, 0.012, 0.22, C.rag, 0.18, y + 0.006, -ez, [0, 0.25, 0]);
+  p.box(0.025, 0.004, 0.22, 0xe9e2c9, 0.18, y + 0.013, -ez, [0, 0.25, 0]);
+  // na outra ponta, uma pilha de pratos e um rádio de pilha
+  if (L > 1.8) {
+    for (let i = 0; i < 3; i++) p.cyl(0.11, 0.09, 0.02, 0xf2f0e8, -0.15, y + 0.01 + i * 0.022, ez - 0.05, undefined, 14);
+    p.box(0.2, 0.12, 0.08, C.black, 0.15, y + 0.06, ez - 0.02, [0, 0.3, 0]);
+    p.cyl(0.003, 0.003, 0.25, C.steel, 0.2, y + 0.24, ez, [0, 0, 0.4], 4);
+  }
+  g.add(body(p));
+  return g;
+}
+
+/**
+ * Prateleiras abertas de tábua encostadas na parede do fundo (norte, −Z), com a frente para
+ * +Z: 90 cm de largura, 32 cm de fundo, 1,7 m de altura, quatro andares. `back` é a distância
+ * do centro do hexágono até a face da parede (unidades do mundo). `seed` varia a ordem do que
+ * fica em cada andar (livros e revistas, latas, caixas, corda e botas), para que duas
+ * prateleiras não fiquem iguais.
+ */
+export function buildShelves(back: number, seed: number): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const W = 0.9;
+  const D = 0.32;
+  const H = 1.7;
+  const t = 0.025;
+  const bz = -back / METER;
+  const cz = bz + D / 2;
+  // laterais (sem fundo: um X de sarrafo atrás segura o móvel) e os andares
+  for (const x of [-1, 1]) p.box(t, H, D, C.plank, x * (W / 2 - t / 2), H / 2, cz, undefined, { outline: true });
+  for (const a of [-1, 1]) p.box(0.02, Math.hypot(W, H) - 0.15, 0.02, C.plankDark, 0, H / 2, bz + 0.012, [0, 0, a * Math.atan2(W, H)]);
+  const levels = [0.08, 0.5, 0.92, 1.34, H - t / 2];
+  for (const y of levels) p.box(W - 2 * t, t, D, C.plankLight, 0, y, cz, undefined, { outline: true });
+  // sorteio fixo pela semente
+  let r = Math.abs(Math.floor(seed)) % 233280;
+  const rnd = () => (r = (r * 9301 + 49297) % 233280) / 233280;
+  const fill = [
+    // livros e revistas em pé, de cores diferentes, e uma pilha deitada
+    (y: number) => {
+      let x = -W / 2 + t + 0.03;
+      for (const color of [0x7d2f2a, 0x34507a, 0xd9be7c, 0x3f5a3a, 0x9a6b3e, 0xb3302a]) {
+        const h = 0.18 + rnd() * 0.08;
+        p.box(0.035, h, 0.2, color, x, y + h / 2, cz + 0.02);
+        x += 0.045;
+      }
+      p.box(0.24, 0.03, 0.2, 0xe9e2c9, x + 0.14, y + 0.015, cz + 0.02, [0, 0.15, 0]);
+    },
+    // latas e potes
+    (y: number) => {
+      for (const [x, color] of [[-0.3, C.tin], [-0.2, C.jar], [-0.08, C.tin], [0.1, C.glass], [0.22, C.tin]] as const) {
+        p.cyl(0.045, 0.045, 0.13, color, x, y + 0.065, cz + (rnd() - 0.5) * 0.08, undefined, 10);
+      }
+    },
+    // caixa de papelão e uma caixa de ferramentas vermelha
+    (y: number) => {
+      p.box(0.34, 0.22, 0.26, 0xc79b62, -0.2, y + 0.11, cz, [0, (rnd() - 0.5) * 0.2, 0]);
+      p.box(0.3, 0.14, 0.18, C.toolRed, 0.2, y + 0.07, cz + 0.02);
+      p.box(0.12, 0.02, 0.03, C.black, 0.2, y + 0.15, cz + 0.02);
+    },
+    // rolo de corda, um galão azul e um par de botas de borracha
+    (y: number) => {
+      p.ring(0.09, 0.03, 0xd9be7c, -0.25, y + 0.03, cz, [Math.PI / 2, 0, 0]);
+      p.box(0.16, 0.24, 0.12, 0x2f6fb0, 0.02, y + 0.12, cz);
+      p.cyl(0.02, 0.02, 0.04, C.black, 0.06, y + 0.26, cz, undefined, 8);
+      for (const x of [0.22, 0.32]) p.box(0.09, 0.26, 0.2, C.black, x, y + 0.13, cz);
+    },
+  ];
+  const order = fill.map((f) => ({ f, k: rnd() })).sort((a, b) => a.k - b.k);
+  order.forEach(({ f }, i) => f(levels[i] + t / 2));
+  g.add(body(p));
+  return g;
+}
+
+/**
+ * Rack baixo da TV encostado numa divisória a leste (+X), com a frente para −X (para a sala):
+ * 1 m de largura, 50 cm de fundo, 55 cm de altura. Em cima, uma TV de tubo com antena de
+ * "chifre", virada `turn` radianos (em volta do eixo vertical) para quem come na mesa, e um
+ * aviãozinho de brinquedo num pezinho; na parede, acima, um quadro de avião. `back` é a
+ * distância do centro do hexágono até a face da parede (unidades do mundo).
+ */
+export function buildTvRack(back: number, turn = 0): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const W = 1.0;
+  const D = 0.5;
+  const H = 0.55;
+  const t = 0.025;
+  const bx = back / METER;
+  const cx = bx - D / 2;
+  // rack: tampo, base, laterais e, embaixo, um aparelho de vídeo e umas fitas
+  p.box(D, t, W, C.plankLight, cx, H - t / 2, 0, undefined, { outline: true });
+  p.box(D, t, W, C.plank, cx, 0.06, 0);
+  for (const z of [-1, 1]) p.box(D, H, t, C.plankDark, cx, H / 2, z * (W / 2 - t / 2), undefined, { outline: true });
+  p.box(0.32, 0.08, 0.4, C.black, cx, 0.12, -0.2);
+  [0x24272a, 0x7d2f2a, 0x24272a, 0x34507a].forEach((color, i) => p.box(0.18, 0.1, 0.025, color, cx, 0.125, 0.12 + i * 0.04));
+  // TV de tubo: caixa funda, tela escura com reflexo, botões e a antena (tudo girado junto)
+  const spin = new THREE.Euler(0, turn, 0);
+  const tvc = new THREE.Vector3(bx - 0.27, 0, -0.12);
+  /** Peça da TV: `x` para a frente (−X é a tela), `z` de lado, no espaço da TV. */
+  const tvBox = (d: number, h: number, w: number, color: number, x: number, y: number, z: number) => {
+    const q = new THREE.Vector3(x, 0, z).applyEuler(spin).add(tvc);
+    p.box(d, h, w, color, q.x, y, q.z, [0, turn, 0], { outline: true });
+  };
+  tvBox(0.32, 0.4, 0.5, 0x3a3d40, 0, H + 0.2, 0);
+  tvBox(0.02, 0.3, 0.38, 0x1d2a33, -0.16, H + 0.22, -0.03);
+  tvBox(0.01, 0.07, 0.12, 0x5d7a8a, -0.17, H + 0.3, -0.1);
+  tvBox(0.02, 0.03, 0.03, C.steel, -0.16, H + 0.14, 0.2);
+  tvBox(0.02, 0.03, 0.03, C.red, -0.16, H + 0.07, 0.2);
+  const top = new THREE.Vector3(0.05, 0, 0).applyEuler(spin).add(tvc);
+  p.dome(0.04, C.black, top.x, H + 0.4, top.z);
+  for (const s of [-1, 1]) p.cyl(0.005, 0.005, 0.4, C.steel, top.x, H + 0.58, top.z + s * 0.09, [s * 0.5, 0, 0], 4);
+  // aviãozinho de brinquedo (monomotor branco de faixa vermelha, nariz para a sala) num pezinho
+  const ax = cx - 0.02;
+  const az = 0.33;
+  const ay = H + 0.16;
+  p.cyl(0.008, 0.03, 0.14, C.black, ax, H + 0.07, az, undefined, 8);
+  p.cyl(0.025, 0.018, 0.26, 0xf2f0e8, ax, ay, az, [0, 0, Math.PI / 2 - 0.12], 10);
+  p.box(0.07, 0.01, 0.28, 0xf2f0e8, ax + 0.01, ay + 0.012, az);
+  p.box(0.05, 0.012, 0.275, C.red, ax + 0.012, ay + 0.016, az);
+  p.box(0.04, 0.008, 0.12, 0xf2f0e8, ax + 0.12, ay + 0.03, az);
+  p.box(0.05, 0.07, 0.008, C.red, ax + 0.12, ay + 0.06, az);
+  p.box(0.005, 0.08, 0.012, C.black, ax - 0.135, ay - 0.01, az);
+  // quadro de avião na parede: moldura, céu, nuvem e um bimotor branco visto de lado
+  const wx = bx - 0.012;
+  const fy = 1.55;
+  const fz = -0.05;
+  p.box(0.02, 0.44, 0.64, C.plankDark, wx, fy, fz, undefined, { outline: true });
+  p.box(0.022, 0.36, 0.56, 0x7fb3d9, wx - 0.002, fy, fz);
+  p.box(0.024, 0.06, 0.18, 0xf3efe4, wx - 0.003, fy - 0.11, fz + 0.15);
+  p.box(0.024, 0.05, 0.3, 0xf2f0e8, wx - 0.004, fy + 0.02, fz);
+  p.box(0.025, 0.018, 0.34, C.red, wx - 0.005, fy + 0.01, fz);
+  p.box(0.024, 0.1, 0.05, 0xf2f0e8, wx - 0.004, fy + 0.09, fz - 0.13);
+  p.box(0.025, 0.025, 0.2, 0xd7d9cf, wx - 0.005, fy + 0.0, fz + 0.02);
+  p.box(0.025, 0.04, 0.03, 0x34507a, wx - 0.005, fy + 0.03, fz + 0.14);
   g.add(body(p));
   return g;
 }
@@ -609,4 +745,214 @@ export function buildNightstand(x: number, z: number): THREE.Group {
   shade.castShadow = true;
   g.add(shade);
   return g;
+}
+
+// ---------- interior do avião ----------
+
+/** Peças da cabine que se pegam (o GPS, o rádio): malha, área de toque e destaque, por id. */
+export type CabinParts = Pick<PropInfo, 'item' | 'hit' | 'glow'>;
+
+/** O que o tabuleiro precisa do interior do avião (fica em `userData.cabin` do grupo). */
+export interface CabinInfo {
+  /** Para onde a câmera fica (do meio da cabine para fora, pela porta), no chão. */
+  facing: THREE.Vector3;
+  /** Caixa a enquadrar (no espaço do grupo). */
+  focus: THREE.Box3;
+  /** As peças destacáveis por id (`CABIN_GPS`, `CABIN_RADIO`). */
+  items: Map<string, CabinParts>;
+}
+
+const CAB = {
+  skin: 0xd9d4c3,
+  floor: 0x5d5f58,
+  floorWorn: 0x76776c,
+  stain: 0x34352f,
+  wall: 0xa9a48f,
+  wallDark: 0x8a8573,
+  rib: 0xbdb7a0,
+  glass: 0x2c3c44,
+  dash: 0x2e3133,
+  dashEdge: 0x4b4f52,
+  gauge: 0xd8d2bb,
+  gaugeRim: 0x8d9296,
+  seat: 0x6b4a33,
+  seatDark: 0x4f3524,
+  foam: 0xd8c48a,
+  tape: 0x8f9396,
+  yoke: 0x34383c,
+  grip: 0x7a5f45,
+  gpsBody: 0x2a2c2e,
+  gpsScreen: 0x9fd08a,
+  radio: 0x4a5a3c,
+  radioFace: 0x1f2326,
+  strap: 0xc9a03a,
+} as const;
+
+/**
+ * Interior do teco-teco (issue #125), em corte: sem a parede do lado da porta (oeste, −X), por
+ * onde a câmera olha. Nariz para +Z, como `buildPlane`. Só é montado quando alguém entra (ver
+ * `HexBoard.enterPlaneCabin`) e é descartado ao sair (`disposeModel`).
+ *
+ * - Cockpit básico e gasto: painel com mostradores (um faltando, fios soltos do lado do
+ *   copiloto), manche de avião na frente do banco do piloto, pedais e manete.
+ * - Banco do piloto gasto: rasgado, com espuma aparecendo e fita prateada em X.
+ * - O **GPS** preso no painel, atrás do manche; o **rádio** preso no teto, com o microfone
+ *   pendurado. Cada um é uma peça destacável (`gpsId`, `radioId`); as de `taken` já saem sem.
+ * - O fundo da fuselagem vazio: só trilhos dos bancos tirados, argolas de amarração, manchas de
+ *   combustível e uma cinta largada.
+ *
+ * Medidas em metros (cabine de 1,3 m de largura, 1,4 m de altura e 4 m de comprimento).
+ */
+export function buildPlaneInterior(gpsId: string, radioId: string, taken: ReadonlySet<string> = new Set()): THREE.Group {
+  const g = new THREE.Group();
+  const p = new Parts();
+  const W = 1.3;
+  const H = 1.4;
+  const y0 = 0.4; // piso da cabine (a barriga fica embaixo)
+  const zF = 1.4; // parede de fogo (frente)
+  const zR = -2.6; // antepara do fundo
+  const L = zF - zR;
+  const zc = (zF + zR) / 2;
+  const top = y0 + H;
+  const far = W / 2; // parede de longe (+X)
+  const near = -W / 2; // lado aberto (a porta)
+
+  // barriga, piso e o desgaste do piso no cockpit
+  p.box(W + 0.08, y0, L, CAB.skin, 0, y0 / 2, zc);
+  p.box(W, 0.04, L, CAB.floor, 0, y0 + 0.02, zc);
+  p.box(W - 0.2, 0.006, 1.2, CAB.floorWorn, 0, y0 + 0.042, 0.6);
+  // parede de longe, com janelas e cavernas (nervuras)
+  p.box(0.05, H, L, CAB.wall, far + 0.025, y0 + H / 2, zc);
+  p.box(0.02, 0.42, 1.0, CAB.glass, far - 0.005, y0 + 1.0, 0.55);
+  p.box(0.02, 0.32, 0.45, CAB.glass, far - 0.005, y0 + 1.0, -0.9);
+  for (let z = zR + 0.4; z < zF; z += 0.55) p.box(0.04, H, 0.05, CAB.rib, far - 0.015, y0 + H / 2, z);
+  // teto e as cavernas dele
+  p.box(W + 0.05, 0.05, L, CAB.wallDark, 0, top + 0.025, zc);
+  for (let z = zR + 0.4; z < zF; z += 0.55) p.box(W, 0.04, 0.05, CAB.rib, 0, top - 0.02, z);
+  // lado da porta (cortado, para a câmera): só a soleira, a longarina de cima e os montantes das pontas
+  p.box(0.05, 0.18, L, CAB.wall, near - 0.025, y0 + 0.09, zc);
+  p.box(0.05, 0.1, L, CAB.wall, near - 0.025, top - 0.05, zc);
+  for (const z of [zF - 0.05, zR + 0.05]) p.box(0.05, H, 0.06, CAB.wallDark, near - 0.025, y0 + H / 2, z);
+  // frente: parede de fogo e para-brisa inclinado; fundo: antepara
+  p.box(W, 0.75, 0.05, CAB.wallDark, 0, y0 + 0.375, zF);
+  p.box(W - 0.06, 0.62, 0.03, CAB.glass, 0, y0 + 1.08, zF - 0.12, [-0.35, 0, 0]);
+  p.box(W, H, 0.05, CAB.wallDark, 0, y0 + H / 2, zR);
+
+  // painel: caixa escura, lábio de cima mais claro (gasto nas quinas)
+  const pz = zF - 0.26; // face do painel
+  p.box(W - 0.04, 0.3, 0.22, CAB.dash, 0, y0 + 0.8, zF - 0.15);
+  p.box(W - 0.04, 0.03, 0.26, CAB.dashEdge, 0, y0 + 0.965, zF - 0.15);
+  // mostradores do lado do piloto (+X); um arrancado (buraco escuro)
+  const gauges: [number, number, boolean][] = [
+    [0.12, 0.86, true], [0.52, 0.86, true], [0.12, 0.74, true], [0.52, 0.74, false], [0.2, 0.74, true],
+  ];
+  for (const [x, y, ok] of gauges) {
+    p.cyl(0.045, 0.045, 0.02, CAB.gaugeRim, x, y0 + y, pz - 0.005, [Math.PI / 2, 0, 0], 12);
+    p.cyl(0.037, 0.037, 0.022, ok ? CAB.gauge : C.black, x, y0 + y, pz - 0.008, [Math.PI / 2, 0, 0], 12);
+    if (ok) p.box(0.004, 0.03, 0.004, C.red, x, y0 + y + 0.01, pz - 0.021, [0, 0, 0.6]);
+  }
+  // lado do copiloto: tampa lisa e o buraco do rádio velho, com fios soltos
+  p.box(0.36, 0.2, 0.01, CAB.dashEdge, -0.3, y0 + 0.8, pz - 0.006);
+  p.box(0.16, 0.06, 0.012, C.black, -0.3, y0 + 0.78, pz - 0.01);
+  for (const [dx, c] of [[-0.03, C.red], [0, 0xe0b12c], [0.03, 0x2f6fb0]] as const) {
+    p.cyl(0.004, 0.004, 0.12, c, -0.3 + dx, y0 + 0.71, pz - 0.02, [0, 0, dx * 4], 5);
+  }
+  // manete no meio
+  p.cyl(0.008, 0.008, 0.1, C.steel, 0, y0 + 0.72, pz - 0.05, [Math.PI / 2, 0, 0], 6);
+  p.cyl(0.022, 0.022, 0.03, C.black, 0, y0 + 0.72, pz - 0.1, [Math.PI / 2, 0, 0], 10);
+
+  // manche (volante de avião) na frente do banco do piloto: coluna, cubo e os chifres
+  const yx = 0.3;
+  const yy = y0 + 0.66;
+  p.cyl(0.02, 0.02, 0.32, CAB.yoke, yx, yy, pz - 0.16, [Math.PI / 2, 0, 0], 8);
+  p.box(0.07, 0.07, 0.05, CAB.yoke, yx, yy, pz - 0.33);
+  p.box(0.3, 0.04, 0.04, CAB.yoke, yx, yy, pz - 0.35);
+  for (const s of [-1, 1]) {
+    p.box(0.045, 0.14, 0.05, CAB.grip, yx + s * 0.15, yy + 0.05, pz - 0.35);
+    p.box(0.047, 0.03, 0.052, CAB.yoke, yx + s * 0.15, yy + 0.125, pz - 0.35);
+  }
+  // o manche do copiloto foi tirado: só o furo da coluna
+  p.cyl(0.03, 0.03, 0.012, C.black, -0.3, yy, pz - 0.005, [Math.PI / 2, 0, 0], 10);
+  // pedais
+  for (const s of [-1, 1]) p.box(0.07, 0.12, 0.03, C.steelDark, yx + s * 0.09, y0 + 0.12, zF - 0.28, [-0.5, 0, 0]);
+  // suporte do GPS (fica no painel quando o GPS sai)
+  p.box(0.05, 0.05, 0.03, C.steelDark, yx, y0 + 0.9, pz - 0.015);
+
+  // banco do piloto gasto: trilhos, base, assento rasgado com fita em X, encosto e cabeceira
+  const sx = 0.3;
+  const sz = 0.05;
+  for (const s of [-1, 1]) p.box(0.04, 0.03, 0.62, C.steelDark, sx + s * 0.18, y0 + 0.055, sz);
+  p.box(0.42, 0.16, 0.42, C.steelDark, sx, y0 + 0.15, sz);
+  p.box(0.48, 0.1, 0.48, CAB.seat, sx, y0 + 0.28, sz);
+  p.box(0.44, 0.012, 0.03, CAB.seatDark, sx, y0 + 0.334, sz - 0.08);
+  p.box(0.15, 0.014, 0.12, CAB.foam, sx + 0.08, y0 + 0.335, sz + 0.1, [0, 0.4, 0]);
+  p.box(0.22, 0.008, 0.045, CAB.tape, sx - 0.08, y0 + 0.337, sz - 0.02, [0, 0.7, 0]);
+  p.box(0.22, 0.008, 0.045, CAB.tape, sx - 0.08, y0 + 0.338, sz - 0.02, [0, -0.7, 0]);
+  const tilt: [number, number, number] = [-0.18, 0, 0];
+  p.box(0.48, 0.62, 0.1, CAB.seat, sx, y0 + 0.64, sz - 0.25, tilt);
+  p.box(0.13, 0.2, 0.012, CAB.foam, sx - 0.1, y0 + 0.7, sz - 0.19, tilt);
+  p.box(0.04, 0.5, 0.012, CAB.seatDark, sx + 0.12, y0 + 0.64, sz - 0.19, tilt);
+  p.box(0.26, 0.14, 0.08, CAB.seatDark, sx, y0 + 1.02, sz - 0.32, tilt);
+
+  // fundo vazio: trilhos dos bancos tirados, argolas, manchas de combustível e uma cinta largada
+  for (const z of [sz, -1.0]) for (const s of [-1, 1]) p.box(0.04, 0.02, 0.6, C.steelDark, (z === sz ? -0.3 : 0) + s * 0.2, y0 + 0.05, z);
+  for (const [x, z] of [[-0.45, -0.6], [0.45, -0.6], [-0.45, -2.2], [0.45, -2.2]]) {
+    p.ring(0.035, 0.008, C.steel, x, y0 + 0.045, z, [Math.PI / 2, 0, 0]);
+  }
+  for (const [x, z, r] of [[-0.1, -1.5, 0.26], [0.2, -2.0, 0.18], [-0.25, -0.5, 0.14]]) {
+    p.cyl(r, r, 0.004, CAB.stain, x, y0 + 0.042, z, undefined, 12);
+  }
+  p.box(0.05, 0.006, 1.1, CAB.strap, 0.1, y0 + 0.045, -1.6, [0, 0.35, 0]);
+  p.box(0.06, 0.02, 0.05, C.steel, 0.29, y0 + 0.05, -1.1);
+  // suportes do rádio no teto
+  const rx = 0.08;
+  const rz = 0.55;
+  for (const s of [-1, 1]) p.box(0.02, 0.06, 0.02, C.steelDark, rx + s * 0.1, top - 0.06, rz);
+  g.add(body(p));
+
+  const items = new Map<string, CabinParts>();
+  // GPS: caixinha preta com tela verde, presa no suporte do painel, atrás do manche
+  if (!taken.has(gpsId)) {
+    const k = new Parts();
+    k.box(0.16, 0.105, 0.04, CAB.gpsBody, yx, y0 + 0.9, pz - 0.05);
+    k.box(0.115, 0.07, 0.006, CAB.gpsScreen, yx - 0.012, y0 + 0.9, pz - 0.072);
+    for (const dy of [0.025, -0.005]) k.box(0.018, 0.018, 0.008, CAB.dashEdge, yx + 0.058, y0 + 0.9 + dy, pz - 0.072);
+    k.cyl(0.008, 0.008, 0.07, CAB.gpsBody, yx + 0.06, y0 + 0.98, pz - 0.05, undefined, 6);
+    const gps = detachable(k, 0.008, 0.05);
+    g.add(gps.item);
+    items.set(gpsId, gps);
+  }
+  // rádio: caixa verde-oliva pendurada no teto, frente para a porta, e o microfone no cabo
+  if (!taken.has(radioId)) {
+    const k = new Parts();
+    const ry = top - 0.14;
+    k.box(0.24, 0.08, 0.18, CAB.radio, rx, ry, rz);
+    k.box(0.006, 0.06, 0.16, CAB.radioFace, rx - 0.123, ry, rz);
+    for (const dz of [-0.05, 0.05]) k.cyl(0.012, 0.012, 0.02, C.brass, rx - 0.13, ry, rz + dz, [0, 0, Math.PI / 2], 8);
+    k.box(0.004, 0.02, 0.05, CAB.gpsScreen, rx - 0.127, ry + 0.012, rz);
+    k.cyl(0.006, 0.006, 0.3, C.black, rx - 0.08, ry - 0.18, rz - 0.06, [0.2, 0, 0.15], 5);
+    k.box(0.05, 0.08, 0.03, C.black, rx - 0.1, ry - 0.36, rz - 0.09);
+    const radio = detachable(k, 0.008, 0.05);
+    g.add(radio.item);
+    items.set(radioId, radio);
+  }
+
+  const focus = new THREE.Box3(new THREE.Vector3(m(near), m(y0), m(-1.3)), new THREE.Vector3(m(far), m(top), m(zF)));
+  g.userData['cabin'] = { facing: new THREE.Vector3(-0.8, 0, -0.6).normalize(), focus, items } satisfies CabinInfo;
+  return g;
+}
+
+/**
+ * Descarta um modelo montado aqui (o interior do avião, ao sair): geometrias e materiais
+ * próprios. Os materiais compartilhados (o dos corpos, o das áreas de toque) ficam.
+ */
+export function disposeModel(root: THREE.Object3D): void {
+  root.traverse((o) => {
+    const mesh = o as THREE.Mesh;
+    if (!mesh.isMesh) return;
+    mesh.geometry.dispose();
+    for (const g of (mesh.userData['outlineParts'] as THREE.BufferGeometry[] | undefined) ?? []) g.dispose();
+    const mats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+    for (const mat of mats) if (mat !== bodyMaterial && mat !== hitMaterial) mat.dispose();
+  });
 }

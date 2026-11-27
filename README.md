@@ -282,11 +282,13 @@ sempre abertas.
   □ no controle) abre o **menu da porta**: a câmera gira 45° e aproxima até enquadrar a porta e o agente,
   a papelada da HUD sai e as ações entram em fichas na direita: **Arrombar**, **Destrancar** e **Abrir**.
   A ficha que depende de rolagem traz o **d20** com o número a tirar; as outras, um círculo vazio.
-- **Arrombar** é um chute frontal de arrombamento: a câmera **fecha na porta**, o agente dá o passo de apoio
-  e sobe o joelho; aí a cena entra em **slow** e o d20 gira na ficha da esquerda enquanto ele recolhe o
-  joelho até o peito, com a ponta do pé puxada para cima e o corpo para trás. Quando o dado para, o slow
-  acaba no gesto e, em velocidade cheia, a perna estica reto e a sola do pé bate chapada na porta (clipe
-  `kick`, a joelhada `Melee_Knee` da Quaternius, com o recolher e o golpe por cima). Se passar, a porta abre com força para dentro, bate na parede e fica
+- **Arrombar** é um chute frontal de arrombamento: a câmera **fecha na porta** e, do repouso, o pé sai
+  do chão direto para a frente e para cima, com o joelho subindo até o peito e a ponta do pé puxada para
+  cima; aí a cena entra em **slow** e o d20 gira na ficha da esquerda enquanto ele segura o joelho lá em
+  cima, com o corpo para trás. Quando o dado para, o slow acaba no gesto e, em velocidade cheia, a perna
+  estica reto e a sola do pé bate chapada na porta, na altura da fechadura (poses feitas à mão por cima do
+  `idle`, com a perna do chute no espaço do corpo; a joelhada `Melee_Knee` não entra, porque começa levando
+  a perna para trás). Se passar, a porta abre com força para dentro, bate na parede e fica
   **arrombada** (aberta para sempre) e a perna atravessa junto; se não, só treme e a perna recolhe.
 - **Cada chute tira 2 de resistência** da porta (`DOOR_RULES.kickDamage`): um **−2** vermelho sobe da porta,
   como dano no RPG, e o próximo arrombamento daquela porta precisa de 2 a menos (trancada: 12 → 10 → 8…;
@@ -305,12 +307,15 @@ sempre abertas.
   - cada rolagem aparece na ficha do d20 (o verde é sempre o que é bom para a equipe). Chutar uma porta
     que já estava aberta não assusta ninguém (só rende a fala do morador);
   - **reação:** no estouro da porta, todo mundo do cômodo vira para ela e dá **um passo para trás**. Depois,
-    um de cada vez (do mais perto ao mais longe), a câmera **inclina de leve** para ele (puxa o olhar, gira um
-    pouco em volta e rola para o lado dele), ele **olha de um lado para o outro** (clipe `look`, o
-    `Idle_LookAround_Loop` da Quaternius) e a rolagem vem em
-    **slow**. Quando o dado para, o slow acaba: se ele **passou** (resistiu ou teve atitude), **vira de
-    costas** para a porta e fica em **posição de correr** (sai correndo na vez dele); se **falhou** perto da
-    porta, já entra na **rendição**.
+    um de cada vez (do mais perto ao mais longe), a câmera **fecha nele** (fica no centro da tela, com uma
+    inclinação de leve para o lado dele) e **some tudo o que tapa a vista** (paredes, telhado, móveis, outro
+    cenário), ele **olha de um lado para o outro** (clipe `look`, o `Idle_LookAround_Loop` da Quaternius) e
+    a rolagem vem em **slow**, mais devagar (`BREAK_IN_SCENE` em `game/break-in-scene.ts`). Nessa cena a
+    HUD e as fichas da porta saem: ficam só a ficha do d20 (maior, embaixo no meio) e os avisos. Quando o
+    dado para, o slow acaba: se ele **passou** (resistiu ou teve atitude), **vira de costas** para a porta e
+    fica em **posição de correr** (sai correndo na vez dele); se **falhou** perto da porta, já entra na
+    **rendição**. O aviso diz se ele se rendeu ou não, e o jogo espera o **Confirmar** (✕ no controle,
+    Enter no teclado) para seguir; depois do último, câmera, cenário e HUD voltam ao menu da porta.
 - **Destrancar** gasta **1 de movimento**: o agente se agacha, o d20 rola enquanto ele mexe na fechadura e,
   dando certo ou não, ele se levanta. Porta sem tranca abre sozinha (precisa de 0). Qualquer um pode
   tentar; o **Agente** soma a perícia **Gazua +6** (o número a tirar já aparece descontado, nunca abaixo de 1).

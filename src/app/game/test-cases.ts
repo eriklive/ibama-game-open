@@ -27,6 +27,8 @@ export interface TestCase {
    * que vão correr: ele escolhe qual perseguir ou deixa os dois (`decisao:alvo`).
    * `turn` só abre o turno do agente, com a cena montada.
    */
+  /** A equipe já começa com a chave do avião (dá para entrar nele). */
+  hasKey?: boolean;
   start:
     | { kind: 'turn'; agent: string }
     | { kind: 'chase'; agent: string; enemy: string }
@@ -123,13 +125,24 @@ export const TEST_CASES: readonly TestCase[] = [
     start: { kind: 'turn', agent: 'bruno' },
   },
   {
+    id: 'interior-aviao',
+    name: 'Dentro do avião',
+    hint: 'Bruno colado no avião, já com a chave. Toque no avião e em "Olhar dentro": ele anda até a porta, ela abre e dá para pegar o GPS do painel e o rádio do teto. "Sair" volta ao tabuleiro.',
+    mapId: 'aeroporto',
+    active: 'bruno',
+    agents: { bruno: { col: 21, row: 10 }, ana: { col: 23, row: 15 }, clara: { col: 24, row: 15 } },
+    enemies: { piloto: { hex: { col: 28, row: 6 } } },
+    hasKey: true,
+    start: { kind: 'turn', agent: 'bruno' },
+  },
+  {
     id: 'armario-caseiro',
     name: 'Armário do caseiro',
     hint: 'A equipe no quarto de trás da casa, com o Caseiro Jô rendido. Ande pelo quarto: cada um rola percepção uma vez e, passando, o armário ganha o contorno. Toque nele para olhar de perto e na arma para apreender.',
     mapId: 'aeroporto',
     active: 'clara',
     agents: { clara: { col: 37, row: 29 }, ana: { col: 37, row: 28 }, bruno: { col: 37, row: 30 } },
-    enemies: { jo: { hex: { col: 32, row: 29 }, status: 'surrendered' }, ...PILOTO_LONGE },
+    enemies: { jo: { hex: { col: 31, row: 29 }, status: 'surrendered' }, ...PILOTO_LONGE },
     start: { kind: 'turn', agent: 'clara' },
   },
   {

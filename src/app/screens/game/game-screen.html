@@ -1,4 +1,4 @@
-<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="prop() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'">
+<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="prop() || interrogation() || cabinInside()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'" [class.break-in-cine]="breakInCine()">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
   <!-- Modo Corrida: o mapa de corrida, por cima do tabuleiro (ver game/runner-session.ts) -->
   <canvas #runner class="board runner" [class.on]="runnerOn()" aria-label="Corrida: arraste para os lados para virar nas curvas, para cima para pular e para baixo para deslizar."></canvas>
@@ -91,6 +91,72 @@
   @if (menuOpen()) {
     <section id="game-menu" class="menu" aria-label="Menu" data-testid="menu">
       <h2 class="menu-title">Menu</h2>
+      <!-- Saves da sessão: novo jogo, o automático (começo de cada vez) e os slots -->
+      <div class="menu-sub menu-saves-sub">
+        <button
+          type="button"
+          class="menu-sub-toggle"
+          [class.open]="savesOpen()"
+          (click)="savesOpen.set(!savesOpen()); overwriteArmed.set(null); newGameArmed.set(false)"
+          [attr.aria-expanded]="savesOpen()"
+          aria-controls="saves"
+          data-testid="saves-toggle">
+          Saves <span class="menu-sub-arrow" aria-hidden="true">›</span>
+        </button>
+        @if (savesOpen()) {
+          <div id="saves" class="saves" data-testid="saves">
+            @if (!savesSupported) {
+              <p class="menu-option-hint">Este navegador não guarda saves (modo privado?).</p>
+            } @else {
+              <p class="saves-note">Ficam nesta aba do navegador. Salvar guarda o começo do turno atual.</p>
+              @if (saveList().auto; as a) {
+                <div class="save-card auto" data-testid="save-auto">
+                  <span class="save-tag">Automático</span>
+                  <span class="menu-option-label">{{ a.mapName }} · Turno {{ a.round }}</span>
+                  <span class="menu-option-hint">Vez de {{ a.activeName }} · {{ savedAtLabel(a.savedAt) }}</span>
+                  <div class="save-actions">
+                    <button type="button" class="save-btn" (click)="loadSave('auto')" data-testid="load-auto">Carregar</button>
+                  </div>
+                </div>
+              }
+              <ul class="menu-sub-list" role="list">
+                @for (row of saveList().slots; track row.slot) {
+                  <li class="save-card" [class.empty]="!row.save" [attr.data-testid]="'save-slot-' + row.slot">
+                    <span class="save-tag">Slot {{ row.slot }}</span>
+                    @if (row.save; as sv) {
+                      <span class="menu-option-label">{{ sv.mapName }} · Turno {{ sv.round }}</span>
+                      <span class="menu-option-hint">Vez de {{ sv.activeName }} · {{ savedAtLabel(sv.savedAt) }}</span>
+                    } @else {
+                      <span class="menu-option-label save-empty">— vazio —</span>
+                    }
+                    <div class="save-actions">
+                      <button
+                        type="button"
+                        class="save-btn"
+                        [class.armed]="overwriteArmed() === row.slot"
+                        (click)="saveToSlot(row.slot)"
+                        [attr.data-testid]="'save-to-' + row.slot">
+                        {{ overwriteArmed() === row.slot ? 'Sobrescrever?' : 'Salvar aqui' }}
+                      </button>
+                      @if (row.save) {
+                        <button type="button" class="save-btn" (click)="loadSave(row.slot)" [attr.data-testid]="'load-' + row.slot">Carregar</button>
+                      }
+                    </div>
+                  </li>
+                }
+              </ul>
+            }
+            <button
+              type="button"
+              class="menu-restart new-game"
+              [class.armed]="newGameArmed()"
+              (click)="newGame()"
+              data-testid="new-game">
+              {{ newGameArmed() ? 'Toque de novo: descartar e começar' : 'Novo jogo' }}
+            </button>
+          </div>
+        }
+      </div>
       <fieldset class="menu-group">
         <legend>Renderização</legend>
         @for (p of renderProfiles; track p.mode) {
@@ -190,8 +256,9 @@
     </section>
   }
 
-  <!-- no menu da porta o aviso vai para dentro das fichas (ver .door-notice) -->
-  @if (phase() !== 'door' ? notice() : null; as n) {
+  <!-- no menu da porta o aviso vai para dentro das fichas (ver .door-notice); na cena do
+       arrombamento as fichas saem e o aviso volta para o telegrama -->
+  @if (phase() !== 'door' || breakInCine() ? notice() : null; as n) {
     <div class="telegram" [class.alert]="n.tone === 'alert'" role="status" aria-live="assertive" data-testid="notice">
       {{ n.text }}
     </div>
@@ -293,13 +360,9 @@
     }
   </div>
 
-  <!-- Menu da porta: a câmera gira e aproxima; as ações ficam em fichas na direita -->
-  @if (phase() === 'door' && openDoor(); as door) {
-    <button type="button" class="door-back" [disabled]="doorBusy()" (click)="closeDoorMenu()" aria-label="Voltar ao tabuleiro" data-testid="door-back">
-      <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-      <span class="door-back-text">Voltar</span>
-      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
-    </button>
+  <!-- Menu da porta: a câmera gira e aproxima; as ações ficam em fichas na direita (saem na
+       cena de quem reage ao arrombamento e voltam depois do Confirmar) -->
+  @if (phase() === 'door' && !breakInCine() ? openDoor() : null; as door) {
     <aside class="door-sheet" aria-label="Ações da porta" data-testid="door-sheet">
       <div class="door-head">
         <span class="door-kicker">Porta · {{ active().name }}</span>
@@ -337,7 +400,8 @@
           </li>
         }
         <li>
-          <button type="button" class="door-opt door-opt-back" [style.--i]="3" [style.--tilt]="'.5deg'" [disabled]="doorBusy()" aria-label="Voltar ao tabuleiro" data-testid="door-opt-back" (click)="closeDoorMenu()">
+          <button type="button" class="door-opt door-opt-back" [style.--i]="3" [style.--tilt]="'.5deg'" [disabled]="doorBusy()" aria-label="Voltar ao tabuleiro" data-testid="door-back" (click)="closeDoorMenu()">
+            <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
             <span class="door-opt-name">Voltar</span>
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
           </button>
@@ -351,11 +415,6 @@
 
   <!-- Menu do avião (inspecionar): a câmera aproxima; olhar dentro e queimar ficam em fichas na direita -->
   @if (phase() === 'plane') {
-    <button type="button" class="door-back" (click)="closePlaneMenu()" aria-label="Voltar ao tabuleiro" data-testid="plane-back">
-      <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-      <span class="door-back-text">Voltar</span>
-      @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
-    </button>
     <aside class="door-sheet" aria-label="Ações do avião" data-testid="plane-sheet">
       <div class="door-head">
         <span class="door-kicker">Inspecionar · {{ active().name }}</span>
@@ -373,7 +432,7 @@
             <span class="door-slot none" aria-hidden="true"></span>
             <span class="door-text">
               <span class="door-opt-name">Olhar dentro</span>
-              <span class="door-opt-need free">{{ hasKey() ? 'tem a chave, abre' : 'sem a chave, está trancado' }}</span>
+              <span class="door-opt-need free">{{ hasKey() ? 'tem a chave, entra' : 'sem a chave, está trancado' }}</span>
             </span>
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
           </button>
@@ -386,6 +445,13 @@
               <span class="door-opt-need free">encerra a vez</span>
             </span>
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('approach') }}</span> }
+          </button>
+        </li>
+        <li>
+          <button type="button" class="door-opt door-opt-back" style="--i: 2; --tilt: -.6deg" aria-label="Voltar ao tabuleiro" data-testid="plane-back" (click)="closePlaneMenu()">
+            <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+            <span class="door-opt-name">Voltar</span>
+            @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
           </button>
         </li>
       </ul>
@@ -477,7 +543,7 @@
           }
           @if (ck.waiting) {
             <button type="button" class="check-close" #checkClose data-testid="check-close" (click)="closeCheck(ck.id)">
-              Continuar &#8250;
+              {{ ck.confirmText ?? 'Continuar' }} &#8250;
               @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
             </button>
           }
@@ -704,6 +770,38 @@
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
         </button>
       }
+    </div>
+  }
+
+  <!--
+    Dentro do avião (issue #125): a câmera olha pela porta aberta; o GPS e o rádio, destacados, se
+    pegam tocando neles (ou pelos botões). "Sair do avião" desmonta o interior e volta ao tabuleiro.
+  -->
+  @if (cabinInside()) {
+    <div class="focus-stage prop-stage" data-testid="cabin-focus"></div>
+    <div class="aim-actions">
+      <div class="slip inspect-slip cabin-slip" [class.pass]="!cabinLeft().length" role="status" aria-live="polite" data-testid="cabin-hint">
+        <strong>Cabine do avião · {{ cabinWho() }}</strong>
+        <span data-testid="cabin-seen">{{ cabinText() }}</span>
+        @if (cabinNote(); as note) {
+          <span class="small" data-testid="cabin-note">{{ note }}</span>
+        }
+      </div>
+      <div class="cabin-actions">
+        @for (item of cabinLeft(); track item.id; let first = $first) {
+          <button type="button" class="paper cabin-btn" [attr.data-testid]="'cabin-take-' + item.id" (click)="takeCabin(item.id)"
+            [attr.aria-label]="'Pegar ' + item.name">
+            <span class="stencil">Pegar</span>
+            <span class="typed">{{ item.short }}</span>
+            @if (pad() && first) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+          </button>
+        }
+        <button type="button" class="paper cabin-btn cabin-leave" data-testid="cabin-leave" (click)="leavePlane()" aria-label="Sair do avião e voltar ao tabuleiro">
+          <span class="stencil">Sair</span>
+          <span class="typed">do avião</span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+        </button>
+      </div>
     </div>
   }
 

@@ -1,13 +1,28 @@
 import * as THREE from 'three';
-import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorsOf, inStructure, playArea, structureView } from './maps';
+import { COVER_HEIGHT, GameMap, Ground, HexRect, StructureKind, doorWall, doorsOf, inStructure, playArea, structureView } from './maps';
 import { HEX_STEP, HexArea, HexCoord, hexDistance, hexKey, hexNeighbors, hexToWorld, reachableHexes, sameHex, worldToHex } from './hex';
 import { APPROACH_FX, waveArrival, waveBump, waveDuration } from './approach-fx';
-import { CharacterRig, ClipName, METER, ModelDef, Pose, restPose } from './character-model';
+import { CharacterRig, ClipName, LegPose, METER, ModelDef, Pose, restLeg, restPose } from './character-model';
 import { clone as cloneSkinned } from 'three/examples/jsm/utils/SkeletonUtils.js';
 import { CHASE_SLOWMO, slowmoFov, slowmoRate } from './chase-slowmo';
+import { BREAK_IN_SCENE, viewBlockers } from './break-in-scene';
 import { wallFloorShape } from './house-plan';
-import { HANGAR_INTERIOR, HANGAR_ROOF, HOUSE_ROOF, buildCover, buildFuelProps, buildHangar, buildHouse, buildPlane } from './scenery';
-import { PropInfo } from './prop-models';
+import {
+  HANGAR_INTERIOR,
+  HANGAR_ROOF,
+  HOUSE_ROOF,
+  RoomFog,
+  buildCover,
+  buildFuelProps,
+  buildHangar,
+  buildHouse,
+  PLANE_DOOR,
+  PLANE_DOOR_OPEN,
+  buildPlane,
+  buildRoomFog,
+} from './scenery';
+import { CabinInfo, PropInfo, buildDiningTable, buildPlaneInterior, disposeModel } from './prop-models';
+import { CABIN_GPS, CABIN_RADIO } from './plane-cabin';
 import { RENDER_PROFILES, RenderProfile } from './render-settings';
 import { Terrain } from './world';
 import { WorldStream, forestFloor, rutPieces } from './world-stream';
@@ -20,9 +35,12 @@ import { SPOTLIGHT_LAYER, Spotlight } from './spotlight';
 import { OUTLINE_LAYER, TargetOutline } from './target-outline';
 import { AuraLayer, AuraStyle, AuraTextures, createAuraTextures, splitHot } from './aura-layer';
 import { BASE_PITCH, INTRO, ScreenEllipse, easeInOutCubic, introZoom } from './mission-intro';
+import { frameGroup } from './group-frame';
 
 const HEX_SIZE = 1;
 const HEX_HEIGHT = 0.35;
+/** Segundos para a névoa de um cômodo se desfazer depois que a porta abre. */
+const ROOM_FOG_CLEAR = 1.6;
 const HEX_GAP = 0.94; // raio visível em relação ao espaçamento → deixa uma fresta entre os hexágonos
 
 /** Peças com modelo 3D: velocidade da corrida entre hexágonos (3,6 m/s ≈ 2,8 hex/s). */
@@ -63,6 +81,9 @@ const RING_VIEW = {
   /** Velocidade da transição (maior, mais rápida). */
   rate: 4.5,
 };
+
+/** Velocidade da transição do enquadramento de grupo (`frameGroupOn`; maior, mais rápida). */
+const GROUP_VIEW_RATE = 4;
 
 export const SECONDS_PER_HEX = (HEX_STEP * HEX_SIZE) / RUN_SPEED;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
@@ -230,37 +251,42 @@ interface EnemyView extends Mover {
 }
 
 /**
- * Golpe do arrombamento, em poses por cima do `idle` (ver `POSE_BONES` em `character-model.ts`):
- * recolhe o joelho no peito (`chamber`), segura no slow inclinado para trás com a guarda alta
- * (`coil`) e solta a sola do pé na porta com o corpo atrás (`strike`); quando a porta cede, a
- * perna vai junto (`through`), quando aguenta, o pé volta (`recoil`).
+ * Chute de arrombamento (chute frontal, de empurrar), feito à mão por cima do `idle`. O clipe
+ * `kick` (a joelhada `Melee_Knee` da UAL) não entra: ele começa levando a perna para trás e, somado
+ * às poses, a perna recuava antes de subir. A perna do chute vai no espaço do corpo
+ * (`CharacterRig.leg`: `hip`, `knee`, `ankle`); o resto (perna de apoio, tronco, braços) na camada
+ * local (`POSE_BONES`), onde `thigh`, `calf` e `foot` ficam em 0.
+ *
+ * Do repouso o pé sai do chão direto para a frente e para cima: o joelho sobe (`lift`) até o peito,
+ * dobrado, com a ponta do pé puxada para cima (`chamber`); no slow ele segura lá em cima, um pouco
+ * mais alto e com o corpo atrás (`coil`); aí a perna estica reto para a frente, na altura da
+ * fechadura, e a sola bate chapada na porta (`strike`). Quando a porta cede, a perna vai junto
+ * (`through`); quando aguenta, ela recolhe (`recoil`); depois o pé desce e volta à base.
+ *
+ * Até o impacto o pé nunca recua: da base (`KICK_LEG_IDLE`) ao recolher, `hip` e o ângulo da canela
+ * (`hip - knee`) só crescem de uma pose para a próxima (a mistura é em linha reta), e no golpe a
+ * canela gira toda para a frente enquanto a coxa desce até a horizontal (conferido renderizando o
+ * modelo de lado, quadro a quadro).
  */
-const KICK_POSES: Record<'chamber' | 'coil' | 'strike' | 'through' | 'recoil', Pose> = {
-  chamber: { thigh: -1.7, calf: 2.0, foot: -0.25, thighL: -0.28, calfL: 0.5, spine: -0.1, armR: 0.55, foreR: 1.35, armL: 0.65, foreL: 1.45 },
-  coil: { thigh: -2.05, calf: 1.9, foot: -0.5, thighL: -0.36, calfL: 0.62, spine: -0.3, armR: 0.2, foreR: 1.25, armL: 0.85, foreL: 1.45 },
-  strike: { thigh: -1.5, calf: 0.05, foot: -0.55, thighL: -0.12, calfL: 0.28, spine: -0.34, armR: -0.6, foreR: 0.7, armL: 0.85, foreL: 1.1 },
-  through: { thigh: -1.25, calf: 0.1, foot: -0.3, thighL: -0.05, calfL: 0.15, spine: -0.18, armR: -0.4, foreR: 0.8, armL: 0.6, foreL: 1.2 },
-  recoil: { thigh: -1.6, calf: 0.9, foot: -0.3, thighL: -0.2, calfL: 0.4, spine: -0.16, armR: 0.1, foreR: 1.1, armL: 0.7, foreL: 1.3 },
+type KickFrame = Pose & Omit<LegPose, 'weight'>;
+type KickStage = 'lift' | 'chamber' | 'coil' | 'strike' | 'through' | 'recoil';
+const kickFrame = (leg: Omit<LegPose, 'weight'>, body: Partial<Pose>): KickFrame => ({ ...restPose(), ...body, ...leg });
+const KICK_POSES: Record<KickStage, KickFrame> = {
+  lift: kickFrame({ hip: 0.9, knee: 1.15, ankle: 0.35 }, { thighL: -0.08, calfL: 0.16, spine: -0.04, armR: 0.3, foreR: 0.9, armL: 0.35, foreL: 1.0 }),
+  chamber: kickFrame({ hip: 2.0, knee: 1.6, ankle: 0.6 }, { thighL: -0.16, calfL: 0.32, spine: -0.12, armR: 0.55, foreR: 1.35, armL: 0.65, foreL: 1.45 }),
+  coil: kickFrame({ hip: 2.15, knee: 1.75, ankle: 0.7 }, { thighL: -0.2, calfL: 0.4, spine: -0.26, armR: 0.25, foreR: 1.25, armL: 0.8, foreL: 1.45 }),
+  strike: kickFrame({ hip: 1.7, knee: 0.05, ankle: 0.15 }, { thighL: -0.08, calfL: 0.16, spine: -0.32, armR: -0.55, foreR: 0.7, armL: 0.8, foreL: 1.1 }),
+  through: kickFrame({ hip: 1.55, knee: 0.1, ankle: 0.1 }, { thighL: -0.04, calfL: 0.08, spine: -0.18, armR: -0.4, foreR: 0.8, armL: 0.6, foreL: 1.2 }),
+  recoil: kickFrame({ hip: 1.65, knee: 1.4, ankle: 0.4 }, { thighL: -0.12, calfL: 0.24, spine: -0.15, armR: 0.1, foreR: 1.1, armL: 0.7, foreL: 1.3 }),
 };
-
 /**
- * Chute de arrombamento (chute frontal, de empurrar) com o clipe `kick` (a joelhada avançando da
- * UAL), em pontos do clipe (0 a 1): dá o passo e começa a subir o joelho até `load`; no slow o
- * joelho chega no peito (`chamber`, o clipe segura o joelho lá em cima até `after`) e volta até
- * `end`. Por cima do clipe: no recolher (`chamber`) o joelho sobe mais, o pé puxa a ponta para
- * cima e o tronco vai para trás; no golpe (`strike`) a perna estica reto para a frente, na altura
- * da fechadura, com a sola chapada na porta (~1,3 m à frente de onde ele estava) e o corpo atrás.
- * Quando a porta cede, a perna vai junto (`through`); quando aguenta, ela recolhe (`recoil`).
+ * A perna do chute parada como no `idle` (a de trás, um pouco atrás e com o joelho solto): é de
+ * onde a subida começa e onde a descida termina, para a troca entre o clipe e a pose não esticar
+ * a perna nem afundar o pé no chão.
  */
-const KICK_CLIP = { load: 0.3, chamber: 0.4, after: 0.45, end: 0.87 } as const;
-const KICK_LAYER: Record<'chamber' | 'strike' | 'through' | 'recoil', Partial<Pose>> = {
-  chamber: { thigh: -0.35, calf: 0.3, foot: -0.8, spine: -0.55 },
-  strike: { thigh: 0.45, calf: -2.2, foot: -1.0, spine: -0.9 },
-  through: { thigh: 0.55, calf: -2.3, foot: -0.8, spine: -0.4 },
-  recoil: { thigh: -0.15, calf: 0.15, foot: -0.5, spine: -0.45 },
-};
-/** Distância da porta para chutar: com o clipe ele avança; sem ele, a perna procedural alcança de perto. */
-const KICK_REACH = { clip: 1.65, pose: 1.05 } as const;
+const KICK_LEG_IDLE: Omit<LegPose, 'weight'> = { hip: -0.05, knee: 0.25, ankle: 0.3 };
+/** Distância da porta para chutar: a perna esticada, com o tranco do corpo, chega na folha. */
+const KICK_REACH = 1.15;
 
 /** Posição de largada de quem resistiu ao arrombamento: inclinado, joelhos dobrados, braços prontos. */
 const BOLT_STANCE: Pose = { thigh: -0.45, calf: 0.55, foot: 0.15, thighL: 0.22, calfL: 0.3, spine: 0.45, armR: -0.7, foreR: 1.3, armL: 0.8, foreL: 1.4 };
@@ -367,6 +393,15 @@ const PROP_CAM = {
 } as const;
 
 /**
+ * Dentro do avião (ver `HexBoard.enterPlaneCabin`): a câmera olha pela porta, quase na altura dos
+ * olhos, abaixo do teto da cabine (para o rádio preso nele aparecer). A porta abre em ~0,7 s.
+ */
+const CABIN_CAM = {
+  pitch: THREE.MathUtils.degToRad(10),
+  doorRate: 6,
+} as const;
+
+/**
  * Close-up no próprio tabuleiro (ver `HexBoard.closeUp`): `object` mira entre um objeto e o
  * agente (inspeção do móvel); `pair` enquadra o agente e outra pessoa em pé, de lado
  * (interrogatório). `insets` diz quanto da tela a papelada cobre (frações da altura, embaixo,
@@ -393,6 +428,8 @@ interface CloseUpView {
   frame: 'object' | 'pair' | 'prop';
   fit?: { w: number; h: number };
   insets: CloseUpInsets;
+  /** Inclinação própria (radianos); sem ela, a do enquadramento (ver `PROP_CAM`, `INSPECT_CAM`). */
+  pitch?: number;
   /** Pontos (mundo) que a câmera precisa enxergar: o agente e o objeto / a pessoa. */
   subjects: THREE.Vector3[];
   /** Estruturas em que a dupla está (o telhado já some; as paredes não esmaecem). */
@@ -467,6 +504,11 @@ export interface HexBoardCallbacks {
    * a arma), `other` no resto do móvel.
    */
   onPropTap?(part: 'item' | 'other'): void;
+  /**
+   * Toque dentro do avião (ver `enterPlaneCabin`): o id da peça tocada (o GPS, o rádio) ou
+   * `other` no resto da cabine.
+   */
+  onCabinTap?(part: string): void;
 }
 
 /**
@@ -520,6 +562,11 @@ export class HexBoard {
   private readonly wallMeshes: THREE.Object3D[] = [];
   /** Peças dos telhados, que esmaecem como as paredes enquanto o telhado está no lugar. */
   private readonly roofMeshes: { mesh: THREE.Object3D; roof: THREE.Object3D }[] = [];
+  /**
+   * Cópias do telhado e das paredes das estruturas na camada do contorno (ver `TargetOutline`):
+   * com o telhado no lugar, o alvo que ele (ou a parede) cobre fica sem contorno.
+   */
+  private readonly shellOccluders: { copy: THREE.Mesh; mesh: THREE.Object3D; roof: THREE.Object3D }[] = [];
   private treeFadeClock = 0;
   private occlusionClock = 0;
   /** Peças grandes de cenário (hangar, avião): somem fora do raio carregado. */
@@ -571,6 +618,11 @@ export class HexBoard {
     roll: 0,
   };
   private readonly cineAim = { point: new THREE.Vector3(), mix: 0, zoom: 1, yaw: 0, roll: 0 };
+  /**
+   * Garimpeiro em foco na cena do arrombamento (ver `focusBreakIn`): o que ficar entre a câmera
+   * e ele some de vez (paredes, telhado, móveis, outro cenário) enquanto durar.
+   */
+  private breakInFocus: string | null = null;
   /** Rolagem da câmera neste quadro (a cena da porta inclina para quem reage). */
   private cineRollNow = 0;
   /** Números de dano que sobem da porta ("−2"). */
@@ -586,6 +638,11 @@ export class HexBoard {
   /** Modelo do avião e da carga por hexágono: o que escurece quando pega fogo. */
   private planeModel?: THREE.Object3D;
   private readonly cargoModels = new Map<string, THREE.Object3D>();
+  /**
+   * Névoa dos cômodos (o quarto do Jô): some de vez quando a porta `door` abre ou um agente
+   * já está lá dentro; `amount` cai de 1 a 0 no desfazer.
+   */
+  private readonly roomFogs: { room: HexRect; door: string; fog: RoomFog; amount: number; clear: boolean }[] = [];
   /** Móveis com zoom (o quadro de chaves, o armário), por hexágono: ver `propCloseUp`. */
   private readonly props = new Map<string, PropInfo>();
   /** O móvel em zoom agora (os toques vão para `onPropTap`). */
@@ -594,6 +651,14 @@ export class HexBoard {
   private readonly glowing = new Set<PropInfo>();
   /** Peça sendo pega: sobe e some (ver `takePropItem`). */
   private taking: { info: PropInfo; t0: number; y: number } | null = null;
+  /**
+   * Interior do avião, montado só com alguém dentro (ver `enterPlaneCabin`): o grupo, as peças
+   * que se pegam (como as dos móveis, para o destaque e o "pegar") e quem entrou (some do tabuleiro).
+   */
+  private cabin: { group: THREE.Group; parts: Map<string, PropInfo>; agentId: string } | null = null;
+  /** Giro da porta da cabine do avião (atual e pedido; ver `setPlaneDoor`). */
+  private planeDoorAngle = 0;
+  private planeDoorGoal = 0;
   /** Personagens escondidos por taparem a vista do zoom no móvel. */
   private readonly propHidden = new Set<string>();
   /** Alvos da missão (queimar): um ícone de chama flutua sobre cada um até ele queimar. */
@@ -670,6 +735,8 @@ export class HexBoard {
   private activeId: string | null = null;
   /** Giro (rad, em volta de +Y) da câmera para ver de frente a porta ao lado do agente da vez. */
   private doorYaw = 0;
+  /** Trecho reto de parede de cada porta (chaves dos hexágonos), ver `doorRun`. */
+  private readonly doorRuns = new Map<string, Set<string>>();
   private focusId: string | null = null;
   private moving = false;
   private inputEnabled = true;
@@ -711,6 +778,13 @@ export class HexBoard {
   private ring: { target: THREE.Vector3; zoom: number; pitch: number } | null = null;
   private ringLast: { target: THREE.Vector3; zoom: number; pitch: number } | null = null;
   private ringBlend = 0;
+  /**
+   * Enquadramento de um grupo (o agente e o que ele vai queimar, ver `frameGroupOn`): por cima da
+   * câmera de jogo, que fica onde estava e volta ao sair. `groupLast` segura a saída da transição.
+   */
+  private group: { target: THREE.Vector3; zoom: number } | null = null;
+  private groupLast: { target: THREE.Vector3; zoom: number } | null = null;
+  private groupBlend = 0;
   private inspectLast: CloseUpView | null = null;
   private inspectBlend = 0;
   /** Deslocamento da vista neste quadro (px): a cena da porta empurra para o lado, o close-up para cima. */
@@ -1154,6 +1228,129 @@ export class HexBoard {
     this.taking = { info, t0: performance.now(), y: info.item.position.y };
   }
 
+  /** Carregar um save: a peça já pega some do móvel na hora, sem a animação de pegar. */
+  hidePropItem(hex: HexCoord): void {
+    const info = this.props.get(hexKey(hex));
+    if (!info) return;
+    this.unglow(info);
+    info.item.visible = false;
+  }
+
+  // ---------- dentro do avião ----------
+
+  /**
+   * Abre (ou fecha) a porta da cabine do avião: gira na dobradiça da frente, para fora. Com
+   * `instant` (ou "menos movimento"), vai direto.
+   */
+  setPlaneDoor(open: boolean, instant = false): void {
+    this.planeDoorGoal = open ? PLANE_DOOR_OPEN : 0;
+    if (instant || reducedMotionQuery()) this.planeDoorAngle = this.planeDoorGoal;
+    this.posePlaneDoor();
+  }
+
+  private updatePlaneDoor(dt: number): void {
+    const diff = this.planeDoorGoal - this.planeDoorAngle;
+    if (diff === 0) return;
+    this.planeDoorAngle = Math.abs(diff) < 1e-3 ? this.planeDoorGoal : this.planeDoorAngle + diff * (1 - Math.exp(-dt * CABIN_CAM.doorRate));
+    this.posePlaneDoor();
+  }
+
+  private posePlaneDoor(): void {
+    const door = this.planeModel?.getObjectByName(PLANE_DOOR);
+    if (door) door.rotation.y = this.planeDoorAngle;
+  }
+
+  /** Se há alguém dentro do avião (o interior está montado). */
+  get inCabin(): boolean {
+    return !!this.cabin;
+  }
+
+  /**
+   * Entra no avião: só agora o interior é montado (`buildPlaneInterior`, sem as peças de `taken`),
+   * no lugar do avião, que some por fora enquanto durar; o agente `agentId` também some (está lá
+   * dentro). A câmera trava olhando pela porta, como no zoom de um móvel (`insets`: o que a
+   * papelada cobre); os toques na cabine vão para `onCabinTap`. Devolve `false` sem avião.
+   */
+  enterPlaneCabin(agentId: string, taken: ReadonlySet<string>, insets: CloseUpInsets = { bottom: 0, right: 0 }): boolean {
+    const pl = this.planeModel;
+    const u = this.units.get(agentId);
+    if (!pl || !u) return false;
+    this.leavePlaneCabin();
+    pl.updateWorldMatrix(true, false);
+    const at = new THREE.Vector3().setFromMatrixPosition(pl.matrixWorld);
+    const group = buildPlaneInterior(CABIN_GPS, CABIN_RADIO, taken);
+    group.position.set(at.x, this.groundAt(at.x, at.z), at.z);
+    this.scene.add(group);
+    group.updateWorldMatrix(true, true);
+    const info = group.userData['cabin'] as CabinInfo;
+    const parts = new Map<string, PropInfo>();
+    for (const [id, p] of info.items) parts.set(id, { facing: info.facing, focus: info.focus, ...p });
+    this.cabin = { group, parts, agentId };
+    pl.visible = false;
+    const box = info.focus.clone().applyMatrix4(group.matrixWorld);
+    const center = box.getCenter(new THREE.Vector3());
+    const size = box.getSize(new THREE.Vector3());
+    const dir = info.facing.clone().transformDirection(group.matrixWorld).setY(0).normalize();
+    const side = new THREE.Vector3(-dir.z, 0, dir.x);
+    this.inspect = {
+      target: center,
+      dir,
+      frame: 'prop',
+      fit: { w: Math.abs(size.x * side.x) + Math.abs(size.z * side.z), h: size.y },
+      insets,
+      pitch: CABIN_CAM.pitch,
+      subjects: [center],
+      rooms: new Set(this.structures.filter((st) => inStructure(u.hex, st.rect)).map((st) => st.object)),
+      hideOccluders: true,
+    };
+    this.propOpen = null;
+    this.occlusionClock = 0;
+    this.inspectLast = this.inspect;
+    if (reducedMotionQuery()) this.inspectBlend = 1;
+    this.pointers.clear();
+    this.tapStart = null;
+    this.pinchDist = 0;
+    return true;
+  }
+
+  /** Liga (ou apaga) o destaque das peças que ainda estão na cabine. */
+  setCabinHighlight(on: boolean): void {
+    for (const info of this.cabin?.parts.values() ?? []) {
+      info.glow.visible = on && info.item.visible;
+      if (info.glow.visible) this.glowing.add(info);
+      else this.unglow(info);
+    }
+  }
+
+  /** Pegou a peça `id` da cabine: sobe um pouco, encolhe e some (como a dos móveis). */
+  takeCabinItem(id: string): void {
+    const info = this.cabin?.parts.get(id);
+    if (!info || !info.item.visible) return;
+    if (this.taking) this.finishTaking();
+    this.unglow(info);
+    if (reducedMotionQuery()) {
+      info.item.visible = false;
+      return;
+    }
+    this.taking = { info, t0: performance.now(), y: info.item.position.y };
+  }
+
+  /**
+   * Sai do avião: o interior é desmontado e descartado, o avião e o agente voltam a aparecer e a
+   * câmera volta, suave, para a de sempre. A porta continua como está (ver `setPlaneDoor`).
+   */
+  leavePlaneCabin(): void {
+    const c = this.cabin;
+    if (!c) return;
+    if (this.taking && [...c.parts.values()].includes(this.taking.info)) this.finishTaking();
+    for (const info of c.parts.values()) this.unglow(info);
+    this.cabin = null;
+    this.scene.remove(c.group);
+    disposeModel(c.group);
+    if (this.planeModel) this.planeModel.visible = true;
+    this.endCloseUp();
+  }
+
   /** Recomeço: as peças voltam para os móveis, sem destaque. */
   resetProps(): void {
     this.finishTaking();
@@ -1282,6 +1479,33 @@ export class HexBoard {
     if (reducedMotionQuery()) this.ringBlend = 1;
   }
 
+  /**
+   * Aproxima suave até os hexágonos (o agente e o que ele vai queimar) caberem juntos no meio
+   * da tela, com folga (a conta está em `group-frame.ts`). A câmera de jogo fica onde estava:
+   * `null` volta para ela, também suave. Enquanto durar, arrastar e dar zoom não mexem na câmera.
+   */
+  frameGroupOn(hexes: readonly HexCoord[] | null): void {
+    if (!hexes?.length || this.inspect || this.intro) {
+      if (this.group) this.groupLast = this.group;
+      this.group = null;
+      return;
+    }
+    const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
+    const f = frameGroup(
+      hexes.map((h) => this.worldOf(h)),
+      {
+        fovDeg: this.camera.fov,
+        aspect: this.camera.aspect,
+        pitchDeg: this.pitchDeg,
+        distPerZoom: 11.5 * Math.min(portrait, 2.3),
+        lead: this.camera.aspect < 1 ? 1.4 : 0.3,
+      },
+    );
+    if (!f) return;
+    this.group = { target: new THREE.Vector3(f.x, 0, f.z), zoom: f.zoom };
+    if (reducedMotionQuery()) this.groupBlend = 1;
+  }
+
   /** Desloca a câmera só o necessário para o hexágono ficar longe das bordas da tela. */
   keepInView(hex: HexCoord): void {
     if (this.inspect || this.intro) return;
@@ -1296,7 +1520,7 @@ export class HexBoard {
 
   /** Arrasta a câmera (em unidades de tela: x direita, y baixo), proporcional ao zoom. */
   panBy(dx: number, dy: number): void {
-    if (this.inspect || this.intro || this.ring) return;
+    if (this.inspect || this.intro || this.ring || this.group) return;
     this.camGoal.x += dx * this.zoom;
     this.camGoal.z += dy * this.zoom * 1.3;
     this.clampGoal();
@@ -1304,7 +1528,7 @@ export class HexBoard {
 
   /** Aproxima (< 1) ou afasta (> 1) a câmera. */
   zoomBy(factor: number): void {
-    if (this.inspect || this.intro || this.ring) return;
+    if (this.inspect || this.intro || this.ring || this.group) return;
     this.setZoom(this.zoom * factor);
   }
 
@@ -1633,6 +1857,17 @@ export class HexBoard {
   setDoors(doors: ReadonlyMap<string, Door>, instant = false): void {
     this.doorViews?.setStates(doors, instant);
     this.doorStates = doors;
+    // a porta do cômodo com névoa abriu: a névoa se desfaz (e não volta). Sem animação (a
+    // partida recomeçou, um caso de teste carregou), a névoa segue a porta como ela está
+    for (const f of this.roomFogs) {
+      const door = doors.get(f.door);
+      const open = !!door && isOpen(door);
+      if (instant) {
+        f.clear = open;
+        f.amount = open ? 0 : 1;
+        f.fog.update(0, f.amount);
+      } else if (open) f.clear = true;
+    }
     this.refreshCover();
     // abrir ou fechar uma porta muda o que se vê da estrutura: reavalia no próximo quadro
     this.structureKey = '';
@@ -1692,6 +1927,7 @@ export class HexBoard {
   /** Volta para a câmera de sempre. */
   releaseDoorFocus(): void {
     this.cine = null;
+    this.breakInFocus = null;
     this.resetCineAim();
   }
 
@@ -1719,6 +1955,25 @@ export class HexBoard {
     const side = Math.sign(to.dot(right)) || 1;
     const zoom = THREE.MathUtils.clamp(0.8 + to.length() * 0.05, 0.85, 1.2);
     this.cineAimGoal = { point: p, mix: 0.55, zoom, yaw: -side * 0.13, roll: -side * 0.05 };
+  }
+
+  /**
+   * Cena de quem reage ao arrombamento: a câmera da porta fecha no garimpeiro `enemyId`, com ele
+   * no centro e uma inclinação de leve para o lado dele, e tudo o que ficar entre a câmera e
+   * ele (paredes, telhado, móveis, outro cenário) some enquanto durar. `null` encerra: o
+   * cenário volta e a câmera fica onde está até `resetCineAim`.
+   */
+  focusBreakIn(enemyId: string | null): void {
+    const e = enemyId ? this.enemies.get(enemyId) : undefined;
+    this.breakInFocus = e ? enemyId : null;
+    this.occlusionClock = 0;
+    const c = this.cine;
+    if (!e || !c) return;
+    const p = e.group.position.clone().setY(this.groundAt(e.group.position.x, e.group.position.z) + 1.2);
+    const right = new THREE.Vector3(c.dir.z, 0, -c.dir.x);
+    const side = Math.sign(p.clone().sub(c.target).setY(0).dot(right)) || 1;
+    const s = BREAK_IN_SCENE;
+    this.cineAimGoal = { point: p, mix: 1, zoom: s.zoom, yaw: -side * s.yaw, roll: -side * s.roll };
   }
 
   /** Desfaz o zoom na porta e a inclinação: volta ao enquadramento do menu da porta. */
@@ -1848,19 +2103,20 @@ export class HexBoard {
     u.rig?.play(down ? 'crouch' : this.restClip(u), down ? 0.35 : 0.45);
   }
 
-  /**
-   * Chutão na porta: o agente planta o pé de apoio e recolhe o joelho no peito; aí a cena entra
-   * em slow (`onSlow` roda nessa hora: é quando a tela gira o d20) e ele segura o golpe inclinado
-   * para trás enquanto a promessa de `onSlow` não termina. Quando ela termina, o slow acaba no
-   * gesto e a sola do pé bate na porta em velocidade cheia (`onImpact`). `through` diz se a porta
-   * cede (a perna e o corpo vão junto) ou aguenta (o pé volta). A biblioteca de clipes não tem
-   * chute: as poses são feitas à mão por cima do `idle` (ver `KICK_POSES`).
-   */
   /** De quão longe da porta o agente chuta (ver `KICK_REACH`). */
-  kickReach(unitId: string): number {
-    return this.units.get(unitId)?.rig?.has('kick') ? KICK_REACH.clip : KICK_REACH.pose;
+  kickReach(_unitId: string): number {
+    return KICK_REACH;
   }
 
+  /**
+   * Chutão na porta (ver `KICK_POSES`): do repouso o joelho sobe direto até o peito, com o pé
+   * puxado para cima; no meio do gesto a cena entra em slow (`onSlow` roda nessa hora: é quando a
+   * tela gira o d20) e ele segura o joelho lá em cima, com o corpo atrás, enquanto a promessa de
+   * `onSlow` não termina. Quando ela termina, o slow acaba no gesto e a perna estica: a sola do pé
+   * bate na porta em velocidade cheia (`onImpact`, uma vez só). `through` diz se a porta cede (a
+   * perna e o corpo vão junto) ou aguenta (a perna recolhe). Tudo por cima do `idle`, sem o clipe
+   * `kick`: a perna do chute só segue as poses, sem outro movimento misturado.
+   */
   async kick(
     unitId: string,
     opts: { onSlow?: () => Promise<void> | void; onImpact: () => void; through?: boolean },
@@ -1870,9 +2126,21 @@ export class HexBoard {
       await opts.onSlow?.();
       return opts.onImpact();
     }
-    if (u.rig?.has('kick')) return this.kickClip(u, u.rig, opts);
     const pose = u.rig?.pose ?? restPose();
-    const rest = restPose();
+    const leg = u.rig?.leg ?? restLeg();
+    const rest: KickFrame = { ...restPose(), ...KICK_LEG_IDLE };
+    const cur: KickFrame = { ...rest };
+    // escreve a mistura de `a` e `b` no corpo (camada local) e na perna do chute
+    const mix = (a: KickFrame, b: KickFrame, t: number) => {
+      for (const k in cur) {
+        const key = k as keyof KickFrame;
+        cur[key] = a[key] + (b[key] - a[key]) * t;
+      }
+      for (const k in pose) pose[k as keyof Pose] = cur[k as keyof Pose];
+      leg.hip = cur.hip;
+      leg.knee = cur.knee;
+      leg.ankle = cur.ankle;
+    };
     const pos = u.group.position;
     const fwd = new THREE.Vector3(Math.sin(u.yaw), 0, Math.cos(u.yaw));
     const start = pos.clone();
@@ -1882,24 +2150,28 @@ export class HexBoard {
     };
     const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
     const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
+    const lerp = THREE.MathUtils.lerp;
     const P = KICK_POSES;
-    // o golpe é montado por cima do `idle`: quem estava agachado na cobertura levanta para chutar
+    // a perna fica só com as poses: quem estava agachado na cobertura (ou andando) volta ao `idle`
     u.rig?.play('idle', 0.15);
     try {
-      // 1. recolhe o joelho (sem modelo, a peça só dá o tranco para a frente no impacto)
-      const slow: { held?: Promise<void> } = {};
-      await this.sceneTween(300, (t) => {
-        mixPose(pose, rest, P.chamber, easeOut(t));
-        u.hop = -0.08 * easeOut(t);
-        lunge(-0.05 * easeOut(t));
+      // 1. o pé sai do chão e o joelho sobe direto até o peito (passando por `lift`, sem recuar);
+      // a perna sai do `idle` para a pose logo no começo da subida
+      let held: Promise<void> | undefined;
+      await this.sceneTween(340, (t) => {
+        const e = easeOut(t);
+        if (e < 0.45) mix(rest, P.lift, e / 0.45);
+        else mix(P.lift, P.chamber, (e - 0.45) / 0.55);
+        leg.weight = easeOut(Math.min(1, t / 0.2));
+        u.hop = -0.03 * e;
         // no meio do gesto a cena desacelera e a tela rola o d20
-        if (!slow.held && t >= 0.45 && opts.onSlow) {
+        if (!held && t >= 0.45 && opts.onSlow) {
           this.setSceneSlowmo(true);
-          slow.held = Promise.resolve(opts.onSlow());
+          held = Promise.resolve(opts.onSlow());
         }
       });
-      // 2. segura o golpe no slow até o d20 parar: o joelho sobe mais, o corpo pende para trás
-      const held = slow.held;
+      leg.weight = 1;
+      // 2. segura o joelho no peito no slow até o d20 parar: sobe mais um pouco, o corpo pende para trás
       if (held) {
         let done = false;
         void held.then(() => (done = true));
@@ -1908,11 +2180,10 @@ export class HexBoard {
           const step = (now: number) => {
             if (this.disposed || done) return resolve();
             const p = Math.min(1, (now - t0) / 900);
-            mixPose(pose, P.chamber, P.coil, easeInOut(p));
+            mix(P.chamber, P.coil, easeInOut(p));
             // tremidinha de quem está com a perna no ar, carregando o golpe
-            pose.thighL += Math.sin(now / 55) * 0.015 * p;
-            u.hop = -0.08 - 0.02 * p;
-            lunge(-0.05 - 0.04 * p);
+            pose.thighL += Math.sin(now / 55) * 0.012 * p;
+            u.hop = -0.03 - 0.01 * p;
             requestAnimationFrame(step);
           };
           requestAnimationFrame(step);
@@ -1920,130 +2191,41 @@ export class HexBoard {
         await held;
         this.setSceneSlowmo(false);
       }
-      const from = { ...pose };
-      const back = -0.05 - (held ? 0.04 : 0);
-      // 3. solta a perna na porta, rápido, com o corpo atrás
-      await this.tween(95, (t) => {
+      // 3. a perna estica reto para a frente, rápido, e a sola bate na porta com o corpo atrás
+      const from = { ...cur };
+      const hop0 = u.hop;
+      await this.tween(110, (t) => {
         const e = t * t;
-        mixPose(pose, from, P.strike, e);
-        u.hop = THREE.MathUtils.lerp(held ? -0.1 : -0.08, -0.04, e);
-        lunge(THREE.MathUtils.lerp(back, 0.16, e));
+        mix(from, P.strike, e);
+        u.hop = lerp(hop0, -0.02, e);
+        lunge(0.12 * e);
       });
       opts.onImpact();
-      // 4. a porta cede (a perna atravessa) ou aguenta (o pé volta, o corpo recua)
-      await this.tween(170, (t) => {
+      // 4. a porta cede (a perna atravessa) ou aguenta (a perna recolhe, o corpo volta)
+      const hit = opts.through ? P.through : P.recoil;
+      await this.tween(180, (t) => {
         const e = easeOut(t);
-        mixPose(pose, P.strike, opts.through ? P.through : P.recoil, e);
-        lunge(opts.through ? 0.16 + 0.16 * e : 0.16 - 0.14 * e);
+        mix(P.strike, hit, e);
+        lunge(opts.through ? 0.12 + 0.2 * e : 0.12 * (1 - e));
       });
-      // 5. volta à base
-      const end = { ...pose };
-      const endAt = opts.through ? 0.32 : 0.02;
+      // 5. o pé desce e volta à base (a perna devolvida ao `idle` no fim da descida)
+      const end = { ...cur };
+      const endAt = opts.through ? 0.32 : 0;
       const hop = u.hop;
       await this.tween(420, (t) => {
         const e = easeInOut(t);
-        mixPose(pose, end, rest, e);
+        mix(end, rest, e);
+        leg.weight = 1 - easeInOut(Math.max(0, (t - 0.4) / 0.6));
         u.hop = hop * (1 - e);
         lunge(endAt * (1 - e));
       });
     } finally {
       this.setSceneSlowmo(false);
-      mixPose(pose, rest, rest, 1);
+      Object.assign(pose, restPose());
+      Object.assign(leg, restLeg());
       u.hop = 0;
       lunge(0);
       u.rig?.play(this.restClip(u), 0.3);
-    }
-  }
-
-  /**
-   * O chute com o clipe `kick`: dá o passo e sobe o joelho no tempo normal; perto do fim a cena
-   * entra em slow e o joelho chega devagar no peito, com o pé puxado e o corpo para trás, enquanto
-   * `onSlow` não termina (o d20 rolando); aí o slow acaba e, em velocidade cheia, a perna estica
-   * reto e a sola bate chapada na porta (`onImpact`).
-   */
-  private async kickClip(
-    u: UnitView,
-    rig: CharacterRig,
-    opts: { onSlow?: () => Promise<void> | void; onImpact: () => void; through?: boolean },
-  ): Promise<void> {
-    const C = KICK_CLIP;
-    const pose = rig.pose;
-    const rest = restPose();
-    const layer = (p: Partial<Pose>): Pose => ({ ...rest, ...p });
-    const easeOut = (t: number) => 1 - (1 - t) * (1 - t);
-    const easeInOut = (t: number) => (t < 0.5 ? 2 * t * t : 1 - (-2 * t + 2) ** 2 / 2);
-    const lerp = THREE.MathUtils.lerp;
-    try {
-      mixPose(pose, rest, rest, 1);
-      rig.scrub('kick', 0, 0.15);
-      const chamber = layer(KICK_LAYER.chamber);
-      const strike = layer(KICK_LAYER.strike);
-      // quanto do recolher já entrou (0 a 1), pelo ponto do clipe
-      const chambered = (at: number) => THREE.MathUtils.clamp((at - C.load) / (C.chamber - C.load), 0, 1);
-      // 1. dá o passo de apoio e começa a subir o joelho (no tempo da cena)
-      let slowed = false;
-      await this.sceneTween(320, (t) => {
-        rig.scrub('kick', C.load * easeOut(t));
-        if (!slowed && t >= 0.7 && opts.onSlow) {
-          slowed = true;
-          this.setSceneSlowmo(true);
-        }
-      });
-      // 2. slow: o joelho chega devagar no peito (pé puxado, corpo para trás) enquanto o d20 rola
-      let at = C.load;
-      if (opts.onSlow) {
-        let done = false;
-        const held = Promise.resolve(opts.onSlow()).then(() => (done = true));
-        let last = performance.now();
-        await new Promise<void>((resolve) => {
-          const step = (now: number) => {
-            if (this.disposed || done) return resolve();
-            const dt = (now - last) / 1000;
-            last = now;
-            at += (C.chamber - at) * (1 - Math.exp(-dt * 1.6));
-            rig.scrub('kick', at);
-            mixPose(pose, rest, chamber, easeInOut(chambered(at)));
-            requestAnimationFrame(step);
-          };
-          requestAnimationFrame(step);
-        });
-        await held;
-        this.setSceneSlowmo(false);
-      }
-      // 3. sai do slow no gesto: termina de recolher (rápido, se o d20 não deu tempo)...
-      const from = at;
-      const left = 1 - chambered(from);
-      if (left > 0.05) {
-        const start = { ...pose };
-        await this.tween(140 * left, (t) => {
-          const e = easeOut(t);
-          rig.scrub('kick', lerp(from, C.chamber, e));
-          mixPose(pose, start, chamber, e);
-        });
-      }
-      // ...e explode a perna reto para a frente: a sola bate chapada na porta, o corpo atrás
-      const strikeAt = lerp(C.chamber, C.after, 0.4);
-      await this.tween(100, (t) => {
-        const e = t * t;
-        rig.scrub('kick', lerp(C.chamber, strikeAt, e));
-        mixPose(pose, chamber, strike, e);
-      });
-      opts.onImpact();
-      // 4. a porta cede (a perna vai junto) ou aguenta (a perna recolhe)
-      const hit = opts.through ? layer(KICK_LAYER.through) : layer(KICK_LAYER.recoil);
-      await this.tween(180, (t) => {
-        rig.scrub('kick', lerp(strikeAt, C.after, t));
-        mixPose(pose, strike, hit, easeOut(t));
-      });
-      // 5. volta para o lugar
-      await this.tween(480, (t) => {
-        rig.scrub('kick', lerp(C.after, C.end, t));
-        mixPose(pose, hit, rest, easeInOut(Math.min(1, t * 1.6)));
-      });
-    } finally {
-      this.setSceneSlowmo(false);
-      mixPose(pose, rest, rest, 1);
-      rig.play(this.restClip(u), 0.25);
     }
   }
 
@@ -2604,6 +2786,7 @@ export class HexBoard {
       if (Array.isArray(mat)) mat.forEach((m) => m.dispose());
       else mat?.dispose();
     });
+    for (const f of this.roomFogs) f.fog.dispose();
     this.staticShadow.dispose();
     this.auraTextures.fill.dispose();
     this.auraTextures.fade.dispose();
@@ -2838,7 +3021,7 @@ export class HexBoard {
     const wallKeys = new Set(walls.map(hexKey));
     const doorKeys = new Set((this.map.doors ?? []).map(hexKey));
     const split = new Set<string>();
-    for (const { kind, rect, windows } of this.map.structures ?? []) {
+    for (const { kind, rect, windows, fog } of this.map.structures ?? []) {
       const built = kind === 'hangar' ? buildHangar(rect, wallKeys, HEX_SIZE) : buildHouse(rect, wallKeys, HEX_SIZE, doorKeys, windows);
       if (kind === 'house') {
         const nodes = [...walls, ...(this.map.doors ?? [])].filter((h) => inStructure(h, rect));
@@ -2847,16 +3030,44 @@ export class HexBoard {
       const roof = built.getObjectByName(kind === 'hangar' ? HANGAR_ROOF : HOUSE_ROOF);
       const lamps = built.getObjectByName(HANGAR_INTERIOR);
       this.structures.push({ kind, rect, doors: doorsOf(this.map, rect), object: built, roof, interior: lamps ? [lamps] : [] });
+      const shell: THREE.Mesh[] = [];
       roof?.traverse((o) => {
-        if ((o as THREE.Mesh).isMesh) this.roofMeshes.push({ mesh: o, roof });
+        if (!(o as THREE.Mesh).isMesh) return;
+        this.roofMeshes.push({ mesh: o, roof });
+        shell.push(o as THREE.Mesh);
       });
       for (const child of built.children) {
         if (child === roof || child === lamps) continue;
         child.traverse((o) => {
-          if ((o as THREE.Mesh).isMesh) this.wallMeshes.push(o);
+          if (!(o as THREE.Mesh).isMesh) return;
+          this.wallMeshes.push(o);
+          shell.push(o as THREE.Mesh);
         });
       }
+      // cópias que tapam o contorno enquanto o telhado está no lugar (filhas das peças)
+      for (const mesh of roof ? shell : []) {
+        const copy = new THREE.Mesh(mesh.geometry, this.targetOutline.occluder);
+        copy.layers.set(OUTLINE_LAYER);
+        copy.castShadow = copy.receiveShadow = false;
+        // antes dos alvos na máscara: a profundidade já está lá quando eles são desenhados
+        copy.renderOrder = -10;
+        copy.userData['outline'] = true;
+        mesh.add(copy);
+        this.shellOccluders.push({ copy, mesh, roof: roof! });
+      }
       this.addScenery(built);
+      // névoa dos cômodos: fica no interior (some com o telhado no lugar), fora do cenário
+      // (não esmaece com as paredes nem entra no corte do raio carregado)
+      const st = this.structures[this.structures.length - 1];
+      for (const { room, door } of fog ?? []) {
+        const roomFog = buildRoomFog(room, HEX_SIZE);
+        this.scene.add(roomFog.group);
+        st.interior.push(roomFog.group);
+        const state = this.doorStates.get(hexKey(door));
+        const clear = !!state && isOpen(state);
+        this.roomFogs.push({ room, door: hexKey(door), fog: roomFog, amount: clear ? 0 : 1, clear });
+        roomFog.update(0, clear ? 0 : 1);
+      }
     }
     const common = commonDoors(this.map.doors ?? []);
     if (common.length && this.structures.length) {
@@ -2935,12 +3146,41 @@ export class HexBoard {
     return done;
   }
 
-  /** Carga do hangar (cobertura) e decoração solta; cada peça sobe junto com o seu hexágono. */
+  /**
+   * Carga do hangar (cobertura) e decoração solta; cada peça sobe junto com o seu hexágono.
+   * Uma coluna de hexágonos de mesa seguidos vira uma mesa comprida só, presa ao primeiro deles.
+   */
   private buildCargo(): void {
+    const kindAt = new Map((this.map.cover ?? []).map((c) => [hexKey(c), c.kind]));
+    const isTable = (col: number, row: number) => kindAt.get(hexKey({ col, row })) === 'table';
+    const tables = new Map<string, THREE.Object3D>();
     for (const c of this.map.cover ?? []) {
       const tile = this.tiles.get(hexKey(c));
       if (!tile) continue;
       tile.baseColor.set(0xa8987a);
+      if (c.kind === 'table') {
+        // o resto da mesa comprida: o modelo é o do primeiro hexágono da coluna
+        if (isTable(c.col, c.row - 1)) {
+          let row = c.row - 1;
+          while (isTable(c.col, row - 1)) row--;
+          const table = tables.get(hexKey({ col: c.col, row }));
+          if (table) this.cargoModels.set(hexKey(c), table);
+          continue;
+        }
+        let n = 1;
+        while (isTable(c.col, c.row + n)) n++;
+        const step = (HEX_STEP * HEX_SIZE) / METER;
+        // o prato fica na frente do hexágono a oeste do meio da mesa (onde o caseiro senta)
+        const mid = this.worldOf({ col: c.col, row: c.row + (n - 1) / 2 });
+        const seat = (this.worldOf({ col: c.col - 1, row: c.row + Math.floor((n - 1) / 2) }).z - mid.z) / METER;
+        const table = buildDiningTable(Math.max(1.25, n * 0.75 * step), n > 1 ? seat : 0);
+        table.position.z = ((n - 1) / 2) * HEX_STEP * HEX_SIZE;
+        const holder = new THREE.Group().add(table);
+        tables.set(hexKey(c), holder);
+        this.cargoModels.set(hexKey(c), holder);
+        this.field.attach(tile, this.housed(c, holder));
+        continue;
+      }
       const model = buildCover(c.kind, c.col * 31 + c.row * 17, c.col);
       this.cargoModels.set(hexKey(c), model);
       const prop = model.userData['prop'] as PropInfo | undefined;
@@ -3074,6 +3314,12 @@ export class HexBoard {
     if (key === this.structureKey) return;
     this.structureKey = key;
     const agents = [...this.units.values()].map((u) => u.hex);
+    // agente já dentro do cômodo com névoa (começou lá, por exemplo): sem névoa
+    for (const f of this.roomFogs) {
+      if (f.clear || !agents.some((a) => inStructure(a, f.room))) continue;
+      f.clear = true;
+      f.amount = 0;
+    }
     for (const st of this.structures) {
       const view = structureView(st.rect, agents, this.seeThrough(st.doors));
       if (st.roof) st.roof.visible = view.roof;
@@ -4213,11 +4459,14 @@ export class HexBoard {
   private updateOccluders(dt: number): void {
     const v = this.inspect;
     const closeUp = !!v?.hideOccluders && this.inspectBlend >= 0.3;
+    // cena do arrombamento: o que tapa o garimpeiro em foco some de vez, como no close-up
+    const focus = !v && this.breakInFocus ? this.enemies.get(this.breakInFocus) : undefined;
+    const hiding = closeUp || !!focus;
     if (closeUp || !v) {
       this.occlusionClock -= dt;
       if (this.occlusionClock <= 0) {
         this.occlusionClock = 0.1;
-        const blockers = closeUp ? this.sceneryBlockers(v!) : this.wallBlockers();
+        const blockers = closeUp ? this.sceneryBlockers(v!) : focus ? this.focusBlockers(focus) : this.wallBlockers();
         for (const o of blockers) {
           if (!this.occluders.has(o)) this.occluders.set(o, this.fadeEntry(o));
         }
@@ -4229,7 +4478,7 @@ export class HexBoard {
     if (!this.occluders.size) return;
 
     // no close-up o que tapa some de vez; na vista normal a parede fica translúcida
-    const floor = closeUp ? 0 : WALL_FADE_ALPHA;
+    const floor = hiding ? 0 : WALL_FADE_ALPHA;
     const k = 1 - Math.exp(-dt * 9);
     for (const [o, e] of this.occluders) {
       e.alpha += ((e.hide ? floor : 1) - e.alpha) * k;
@@ -4267,6 +4516,39 @@ export class HexBoard {
     }
     this.raycaster.far = Infinity;
     return blockers;
+  }
+
+  /**
+   * Cena do arrombamento: o que fica entre a câmera e o garimpeiro em foco (pés, peito e
+   * cabeça): paredes e telhado das estruturas (só as peças que tapam), móveis e carga, e o
+   * resto do cenário (o avião, por exemplo).
+   */
+  private focusBlockers(e: EnemyView): Set<THREE.Object3D> {
+    const base = e.group.position;
+    const ground = this.groundAt(base.x, base.z);
+    const points = BREAK_IN_SCENE.bodyHeights.map((h) => base.clone().setY(ground + h));
+    const candidates = new Set<THREE.Object3D>(this.wallMeshes);
+    for (const r of this.roofMeshes) if (r.roof.visible) candidates.add(r.mesh);
+    // móveis do raio carregado (os de fora não estão sendo desenhados)
+    for (const m of this.cargoModels.values()) if (this.drawnAbove(m)) candidates.add(m);
+    // as estruturas entram peça por peça (paredes e telhado, acima), nunca inteiras: assim a
+    // casa em que ele está fica de pé e nenhuma peça esmaece duas vezes (dentro e fora do grupo)
+    const shells = new Set(this.structures.map((st) => st.object));
+    for (const sc of this.scenery) {
+      if (shells.has(sc.object)) continue;
+      if (!sc.object.visible && !this.occluders.has(sc.object)) continue;
+      candidates.add(sc.object);
+    }
+    return viewBlockers(this.camera.position, points, candidates, {
+      shown: (hit, root) => this.shownUnder(hit, root),
+    });
+  }
+
+  /** Os pais da peça (acima dela) estão todos à mostra: ela está na cena desenhada. */
+  private drawnAbove(object: THREE.Object3D): boolean {
+    if (!object.parent) return false;
+    for (let o: THREE.Object3D | null = object.parent; o; o = o.parent) if (!o.visible) return false;
+    return true;
   }
 
   /**
@@ -4370,6 +4652,12 @@ export class HexBoard {
     return true;
   }
 
+  /** A peça (ou um pai dela) está esmaecida, mais transparente que opaca (ver `updateOccluders`). */
+  private fadedOut(object: THREE.Object3D): boolean {
+    for (let o: THREE.Object3D | null = object; o; o = o.parent) if ((this.occluders.get(o)?.alpha ?? 1) <= 0.5) return true;
+    return false;
+  }
+
   /** Fim do fade: materiais originais de volta, cópias descartadas, visível conforme o raio carregado. */
   private releaseFade(object: THREE.Object3D): void {
     const e = this.occluders.get(object);
@@ -4388,7 +4676,8 @@ export class HexBoard {
     const meshes: OccluderFade['meshes'] = [];
     object.traverse((o) => {
       const mesh = o as THREE.Mesh;
-      if (!mesh.isMesh) return;
+      // as cópias do contorno (camada própria) ficam como estão
+      if (!mesh.isMesh || mesh.userData['outline']) return;
       const original = mesh.material;
       const base = new Map<THREE.Material, number>();
       const clone = (m: THREE.Material): THREE.Material => {
@@ -4446,7 +4735,7 @@ export class HexBoard {
       const portrait = this.camera.aspect < 1 ? 1 / Math.max(this.camera.aspect, 0.45) : 1;
       near = c.dist * Math.min(portrait, c.portraitMax);
     }
-    const pitch = v.frame === 'prop' ? PROP_CAM.pitch : c.pitch;
+    const pitch = v.pitch ?? (v.frame === 'prop' ? PROP_CAM.pitch : c.pitch);
     const pos = v.target
       .clone()
       .addScaledVector(v.dir, Math.cos(pitch) * near)
@@ -4464,6 +4753,18 @@ export class HexBoard {
     const k = 1 - Math.exp(-dt * 6);
     this.stepIntro();
     this.camTarget.lerp(this.camGoal, k);
+    // enquadramento de um grupo (ver `frameGroupOn`): mistura com a câmera de jogo
+    const gGoal = this.group ? 1 : 0;
+    this.groupBlend += (gGoal - this.groupBlend) * (1 - Math.exp(-dt * GROUP_VIEW_RATE));
+    if (Math.abs(gGoal - this.groupBlend) < 0.002) this.groupBlend = gGoal;
+    const g = this.group ?? this.groupLast;
+    let base = this.camTarget;
+    let baseZoom = this.zoom;
+    if (g && this.groupBlend > 0) {
+      const e = easeInOutCubic(this.groupBlend);
+      base = new THREE.Vector3().lerpVectors(this.camTarget, g.target, e);
+      baseZoom = THREE.MathUtils.lerp(this.zoom, g.zoom, e);
+    } else this.groupLast = null;
     // vista do tablet de abordagem (ver `frameRing`): mistura os parâmetros, não as posições
     const goal = this.ring ? 1 : 0;
     this.ringBlend += (goal - this.ringBlend) * (1 - Math.exp(-dt * RING_VIEW.rate));
@@ -4472,8 +4773,8 @@ export class HexBoard {
     if (v && this.ringBlend > 0) {
       const e = easeInOutCubic(this.ringBlend);
       return this.placePerspective(
-        new THREE.Vector3().lerpVectors(this.camTarget, v.target, e),
-        THREE.MathUtils.lerp(this.zoom, v.zoom, e),
+        new THREE.Vector3().lerpVectors(base, v.target, e),
+        THREE.MathUtils.lerp(baseZoom, v.zoom, e),
         THREE.MathUtils.lerp(this.pitchDeg, v.pitch, e),
         look,
       );
@@ -4481,27 +4782,32 @@ export class HexBoard {
     this.ringLast = null;
     this.doorYaw += (this.doorYawGoal() - this.doorYaw) * (1 - Math.exp(-dt * 2.5));
     if (Math.abs(this.doorYaw) < 1e-4) this.doorYaw = 0;
-    return this.placePerspective(this.camTarget, this.zoom, this.pitchDeg, look, this.doorYaw);
+    return this.placePerspective(base, baseZoom, this.pitchDeg, look, this.doorYaw);
   }
 
   /**
-   * Agente da vez num hexágono vizinho de uma porta: a câmera gira um pouco para o lado em que
-   * ele está, para a porta não ficar de quina (as portas das paredes laterais somem de frente).
+   * Agente da vez junto do trecho reto de parede de uma porta (a porta ou qualquer hexágono da
+   * mesma parede, ver `doorRun`): a câmera gira um pouco para o lado em que ele está, para a
+   * porta não ficar de quina (as portas das paredes laterais somem de frente).
    */
   private doorYawGoal(): number {
     const u = this.activeId ? this.units.get(this.activeId) : undefined;
     if (!u) return 0;
     const near = new Set([u.hex, ...hexNeighbors(u.hex)].map(hexKey));
-    // casa: um giro só, da porta de entrada até sair, que mostra as portas e os cômodos
+    const byWall = (key: string): boolean => {
+      for (const k of this.doorRun(key)) if (near.has(k)) return true;
+      return false;
+    };
+    // casa: um giro só, de toda a parede da porta de entrada até sair, que mostra as portas e os cômodos
     for (const st of this.structures) {
       if (st.kind !== 'house') continue;
-      if (inStructure(u.hex, st.rect) || st.doors.some((d) => near.has(hexKey(d)))) return HOUSE_CAMERA_YAW;
+      if (inStructure(u.hex, st.rect) || st.doors.some((d) => byWall(hexKey(d)))) return HOUSE_CAMERA_YAW;
     }
     const doors = this.doorViews;
     if (!doors) return 0;
     let best: { yaw: number; d: number } | null = null;
     for (const key of doors.keys()) {
-      if (!near.has(key)) continue;
+      if (!byWall(key)) continue;
       const center = doors.centerOf(key)!;
       const normal = doors.normalOf(key)!;
       const away = u.group.position.clone().sub(center).setY(0);
@@ -4514,6 +4820,17 @@ export class HexBoard {
       if (!best || d < best.d) best = { yaw, d };
     }
     return best?.yaw ?? 0;
+  }
+
+  /** Trecho reto de parede da porta (chaves dos hexágonos), ver `doorWall`. */
+  private doorRun(key: string): Set<string> {
+    let run = this.doorRuns.get(key);
+    if (!run) {
+      const [col, row] = key.split(',').map(Number);
+      run = new Set(doorWall(this.map, { col, row }).map(hexKey));
+      this.doorRuns.set(key, run);
+    }
+    return run;
   }
 
   /** Põe a câmera inclinada `pitchDeg` sobre `target`, afastada conforme `zoom`; devolve a distância. */
@@ -4572,14 +4889,18 @@ export class HexBoard {
     const lk = 1 - Math.exp(-dt * 8);
     // monta em segundo plano o que entrou no raio (e muda o centro, se a câmera foi longe)
     // (na vista do tablet de abordagem, em volta de para onde a câmera foi)
-    const sc = this.ring && this.ringBlend > 0.5 ? this.ring.target : this.camTarget;
+    const sc = this.ring && this.ringBlend > 0.5 ? this.ring.target : this.group && this.groupBlend > 0.5 ? this.group.target : this.camTarget;
     this.stream.update(sc.x, sc.z, STREAM_BUDGET_MS);
     this.updateStructure();
+    for (const f of this.roomFogs) {
+      if (f.clear && f.amount > 0) f.amount = Math.max(0, f.amount - dt / ROOM_FOG_CLEAR);
+      if (f.amount > 0 || f.fog.group.children[0]?.visible) f.fog.update(t, f.amount);
+    }
 
     for (const u of this.units.values()) {
       const active = u.id === this.activeId;
       u.group.visible = u.shadow.visible =
-        this.stream.inLoadRadius(u.group.position.x, u.group.position.z) && !this.blocksProp(u.group);
+        this.stream.inLoadRadius(u.group.position.x, u.group.position.z) && !this.blocksProp(u.group) && u.id !== this.cabin?.agentId;
       if (u.rig) {
         // personagem com modelo: fica de pé sobre o hexágono (acompanha a flutuação do caminho)
         // e vira suavemente para onde vai; quem está na vez é marcado só pelo anel
@@ -4688,6 +5009,7 @@ export class HexBoard {
     field.flush();
 
     this.updateProps(t);
+    this.updatePlaneDoor(dt);
     if (this.outlinesOn && this.outlined.size) {
       this.updateAimFx(t);
     }
@@ -4717,6 +5039,9 @@ export class HexBoard {
       // respira devagar: dá para tocar; o tocado uma vez pulsa rápido, quase branco no pico
       const t = this.clock.elapsedTime;
       const hulls = [...this.outlined.values()].flatMap((o) => o.hulls);
+      // estrutura fechada tapa o contorno; aberta, ou a peça esmaecida (tapando alguém, ou a
+      // estrutura no close-up), não
+      for (const o of this.shellOccluders) o.copy.visible = o.roof.visible && !this.fadedOut(o.mesh);
       this.targetOutline.render(hulls, 0.5 + Math.sin(t * 2.5) * 0.5, this.armedTarget ? 0.5 + Math.sin(t * 7) * 0.5 : 0);
     }
     if (this.labels.size || this.aimFx || this.flashes.size) {
@@ -4910,8 +5235,8 @@ export class HexBoard {
     if (!prev) return;
     const cur = { x: e.clientX, y: e.clientY };
     this.pointers.set(e.pointerId, cur);
-    // vista de inspeção: a câmera fica travada
-    if (this.inspect) {
+    // vista de inspeção (e o enquadramento de grupo): a câmera fica travada
+    if (this.inspect || this.group) {
       if (this.tapStart && Math.hypot(cur.x - this.tapStart.x, cur.y - this.tapStart.y) > 10) this.dragged = true;
       return;
     }
@@ -4952,7 +5277,7 @@ export class HexBoard {
 
   private onWheel = (e: WheelEvent): void => {
     e.preventDefault();
-    if (this.inspect) return;
+    if (this.inspect || this.group) return;
     this.setZoom(this.zoom * (e.deltaY > 0 ? 1.1 : 0.9));
   };
 
@@ -4998,6 +5323,18 @@ export class HexBoard {
     // no close-up só o móvel em zoom responde, mesmo com o resto travado
     if (this.moving || (!this.inputEnabled && !this.inspect)) return;
 
+    // dentro do avião: o GPS, o rádio (pelas áreas de toque) ou o resto da cabine
+    if (this.cabin && this.inspect) {
+      for (const [id, info] of this.cabin.parts) {
+        if (!info.item.visible || this.taking?.info === info) continue;
+        if (this.raycaster.intersectObject(info.hit, false).length) {
+          this.callbacks.onCabinTap?.(id);
+          return;
+        }
+      }
+      if (this.raycaster.intersectObject(this.cabin.group, true).length) this.callbacks.onCabinTap?.('other');
+      return;
+    }
     // zoom num móvel: a peça destacável (pela área de toque, um pouco maior que ela) ou o resto
     const prop = this.inspect?.frame === 'prop' ? this.propOpen : null;
     if (prop) {

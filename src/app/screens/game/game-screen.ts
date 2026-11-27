@@ -94,6 +94,7 @@ import {
   rollsDie,
   spawnDoors,
 } from '../../game/door';
+import { BREAK_IN_SCENE, breakInVerdict } from '../../game/break-in-scene';
 import { BURN_RULES, Burnable, burnTarget, canBurn, seeFire } from '../../game/burn';
 import {
   KEY_PANEL_ID,
@@ -106,6 +107,20 @@ import {
   nextToPanel,
   witness,
 } from '../../game/plane';
+import {
+  CABIN_ITEMS,
+  CabinEvent,
+  CabinState,
+  INITIAL_CABIN,
+  cabinBuilt,
+  cabinClutter,
+  cabinItem,
+  cabinItemsLeft,
+  cabinStep,
+  cabinSummary,
+  canEnterPlane,
+  planeDoorSpot,
+} from '../../game/plane-cabin';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { IntroTarget, STRUCTURE_TOP, introTargets } from '../../game/mission-intro';
 import { IntroMark, MissionIntro } from '../../ui/mission-intro/mission-intro';
@@ -129,6 +144,7 @@ import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-
 import { HexCoord, hexDistance, hexKey, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
 import { CHARACTERS, Character, GameMap, HexRect, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
+import { SLOT_COUNT, SAVE_VERSION, SaveGames, SaveId, SaveState, savedAtLabel } from '../../game/save-game';
 import { TEST_CASES, TestCase, findTestCase } from '../../game/test-cases';
 import {
   Clues,
@@ -167,7 +183,7 @@ const SLOW_GRACE_MS = 300;
  * `interrogating`: interrogatório em close-up (balões e cartões de pergunta na tela).
  * `over`: a operação foi encerrada (fica o relatório na tela).
  */
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'plane' | 'interrogating' | 'ending' | 'chase' | 'enemy' | 'over';
+type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'plane' | 'cabin' | 'interrogating' | 'ending' | 'chase' | 'enemy' | 'over';
 
 /** Anotação da caderneta de campo (vai para o relatório da operação). */
 export interface FieldNote {
@@ -222,6 +238,8 @@ interface CheckView {
   pass: boolean | null;
   /** O resultado já foi visto e o jogo espera o **Continuar**. */
   waiting?: boolean;
+  /** Texto do botão que fecha a ficha (padrão: "Continuar"). */
+  confirmText?: string;
   /** De quem é o dado: o do garimpeiro é vermelho e fica à direita das fichas da equipe. */
   side: CheckSide;
 }
@@ -313,6 +331,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly roster = inject(RosterService);
   private readonly haptics = inject(Haptics);
   private readonly sound = inject(Sound);
+  /** Saves da sessão: o automático (começo de cada vez) e os slots do menu. */
+  private readonly saves = inject(SaveGames);
   private stopPad?: () => void;
   private readonly canvasRef = viewChild.required<ElementRef<HTMLCanvasElement>>('board');
   private readonly tacticalBoard = viewChild(TacticalBoard);
@@ -410,9 +430,20 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly testCasesOpen = signal(false);
   /** Submenu "Tutoriais" do menu: as lições da lousa tática, para rever. */
   protected readonly tutorialsOpen = signal(false);
+  /** Submenu "Saves" do menu: novo jogo, o automático e os slots. */
+  protected readonly savesOpen = signal(false);
+  protected readonly savesSupported = this.saves.supported;
+  protected readonly saveList = computed(() => this.saves.summaries());
+  protected readonly savedAtLabel = savedAtLabel;
+  /** Slot cheio tocado uma vez em "Salvar": o segundo toque sobrescreve. */
+  protected readonly overwriteArmed = signal<number | null>(null);
+  /** "Novo jogo" tocado uma vez: o segundo toque apaga o automático e volta ao início. */
+  protected readonly newGameArmed = signal(false);
 
   protected toggleMenu(): void {
     this.menuOpen.update((v) => !v);
+    this.overwriteArmed.set(null);
+    this.newGameArmed.set(false);
     clearInterval(this.statsTicker);
     if (this.menuOpen()) {
       const tick = () => this.renderStats.set(this.board?.renderStats() ?? null);
@@ -757,6 +788,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly doorKey = signal<string | null>(null);
   /** Animação de porta em andamento: as fichas ficam travadas. */
   protected readonly doorBusy = signal(false);
+  /**
+   * Cena de quem reage ao arrombamento (ver `breakIn`): a câmera fecha no garimpeiro, a HUD e
+   * as fichas da porta saem, e só ficam a ficha do d20 e os avisos até o **Confirmar**.
+   */
+  protected readonly breakInCine = signal(false);
   protected readonly doorStateLabel = DOOR_STATE_LABEL;
 
   /** Portas coladas no agente da vez (dá para interagir). */
@@ -1307,6 +1343,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.pickCharacter(id),
         onPropTap: (part) => this.tapProp(part),
+        onCabinTap: (part) => this.tapCabin(part),
         onTargetTap: (id) => {
           this.tapTarget(id);
           this.centerOnTarget(id);
@@ -1333,8 +1370,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.refreshVision();
     // `?caso=` abre direto num caso de teste (o menu usa isso para trocar de mapa)
     const testCase = findTestCase(this.route.snapshot.queryParamMap.get('caso'));
+    // `?save=` carrega um save (o menu usa isso para trocar de mapa); sem nada, o automático
+    // deste mapa, se houver (a página recarregou no meio da partida)
+    const save = this.saveFromUrl() ?? this.saves.read('auto');
     if (testCase?.mapId === this.map.id) void this.runTestCase(testCase);
+    else if (save?.mapId === this.map.id) this.applySave(save);
     else this.beginMatch();
+    // tira o `?save=` da URL: recarregar a página volta ao automático, não a este slot
+    if (this.route.snapshot.queryParamMap.has('save')) {
+      void this.router.navigate([], { relativeTo: this.route, queryParams: { save: null }, queryParamsHandling: 'merge', replaceUrl: true });
+    }
     this.lessonTicker = setInterval(() => this.checkLessons(), 400);
     this.stopPad = this.gamepad.listen({
       button: (b) => this.padButton(b),
@@ -1364,6 +1409,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private startTurn(): void {
     const active = this.active();
+    // fim do turno anterior: a partida vai para o save automático da sessão
+    this.autosave();
     this.commandsUsed.set(0);
     this.closeApproach();
     this.closeGrouping();
@@ -1447,7 +1494,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected endTurn(): void {
-    if (['walking', 'checking', 'door', 'plane', 'interrogating', 'rolling', 'chase', 'enemy', 'over'].includes(this.phase())) return;
+    if (['walking', 'checking', 'door', 'plane', 'cabin', 'interrogating', 'rolling', 'chase', 'enemy', 'over'].includes(this.phase())) return;
     // só quando o jogador decide passar (não depois de abordar ou queimar)
     if (this.phase() === 'moving-choice') this.sound.play('ui.passar');
     this.clearTimers();
@@ -1606,6 +1653,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (ev.key !== 'Escape') return;
       ev.preventDefault();
       this.closeProp();
+      return;
+    }
+    // dentro do avião: Esc sai
+    if (this.cabinInside()) {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault();
+      this.leavePlane();
       return;
     }
     if (this.targetPrompt()) {
@@ -3165,7 +3219,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /**
    * Põe a ficha do d20 da porta na tela: o dado 3D cai já em `value` (o resultado sorteado) e
    * leva `duration` ms para parar, a mesma hora em que a ação resolve (no chute, o impacto).
-   * A função devolvida pinta o dado de verde ou vermelho e carimba.
+   * A função devolvida pinta o dado de verde ou vermelho e carimba; com `hold`, a ficha fica na
+   * tela até `confirmDoorCheck` (senão, some sozinha uns segundos depois).
    */
   private startDoorCheck(
     kicker: string,
@@ -3176,6 +3231,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     value: number,
     duration: number,
     side: CheckSide = 'team',
+    hold = false,
   ): (result: number, pass: boolean) => void {
     clearTimeout(this.doorCheckTimer);
     if (this.doorCheckId !== undefined) this.dropCheck(this.doorCheckId);
@@ -3187,6 +3243,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.patchCheck(id, { result, pass });
       this.checkSound(result, pass);
       this.haptics.vibrate(SETTLE_PATTERN);
+      // `hold`: a ficha fica até o botão (ver `confirmDoorCheck`)
+      if (hold) return;
       this.doorCheckTimer = setTimeout(() => {
         if (this.doorCheckId === id) this.doorCheckId = undefined;
         this.dropCheck(id);
@@ -3226,50 +3284,69 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const r of rolls) void board.enemyFlinch(r.enemy.id, doorHex);
     if (rolls.length) await this.wait(380);
     if (stale()) return false;
-    for (const r of rolls) {
-      const e = r.enemy;
-      const resist = r.test === 'resist';
-      // a câmera inclina para ele, que olha de um lado para o outro; a rolagem vem em slow
-      board.tiltCineTo(e.hex);
-      board.enemyLookAround(e.id, true);
-      await this.wait(650);
-      if (stale()) return false;
-      board.setSceneSlowmo(true);
-      const reveal = this.startDoorCheck(
-        resist ? 'Resistir à rendição' : 'Atitude para correr',
-        e.name,
-        resist ? `resiste com ${r.need} ou mais` : `corre com mais que ${r.need}`,
-        resist ? 'Rendido!' : 'Ficou parado',
-        resist ? 'Resistiu: vai correr' : 'Vai correr',
-        r.roll,
-        1000,
-        'enemy',
-      );
-      await this.wait(1000);
-      board.setSceneSlowmo(false);
-      if (stale()) return false;
-      reveal(r.roll, r.outcome !== 'flee');
-      board.enemyLookAround(e.id, false);
-      const facing = facingBetween(e.hex, doorHex);
-      if (r.outcome === 'surrender') {
-        // falhou: rende na hora
-        board.setEnemyFacing(e.id, facing);
-        if (!rolls.slice(0, rolls.indexOf(r)).some((o) => o.outcome === 'surrender')) this.sound.play('ini.rende', { at: e.hex });
-        this.updateEnemy(e.id, { status: 'surrendered', facing });
-        board.setEnemySurrendered(e.id, true);
-      } else if (r.outcome === 'flee') {
-        // passou: vira de costas e fica pronto para correr (sai na vez dele)
-        this.updateEnemy(e.id, { status: 'alert', facing });
-        board.setEnemyAlert(e.id, true);
-        board.enemyBolt(e.id, doorHex);
-      } else {
-        board.setEnemyFacing(e.id, facing);
-        this.updateEnemy(e.id, { facing });
+    // a cena de cada um: a HUD e as fichas da porta saem (só ficam a ficha do d20 e os avisos),
+    // a câmera fecha nele com o cenário da frente escondido, e o jogo espera o Confirmar
+    if (rolls.length) {
+      this.breakInCine.set(true);
+      board.setDoorFocusOffset(0);
+    }
+    try {
+      for (const r of rolls) {
+        const e = r.enemy;
+        const resist = r.test === 'resist';
+        // a câmera fecha nele, que olha de um lado para o outro; a rolagem vem em slow
+        board.focusBreakIn(e.id);
+        board.enemyLookAround(e.id, true);
+        await this.wait(BREAK_IN_SCENE.lookMs);
+        if (stale()) return false;
+        board.setSceneSlowmo(true);
+        const reveal = this.startDoorCheck(
+          resist ? 'Resistir à rendição' : 'Atitude para correr',
+          e.name,
+          resist ? `resiste com ${r.need} ou mais` : `corre com mais que ${r.need}`,
+          resist ? 'Rendido!' : 'Ficou parado',
+          resist ? 'Resistiu: vai correr' : 'Vai correr',
+          r.roll,
+          BREAK_IN_SCENE.rollMs,
+          'enemy',
+          true,
+        );
+        await this.wait(BREAK_IN_SCENE.rollMs);
+        board.setSceneSlowmo(false);
+        if (stale()) return false;
+        reveal(r.roll, r.outcome !== 'flee');
+        board.enemyLookAround(e.id, false);
+        const facing = facingBetween(e.hex, doorHex);
+        if (r.outcome === 'surrender') {
+          // falhou: rende na hora
+          board.setEnemyFacing(e.id, facing);
+          if (!rolls.slice(0, rolls.indexOf(r)).some((o) => o.outcome === 'surrender')) this.sound.play('ini.rende', { at: e.hex });
+          this.updateEnemy(e.id, { status: 'surrendered', facing });
+          board.setEnemySurrendered(e.id, true);
+        } else if (r.outcome === 'flee') {
+          // passou: vira de costas e fica pronto para correr (sai na vez dele)
+          this.updateEnemy(e.id, { status: 'alert', facing });
+          board.setEnemyAlert(e.id, true);
+          board.enemyBolt(e.id, doorHex);
+        } else {
+          board.setEnemyFacing(e.id, facing);
+          this.updateEnemy(e.id, { facing });
+        }
+        board.startleEnemy(e.id);
+        this.refreshVision();
+        this.say(breakInVerdict(r), r.outcome === 'surrender' ? 'info' : 'alert');
+        await this.wait(BREAK_IN_SCENE.reactMs);
+        if (stale()) return false;
+        // o carimbo e o aviso ficam até o jogador confirmar
+        if (!(await this.confirmDoorCheck())) return false;
       }
-      board.startleEnemy(e.id);
-      this.refreshVision();
-      await this.wait(1100);
-      if (stale()) return false;
+    } finally {
+      if (rolls.length && !stale()) {
+        board.focusBreakIn(null);
+        board.setDoorFocusOffset(this.doorPanelWidth() / 2);
+        this.notice.set(null);
+        this.breakInCine.set(false);
+      }
     }
     board.resetCineAim();
     this.checkAllSpotted(this.positions());
@@ -3285,6 +3362,24 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       'alert',
     );
     return true;
+  }
+
+  /**
+   * Espera o **Confirmar** na ficha do d20 da porta (a de `startDoorCheck` com `hold`) e tira a
+   * ficha da tela. Devolve `false` se a partida foi recomeçada no meio.
+   */
+  private async confirmDoorCheck(): Promise<boolean> {
+    const id = this.doorCheckId;
+    if (id === undefined || !this.checks().some((c) => c.id === id)) return true;
+    const epoch = this.epoch;
+    // um instante para o carimbo aparecer antes do botão (evita fechar sem querer)
+    await this.wait(450);
+    if (this.destroyed || this.epoch !== epoch) return false;
+    const closed = new Promise<void>((done) => this.checkDone.set(id, done));
+    this.patchCheck(id, { waiting: true, confirmText: BREAK_IN_SCENE.confirm });
+    await closed;
+    if (this.doorCheckId === id) this.doorCheckId = undefined;
+    return !this.destroyed && this.epoch === epoch;
   }
 
   /** Arrombou uma porta sem tranca: o inimigo mais perto (que esteja vendo) comenta. */
@@ -3747,7 +3842,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.burning.set(true);
     this.board?.setSelected(null);
     this.board?.setReachable([]);
-    this.board?.keepInView(target.hexes[0]);
+    // a câmera aproxima e enquadra o agente e o alvo juntos no meio da tela (issue #126)
+    const from = this.positions().get(this.active().id);
+    this.board?.frameGroupOn(from ? [from, ...target.hexes] : target.hexes);
   }
 
   protected cancelBurn(): void {
@@ -3756,7 +3853,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.phase() === 'moving-choice') this.refreshBoard();
   }
 
-  private closeBurn(): void {
+  /** Fecha a confirmação; `keepFrame` segura o enquadramento (o fogo pegando, ver `setFire`). */
+  private closeBurn(keepFrame = false): void {
+    if (!keepFrame) this.board?.frameGroupOn(null);
     this.burning.set(false);
     this.planeBurn.set(false);
   }
@@ -3766,7 +3865,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const target = this.burnable();
     if (!this.burning() || !target || this.phase() !== 'moving-choice') return;
     const witnesses = this.burnWitnesses();
-    this.closeBurn();
+    // a câmera continua no agente e no alvo enquanto o fogo pega; volta quando a vez acaba
+    this.closeBurn(true);
     this.phase.set('ending');
     // com som, o fogo só pega depois da gasolina e das riscadas de fósforo
     this.sound.play('fogo.riscar', { at: target.hexes[0] });
@@ -3800,7 +3900,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         (unlocked ? ' A equipe já pode encerrar a operação.' : ''),
       'alert',
     );
-    this.later(reducedMotion() ? 400 : 2000, () => this.endTurn());
+    this.later(reducedMotion() ? 400 : 2000, () => {
+      this.board?.frameGroupOn(null);
+      this.endTurn();
+    });
   }
 
   // ---------- avião trancado e quadro de chaves ----------
@@ -3901,8 +4004,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected planeLook(): void {
     if (this.phase() !== 'plane') return;
     if (lookInside(this.planeState()) === 'open') {
-      this.planeNote.set('Destrancado com a chave. Dentro: galões e caixas lacradas de combustível para o garimpo.');
       this.sound.play('porta.destrancou');
+      void this.enterPlane();
       return;
     }
     this.sound.play('eq.aviao-trancado');
@@ -3922,6 +4025,130 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.planeNote.set(null);
     this.phase.set('moving-choice');
     this.startBurn();
+  }
+
+  // ---------- dentro do avião (issue #125; a regra está em `plane-cabin.ts`) ----------
+
+  /** Etapa da entrada no avião e quem entrou. */
+  private readonly cabinState = signal<CabinState>(INITIAL_CABIN);
+  /** Alguém está dentro: o interior está montado e a ficha da cabine aparece. */
+  protected readonly cabinInside = computed(() => cabinBuilt(this.cabinState()));
+  /** Peças que ainda estão na cabine (o GPS, o rádio). */
+  protected readonly cabinLeft = computed(() => cabinItemsLeft(this.found()));
+  /** O que a ficha da cabine diz do que sobrou. */
+  protected readonly cabinText = computed(() => cabinSummary(this.found()));
+  /** Última coisa vista ou pega na cabine. */
+  protected readonly cabinNote = signal<string | null>(null);
+  /** Quem está dentro (nome, para a ficha). */
+  protected readonly cabinWho = computed(() => {
+    const id = this.cabinState().agent;
+    return id ? this.nameOf(id) : '';
+  });
+
+  private cabinEvent(e: CabinEvent): void {
+    this.cabinState.update((s) => cabinStep(s, e));
+  }
+
+  /**
+   * Entrar no avião (com a chave): o agente anda até a porta da cabine (sem gastar movimento) e
+   * a câmera vai junto; a porta abre e só então o interior é montado no tabuleiro.
+   */
+  private async enterPlane(): Promise<void> {
+    const plane = (this.map?.burnables ?? []).find((t) => t.inspect);
+    const board = this.board;
+    const id = this.active().id;
+    const from = this.positions().get(id);
+    if (!plane || !board || !from || this.phase() !== 'plane') return;
+    if (!canEnterPlane(this.planeState(), this.burned().has(plane.id))) return;
+    const epoch = this.epoch;
+    board.releaseDoorFocus();
+    removeEventListener('resize', this.onDoorResize);
+    this.planeNote.set(null);
+    this.cabinNote.set(null);
+    this.cabinEvent({ type: 'enter', agent: id });
+    this.phase.set('cabin');
+    board.focus(id);
+    // até a porta: o hexágono livre colado no avião mais perto dela (se não der, entra de onde está)
+    const blocked = this.moveBlocked();
+    const door = planeDoorSpot(plane.hexes, blocked);
+    const path = door && !sameHex(door, from) ? pathTo(reachableHexes(from, Number.MAX_SAFE_INTEGER, this.area, blocked), door) : [];
+    if (path.length) {
+      if (!(await this.walkUnits(id, new Map([[id, path]])))) return;
+      if (this.epoch !== epoch || this.phase() !== 'walking') {
+        this.dropCabin();
+        return;
+      }
+      this.phase.set('cabin');
+    }
+    this.cabinEvent({ type: 'arrived' });
+    board.setPlaneDoor(true);
+    this.sound.play('porta.abrir');
+    this.later(reducedMotion() ? 150 : 750, () => {
+      if (this.epoch !== epoch || this.cabinState().stage !== 'opening') return;
+      board.setInputEnabled(false);
+      if (!board.enterPlaneCabin(id, this.found(), this.propInsets())) {
+        board.setInputEnabled(true);
+        board.setPlaneDoor(false);
+        this.dropCabin();
+        this.afterMove();
+        return;
+      }
+      board.setCabinHighlight(true);
+      this.cabinEvent({ type: 'opened' });
+      this.sound.play('eq.closeup');
+      addEventListener('resize', this.onCabinResize);
+    });
+  }
+
+  private readonly onCabinResize = (): void => this.board?.setCloseUpInsets(this.propInsets());
+
+  /** Toque na cabine: na peça, pega; no resto, diz o que tem ali. */
+  private tapCabin(part: string): void {
+    if (!this.cabinInside()) return;
+    if (part !== 'other') {
+      this.takeCabin(part);
+      return;
+    }
+    this.sound.play('ui.hex');
+    this.cabinNote.set(cabinClutter(this.cabinState()));
+    this.cabinEvent({ type: 'poke' });
+  }
+
+  /** Pega o GPS ou o rádio: vai para os achados da equipe (como a arma) e some da cabine. */
+  protected takeCabin(id: string): void {
+    if (!this.cabinInside()) return;
+    const item = cabinItem(id, this.found());
+    if (!item) return;
+    this.found.update((s) => new Set([...s, item.id]));
+    this.board?.takeCabinItem(item.id);
+    this.haptics.vibrate(SETTLE_PATTERN);
+    this.gamepad.rumble(0.8, 0.5, 220);
+    this.sound.play('eq.vasculhar');
+    this.cabinNote.set(item.seized);
+  }
+
+  /** **Sair do avião**: o interior é descartado, a câmera volta, a porta fecha e a vez segue. */
+  protected leavePlane(): void {
+    if (!this.cabinInside()) return;
+    const who = this.cabinWho();
+    const took = CABIN_ITEMS.filter((i) => this.found().has(i.id)).map((i) => i.name);
+    this.cabinEvent({ type: 'leave' });
+    this.dropCabin();
+    this.sound.play('porta.abrir');
+    this.say(took.length ? `${who} saiu do avião com ${took.join(' e ')}` : `${who} saiu do avião`, 'info');
+    this.afterMove();
+  }
+
+  /** Some com o interior e fecha a porta (saída ou recomeço), sem seguir a vez. */
+  private dropCabin(): void {
+    const was = this.cabinState().stage;
+    this.cabinEvent({ type: 'closed' });
+    this.cabinNote.set(null);
+    removeEventListener('resize', this.onCabinResize);
+    if (was === 'outside') return;
+    this.board?.leavePlaneCabin();
+    this.board?.setPlaneDoor(false, was !== 'leaving');
+    this.board?.setInputEnabled(true);
   }
 
   // ---------- encerrar a operação ----------
@@ -4008,11 +4235,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.keySeenBy.set([]);
     this.planeNote.set(null);
     this.planeBurn.set(false);
+    this.dropCabin();
     this.closeSpeech();
     this.linePools.set(new Map());
     this.fieldNotes.set([]);
     this.doorKey.set(null);
     this.doorBusy.set(false);
+    this.breakInCine.set(false);
     this.breakInUntil.set(0);
     clearTimeout(this.doorCheckTimer);
     this.board?.releaseDoorFocus();
@@ -4029,6 +4258,157 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
     this.refreshVision();
     this.notice.set(null);
+  }
+
+  // ---------- saves (ver `save-game.ts`) ----------
+
+  /** A partida agora, num formato que vai para o `sessionStorage`. Só no começo de uma vez. */
+  private snapshot(): SaveState | null {
+    const map = this.map;
+    if (!map) return null;
+    return {
+      version: SAVE_VERSION,
+      savedAt: Date.now(),
+      mapId: map.id,
+      mapName: map.name,
+      round: this.round(),
+      activeName: this.active().name,
+      roster: {
+        points: Object.fromEntries(CHARACTERS.map((c) => [c.id, this.roster.spent(c.id)])),
+        captain: this.captainId(),
+      },
+      turn: this.turn(),
+      activeIndex: this.activeIndex(),
+      positions: [...this.positions()].map(([id, h]) => [id, { ...h }]),
+      group: [...this.group()],
+      groupLine: [...this.groupLine()],
+      enemies: this.enemies().map((e) => ({ ...e })),
+      doors: [...this.doors()],
+      burned: [...this.burned()],
+      noticed: [...this.noticed()],
+      found: [...this.found()],
+      noticeRolled: [...this.noticeRolled],
+      seenAgents: [...this.seenAgents],
+      ranThisRound: [...this.ranThisRound],
+      caughtThisRound: [...this.caughtThisRound],
+      dialogues: [...this.dialogues()],
+      linePools: [...this.linePools()].map(([k, v]) => [k, [...v]]),
+      clueLog: [...this.clueLog()],
+      fieldNotes: this.fieldNotes().map((n) => ({ ...n })),
+      hasKey: this.hasKey(),
+      keySeenBy: [...this.keySeenBy()],
+      planeNote: this.planeNote(),
+      breakInUntil: this.breakInUntil(),
+    };
+  }
+
+  private autosave(): void {
+    const state = this.snapshot();
+    if (state) this.saves.write('auto', state);
+  }
+
+  /** O save pedido na URL (`?save=auto` ou `?save=2`). */
+  private saveFromUrl(): SaveState | null {
+    const raw = this.route.snapshot.queryParamMap.get('save');
+    if (!raw) return null;
+    const id: SaveId = raw === 'auto' ? 'auto' : Number(raw);
+    return id === 'auto' || (Number.isInteger(id) && id >= 1 && id <= SLOT_COUNT) ? this.saves.read(id) : null;
+  }
+
+  /** Remonta a partida do save (sem a abertura da missão) e começa a vez de quem estava nela. */
+  private applySave(s: SaveState): void {
+    this.resetMatch();
+    this.roster.confirm(s.roster.points, s.roster.captain);
+    const positions = new Map(s.positions);
+    this.positions.set(positions);
+    this.board?.placeUnits(positions);
+    this.group.set(new Set(s.group));
+    this.groupLine.set(s.groupLine);
+    this.enemies.set(s.enemies);
+    this.board?.placeEnemies(
+      this.enemies().map((e) => ({
+        ...e,
+        alert: e.status === 'alert',
+        surrendered: e.status === 'surrendered',
+        gone: e.status === 'hidden' || e.status === 'fled',
+      })),
+    );
+    this.doors.set(new Map(s.doors));
+    this.board?.setDoors(this.doors(), true);
+    this.noticed.set(new Set(s.noticed));
+    this.found.set(new Set(s.found));
+    for (const k of s.noticeRolled) this.noticeRolled.add(k);
+    for (const id of s.seenAgents) this.seenAgents.add(id);
+    this.board?.setSeenAgents(this.seenAgents);
+    for (const id of s.ranThisRound) this.ranThisRound.add(id);
+    for (const id of s.caughtThisRound) this.caughtThisRound.add(id);
+    this.dialogues.set(new Map(s.dialogues));
+    this.linePools.set(new Map(s.linePools));
+    this.clueLog.set(new Set(s.clueLog));
+    this.fieldNotes.set(s.fieldNotes as FieldNote[]);
+    this.noteSeq = Math.max(0, ...s.fieldNotes.map((n) => n.id));
+    this.hasKey.set(s.hasKey);
+    this.keySeenBy.set(s.keySeenBy);
+    this.planeNote.set(s.planeNote);
+    this.breakInUntil.set(s.breakInUntil);
+    // o que já foi pego some dos móveis; o que já queimou volta a arder
+    for (const h of this.map?.hidden ?? []) if (this.found().has(h.id)) this.board?.hidePropItem(h.spot);
+    const panel = this.map?.keyPanel;
+    if (panel && s.hasKey) this.board?.hidePropItem(panel.spot);
+    this.burned.set(new Set(s.burned));
+    for (const t of this.map?.burnables ?? []) {
+      if (!this.burned().has(t.id)) continue;
+      this.board?.ignite(t.id, t.hexes);
+      this.sound.ignite(t.id, t.hexes, !!t.inspect);
+    }
+    this.refreshVision();
+    this.activeIndex.set(Math.min(Math.max(0, s.activeIndex), CHARACTERS.length - 1));
+    this.turn.set(s.turn);
+    this.rollSeq++;
+    this.rollKeys.set([]);
+    this.phase.set('rolling');
+    this.say(`Save carregado · turno ${this.round()}, vez de ${this.active().name}`, 'info');
+    this.startTurn();
+  }
+
+  /** Copia o estado do começo do turno atual (o automático) para um slot. */
+  protected saveToSlot(slot: number): void {
+    const filled = !!this.saveList().slots.find((x) => x.slot === slot)?.save;
+    if (filled && this.overwriteArmed() !== slot) {
+      this.overwriteArmed.set(slot);
+      return;
+    }
+    this.overwriteArmed.set(null);
+    const state = this.saves.read('auto') ?? this.snapshot();
+    const ok = !!state && state.mapId === this.map?.id && this.saves.write(slot, { ...state, savedAt: Date.now() });
+    this.sound.play(ok ? 'ui.confirmar' : 'ui.hex');
+    this.say(ok ? `Salvo no slot ${slot} · começo do turno ${state!.round}` : 'Não deu para salvar neste navegador', ok ? 'info' : 'alert');
+  }
+
+  /** Carrega um save: no mesmo mapa, aqui; em outro, abre a partida lá com `?save=`. */
+  protected loadSave(id: SaveId): void {
+    const state = this.saves.read(id);
+    if (!state) return;
+    this.menuOpen.set(false);
+    this.savesOpen.set(false);
+    clearInterval(this.statsTicker);
+    if (state.mapId === this.map?.id) {
+      this.applySave(state);
+      return;
+    }
+    void this.router
+      .navigateByUrl('/', { skipLocationChange: true })
+      .then(() => this.router.navigate(['/jogo', state.mapId], { queryParams: { save: id } }));
+  }
+
+  /** Novo jogo: apaga o automático (os slots ficam) e volta para a escolha da missão. */
+  protected newGame(): void {
+    if (!this.newGameArmed()) {
+      this.newGameArmed.set(true);
+      return;
+    }
+    this.saves.clear('auto');
+    this.router.navigate(['/']);
   }
 
   // ---------- casos de teste (ver `test-cases.ts`) ----------
@@ -4078,6 +4458,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.focus(active.id);
     this.board?.setSelected(null);
     this.board?.setReachable([]);
+    if (testCase.hasKey) {
+      this.hasKey.set(true);
+      this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
+      const panel = this.map?.keyPanel;
+      if (panel) this.board?.hidePropItem(panel.spot);
+    }
     this.say(testCase.name, 'info');
 
     if (testCase.start.kind === 'turn') {
@@ -4182,10 +4568,23 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     // menu da porta: ○ volta; ✕ arromba, □ destranca, △ abre
     if (this.phase() === 'door') {
+      // cena do arrombamento: só o Confirmar da ficha
+      if (this.breakInCine()) {
+        if (b === 'cross' && this.waitingCheck()) this.closeCheck();
+        return;
+      }
       const act: Partial<Record<PadButton, DoorAction>> = { cross: 'arrombar', square: 'pick', triangle: 'abrir' };
       const option = this.doorOptions().find((o) => o.action === act[b]);
       if (b === 'circle') this.closeDoorMenu();
       else if (option && !option.disabled) void this.doorAction(option.action);
+      return;
+    }
+    // dentro do avião: ✕ pega a próxima peça (o GPS, depois o rádio), ○ sai
+    if (this.phase() === 'cabin') {
+      const next = this.cabinLeft()[0];
+      if (b === 'circle') this.leavePlane();
+      else if (b === 'cross' && next) this.takeCabin(next.id);
+      else if (b === 'cross') this.leavePlane();
       return;
     }
     // menu do avião: ○ volta; ✕ olha dentro, □ queima
@@ -4285,7 +4684,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     const map = this.map;
-    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.approaching() || this.burning() || this.prop() || this.debrief()) return;
+    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.phase() === 'cabin' || this.approaching() || this.burning() || this.prop() || this.debrief()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
     const next = neighborToward(from, dir);
