@@ -789,9 +789,12 @@
         }
       </div>
       <div class="cabin-actions">
-        <button type="button" class="paper cabin-btn cabin-leave" data-testid="cabin-leave" (click)="leavePlane()" aria-label="Sair do avião e voltar ao tabuleiro">
-          <span class="stencil">Sair</span>
-          <span class="typed">do avião</span>
+        <button type="button" class="door-opt door-opt-back cabin-leave" style="--tilt: -1.5deg" data-testid="cabin-leave" (click)="leavePlane()" aria-label="Sair do avião e voltar ao tabuleiro">
+          <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
+          <span class="cabin-leave-text">
+            <span class="door-opt-name">Sair</span>
+            <span class="cabin-leave-sub">do avião</span>
+          </span>
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
         </button>
       </div>
