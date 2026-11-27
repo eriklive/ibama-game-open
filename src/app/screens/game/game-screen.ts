@@ -3735,7 +3735,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.burning.set(true);
     this.board?.setSelected(null);
     this.board?.setReachable([]);
-    this.board?.keepInView(target.hexes[0]);
+    // a câmera aproxima e enquadra o agente e o alvo juntos no meio da tela (issue #126)
+    const from = this.positions().get(this.active().id);
+    this.board?.frameGroupOn(from ? [from, ...target.hexes] : target.hexes);
   }
 
   protected cancelBurn(): void {
@@ -3744,7 +3746,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (this.phase() === 'moving-choice') this.refreshBoard();
   }
 
-  private closeBurn(): void {
+  /** Fecha a confirmação; `keepFrame` segura o enquadramento (o fogo pegando, ver `setFire`). */
+  private closeBurn(keepFrame = false): void {
+    if (!keepFrame) this.board?.frameGroupOn(null);
     this.burning.set(false);
     this.planeBurn.set(false);
   }
@@ -3754,7 +3758,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const target = this.burnable();
     if (!this.burning() || !target || this.phase() !== 'moving-choice') return;
     const witnesses = this.burnWitnesses();
-    this.closeBurn();
+    // a câmera continua no agente e no alvo enquanto o fogo pega; volta quando a vez acaba
+    this.closeBurn(true);
     this.phase.set('ending');
     // com som, o fogo só pega depois da gasolina e das riscadas de fósforo
     this.sound.play('fogo.riscar', { at: target.hexes[0] });
@@ -3788,7 +3793,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         (unlocked ? ' A equipe já pode encerrar a operação.' : ''),
       'alert',
     );
-    this.later(reducedMotion() ? 400 : 2000, () => this.endTurn());
+    this.later(reducedMotion() ? 400 : 2000, () => {
+      this.board?.frameGroupOn(null);
+      this.endTurn();
+    });
   }
 
   // ---------- avião trancado e quadro de chaves ----------
