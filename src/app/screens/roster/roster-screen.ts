@@ -10,10 +10,10 @@ import {
   viewChild,
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
-import { AgentViewer } from '../../game/agent-viewer';
+import { AgentViewer, Framing } from '../../game/agent-viewer';
 import { PadButton, Stick, glyphFor } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
-import { CHARACTERS, Character, findMap } from '../../game/maps';
+import { CHARACTERS, Character, findMap, phaseTitle } from '../../game/maps';
 import {
   AGENT_CLASSES,
   AgentClass,
@@ -76,11 +76,16 @@ const STAT_TEXT: Record<
   },
 };
 
+/** A partir desta largura, a ficha fica ao lado do modelo (layout "web"). */
+const WIDE_QUERY = '(min-width: 900px)';
+
 /**
- * Escalação: a ficha de cada agente, entre escolher o mapa e começar a partida. O jogador
- * escolhe a classe (um Capitão na equipe, os demais Agentes), distribui o ponto de cada agente
- * (vigor ou intimidação), vê o modelo 3D e confirma.
- * Uma tela só: larga vira o layout "web" (abas na lateral), estreita vira o de celular.
+ * Ficha de personagem, aberta pelo menu do agente no lobby: classe (um Capitão na equipe, os
+ * demais Agentes), o ponto do agente nos atributos e o modelo 3D. "Salvar" guarda na escalação e
+ * volta ao lobby; "Voltar" volta sem guardar.
+ * Larga: o modelo à esquerda e a ficha à direita. Estreita (celular): o modelo num quadrado em
+ * cima, da cintura para cima; tocar nele desce a ficha e deixa girar o modelo inteiro, e rolar a
+ * ficha a faz cobrir o modelo.
  */
 @Component({
   selector: 'app-roster-screen',
@@ -92,8 +97,10 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
   private readonly roster = inject(RosterService);
   private readonly saves = inject(SaveGames);
   private readonly gamepad = inject(GamepadService);
-  private readonly mapId = inject(ActivatedRoute).snapshot.paramMap.get('mapId') ?? '';
+  private readonly params = inject(ActivatedRoute).snapshot.paramMap;
+  private readonly mapId = this.params.get('mapId') ?? '';
   protected readonly map = findMap(this.mapId);
+  protected readonly title = this.map ? phaseTitle(this.map) : '';
   protected readonly agents = CHARACTERS;
   protected readonly pad = this.gamepad.pad;
   protected readonly signed = signed;
@@ -102,7 +109,20 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
   protected readonly slotsRight = ['Arma', 'Costas', 'Pés'];
   protected readonly rulerLabels = rulerCells(0, 0).map((c) => signed(c.unit));
 
-  protected readonly cur = signal(0);
+  protected readonly cur = signal(
+    Math.max(
+      0,
+      CHARACTERS.findIndex((c) => c.id === this.params.get('agentId')),
+    ),
+  );
+  /** Layout largo (modelo e ficha lado a lado). */
+  protected readonly wide = signal(matchMedia?.(WIDE_QUERY).matches ?? true);
+  /** Celular: a ficha desceu e o modelo ocupa a tela, girável. */
+  protected readonly expanded = signal(false);
+  /** Modelo inteiro (web, ou celular com a ficha recolhida); senão, da cintura para cima. */
+  private readonly framing = computed<Framing>(() =>
+    this.wide() || this.expanded() ? 'full' : 'bust',
+  );
   /** Pontos distribuídos por agente (começa com a última escalação confirmada). */
   protected readonly points = signal<Record<string, Stats>>(
     Object.fromEntries(CHARACTERS.map((c) => [c.id, this.roster.spent(c.id)])),
@@ -116,14 +136,7 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
   protected readonly agent = computed<Character>(() => CHARACTERS[this.cur()]);
   private readonly spent = computed(() => this.points()[this.agent().id]);
   protected readonly free = computed(() => freePoints(this.spent()));
-  protected readonly last = computed(() => this.cur() === CHARACTERS.length - 1);
-
-  protected readonly tabs = computed(() =>
-    CHARACTERS.map((c, i) => {
-      const done = freePoints(this.points()[c.id]) <= 0;
-      return { c, i, done, selected: i === this.cur(), captain: c.id === this.captain() };
-    }),
-  );
+  protected readonly isCaptain = computed(() => this.agent().id === this.captain());
 
   /** Classe do agente da ficha. */
   protected readonly cls = computed<AgentClass>(() => classOf(this.agent().id, this.captain()));
@@ -197,8 +210,20 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
     move: (dir) => this.padMove(dir),
     button: (b) => this.padButton(b),
   });
+  private readonly media = matchMedia?.(WIDE_QUERY);
+  private readonly onMedia = (e: MediaQueryListEvent): void => {
+    this.wide.set(e.matches);
+    if (e.matches) this.expanded.set(false);
+  };
 
   constructor() {
+    this.media?.addEventListener?.('change', this.onMedia);
+    effect(() => {
+      const framing = this.framing();
+      this.viewer?.setFraming(framing);
+      // recolhendo o modelo, ele volta de frente para o quadrado
+      if (framing === 'bust') this.viewer?.face();
+    });
     // troca de agente: o palco mostra o modelo dele
     effect(() => {
       const model = this.agent().model;
@@ -215,7 +240,7 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
     const host = this.stage()?.nativeElement;
     if (!host) return;
     try {
-      this.viewer = new AgentViewer(host);
+      this.viewer = new AgentViewer(host, this.framing());
       const model = this.agent().model;
       if (model) {
         this.loadingModel.set(true);
@@ -231,11 +256,16 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
 
   ngOnDestroy(): void {
     this.stopPad();
+    this.media?.removeEventListener?.('change', this.onMedia);
     this.viewer?.dispose();
   }
 
-  protected go(i: number): void {
-    this.cur.set((i + CHARACTERS.length) % CHARACTERS.length);
+  /** Celular: toca no quadrado do modelo (a ficha desce) ou em "Ver ficha" (ela volta). */
+  protected expand(on: boolean): void {
+    if (this.wide()) return;
+    this.expanded.set(on);
+    // o modelo fica no topo da página: com a ficha descendo, a tela volta para cima
+    if (on) window.scrollTo?.({ top: 0, behavior: 'smooth' });
   }
 
   protected inc(key: StatKey): void {
@@ -257,36 +287,24 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
     this.viewer?.turn();
   }
 
-  protected prev(): void {
-    this.go(this.cur() - 1);
+  /** Volta ao lobby sem guardar (com o agente ainda destacado lá). */
+  protected back(): void {
+    this.router.navigate(['/lobby', this.mapId], { queryParams: { agente: this.agent().id } });
   }
 
-  /** Próximo agente; no último, confirma a escalação e começa a partida. */
-  protected next(): void {
-    if (!this.last()) {
-      this.go(this.cur() + 1);
-      return;
-    }
+  /** Guarda a ficha na escalação e volta ao lobby. */
+  protected save(): void {
     this.roster.confirm(this.points(), this.captain());
-    // escalação nova é partida nova: o automático da anterior não volta por cima dela
+    // escalação mudou: o automático da partida anterior não volta por cima dela
     this.saves.clear('auto');
-    this.router.navigate(['/jogo', this.mapId]);
+    this.back();
   }
 
   protected matricula(i: number): string {
     return String(i + 1).padStart(4, '0');
   }
 
-  /** Cor da silhueta na foto 3x4: a cor do agente escurecida (como no jogo). */
-  protected shade(c: Character): string {
-    const k = 0.62;
-    const r = Math.round(((c.color >> 16) & 255) * k);
-    const g = Math.round(((c.color >> 8) & 255) * k);
-    const b = Math.round((c.color & 255) * k);
-    return `rgb(${r}, ${g}, ${b})`;
-  }
-
-  protected glyph(action: 'confirm' | 'cancel' | 'prev' | 'next' | 'endTurn'): string {
+  protected glyph(action: 'confirm' | 'cancel' | 'approach' | 'endTurn'): string {
     const p = this.pad();
     return p ? glyphFor(p.kind, action) : '';
   }
@@ -307,11 +325,13 @@ export class RosterScreen implements AfterViewInit, OnDestroy {
   }
 
   private padButton(b: PadButton): void {
-    if (b === 'l1') this.prev();
-    else if (b === 'r1') this.go(this.cur() + 1);
-    else if (b === 'cross' || b === 'options') this.next();
-    else if (b === 'circle') this.router.navigate(['/']);
-    else if (b === 'square') this.turnModel();
-    else if (b === 'triangle') this.setClass('capitao');
+    if (b === 'cross' || b === 'options') this.save();
+    else if (b === 'circle') {
+      if (this.expanded()) this.expand(false);
+      else this.back();
+    } else if (b === 'square') {
+      if (!this.wide() && !this.expanded()) this.expand(true);
+      else this.turnModel();
+    } else if (b === 'triangle') this.setClass('capitao');
   }
 }

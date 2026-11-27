@@ -5,8 +5,18 @@ import { CharacterRig, ModelDef } from './character-model';
 const TURN_STEP = Math.PI / 4;
 /** Arrasto horizontal: radianos por pixel. */
 const DRAG_SPEED = 0.012;
-/** O que precisa caber na tela (unidades do mundo): personagem de pé com folga e o disco. */
-const FRAME = { height: 3.8, width: 3.4 };
+/**
+ * Enquadramentos do palco (unidades do mundo): o que precisa caber na tela e para onde a câmera
+ * olha. `full`: o personagem de pé, com folga, e o disco. `bust`: da cintura para cima (o
+ * quadrado da ficha no celular, antes de tocar nele).
+ */
+export type Framing = 'full' | 'bust';
+const FRAMES: Record<Framing, { height: number; width: number; target: number; eye: number }> = {
+  full: { height: 3.8, width: 3.0, target: 1.25, eye: 2.1 },
+  bust: { height: 1.65, width: 1.5, target: 1.78, eye: 1.95 },
+};
+/** Velocidade da transição entre enquadramentos (1/s). */
+const FRAME_EASE = 6;
 
 /**
  * Visualizador do personagem na ficha do agente: o modelo 3D real (`CharacterRig`) parado
@@ -27,9 +37,17 @@ export class AgentViewer {
   private targetYaw = 0;
   private drag: { id: number; x: number; yaw: number } | null = null;
   private disposed = false;
+  /** Enquadramento atual (interpolado até o pedido em `setFraming`). */
+  private readonly view: { height: number; width: number; target: number; eye: number };
+  private framing: Framing;
 
   /** Lança um erro se o WebGL não estiver disponível (quem chama mostra o desenho 2D). */
-  constructor(private readonly host: HTMLElement) {
+  constructor(
+    private readonly host: HTMLElement,
+    framing: Framing = 'full',
+  ) {
+    this.framing = framing;
+    this.view = { ...FRAMES[framing] };
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     this.renderer.setPixelRatio(Math.min(devicePixelRatio || 1, 2));
     this.renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -52,9 +70,6 @@ export class AgentViewer {
     );
     disc.position.y = -0.06;
     this.scene.add(disc, this.turntable);
-
-    this.camera.position.set(0, 2.1, 7);
-    this.camera.lookAt(0, 1.25, 0);
 
     const el = this.renderer.domElement;
     el.addEventListener('pointerdown', this.onDown);
@@ -81,6 +96,20 @@ export class AgentViewer {
     this.rig = rig;
     this.turntable.add(rig.object);
     this.yaw = this.targetYaw = 0;
+  }
+
+  /** Troca o enquadramento (com uma transição curta; `instant` pula a transição). */
+  setFraming(framing: Framing, instant = false): void {
+    this.framing = framing;
+    if (instant) {
+      Object.assign(this.view, FRAMES[framing]);
+      this.fit();
+    }
+  }
+
+  /** Volta o personagem para a frente. */
+  face(): void {
+    this.targetYaw = Math.round(this.yaw / (2 * Math.PI)) * 2 * Math.PI;
   }
 
   /** Gira um passo (botão "Girar modelo"). */
@@ -121,13 +150,33 @@ export class AgentViewer {
     const h = this.host.clientHeight || 1;
     this.renderer.setSize(w, h, false);
     this.camera.aspect = w / h;
-    // distância para caber o personagem de pé (altura) e o disco (largura)
-    const view = 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
-    this.camera.position.z = Math.max(
-      FRAME.height / view,
-      FRAME.width / (view * this.camera.aspect),
-    );
+    this.place();
+  }
+
+  /** Põe a câmera no enquadramento atual: longe o bastante para caber altura e largura. */
+  private place(): void {
+    const v = this.view;
+    const tan = 2 * Math.tan(THREE.MathUtils.degToRad(this.camera.fov / 2));
+    const z = Math.max(v.height / tan, v.width / (tan * this.camera.aspect));
+    this.camera.position.set(0, v.eye, z);
+    this.camera.lookAt(0, v.target, 0);
     this.camera.updateProjectionMatrix();
+  }
+
+  /** Aproxima o enquadramento atual do pedido; devolve se ainda estava mudando. */
+  private easeFrame(dt: number): boolean {
+    const goal = FRAMES[this.framing];
+    const k = Math.min(1, dt * FRAME_EASE);
+    let moving = false;
+    for (const key of ['height', 'width', 'target', 'eye'] as const) {
+      const d = goal[key] - this.view[key];
+      if (Math.abs(d) < 1e-3) this.view[key] = goal[key];
+      else {
+        this.view[key] += d * k;
+        moving = true;
+      }
+    }
+    return moving;
   }
 
   private readonly tick = (): void => {
@@ -135,6 +184,7 @@ export class AgentViewer {
     const dt = Math.min(this.clock.getDelta(), 0.1);
     if (!this.drag) this.yaw += (this.targetYaw - this.yaw) * Math.min(1, dt * 10);
     this.turntable.rotation.y = this.yaw;
+    if (this.easeFrame(dt)) this.place();
     this.rig?.update(dt);
     this.renderer.render(this.scene, this.camera);
   };

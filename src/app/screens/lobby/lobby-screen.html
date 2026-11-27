@@ -1,0 +1,113 @@
+<main class="lobby">
+  <header class="head">
+    <button
+      type="button"
+      class="back"
+      data-testid="lobby-back"
+      aria-label="Voltar ao menu de fases"
+      (click)="back()"
+    >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+      <span class="back-label">Voltar</span>
+      @if (pad() && selected() === null) {
+        <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span>
+      }
+    </button>
+    <div class="head-title">
+      <span class="kicker">{{ title }}</span>
+      <h1>Lobby</h1>
+    </div>
+  </header>
+
+  <section class="stage-wrap" aria-label="Equipe">
+    <!-- a fila (palco 3D + colunas tocáveis); no web, abre espaço para o menu à direita -->
+    <div class="lineup" [class.shifted]="selected() !== null">
+      <div class="stage" #stage aria-hidden="true"></div>
+      @if (loading() && !viewerFailed()) {
+        <span class="loading" aria-live="polite">carregando a equipe…</span>
+      }
+
+      <!-- Uma coluna tocável por agente, sobre o palco 3D (mesma ordem da fila) -->
+      <div
+        class="picks"
+        role="listbox"
+        aria-label="Escolha um agente"
+        [class.any]="selected() !== null"
+      >
+        @for (c of agents; track c.id; let i = $index) {
+          <button
+            type="button"
+            role="option"
+            class="pick"
+            [class.on]="selected() === i"
+            [attr.aria-selected]="selected() === i"
+            [attr.data-testid]="'lobby-' + c.id"
+            [style.--agent]="css(c)"
+            (click)="pick(i)"
+          >
+            @if (viewerFailed()) {
+              <svg class="silhouette" viewBox="0 0 76 96" aria-hidden="true">
+                <circle cx="38" cy="34" r="18" />
+                <path d="M4 96c2-24 16-36 34-36s32 12 34 36z" />
+              </svg>
+            }
+            <span class="plate">
+              <span class="plate-name">{{ c.name }}</span>
+              <span class="plate-class">{{ classLabel(c) }}</span>
+            </span>
+          </button>
+        }
+      </div>
+    </div>
+
+    <!-- Menu suspenso do agente destacado -->
+    @if (agent(); as a) {
+      <div
+        class="menu"
+        role="menu"
+        [attr.aria-label]="'Opções de ' + a.name"
+        data-testid="lobby-menu"
+      >
+        <span class="menu-title" [style.--agent]="css(a)">{{ a.name }}</span>
+        @for (item of menu; track item.id; let i = $index) {
+          <button
+            type="button"
+            role="menuitem"
+            class="menu-item"
+            [class.pad-on]="pad() && menuFocus() === i"
+            [class.locked]="item.locked"
+            [attr.aria-disabled]="item.locked ? 'true' : null"
+            [attr.data-testid]="'menu-' + item.id"
+            (click)="choose(item)"
+          >
+            <span>{{ item.label }}</span>
+            @if (item.locked) {
+              <span class="soon">Em breve</span>
+            }
+          </button>
+        }
+      </div>
+    }
+  </section>
+
+  <footer class="actions">
+    <p class="hint">
+      @if (selected() === null) {
+        {{ pad() ? 'Direcional para escolher um agente' : 'Toque num agente para ver as opções' }}
+      } @else {
+        {{ agent()?.name }} em destaque
+      }
+    </p>
+    <button
+      type="button"
+      class="btn btn-primary start-btn"
+      data-testid="lobby-start"
+      (click)="start()"
+    >
+      Iniciar missão
+      @if (pad()) {
+        <span class="pad-glyph" aria-hidden="true">{{ glyph('help') }}</span>
+      }
+    </button>
+  </footer>
+</main>
