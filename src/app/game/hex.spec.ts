@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { rollDice, rollDie, sum } from './dice';
 import { circleArea, hexDistance, hexKey, hexLine, hexNeighbors, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea } from './hex';
-import { CHARACTERS, MAPS, MOVE_DICE, playArea } from './maps';
+import { CHARACTERS, MAPS, MOVE_DICE, PHASES, phaseTitle, playArea } from './maps';
 
 describe('mapas e personagens', () => {
   it('o mapa de teste é 12x12 e vem primeiro entre os disponíveis', () => {
@@ -9,6 +9,15 @@ describe('mapas e personagens', () => {
     expect(available.map((m) => m.id)).toEqual(['teste-12x12', 'aeroporto']);
     expect(available[0].cols).toBe(12);
     expect(available[0].rows).toBe(12);
+  });
+
+  it('o menu tem três fases e só a primeira (o hangar do aeroporto) abre', () => {
+    expect(PHASES.map((m) => [phaseTitle(m), m.available])).toEqual([
+      ['Fase 1: Hangar', true],
+      ['Fase 2: Garimpo', false],
+      ['Fase 3: Zona de dragagem', false],
+    ]);
+    expect(PHASES[0].id).toBe('aeroporto');
   });
 
   it('há 3 personagens e cada mapa tem uma posição inicial distinta para cada um', () => {

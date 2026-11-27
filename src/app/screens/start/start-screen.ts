@@ -2,7 +2,7 @@ import { Component, OnDestroy, inject, signal } from '@angular/core';
 import { Router } from '@angular/router';
 import { PadButton, Stick, glyphFor } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
-import { GameMap, MAPS } from '../../game/maps';
+import { GameMap, PHASES, phaseTitle } from '../../game/maps';
 
 @Component({
   selector: 'app-start-screen',
@@ -12,11 +12,13 @@ import { GameMap, MAPS } from '../../game/maps';
 export class StartScreen implements OnDestroy {
   private readonly router = inject(Router);
   private readonly gamepad = inject(GamepadService);
-  protected readonly maps = MAPS;
-  protected readonly selectedId = signal<string | null>(null);
+  protected readonly maps = PHASES;
+  protected readonly phaseTitle = phaseTitle;
+  /** Já vem com a primeira fase disponível marcada: hoje só há uma. */
+  protected readonly selectedId = signal<string | null>(PHASES.find((m) => m.available)?.id ?? null);
   protected readonly pad = this.gamepad.pad;
 
-  // Controle: direcional/analógico escolhe o mapa, ✕ (ou Options) escolhe e inicia.
+  // Controle: direcional/analógico escolhe a fase, ✕ (ou Options) escolhe e inicia.
   private readonly stopPad = this.gamepad.listen({
     move: (dir) => this.cycle(dir),
     button: (b) => this.padButton(b),
@@ -28,8 +30,8 @@ export class StartScreen implements OnDestroy {
 
   protected start(): void {
     const id = this.selectedId();
-    // antes da partida, a ficha de cada agente (escalação)
-    if (id) this.router.navigate(['/escalacao', id]);
+    // antes da partida, o lobby com a equipe
+    if (id) this.router.navigate(['/lobby', id]);
   }
 
   protected confirmGlyph(): string {
@@ -44,7 +46,7 @@ export class StartScreen implements OnDestroy {
   private cycle(dir: Stick): void {
     const step = dir.y || dir.x;
     if (!step) return;
-    const available = MAPS.filter((m) => m.available);
+    const available = PHASES.filter((m) => m.available);
     const i = available.findIndex((m) => m.id === this.selectedId());
     const next = i < 0 ? (step > 0 ? 0 : available.length - 1) : (i + Math.sign(step) + available.length) % available.length;
     this.selectedId.set(available[next]?.id ?? null);
@@ -53,6 +55,6 @@ export class StartScreen implements OnDestroy {
   private padButton(b: PadButton): void {
     if (b !== 'cross' && b !== 'options') return;
     if (this.selectedId()) this.start();
-    else this.selectedId.set(MAPS.find((m) => m.available)?.id ?? null);
+    else this.selectedId.set(PHASES.find((m) => m.available)?.id ?? null);
   }
 }

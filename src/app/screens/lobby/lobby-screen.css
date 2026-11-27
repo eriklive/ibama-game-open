@@ -1,0 +1,319 @@
+/* Lobby da fase: a equipe de pé num palco escuro (a tela inteira), com o menu do agente
+   destacado à direita. */
+:host {
+  display: block;
+  height: 100dvh;
+  background: radial-gradient(ellipse at 50% 80%, #23505d 0%, #0f2a32 75%);
+}
+
+.lobby {
+  position: relative;
+  height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+}
+
+/* ---------- cabeçalho ---------- */
+.head {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: calc(12px + var(--safe-top)) calc(16px + var(--safe-right)) 0
+    calc(16px + var(--safe-left));
+}
+.back {
+  position: relative;
+  min-width: 52px;
+  min-height: 48px;
+  padding: 0 14px 0 10px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  border-radius: 14px;
+  border: 4px solid var(--ink);
+  background: var(--panel);
+  color: var(--text);
+  font-family: var(--display);
+  font-size: 18px;
+  box-shadow: 0 4px 0 var(--ink);
+}
+.back svg {
+  width: 22px;
+  height: 22px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 3;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.head-title {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+.kicker {
+  font-size: 13px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+  color: var(--yellow);
+}
+h1 {
+  margin: 0;
+  font-family: var(--display);
+  font-weight: 400;
+  font-size: 32px;
+  line-height: 1;
+  text-shadow: 0 3px 0 var(--ink);
+}
+
+/* ---------- palco ---------- */
+/* o palco ocupa a tela toda, por trás do cabeçalho e do rodapé (ver LOBBY_INSETS) */
+.stage-wrap {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+}
+.lineup {
+  position: absolute;
+  inset: 0;
+}
+.stage {
+  position: absolute;
+  inset: 0;
+}
+.loading {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 13px;
+  color: var(--muted);
+}
+
+/* colunas tocáveis por cima de cada agente */
+.picks {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+}
+.pick {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-end;
+  /* as plaquinhas ficam logo acima do rodapé */
+  padding: 0 4px 128px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+}
+.pick:focus-visible {
+  outline-offset: -6px;
+}
+/* com o palco 3D: só as plaquinhas são botões, cada uma embaixo do seu agente */
+.picks.live {
+  pointer-events: none;
+}
+.picks.live .pick {
+  position: absolute;
+  bottom: 128px;
+  padding: 0;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  transition: left 0.3s ease;
+}
+.picks.live .pick:focus-visible {
+  outline-offset: 3px;
+}
+.silhouette {
+  flex: 1;
+  width: 70%;
+  max-height: 60%;
+  margin-bottom: 12px;
+  fill: var(--agent);
+  opacity: 0.85;
+}
+.plate {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 4px 12px 5px;
+  border-radius: 12px;
+  border: 3px solid var(--ink);
+  background: var(--panel);
+  box-shadow: 0 3px 0 var(--ink);
+  transition:
+    background 0.15s,
+    transform 0.15s;
+}
+.plate-name {
+  font-family: var(--display);
+  font-size: 20px;
+  line-height: 1.1;
+}
+.plate-class {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  opacity: 0.85;
+}
+.stage {
+  cursor: pointer;
+}
+.pick.on .plate {
+  background: var(--yellow);
+  color: var(--dark-text);
+  transform: translateY(-4px);
+}
+.picks.any .pick:not(.on) .plate {
+  opacity: 0.6;
+}
+
+/* ---------- menu suspenso ---------- */
+.menu {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  width: min(230px, 46%);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 18px;
+  border: 4px solid var(--ink);
+  background: var(--panel);
+  box-shadow: 0 5px 0 var(--ink);
+  animation: drop 0.18s ease-out;
+}
+.menu-title {
+  padding-left: 10px;
+  border-left: 6px solid var(--agent);
+  font-family: var(--display);
+  font-size: 22px;
+  line-height: 1.1;
+}
+.menu-item {
+  min-height: 48px;
+  padding: 6px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  text-align: left;
+  border-radius: 12px;
+  border: 3px solid var(--ink);
+  background: #ffffff;
+  color: var(--dark-text);
+  font-size: 15px;
+  box-shadow: 0 3px 0 var(--ink);
+}
+.menu-item:active:not(.locked) {
+  transform: translateY(2px);
+  box-shadow: 0 1px 0 var(--ink);
+}
+.menu-item.locked {
+  background: #4f6970;
+  color: var(--muted);
+  cursor: not-allowed;
+}
+.menu-item.pad-on {
+  outline: 4px solid var(--sky);
+  outline-offset: 2px;
+}
+.soon {
+  font-size: 11px;
+  text-transform: uppercase;
+  letter-spacing: 0.6px;
+  opacity: 0.85;
+}
+@keyframes drop {
+  from {
+    opacity: 0;
+    transform: translateY(-10px);
+  }
+}
+
+/* ---------- rodapé ---------- */
+.actions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  padding: 0 calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom))
+    calc(16px + var(--safe-left));
+}
+.hint {
+  margin: 0;
+  font-size: 14px;
+  color: var(--muted);
+}
+.start-btn {
+  position: relative;
+  width: 100%;
+  max-width: 360px;
+  min-height: 60px;
+  font-size: 26px;
+}
+.pad-glyph {
+  display: inline-grid;
+  place-items: center;
+  min-width: 26px;
+  height: 26px;
+  margin-left: 10px;
+  padding: 0 6px;
+  border-radius: 13px;
+  background: var(--ink);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1;
+  vertical-align: middle;
+}
+
+/* web: com o menu aberto, a fila anda para a esquerda e o menu fica ao lado, sem cobrir ninguém */
+@media (min-width: 600px) {
+  .menu {
+    top: 50%;
+    transform: translateY(-50%);
+    animation-name: slide;
+  }
+}
+@keyframes slide {
+  from {
+    opacity: 0;
+    transform: translate(16px, -50%);
+  }
+}
+
+/* celular: a fila fica no pé do palco e o menu, no alto, mais compacto */
+@media (max-width: 599px) {
+  .back-label {
+    display: none;
+  }
+  .menu {
+    right: 10px;
+    top: 84px;
+    width: min(220px, 62%);
+    padding: 10px;
+    gap: 6px;
+  }
+  .menu-item {
+    min-height: 44px;
+    font-size: 14px;
+  }
+  .plate-name {
+    font-size: 17px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .menu {
+    animation: none;
+  }
+}
