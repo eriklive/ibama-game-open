@@ -1,4 +1,4 @@
-<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="prop() || interrogation()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'" [class.break-in-cine]="breakInCine()">
+<div class="game" [class.intro]="!!intro()" [class.approach-mode]="approaching()" [class.focus-mode]="prop() || interrogation() || cabinInside()" [class.door-focus]="phase() === 'door' || phase() === 'plane'" [class.chase-mode]="!!chaseHud() || !!chaseOffer() || !!targetPrompt()" [class.rolling]="phase() === 'rolling'" [class.break-in-cine]="breakInCine()">
   <canvas #board class="board" aria-label="Tabuleiro hexagonal em 3D. Toque num hexágono claro para escolher o destino e toque de novo para confirmar. Toque numa peça para ver o personagem."></canvas>
   <!-- Modo Corrida: o mapa de corrida, por cima do tabuleiro (ver game/runner-session.ts) -->
   <canvas #runner class="board runner" [class.on]="runnerOn()" aria-label="Corrida: arraste para os lados para virar nas curvas, para cima para pular e para baixo para deslizar."></canvas>
@@ -432,7 +432,7 @@
             <span class="door-slot none" aria-hidden="true"></span>
             <span class="door-text">
               <span class="door-opt-name">Olhar dentro</span>
-              <span class="door-opt-need free">{{ hasKey() ? 'tem a chave, abre' : 'sem a chave, está trancado' }}</span>
+              <span class="door-opt-need free">{{ hasKey() ? 'tem a chave, entra' : 'sem a chave, está trancado' }}</span>
             </span>
             @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
           </button>
@@ -770,6 +770,38 @@
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
         </button>
       }
+    </div>
+  }
+
+  <!--
+    Dentro do avião (issue #125): a câmera olha pela porta aberta; o GPS e o rádio, destacados, se
+    pegam tocando neles (ou pelos botões). "Sair do avião" desmonta o interior e volta ao tabuleiro.
+  -->
+  @if (cabinInside()) {
+    <div class="focus-stage prop-stage" data-testid="cabin-focus"></div>
+    <div class="aim-actions">
+      <div class="slip inspect-slip cabin-slip" [class.pass]="!cabinLeft().length" role="status" aria-live="polite" data-testid="cabin-hint">
+        <strong>Cabine do avião · {{ cabinWho() }}</strong>
+        <span data-testid="cabin-seen">{{ cabinText() }}</span>
+        @if (cabinNote(); as note) {
+          <span class="small" data-testid="cabin-note">{{ note }}</span>
+        }
+      </div>
+      <div class="cabin-actions">
+        @for (item of cabinLeft(); track item.id; let first = $first) {
+          <button type="button" class="paper cabin-btn" [attr.data-testid]="'cabin-take-' + item.id" (click)="takeCabin(item.id)"
+            [attr.aria-label]="'Pegar ' + item.name">
+            <span class="stencil">Pegar</span>
+            <span class="typed">{{ item.short }}</span>
+            @if (pad() && first) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
+          </button>
+        }
+        <button type="button" class="paper cabin-btn cabin-leave" data-testid="cabin-leave" (click)="leavePlane()" aria-label="Sair do avião e voltar ao tabuleiro">
+          <span class="stencil">Sair</span>
+          <span class="typed">do avião</span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
+        </button>
+      </div>
     </div>
   }
 

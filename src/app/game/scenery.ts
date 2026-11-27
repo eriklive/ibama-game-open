@@ -710,6 +710,14 @@ export function buildHouse(
 }
 
 /**
+ * Nome do grupo da porta da cabine do avião (o giro em Y abre: positivo, para fora). Ver
+ * `HexBoard.setPlaneDoor`.
+ */
+export const PLANE_DOOR = 'plane-door';
+/** Giro da porta da cabine aberta (radianos). */
+export const PLANE_DOOR_OPEN = 1.25;
+
+/**
  * Teco-teco de asa alta (estilo Cessna 152), feito de caixas e cilindros. O nariz
  * aponta para +Z; mede cerca de 6,2 (envergadura) × 5 (comprimento) unidades.
  */
@@ -758,6 +766,21 @@ export function buildPlane(): THREE.Group {
   box(2.3, 0.08, 0.62, 0, 1.22, -2.62, white);
   box(0.08, 0.95, 0.7, 0, 1.68, -2.58, white).rotation.x = -0.25;
   box(0.09, 0.3, 0.72, 0, 2.02, -2.68, blue).rotation.x = -0.25;
+  // porta da cabine (lado oeste, −X), com a dobradiça na frente: abre para fora (ver `PLANE_DOOR`)
+  const door = new THREE.Group();
+  door.name = PLANE_DOOR;
+  door.position.set(-0.53, 0, 0.95);
+  const leaf = (w: number, h: number, d: number, y: number, z: number, material: THREE.Material): void => {
+    const mesh = new THREE.Mesh(new THREE.BoxGeometry(w, h, d), material);
+    mesh.position.set(0, y, z);
+    mesh.castShadow = true;
+    door.add(mesh);
+  };
+  leaf(0.04, 0.88, 0.8, 1.06, -0.4, white);
+  leaf(0.05, 0.34, 0.64, 1.3, -0.4, glass);
+  leaf(0.05, 0.14, 0.8, 0.9, -0.4, blue);
+  leaf(0.07, 0.03, 0.12, 1.02, -0.68, dark);
+  plane.add(door);
   // trem de pouso triciclo
   const wheelGeo = new THREE.CylinderGeometry(0.2, 0.2, 0.13, 10);
   wheelGeo.rotateZ(Math.PI / 2);

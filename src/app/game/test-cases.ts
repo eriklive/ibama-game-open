@@ -27,6 +27,8 @@ export interface TestCase {
    * que vão correr: ele escolhe qual perseguir ou deixa os dois (`decisao:alvo`).
    * `turn` só abre o turno do agente, com a cena montada.
    */
+  /** A equipe já começa com a chave do avião (dá para entrar nele). */
+  hasKey?: boolean;
   start:
     | { kind: 'turn'; agent: string }
     | { kind: 'chase'; agent: string; enemy: string }
@@ -120,6 +122,17 @@ export const TEST_CASES: readonly TestCase[] = [
     active: 'bruno',
     agents: { bruno: { col: 21, row: 9 }, ana: { col: 22, row: 9 }, clara: { col: 23, row: 9 } },
     enemies: { piloto: { hex: { col: 26, row: 14 } } },
+    start: { kind: 'turn', agent: 'bruno' },
+  },
+  {
+    id: 'interior-aviao',
+    name: 'Dentro do avião',
+    hint: 'Bruno colado no avião, já com a chave. Toque no avião e em "Olhar dentro": ele anda até a porta, ela abre e dá para pegar o GPS do painel e o rádio do teto. "Sair" volta ao tabuleiro.',
+    mapId: 'aeroporto',
+    active: 'bruno',
+    agents: { bruno: { col: 21, row: 10 }, ana: { col: 23, row: 15 }, clara: { col: 24, row: 15 } },
+    enemies: { piloto: { hex: { col: 28, row: 6 } } },
+    hasKey: true,
     start: { kind: 'turn', agent: 'bruno' },
   },
   {

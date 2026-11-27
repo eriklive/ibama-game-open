@@ -99,6 +99,20 @@ import {
   nextToPanel,
   witness,
 } from '../../game/plane';
+import {
+  CABIN_ITEMS,
+  CabinEvent,
+  CabinState,
+  INITIAL_CABIN,
+  cabinBuilt,
+  cabinClutter,
+  cabinItem,
+  cabinItemsLeft,
+  cabinStep,
+  cabinSummary,
+  canEnterPlane,
+  planeDoorSpot,
+} from '../../game/plane-cabin';
 import { MissionProgress, Verdict, canEndMission, missionVerdict, objectiveState, visibleObjectives } from '../../game/mission';
 import { IntroTarget, STRUCTURE_TOP, introTargets } from '../../game/mission-intro';
 import { IntroMark, MissionIntro } from '../../ui/mission-intro/mission-intro';
@@ -161,7 +175,7 @@ const SLOW_GRACE_MS = 300;
  * `interrogating`: interrogatório em close-up (balões e cartões de pergunta na tela).
  * `over`: a operação foi encerrada (fica o relatório na tela).
  */
-type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'plane' | 'interrogating' | 'ending' | 'chase' | 'enemy' | 'over';
+type Phase = 'rolling' | 'moving-choice' | 'walking' | 'checking' | 'door' | 'plane' | 'cabin' | 'interrogating' | 'ending' | 'chase' | 'enemy' | 'over';
 
 /** Anotação da caderneta de campo (vai para o relatório da operação). */
 export interface FieldNote {
@@ -1305,6 +1319,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         onHexTap: (hex) => this.tapHex(hex),
         onUnitTap: (id) => this.pickCharacter(id),
         onPropTap: (part) => this.tapProp(part),
+        onCabinTap: (part) => this.tapCabin(part),
         onTargetTap: (id) => {
           this.tapTarget(id);
           this.centerOnTarget(id);
@@ -1451,7 +1466,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   protected endTurn(): void {
-    if (['walking', 'checking', 'door', 'plane', 'interrogating', 'rolling', 'chase', 'enemy', 'over'].includes(this.phase())) return;
+    if (['walking', 'checking', 'door', 'plane', 'cabin', 'interrogating', 'rolling', 'chase', 'enemy', 'over'].includes(this.phase())) return;
     // só quando o jogador decide passar (não depois de abordar ou queimar)
     if (this.phase() === 'moving-choice') this.sound.play('ui.passar');
     this.clearTimers();
@@ -1628,6 +1643,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (ev.key !== 'Escape') return;
       ev.preventDefault();
       this.closeProp();
+      return;
+    }
+    // dentro do avião: Esc sai
+    if (this.cabinInside()) {
+      if (ev.key !== 'Escape') return;
+      ev.preventDefault();
+      this.leavePlane();
       return;
     }
     if (this.targetPrompt()) {
@@ -3946,8 +3968,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected planeLook(): void {
     if (this.phase() !== 'plane') return;
     if (lookInside(this.planeState()) === 'open') {
-      this.planeNote.set('Destrancado com a chave. Dentro: galões e caixas lacradas de combustível para o garimpo.');
       this.sound.play('porta.destrancou');
+      void this.enterPlane();
       return;
     }
     this.sound.play('eq.aviao-trancado');
@@ -3967,6 +3989,130 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.planeNote.set(null);
     this.phase.set('moving-choice');
     this.startBurn();
+  }
+
+  // ---------- dentro do avião (issue #125; a regra está em `plane-cabin.ts`) ----------
+
+  /** Etapa da entrada no avião e quem entrou. */
+  private readonly cabinState = signal<CabinState>(INITIAL_CABIN);
+  /** Alguém está dentro: o interior está montado e a ficha da cabine aparece. */
+  protected readonly cabinInside = computed(() => cabinBuilt(this.cabinState()));
+  /** Peças que ainda estão na cabine (o GPS, o rádio). */
+  protected readonly cabinLeft = computed(() => cabinItemsLeft(this.found()));
+  /** O que a ficha da cabine diz do que sobrou. */
+  protected readonly cabinText = computed(() => cabinSummary(this.found()));
+  /** Última coisa vista ou pega na cabine. */
+  protected readonly cabinNote = signal<string | null>(null);
+  /** Quem está dentro (nome, para a ficha). */
+  protected readonly cabinWho = computed(() => {
+    const id = this.cabinState().agent;
+    return id ? this.nameOf(id) : '';
+  });
+
+  private cabinEvent(e: CabinEvent): void {
+    this.cabinState.update((s) => cabinStep(s, e));
+  }
+
+  /**
+   * Entrar no avião (com a chave): o agente anda até a porta da cabine (sem gastar movimento) e
+   * a câmera vai junto; a porta abre e só então o interior é montado no tabuleiro.
+   */
+  private async enterPlane(): Promise<void> {
+    const plane = (this.map?.burnables ?? []).find((t) => t.inspect);
+    const board = this.board;
+    const id = this.active().id;
+    const from = this.positions().get(id);
+    if (!plane || !board || !from || this.phase() !== 'plane') return;
+    if (!canEnterPlane(this.planeState(), this.burned().has(plane.id))) return;
+    const epoch = this.epoch;
+    board.releaseDoorFocus();
+    removeEventListener('resize', this.onDoorResize);
+    this.planeNote.set(null);
+    this.cabinNote.set(null);
+    this.cabinEvent({ type: 'enter', agent: id });
+    this.phase.set('cabin');
+    board.focus(id);
+    // até a porta: o hexágono livre colado no avião mais perto dela (se não der, entra de onde está)
+    const blocked = this.moveBlocked();
+    const door = planeDoorSpot(plane.hexes, blocked);
+    const path = door && !sameHex(door, from) ? pathTo(reachableHexes(from, Number.MAX_SAFE_INTEGER, this.area, blocked), door) : [];
+    if (path.length) {
+      if (!(await this.walkUnits(id, new Map([[id, path]])))) return;
+      if (this.epoch !== epoch || this.phase() !== 'walking') {
+        this.dropCabin();
+        return;
+      }
+      this.phase.set('cabin');
+    }
+    this.cabinEvent({ type: 'arrived' });
+    board.setPlaneDoor(true);
+    this.sound.play('porta.abrir');
+    this.later(reducedMotion() ? 150 : 750, () => {
+      if (this.epoch !== epoch || this.cabinState().stage !== 'opening') return;
+      board.setInputEnabled(false);
+      if (!board.enterPlaneCabin(id, this.found(), this.propInsets())) {
+        board.setInputEnabled(true);
+        board.setPlaneDoor(false);
+        this.dropCabin();
+        this.afterMove();
+        return;
+      }
+      board.setCabinHighlight(true);
+      this.cabinEvent({ type: 'opened' });
+      this.sound.play('eq.closeup');
+      addEventListener('resize', this.onCabinResize);
+    });
+  }
+
+  private readonly onCabinResize = (): void => this.board?.setCloseUpInsets(this.propInsets());
+
+  /** Toque na cabine: na peça, pega; no resto, diz o que tem ali. */
+  private tapCabin(part: string): void {
+    if (!this.cabinInside()) return;
+    if (part !== 'other') {
+      this.takeCabin(part);
+      return;
+    }
+    this.sound.play('ui.hex');
+    this.cabinNote.set(cabinClutter(this.cabinState()));
+    this.cabinEvent({ type: 'poke' });
+  }
+
+  /** Pega o GPS ou o rádio: vai para os achados da equipe (como a arma) e some da cabine. */
+  protected takeCabin(id: string): void {
+    if (!this.cabinInside()) return;
+    const item = cabinItem(id, this.found());
+    if (!item) return;
+    this.found.update((s) => new Set([...s, item.id]));
+    this.board?.takeCabinItem(item.id);
+    this.haptics.vibrate(SETTLE_PATTERN);
+    this.gamepad.rumble(0.8, 0.5, 220);
+    this.sound.play('eq.vasculhar');
+    this.cabinNote.set(item.seized);
+  }
+
+  /** **Sair do avião**: o interior é descartado, a câmera volta, a porta fecha e a vez segue. */
+  protected leavePlane(): void {
+    if (!this.cabinInside()) return;
+    const who = this.cabinWho();
+    const took = CABIN_ITEMS.filter((i) => this.found().has(i.id)).map((i) => i.name);
+    this.cabinEvent({ type: 'leave' });
+    this.dropCabin();
+    this.sound.play('porta.abrir');
+    this.say(took.length ? `${who} saiu do avião com ${took.join(' e ')}` : `${who} saiu do avião`, 'info');
+    this.afterMove();
+  }
+
+  /** Some com o interior e fecha a porta (saída ou recomeço), sem seguir a vez. */
+  private dropCabin(): void {
+    const was = this.cabinState().stage;
+    this.cabinEvent({ type: 'closed' });
+    this.cabinNote.set(null);
+    removeEventListener('resize', this.onCabinResize);
+    if (was === 'outside') return;
+    this.board?.leavePlaneCabin();
+    this.board?.setPlaneDoor(false, was !== 'leaving');
+    this.board?.setInputEnabled(true);
   }
 
   // ---------- encerrar a operação ----------
@@ -4054,6 +4200,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.keySeenBy.set([]);
     this.planeNote.set(null);
     this.planeBurn.set(false);
+    this.dropCabin();
     this.closeSpeech();
     this.linePools.set(new Map());
     this.fieldNotes.set([]);
@@ -4278,6 +4425,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.focus(active.id);
     this.board?.setSelected(null);
     this.board?.setReachable([]);
+    if (testCase.hasKey) {
+      this.hasKey.set(true);
+      this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
+      const panel = this.map?.keyPanel;
+      if (panel) this.board?.hidePropItem(panel.spot);
+    }
     this.say(testCase.name, 'info');
 
     if (testCase.start.kind === 'turn') {
@@ -4393,6 +4546,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       else if (option && !option.disabled) void this.doorAction(option.action);
       return;
     }
+    // dentro do avião: ✕ pega a próxima peça (o GPS, depois o rádio), ○ sai
+    if (this.phase() === 'cabin') {
+      const next = this.cabinLeft()[0];
+      if (b === 'circle') this.leavePlane();
+      else if (b === 'cross' && next) this.takeCabin(next.id);
+      else if (b === 'cross') this.leavePlane();
+      return;
+    }
     // menu do avião: ○ volta; ✕ olha dentro, □ queima
     if (this.phase() === 'plane') {
       if (b === 'circle') this.closePlaneMenu();
@@ -4490,7 +4651,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     const map = this.map;
-    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.approaching() || this.burning() || this.prop() || this.debrief()) return;
+    if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.phase() === 'cabin' || this.approaching() || this.burning() || this.prop() || this.debrief()) return;
     const from = this.cursor() ?? this.positions().get(this.active().id);
     if (!from) return;
     const next = neighborToward(from, dir);
