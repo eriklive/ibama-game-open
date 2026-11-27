@@ -1338,6 +1338,18 @@ export class HexBoard {
     if (reducedMotionQuery()) this.stepCabinPan(Infinity);
   }
 
+  /**
+   * Desliza a vista da cabine para um lado da tela (`1`: direita, `-1`: esquerda), um passo de
+   * `step` do trilho: o lado que é o fundo depende de como a câmera olha.
+   */
+  panCabinSide(side: 1 | -1, step = 0.25): void {
+    const tr = this.cabin?.track;
+    if (!tr) return;
+    const right = new THREE.Vector3().setFromMatrixColumn(this.camera.matrixWorld, 0).setY(0);
+    const toBack = tr.back.clone().sub(tr.front).setY(0);
+    this.panCabin(side * Math.sign(right.dot(toBack) || 1) * step);
+  }
+
   /** Leva a câmera da cabine para o ponto pedido do trilho (e o close-up mira lá). */
   private stepCabinPan(dt: number): void {
     const c = this.cabin;

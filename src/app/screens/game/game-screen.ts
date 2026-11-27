@@ -1649,8 +1649,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // dentro do avião: Esc sai; as setas deslizam a vista entre o painel e o fundo
     if (this.cabinInside()) {
       if (ev.key === 'Escape') this.leavePlane();
-      else if (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') this.board?.panCabin(0.25);
-      else if (ev.key === 'ArrowLeft' || ev.key === 'ArrowUp') this.board?.panCabin(-0.25);
+      else if (ev.key === 'ArrowRight' || ev.key === 'd' || ev.key === 'D') this.board?.panCabinSide(1);
+      else if (ev.key === 'ArrowLeft' || ev.key === 'a' || ev.key === 'A') this.board?.panCabinSide(-1);
       else return;
       ev.preventDefault();
       return;
@@ -4681,7 +4681,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     const map = this.map;
     if (this.phase() === 'cabin' && this.cabinInside()) {
-      if (dir.x || dir.y) this.board?.panCabin((Math.abs(dir.x) >= Math.abs(dir.y) ? Math.sign(dir.x) : Math.sign(dir.y)) * 0.25);
+      if (dir.x) this.board?.panCabinSide(dir.x > 0 ? 1 : -1);
       return;
     }
     if (!map || !this.board || this.phase() === 'enemy' || this.phase() === 'chase' || this.phase() === 'door' || this.phase() === 'plane' || this.phase() === 'cabin' || this.approaching() || this.burning() || this.prop() || this.debrief()) return;
