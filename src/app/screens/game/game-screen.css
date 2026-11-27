@@ -429,7 +429,7 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   position: absolute; right: 108px; bottom: 58px;
   width: 160px;
   padding: 10px 12px 12px;
-  background: var(--postit);
+  background: var(--postit); color: var(--ink-paper);
   box-shadow: 2px 4px 0 rgba(0, 0, 0, 0.3);
   transform: rotate(-3deg);
   font-family: var(--marker); font-size: 15px; line-height: 1.25;
