@@ -80,9 +80,12 @@ describe('peças da cabine', () => {
   });
 
   it('a ficha diz o que sobrou', () => {
-    expect(cabinSummary(new Set())).toContain('GPS');
-    expect(cabinSummary(new Set())).toContain('rádio');
-    expect(cabinSummary(new Set([CABIN_GPS]))).not.toContain('GPS');
+    // a ficha não entrega o que tem na cabine: isso é com a percepção
+    for (const found of [new Set<string>(), new Set([CABIN_GPS]), new Set([CABIN_RADIO])]) {
+      expect(cabinSummary(found)).not.toContain('GPS');
+      expect(cabinSummary(found)).not.toContain('rádio');
+      expect(cabinSummary(found)).toContain('Deslize');
+    }
     expect(cabinSummary(new Set([CABIN_GPS, CABIN_RADIO]))).toContain('vazio');
   });
 

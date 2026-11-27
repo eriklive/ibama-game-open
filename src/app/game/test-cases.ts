@@ -127,7 +127,7 @@ export const TEST_CASES: readonly TestCase[] = [
   {
     id: 'interior-aviao',
     name: 'Dentro do avião',
-    hint: 'Bruno colado no avião, já com a chave. Toque no avião e em "Olhar dentro": ele anda até a porta, ela abre e dá para pegar o GPS do painel e o rádio do teto. "Sair" volta ao tabuleiro.',
+    hint: 'Bruno colado no avião, já com a chave. Toque no avião e em "Olhar dentro": ele anda até a porta e rola percepção (passando, o GPS e o rádio aparecem destacados; falhando, ainda dá para tocar neles). Dentro, a câmera fica no painel: deslize para ver o fundo. "Sair" volta ao tabuleiro.',
     mapId: 'aeroporto',
     active: 'bruno',
     agents: { bruno: { col: 21, row: 10 }, ana: { col: 23, row: 15 }, clara: { col: 24, row: 15 } },

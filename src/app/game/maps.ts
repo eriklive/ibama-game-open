@@ -250,7 +250,8 @@ export const lowCoverHexes = (map: GameMap): Set<string> => new Set(coverOf(map,
  * O avião fica **trancado**; a chave está no quadro de chaves (`K`), na parede do fundo.
  *
  * O caminho para os fundos do hangar é cheio de cobertura **baixa** (sacos, gaiolas): na fuga o
- * garimpeiro dá a volta nelas.
+ * garimpeiro dá a volta nelas. Junto da parede do fundo, entre a porta dos fundos e o quadro de
+ * chaves, sobrou só um par de gaiolas (o corredor fica livre).
  *
  * A missão principal é queimar o **avião** e a pilha de **suprimentos do garimpo** (`R`), no
  * fundo do hangar, à direita de quem entra pelo portão.
@@ -261,8 +262,8 @@ const AEROPORTO_LAYOUT = parseLayout([
   'TTTTTTTTT........................G..TTTTTTTT',
   'TTTTTTTTT.T......................T..TTTTTTTT',
   'TTTTTTTTT..###D##############D###T..TTTTTTTT',
-  'TTTTTTTTT..#____GG__K___________#T...T.TTTTT',
-  'TTTTTT.....#____G_______________#T......TTTT',
+  'TTTTTTTTT..#________K___________#T...T.TTTTT',
+  'TTTTTT.....#____________________#T......TTTT',
   'TTTT....T..#____GG______________#T.......TTT',
   'TTTTT...T..#_S_________RRR_____f#T..T...TTTT',
   'TTTTT..TT..#B_B___AAA_________B_#T...T..TTTT',

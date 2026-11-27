@@ -774,8 +774,9 @@
   }
 
   <!--
-    Dentro do avião (issue #125): a câmera olha pela porta aberta; o GPS e o rádio, destacados, se
-    pegam tocando neles (ou pelos botões). "Sair do avião" desmonta o interior e volta ao tabuleiro.
+    Dentro do avião (issue #125): a câmera olha o painel pela porta aberta; deslizar mostra o fundo.
+    A ficha não conta o que tem lá: o GPS e o rádio só aparecem destacados se a percepção passou,
+    e se pegam tocando neles. "Sair do avião" desmonta o interior e volta ao tabuleiro.
   -->
   @if (cabinInside()) {
     <div class="focus-stage prop-stage" data-testid="cabin-focus"></div>
@@ -788,14 +789,6 @@
         }
       </div>
       <div class="cabin-actions">
-        @for (item of cabinLeft(); track item.id; let first = $first) {
-          <button type="button" class="paper cabin-btn" [attr.data-testid]="'cabin-take-' + item.id" (click)="takeCabin(item.id)"
-            [attr.aria-label]="'Pegar ' + item.name">
-            <span class="stencil">Pegar</span>
-            <span class="typed">{{ item.short }}</span>
-            @if (pad() && first) { <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span> }
-          </button>
-        }
         <button type="button" class="paper cabin-btn cabin-leave" data-testid="cabin-leave" (click)="leavePlane()" aria-label="Sair do avião e voltar ao tabuleiro">
           <span class="stencil">Sair</span>
           <span class="typed">do avião</span>

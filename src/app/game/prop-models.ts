@@ -756,8 +756,10 @@ export type CabinParts = Pick<PropInfo, 'item' | 'hit' | 'glow'>;
 export interface CabinInfo {
   /** Para onde a câmera fica (do meio da cabine para fora, pela porta), no chão. */
   facing: THREE.Vector3;
-  /** Caixa a enquadrar (no espaço do grupo). */
+  /** Caixa a enquadrar ao entrar: o painel, de perto (no espaço do grupo). */
   focus: THREE.Box3;
+  /** O fundo da fuselagem: a outra ponta do trilho da câmera (deslizando, ver `HexBoard.panCabin`). */
+  back: THREE.Box3;
   /** As peças destacáveis por id (`CABIN_GPS`, `CABIN_RADIO`). */
   items: Map<string, CabinParts>;
 }
@@ -937,8 +939,10 @@ export function buildPlaneInterior(gpsId: string, radioId: string, taken: Readon
     items.set(radioId, radio);
   }
 
-  const focus = new THREE.Box3(new THREE.Vector3(m(near), m(y0), m(-1.3)), new THREE.Vector3(m(far), m(top), m(zF)));
-  g.userData['cabin'] = { facing: new THREE.Vector3(-0.8, 0, -0.6).normalize(), focus, items } satisfies CabinInfo;
+  // a câmera entra perto do painel (o manche, o GPS); o fundo vazio só aparece deslizando
+  const focus = new THREE.Box3(new THREE.Vector3(m(near + 0.1), m(y0 + 0.55), m(0.6)), new THREE.Vector3(m(far), m(top), m(zF - 0.1)));
+  const back = new THREE.Box3(new THREE.Vector3(m(near + 0.1), m(y0 + 0.55), m(zR + 0.15)), new THREE.Vector3(m(far), m(top), m(zR + 1.1)));
+  g.userData['cabin'] = { facing: new THREE.Vector3(-1, 0, -0.35).normalize(), focus, back, items } satisfies CabinInfo;
   return g;
 }
 

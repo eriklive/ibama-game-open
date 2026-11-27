@@ -11,6 +11,12 @@ import { PlaneState, lookInside } from './plane';
  *   e se pegam (vão para os achados da equipe, como a arma do armário) e somem da cabine;
  * - o fundo da fuselagem vazio: tiraram tudo para levar combustível.
  *
+ * - a câmera entra perto do painel; o fundo só aparece **deslizando** a vista (arrasto, rodinha,
+ *   setas ou direcional);
+ * - ao chegar na porta, quem entra rola **percepção** (uma vez por agente, `CABIN_NOTICE_ID`):
+ *   passando, o GPS e o rádio aparecem destacados; falhando, continuam tocáveis, sem destaque. A
+ *   ficha nunca conta o que tem lá dentro.
+ *
  * **Sair do avião** desmonta o interior e devolve a câmera. Aqui fica só a regra (as etapas, o
  * que ainda está lá e onde fica a porta); o tabuleiro desenha e a tela amarra.
  */
@@ -23,13 +29,13 @@ export interface CabinItem {
   name: string;
   /** Rótulo curto do botão ("GPS"). */
   short: string;
-  /** O que se vê dela na cabine. */
-  glimpse: string;
   /** Aviso quando é pega. */
   seized: string;
 }
 
 export const CABIN_GPS = 'gps-aviao';
+/** Id da percepção da cabine (entra em `noticed` quando alguém repara no GPS e no rádio). */
+export const CABIN_NOTICE_ID = 'cabine-aviao';
 export const CABIN_RADIO = 'radio-aviao';
 
 /** As peças da cabine, na ordem em que o controle pega (✕). */
@@ -38,14 +44,12 @@ export const CABIN_ITEMS: readonly CabinItem[] = [
     id: CABIN_GPS,
     name: 'o GPS',
     short: 'GPS',
-    glimpse: 'Um GPS portátil preso no painel, atrás do manche, com rotas salvas.',
     seized: 'GPS apreendido: as rotas do garimpo ficam com a equipe.',
   },
   {
     id: CABIN_RADIO,
     name: 'o rádio',
     short: 'rádio',
-    glimpse: 'Um rádio amador preso no teto da cabine, com o microfone pendurado.',
     seized: 'Rádio apreendido: acabou a conversa com o garimpo.',
   },
 ];
@@ -114,11 +118,13 @@ export const cabinItem = (id: string, found: ReadonlySet<string>): CabinItem | n
 /** Frase do toque no resto da cabine. */
 export const cabinClutter = (s: CabinState): string => CABIN_CLUTTER[s.pokes % CABIN_CLUTTER.length];
 
-/** Texto da ficha da cabine conforme o que sobrou. */
+/**
+ * Texto da ficha da cabine: só como olhar (nunca o que tem lá; isso é com a percepção). Sem nada
+ * de valor sobrando, diz que acabou.
+ */
 export function cabinSummary(found: ReadonlySet<string>): string {
-  const left = cabinItemsLeft(found);
-  if (!left.length) return 'Não sobrou nada de valor: o fundo do avião está vazio.';
-  return `${left.map((i) => i.glimpse).join(' ')} Toque para pegar.`;
+  if (!cabinItemsLeft(found).length) return 'Não sobrou nada de valor: o fundo do avião está vazio.';
+  return 'Deslize para olhar o fundo do avião. Toque no que quiser pegar.';
 }
 
 /**
