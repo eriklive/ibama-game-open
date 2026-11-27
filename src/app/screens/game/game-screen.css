@@ -406,14 +406,11 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .aim-actions .prop-take { position: absolute; right: 108px; bottom: 0; width: 136px; }
 .prop-take:not(:focus-visible) { opacity: 0; }
 /* dentro do avião: à direita, os botões de pegar e o de sair, em pilha */
-.cabin-actions { position: absolute; right: 0; bottom: 0; width: 124px; display: flex; flex-direction: column-reverse; gap: 8px; }
+.cabin-actions { position: absolute; right: 0; bottom: 0; width: 160px; display: flex; flex-direction: column-reverse; gap: 8px; }
 .cabin-actions .cabin-btn { position: relative; width: 92px; height: 42px; transform: rotate(2deg); }
 .cabin-actions .cabin-btn:nth-child(2) { transform: rotate(-2deg); }
-.cabin-actions .door-opt.cabin-leave { order: -1; width: 124px; padding: 8px 12px 8px 8px; }
-/* Sair do avião: o mesmo Voltar vermelho dos menus da porta e do avião */
-.cabin-leave-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.cabin-leave .door-opt-name { font-size: 22px; }
-.cabin-leave-sub { font-size: 11px; line-height: 1; letter-spacing: .5px; text-transform: uppercase; color: #ffd9cf; }
+/* sair do avião: o mesmo Voltar vermelho dos menus da porta e do avião */
+.cabin-actions .door-opt.cabin-leave { order: -1; width: auto; align-self: flex-end; }
 .prop-take:not(:focus) { pointer-events: none; }
 
 /* inspecionar e conversar pelo teclado: o botão só aparece quando recebe o foco */

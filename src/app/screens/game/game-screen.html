@@ -776,7 +776,7 @@
   <!--
     Dentro do avião (issue #125): a câmera olha o painel pela porta aberta; deslizar mostra o fundo.
     Sem bilhete na tela: o GPS e o rádio só aparecem destacados se a percepção passou,
-    e se pegam tocando neles. "Sair do avião" desmonta o interior e volta ao tabuleiro.
+    e se pegam tocando neles. "Voltar" desmonta o interior e volta ao tabuleiro.
   -->
   @if (cabinInside()) {
     <div class="focus-stage prop-stage" data-testid="cabin-focus"></div>
@@ -784,10 +784,7 @@
       <div class="cabin-actions">
         <button type="button" class="door-opt door-opt-back cabin-leave" style="--tilt: -1.5deg" data-testid="cabin-leave" (click)="leavePlane()" aria-label="Sair do avião e voltar ao tabuleiro">
           <svg class="door-back-arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M15 18l-6-6 6-6" /></svg>
-          <span class="cabin-leave-text">
-            <span class="door-opt-name">Sair</span>
-            <span class="cabin-leave-sub">do avião</span>
-          </span>
+          <span class="door-opt-name">Voltar</span>
           @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
         </button>
       </div>
