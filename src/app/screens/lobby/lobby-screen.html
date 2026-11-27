@@ -20,19 +20,21 @@
   </header>
 
   <section class="stage-wrap" aria-label="Equipe">
-    <!-- a fila (palco 3D + colunas tocáveis); no web, abre espaço para o menu à direita -->
-    <div class="lineup" [class.shifted]="selected() !== null">
-      <div class="stage" #stage aria-hidden="true"></div>
+    <!-- a fila (palco 3D + plaquinhas) -->
+    <div class="lineup">
+      <div class="stage" #stage aria-hidden="true" (click)="tapStage($event)"></div>
       @if (loading() && !viewerFailed()) {
         <span class="loading" aria-live="polite">carregando a equipe…</span>
       }
 
-      <!-- Uma coluna tocável por agente, sobre o palco 3D (mesma ordem da fila) -->
+      <!-- Plaquinha de cada agente: embaixo dele na fila; com um em destaque, lado a lado no
+           meio. Sem 3D, viram colunas tocáveis com a silhueta. -->
       <div
         class="picks"
         role="listbox"
         aria-label="Escolha um agente"
         [class.any]="selected() !== null"
+        [class.live]="!viewerFailed()"
       >
         @for (c of agents; track c.id; let i = $index) {
           <button
@@ -43,6 +45,7 @@
             [attr.aria-selected]="selected() === i"
             [attr.data-testid]="'lobby-' + c.id"
             [style.--agent]="css(c)"
+            [style.left]="viewerFailed() ? null : plateLeft(i)"
             (click)="pick(i)"
           >
             @if (viewerFailed()) {

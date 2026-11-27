@@ -1,25 +1,28 @@
-/* Lobby da fase: a equipe de pé num palco escuro, com o menu do agente destacado à direita. */
+/* Lobby da fase: a equipe de pé num palco escuro (a tela inteira), com o menu do agente
+   destacado à direita. */
 :host {
   display: block;
   height: 100dvh;
+  background: radial-gradient(ellipse at 50% 80%, #23505d 0%, #0f2a32 75%);
 }
 
 .lobby {
+  position: relative;
   height: 100dvh;
-  max-width: 1100px;
-  margin: 0 auto;
   display: flex;
   flex-direction: column;
-  padding: calc(12px + var(--safe-top)) calc(16px + var(--safe-right))
-    calc(16px + var(--safe-bottom)) calc(16px + var(--safe-left));
-  gap: 12px;
+  justify-content: space-between;
 }
 
 /* ---------- cabeçalho ---------- */
 .head {
+  position: relative;
+  z-index: 2;
   display: flex;
   align-items: center;
   gap: 14px;
+  padding: calc(12px + var(--safe-top)) calc(16px + var(--safe-right)) 0
+    calc(16px + var(--safe-left));
 }
 .back {
   position: relative;
@@ -67,20 +70,15 @@ h1 {
 }
 
 /* ---------- palco ---------- */
+/* o palco ocupa a tela toda, por trás do cabeçalho e do rodapé (ver LOBBY_INSETS) */
 .stage-wrap {
-  position: relative;
-  flex: 1;
-  min-height: 0;
-  border-radius: 22px;
-  border: 4px solid var(--ink);
-  background: radial-gradient(ellipse at 50% 85%, #23505d 0%, #0f2a32 70%);
-  box-shadow: 0 5px 0 var(--ink);
+  position: absolute;
+  inset: 0;
   overflow: hidden;
 }
 .lineup {
   position: absolute;
   inset: 0;
-  transition: right 0.25s ease;
 }
 .stage {
   position: absolute;
@@ -108,13 +106,29 @@ h1 {
   flex-direction: column;
   align-items: center;
   justify-content: flex-end;
-  padding: 0 4px 14px;
+  /* as plaquinhas ficam logo acima do rodapé */
+  padding: 0 4px 128px;
   border: 0;
   background: transparent;
   color: var(--text);
 }
 .pick:focus-visible {
   outline-offset: -6px;
+}
+/* com o palco 3D: só as plaquinhas são botões, cada uma embaixo do seu agente */
+.picks.live {
+  pointer-events: none;
+}
+.picks.live .pick {
+  position: absolute;
+  bottom: 128px;
+  padding: 0;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  transition: left 0.3s ease;
+}
+.picks.live .pick:focus-visible {
+  outline-offset: 3px;
 }
 .silhouette {
   flex: 1;
@@ -147,6 +161,9 @@ h1 {
   text-transform: uppercase;
   letter-spacing: 0.6px;
   opacity: 0.85;
+}
+.stage {
+  cursor: pointer;
 }
 .pick.on .plate {
   background: var(--yellow);
@@ -223,10 +240,14 @@ h1 {
 
 /* ---------- rodapé ---------- */
 .actions {
+  position: relative;
+  z-index: 2;
   display: flex;
   flex-direction: column;
   align-items: center;
   gap: 8px;
+  padding: 0 calc(16px + var(--safe-right)) calc(16px + var(--safe-bottom))
+    calc(16px + var(--safe-left));
 }
 .hint {
   margin: 0;
@@ -257,9 +278,6 @@ h1 {
 
 /* web: com o menu aberto, a fila anda para a esquerda e o menu fica ao lado, sem cobrir ninguém */
 @media (min-width: 600px) {
-  .lineup.shifted {
-    right: 262px;
-  }
   .menu {
     top: 50%;
     transform: translateY(-50%);
@@ -280,7 +298,7 @@ h1 {
   }
   .menu {
     right: 10px;
-    top: 10px;
+    top: 84px;
     width: min(220px, 62%);
     padding: 10px;
     gap: 6px;
