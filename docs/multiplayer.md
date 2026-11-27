@@ -16,30 +16,57 @@ mais agentes (Ana, Bruno, Clara) contra os inimigos da IA. Não haverá modo ver
   resultado. Os clientes aplicam a mesma ação no mesmo motor e só animam.
 - **Primeiro calcula, depois anima.** Nenhuma regra pode depender de animação ou relógio.
 
-## Motor (`src/app/game/engine.ts`)
+## Motor (`src/app/game/engine/`)
 
-`TurnState` é o estado compartilhado (serializável em JSON) e `TurnAction`, as ações que o
+`GameState` é o estado compartilhado (serializável em JSON) e `GameAction`, as ações que o
 mudam. `validateAction` diz se a ação vale; `applyAction` aplica, sem efeito colateral. No
 componente (`game-screen.ts`) tudo passa por `dispatch`, a única entrada do estado.
 
-Hoje o motor cobre o **ciclo do turno**: vez, turno global, posições dos agentes, dados e
-movimento restante. Os dados de movimento já são sorteados **antes** da animação (o `app-d4`
-recebe o valor em `value` e só cai nele).
+Um módulo por sistema, reaproveitando as regras puras que já existiam (`enemies.ts`, `hex.ts`…):
+
+| Módulo | O que tem |
+|---|---|
+| `state.ts` | `GameState`, estado inicial e auxiliares |
+| `turn.ts` | ciclo do turno: rolagem, andar, gastar movimento, passar a vez |
+| `enemy-turn.ts` | inimigos: patrulha, avistar, fuga, fim da rodada |
+| `index.ts` | junta tudo: `GameAction`, `validateAction`, `applyAction` |
+
+Como já funciona:
+
+- **Rolagem:** os dados de movimento são sorteados **antes** da animação (o `app-d4` recebe o
+  valor em `value` e só cai nele).
+- **Turno inimigo:** cada inimigo que age vira **uma** ação já resolvida (`planPatrolAct`,
+  `planFleeAct`): o caminho inteiro, em que passo avistou alguém e se fugiu do mapa. O
+  componente aplica a ação e só depois anima; o cone de visão na tela segue o passo animado
+  (`enemyView`), não o estado.
+- **Sorteio:** quem vagueia sorteia o destino com o `rng` da partida, e o destino viaja na ação.
+
+**Transitório:** a ação `patchEnemy` muda um inimigo direto. Ela existe só para os sistemas
+que ainda mexem nos inimigos por fora do motor (abordagem, perseguição, interrogatório,
+revelar escondido, casos de teste) e some quando o último deles migrar. Também ficam no
+componente, por enquanto, o laço do turno inimigo (porque a perseguição se intercala nele) e
+o mapa que o motor recebe (`EnemyWorld`, porque as portas ainda não estão no estado).
 
 ## Ordem do trabalho
 
-1. ~~Dados decididos antes da animação.~~
-2. ~~Motor do ciclo do turno (`engine.ts`).~~
-3. **Turno inimigo no motor:** calcular a rodada inteira dos inimigos (patrulha, fuga,
-   quem avistou quem e em que passo) e só depois animar. Hoje `enemyTurn` muda o estado
-   passo a passo durante a animação.
-4. **Servidor local** (`server/`): Node + `ws`, salas com código curto, dono de cada agente
-   (o dono da sala fica com os que sobrarem), reconexão, e o build servido junto.
-5. **Online:** o mesmo servidor publicado; o cliente conecta por `wss://`.
+O refactor do `game-screen.ts` **é** a migração para o motor: as regras e o estado de cada
+sistema vão para `engine/`, e o componente fica só com câmera, animação, som e menus. O
+servidor vem depois, quando o jogo inteiro rodar no motor.
 
-Depois disso, cada sistema migra para o motor num passo próprio: Agrupar (grupo, fila,
-Comando), portas, abordagem, testes de percepção, interrogatório, queima e perseguição.
-Enquanto um sistema não migra, ele fica fora do modo multiplayer.
+1. ~~Dados decididos antes da animação.~~
+2. ~~Motor do ciclo do turno.~~
+3. ~~Turno inimigo e visão.~~
+4. Grupo (agrupar, fila, Comando).
+5. Portas (e o `EnemyWorld` passa a sair do estado).
+6. Abordagem e rendição.
+7. Percepção, móveis e avião/chaves.
+8. Interrogatório.
+9. Queima e fim da operação.
+10. Perseguição (o reflexo da corrida fica no cliente de quem corre); o laço do turno inimigo
+    vai inteiro para o motor e `patchEnemy` sai.
+11. **Servidor** (`server/`): Node + `ws`, salas com código curto, dono de cada agente (o dono
+    da sala fica com os que sobrarem), reconexão, e o build servido junto. Rodando local é o
+    modo de rede local; publicado, o online (`wss://`).
 
 ## Ideias para o cooperativo
 

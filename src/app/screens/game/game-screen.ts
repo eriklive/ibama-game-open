@@ -11,7 +11,18 @@ import {
 } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Rng, rollDice, rollDie, sum } from '../../game/dice';
-import { TurnAction, TurnState, applyAction, initialTurnState, validateAction } from '../../game/engine';
+import {
+  EnemyWorld,
+  GameAction,
+  GameState,
+  Sighting,
+  applyAction,
+  firstSighting,
+  initialGameState,
+  planFleeAct,
+  planPatrolAct,
+  validateAction,
+} from '../../game/engine';
 import {
   CHASE_RULES,
   ChaseAgent,
@@ -55,16 +66,12 @@ import {
   EnemyState,
   canAct,
   facingBetween,
-  isBorder,
   known,
   lineOfSight,
   onBoard,
-  planFlee,
-  planPatrol,
   resolveApproach,
   rollEscape,
   spawnEnemy,
-  spotted,
   stationary,
   visionHexes,
 } from '../../game/enemies';
@@ -345,17 +352,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly diceSides = MOVE_DICE.sides;
 
   /**
-   * Estado do ciclo do turno (vez, posições, movimento; ver `engine.ts`). Só muda por
-   * `dispatch`: no multiplayer, é o que vai e volta pelo servidor.
+   * Estado da partida no motor (vez, posições, movimento, inimigos; ver `game/engine/`). Só
+   * muda por `dispatch`: no multiplayer, é o que vai e volta pelo servidor.
    */
-  private readonly core = signal<TurnState>(this.initialCore());
+  private readonly core = signal<GameState>(this.initialCore());
   protected readonly positions = computed<ReadonlyMap<string, HexCoord>>(
     () => new Map(Object.entries(this.core().positions)),
   );
   protected readonly activeIndex = computed(() => this.core().activeIndex);
   /** Turno global: aumenta a cada vez que um personagem começa a jogar. */
   protected readonly turn = computed(() => this.core().turn);
-  /** Sorteio da partida (dados de movimento). No multiplayer, quem sorteia é o servidor. */
+  /** Sorteio da partida (dados, destino de quem vagueia). No multiplayer, quem sorteia é o servidor. */
   private readonly rng: Rng = Math.random;
   protected readonly phase = signal<Phase>('rolling');
   /** Valores da rolagem à mostra: só aparecem quando os dados param (o estado já os tem antes). */
@@ -374,7 +381,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly selected = signal<HexCoord | null>(null);
   /** Personagem em foco na interface (tocado no tabuleiro ou no retrato). */
   protected readonly focusedId = signal<string>(CHARACTERS[0].id);
-  protected readonly enemies = signal<readonly EnemyState[]>(this.initialEnemies());
+  protected readonly enemies = computed<readonly EnemyState[]>(() => this.core().enemies);
+  /**
+   * Inimigo no meio da animação: o estado já tem o fim do trecho, mas o cone de visão segue
+   * o passo que está na tela.
+   */
+  private enemyView: Pick<EnemyState, 'id' | 'hex' | 'facing' | 'status'> | null = null;
   /** Último acontecimento com inimigos (avistou, correu, fugiu…), mostrado num aviso. */
   protected readonly notice = signal<{ text: string; tone: 'alert' | 'info' } | null>(null);
   private noticeTimer?: ReturnType<typeof setTimeout>;
@@ -1511,42 +1523,35 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     }
     if (stale()) return;
     // o abalado de uma rodada atrás passa
-    for (const e of this.enemies()) if (e.shaken && !caught.has(e.id)) this.updateEnemy(e.id, { shaken: false });
+    this.dispatch({ type: 'clearShaken', except: [...caught] });
     this.announceIfOver();
     this.nextCharacter();
   }
 
   /** Patrulha um trecho. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
   private async patrol(enemy: EnemyState, epoch: number): Promise<boolean> {
-    const plan = planPatrol(enemy, ENEMY_RULES.patrolSteps, this.area, this.blockedFor(enemy.id));
-    this.updateEnemy(enemy.id, { waypoint: plan.waypoint, dir: plan.dir, target: plan.target });
-    if (!plan.path.length) {
+    // o motor decide o trecho inteiro (e em que passo ele avista alguém); a tela só anima
+    const act = planPatrolAct(this.core(), enemy.id, this.enemyWorld(), this.rng);
+    if (!this.dispatch(act)) return false;
+    if (!act.path.length) {
       if (this.board!.isCovered(enemy.hex)) return false;
       this.say(`${enemy.name} espera: o caminho está bloqueado`, 'info');
       return true;
     }
-    const shown = await this.walkEnemy(enemy.id, plan.path, (hex) => {
-      if (this.epoch !== epoch) return false;
-      const prev = this.enemy(enemy.id)!.hex;
-      this.updateEnemy(enemy.id, { hex, facing: facingBetween(prev, hex) });
-      this.refreshVision();
-      // ao avistar alguém, para onde está
-      return !this.checkSpotted(enemy.id);
-    });
-    // dá tempo de ver o "!" antes de seguir
-    if (this.enemy(enemy.id)?.status === 'alert') {
-      await this.wait(900);
-      return true;
-    }
-    return shown;
+    const shown = await this.walkEnemy(enemy, act.path, () => this.epoch === epoch);
+    if (this.epoch !== epoch || !act.spotted) return shown;
+    // o caminho já termina onde ele avistou: mostra o "!" e dá tempo de ver antes de seguir
+    this.showSpotted(enemy.id, act.spotted);
+    await this.wait(900);
+    return true;
   }
 
   /** Foge para a borda. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
   private async flee(enemy: EnemyState, epoch: number): Promise<boolean> {
-    const agents = [...this.positions().values()];
-    const plan = planFlee(enemy.hex, ENEMY_RULES.fleeSteps, this.area, this.blockedFor(enemy.id), agents);
+    const act = planFleeAct(this.core(), enemy.id, this.enemyWorld());
+    if (!this.dispatch(act)) return false;
     const covered = this.board!.isCovered(enemy.hex);
-    if (plan.cornered) {
+    if (act.cornered) {
       if (!covered) {
         this.say(`${enemy.name} está encurralado!`, 'info');
         this.sound.play('ini.encurralado');
@@ -1554,22 +1559,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return !covered;
     }
     let shown = false;
-    if (plan.path.length) {
+    if (act.path.length) {
       if (!covered) this.say(`${enemy.name} corre para a borda!`, 'alert');
-      shown = await this.walkEnemy(
-        enemy.id,
-        plan.path,
-        (hex) => {
-          if (this.epoch !== epoch) return false;
-          this.updateEnemy(enemy.id, { hex, facing: facingBetween(this.enemy(enemy.id)!.hex, hex) });
-          return true;
-        },
-        1.8,
-      );
+      shown = await this.walkEnemy(enemy, act.path, () => this.epoch === epoch, 1.8);
     }
     if (this.epoch !== epoch) return shown;
-    if (isBorder(this.enemy(enemy.id)!.hex, this.area)) {
-      this.updateEnemy(enemy.id, { status: 'fled' });
+    if (act.fled) {
       this.say(`${enemy.name} fugiu do mapa!`, 'alert');
       this.sound.play('ini.foge', { at: this.enemy(enemy.id)!.hex });
       await this.board!.removeEnemy(enemy.id);
@@ -2240,18 +2235,43 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * de `moveEnemy`. Devolve se algum trecho apareceu na tela.
    */
   private async walkEnemy(
-    id: string,
-    path: HexCoord[],
+    enemy: EnemyState,
+    path: readonly HexCoord[],
     onStep: (hex: HexCoord) => boolean,
     speed = 1,
   ): Promise<boolean> {
     const board = this.board!;
+    const { id, status } = enemy;
     const hiddenStep = (from: HexCoord, to: HexCoord) => board.isCovered(from) && board.isCovered(to);
+    // o passo que está na tela (o estado já tem o fim do trecho): o cone de visão segue ele
+    let view = { id, status, hex: enemy.hex, facing: enemy.facing };
+    const step = (hex: HexCoord): boolean => {
+      view = { ...view, hex, facing: facingBetween(view.hex, hex) };
+      this.enemyView = view;
+      this.refreshVision();
+      return onStep(hex);
+    };
+    try {
+      return await this.walkEnemySteps(board, id, path, step, hiddenStep, () => view.hex, speed);
+    } finally {
+      this.enemyView = null;
+      this.refreshVision();
+    }
+  }
+
+  private async walkEnemySteps(
+    board: HexBoard,
+    id: string,
+    path: readonly HexCoord[],
+    onStep: (hex: HexCoord) => boolean,
+    hiddenStep: (from: HexCoord, to: HexCoord) => boolean,
+    at: () => HexCoord,
+    speed: number,
+  ): Promise<boolean> {
     let shown = false;
     let i = 0;
     while (i < path.length) {
-      const from = this.enemy(id)?.hex;
-      if (!from) return shown;
+      const from = at();
       if (hiddenStep(from, path[i])) {
         board.jumpEnemy(id, path[i]);
         this.enemySteps(path[i], speed, true);
@@ -2276,7 +2296,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         },
         speed,
       );
-      if (stopped || hexKey(this.enemy(id)?.hex ?? from) !== hexKey(path[j - 1])) return shown;
+      if (stopped || hexKey(at()) !== hexKey(path[j - 1])) return shown;
       i = j;
     }
     return shown;
@@ -2284,24 +2304,29 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Se o inimigo em patrulha enxerga algum agente, entra em alerta. Devolve se avistou. */
   private checkSpotted(enemyId: string, agents: ReadonlyMap<string, HexCoord> = this.positions()): boolean {
-    const map = this.map;
+    if (!this.map) return false;
+    const seen = firstSighting(this.core(), agents, this.enemyWorld(), enemyId);
+    if (!seen) return false;
+    const { agent, at } = seen.sighting;
+    if (!this.dispatch({ type: 'spot', enemy: enemyId, agent, at })) return false;
+    this.showSpotted(enemyId, seen.sighting);
+    return true;
+  }
+
+  /** Mostra que o inimigo avistou alguém (o estado já está em alerta): "!", giro, som e aviso. */
+  private showSpotted(enemyId: string, { agent: who }: Sighting): void {
     const enemy = this.enemy(enemyId);
-    if (!map || !enemy) return false;
-    const who = spotted(enemy, agents, this.area, this.walls(), this.lowCover);
-    if (!who) return false;
-    const agent = agents.get(who)!;
+    if (!enemy) return;
     // quem foi visto não se abaixa mais na cobertura
     this.seenAgents.add(who);
     this.board?.setSeenAgents(this.seenAgents);
     // vira para quem viu
-    this.updateEnemy(enemyId, { status: 'alert', facing: facingBetween(enemy.hex, agent) });
-    this.board?.setEnemyFacing(enemyId, facingBetween(enemy.hex, agent));
+    this.board?.setEnemyFacing(enemyId, enemy.facing);
     this.board?.setEnemyAlert(enemyId, true);
     this.refreshVision();
     this.gamepad.rumble(0.7, 0.4, 260);
     this.sound.spotted();
     this.say(`${enemy.name} avistou ${this.nameOf(who)}! Vai correr para a borda.`, 'alert');
-    return true;
   }
 
   /** Agentes já avistados por algum inimigo na partida (não se abaixam na cobertura). */
@@ -3965,7 +3990,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.passing = false;
     this.closeGrouping();
     this.board?.placeUnits(this.positions());
-    this.enemies.set(this.initialEnemies());
     this.flight = null;
     this.ranThisRound.clear();
     this.caughtThisRound.clear();
@@ -4340,8 +4364,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     );
   }
 
+  /** Muda um inimigo direto: só para os sistemas que ainda não migraram para o motor. */
   private updateEnemy(id: string, patch: Partial<EnemyState>): void {
-    this.enemies.update((es) => es.map((e) => (e.id === id ? { ...e, ...patch } : e)));
+    this.dispatch({ type: 'patchEnemy', enemy: id, patch });
+  }
+
+  /** O mapa como o motor precisa dele (as portas ainda vivem aqui). */
+  private enemyWorld(): EnemyWorld {
+    return { area: this.area, walls: this.walls(), lowCover: this.lowCover, solid: this.solid() };
   }
 
   /** Paredes, carga e inimigos no tabuleiro: o que bloqueia os agentes (sem contar os outros agentes). */
@@ -4350,19 +4380,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /** Hexágonos que um inimigo não pode atravessar: paredes, agentes e os outros inimigos. */
-  private blockedFor(enemyId: string): Set<string> {
-    return new Set([
-      ...this.solid(),
-      ...[...this.positions().values()].map(hexKey),
-      ...this.onBoardEnemies().filter((e) => e.id !== enemyId).map((e) => hexKey(e.hex)),
-    ]);
-  }
 
   /** Pinta no tabuleiro o que os inimigos em patrulha enxergam. */
   private refreshVision(): void {
     const map = this.map;
     if (!map) return;
+    const view = this.enemyView;
     const keys = this.enemies()
+      .map((e) => (view && e.id === view.id ? { ...e, ...view } : e))
       .filter((e) => e.status === 'patrol')
       .flatMap((e) =>
         visionHexes(e, this.area, this.walls(), ENEMY_RULES.visionRange, ENEMY_RULES.visionAngle, this.lowCover).map(hexKey),
@@ -4406,11 +4431,12 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return new Promise((r) => this.later(reducedMotion() ? Math.min(ms, 150) : ms, r));
   }
 
-  private initialCore(): TurnState {
+  private initialCore(): GameState {
     const starts = CHARACTERS.map((c, i) => [c.id, { ...(this.map?.starts[i] ?? { col: 0, row: 0 }) }] as const);
-    return initialTurnState(
+    return initialGameState(
       CHARACTERS.map((c) => c.id),
       Object.fromEntries(starts),
+      this.initialEnemies(),
     );
   }
 
@@ -4418,7 +4444,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Única entrada do estado do turno: confere a ação e aplica. No multiplayer, a ação vai ao
    * servidor, que confere de novo e a devolve para todos.
    */
-  private dispatch(action: TurnAction): boolean {
+  private dispatch(action: GameAction): boolean {
     const why = validateAction(this.core(), action);
     if (why) {
       console.error(`Ação recusada (${action.type}): ${why}`);

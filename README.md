@@ -732,8 +732,8 @@ para isso falta uma entrada em `CHARACTERS` e uma posição inicial por mapa (`m
 - Mapas, personagens e regras em `src/app/game/maps.ts` (`CHARACTERS`, `MOVE_DICE`)
 - Dados em `src/app/game/dice.ts`; alcance com obstáculos em `hex.ts` (`reachableHexes`, `pathTo`)
 - Inimigos (visão, patrulha, fuga) em `src/app/game/enemies.ts`, como funções puras testadas
-- Motor do ciclo do turno em `src/app/game/engine.ts` (estado serializável mudado só por ações):
-  base do multiplayer cooperativo, planejado em `docs/multiplayer.md`
+- Motor da partida em `src/app/game/engine/` (estado serializável mudado só por ações: turno,
+  posições, inimigos): base do multiplayer cooperativo, planejado em `docs/multiplayer.md`
 - Personagens 3D em `src/app/game/character-model.ts` (GLB + animações); modelos em `public/assets/`
   (licenças em `public/assets/LICENSES.md`, build em `tools/assets/`). Proposta completa em
   `docs/esqueletos-e-movimentacao.md`

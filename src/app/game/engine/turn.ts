@@ -1,34 +1,8 @@
 /**
- * Motor do ciclo do turno: o estado da partida que importa para todos os jogadores, mudado
- * só por ações. É o primeiro pedaço do motor do multiplayer (ver `docs/multiplayer.md`): o
- * mesmo `applyAction` vai rodar no servidor (que confere e transmite cada ação) e nos
- * clientes (que aplicam a ação e animam).
- *
- * Regras de ouro:
- * - o estado é serializável em JSON (nada de `Map`, `Set` ou classes);
- * - toda aleatoriedade já vem resolvida dentro da ação (os dados rolados viajam com ela);
- * - `applyAction` é puro: mesma entrada, mesma saída, sem relógio nem animação.
- *
- * Por enquanto o motor guarda só o turno, a vez, as posições dos agentes, os dados e o
- * movimento restante. Grupo, portas, inimigos e o resto continuam no componente e entram
- * aqui aos poucos.
+ * Ciclo do turno: rolagem de movimento, andar, gastar movimento e passar a vez.
  */
-import { HexCoord, hexDistance } from './hex';
-
-export interface TurnState {
-  /** Turno global: aumenta a cada vez que um agente começa a jogar. */
-  readonly turn: number;
-  /** Ordem fixa da vez (ids dos agentes). */
-  readonly order: readonly string[];
-  /** Índice em `order` de quem está na vez. */
-  readonly activeIndex: number;
-  /** Onde cada agente está. */
-  readonly positions: Readonly<Record<string, HexCoord>>;
-  /** Dados da última rolagem de movimento (vazio antes da primeira). */
-  readonly dice: readonly number[];
-  /** Movimento que ainda sobra neste turno. */
-  readonly movesLeft: number;
-}
+import { HexCoord, hexDistance } from '../hex';
+import { GameState, isCount, isHex } from './state';
 
 export type TurnAction =
   /** Rolagem de movimento: os dados sorteados e o movimento que deram (já com os bônus). */
@@ -48,43 +22,29 @@ export type TurnAction =
   /** A vez vai direto para um agente (caso de teste). */
   | { readonly type: 'setActive'; readonly agent: string };
 
-export function initialTurnState(
-  order: readonly string[],
-  positions: Readonly<Record<string, HexCoord>>,
-): TurnState {
-  return {
-    turn: 1,
-    order: [...order],
-    activeIndex: 0,
-    positions: { ...positions },
-    dice: [],
-    movesLeft: 0,
-  };
+/** Confere se `path` anda de hexágono em hexágono a partir de `from`. */
+export function stepByStep(from: HexCoord, path: readonly HexCoord[]): boolean {
+  let at = from;
+  for (const step of path) {
+    if (!isHex(step) || hexDistance(at, step) !== 1) return false;
+    at = step;
+  }
+  return true;
 }
 
-export const activeAgent = (state: TurnState): string => state.order[state.activeIndex];
-
-const isCount = (n: number): boolean => Number.isInteger(n) && n >= 0;
-const isHex = (h: HexCoord | undefined): h is HexCoord =>
-  !!h && Number.isInteger(h.col) && Number.isInteger(h.row);
-
-/** Por que a ação não vale neste estado, ou `null` se vale. É o que o servidor vai conferir. */
-export function validateAction(state: TurnState, action: TurnAction): string | null {
+export function validateTurn(state: GameState, action: TurnAction): string | null {
   switch (action.type) {
     case 'roll':
-      if (!action.dice.length || !action.dice.every((d) => Number.isInteger(d) && d >= 1))
+      if (!action.dice.length || !action.dice.every((d) => Number.isInteger(d) && d >= 1)) {
         return 'dados inválidos';
+      }
       return isCount(action.movement) ? null : 'movimento inválido';
     case 'move': {
       if (!isCount(action.cost)) return 'custo inválido';
       for (const [id, path] of Object.entries(action.paths)) {
-        let at = state.positions[id];
+        const at = state.positions[id];
         if (!at) return `agente desconhecido: ${id}`;
-        for (const step of path) {
-          if (!isHex(step) || hexDistance(at, step) !== 1)
-            return `caminho de ${id} não é passo a passo`;
-          at = step;
-        }
+        if (!stepByStep(at, path)) return `caminho de ${id} não é passo a passo`;
       }
       return null;
     }
@@ -103,15 +63,15 @@ export function validateAction(state: TurnState, action: TurnAction): string | n
   }
 }
 
-/** Aplica uma ação (que já passou por `validateAction`) e devolve o estado novo. */
-export function applyAction(state: TurnState, action: TurnAction): TurnState {
+export function applyTurn(state: GameState, action: TurnAction): GameState {
   switch (action.type) {
     case 'roll':
       return { ...state, dice: [...action.dice], movesLeft: action.movement };
     case 'move': {
       const positions = { ...state.positions };
-      for (const [id, path] of Object.entries(action.paths))
+      for (const [id, path] of Object.entries(action.paths)) {
         if (path.length) positions[id] = { ...path.at(-1)! };
+      }
       return { ...state, positions, movesLeft: Math.max(0, state.movesLeft - action.cost) };
     }
     case 'spend':

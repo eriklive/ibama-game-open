@@ -1,27 +1,27 @@
 import { describe, expect, it } from 'vitest';
 import {
-  TurnAction,
-  TurnState,
+  GameAction,
+  GameState,
   activeAgent,
   applyAction,
-  initialTurnState,
+  initialGameState,
   validateAction,
-} from './engine';
+} from '.';
 
-const start = (): TurnState =>
-  initialTurnState(['ana', 'bruno', 'clara'], {
+const start = (): GameState =>
+  initialGameState(['ana', 'bruno', 'clara'], {
     ana: { col: 2, row: 2 },
     bruno: { col: 4, row: 2 },
     clara: { col: 6, row: 2 },
   });
 
-const run = (state: TurnState, ...actions: TurnAction[]): TurnState =>
+const run = (state: GameState, ...actions: GameAction[]): GameState =>
   actions.reduce((s, a) => {
     expect(validateAction(s, a)).toBeNull();
     return applyAction(s, a);
   }, state);
 
-describe('engine (ciclo do turno)', () => {
+describe('motor: ciclo do turno', () => {
   it('começa no turno 1, com o primeiro da ordem na vez e sem movimento', () => {
     const s = start();
     expect(s.turn).toBe(1);
