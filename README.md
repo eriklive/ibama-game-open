@@ -6,9 +6,12 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 
 ## Como jogar o teste
 
-1. Na tela inicial, toque em **Campo de teste** (o único mapa disponível) e em **Iniciar**.
-2. Antes da partida vem a **ficha do agente** (escalação): escolha o **Capitão**, distribua o ponto de
-   cada agente e toque em **Confirmar escalação** (ver [Ficha do agente](#ficha-do-agente-atributos)).
+1. Na tela inicial, escolha a fase: **Fase 1: Hangar** (o aeroporto) é a única aberta; **Fase 2:
+   Garimpo** e **Fase 3: Zona de dragagem** aparecem bloqueadas. Toque em **Iniciar**. (O campo de
+   teste 12×12 saiu do menu, mas continua em `#/jogo/teste-12x12`.)
+2. Antes da partida vem o **lobby** (`#/lobby/<fase>`), com os três agentes de pé no palco 3D (ver
+   [Lobby](#lobby)). Ali se abre a **ficha de personagem** de cada um (ver
+   [Ficha do agente](#ficha-do-agente-atributos)) e se toca em **Iniciar missão**.
 3. Há **3 personagens** (Ana, Bruno e Clara), cada um com o seu turno, em rodadas sem fim.
 4. No início de cada turno são rolados **2d4**: a soma **mais o vigor** do agente (e +1 se
    estiver agrupado, +1 a mais com o Capitão no grupo) é o movimento daquele turno.
@@ -28,12 +31,33 @@ hexágonos azuis, em perspectiva, com três personagens que se revezam.
 8. Ana, Bruno e Clara são personagens 3D animados (ficam parados respirando e correm pelo
    caminho), de pé sobre um disco com a cor de cada um.
 
+## Lobby
+
+O lobby (`src/app/screens/lobby`, palco em `src/app/game/lobby-viewer.ts`) mostra Ana, Bruno e
+Clara lado a lado, bem juntos, num palco que ocupa a tela toda, com o nome e a classe de cada um.
+Tocar num agente o **destaca**: a câmera se aproxima dele, **da cintura para cima**, a luz acende
+em cima dele (os outros ficam na penumbra) e abre o **menu suspenso** à direita:
+
+- **Trocar personagem** — bloqueado por enquanto (em breve);
+- **Ficha de personagem** — abre a ficha daquele agente;
+- **Voltar** — fecha o menu, tira o destaque e a câmera volta para a fila inteira.
+
+O **Voltar** do cabeçalho leva de volta ao menu de fases. No web, o palco abre espaço à direita
+para o menu não cobrir o agente; no celular, o agente fica no pé do palco e o menu, no alto.
+Controle: esquerda/direita escolhe o agente, cima/baixo anda pelo menu, ✕ confirma, ○ volta e
+Options inicia a missão.
+
 ## Ficha do agente (atributos)
 
-Entre escolher o mapa e começar, a tela **Ficha do agente** (`#/escalacao/<mapa>`) mostra cada
-agente: abas com a foto 3x4 (ponto **amarelo** = ponto livre, **verde** = distribuído), o
-**modelo 3D** real do personagem (arraste ou use o botão para girar) com seis espaços de
-equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a ficha em papel.
+A **ficha de personagem** (`#/lobby/<fase>/ficha/<agente>`, aberta pelo menu do lobby) mostra um
+agente: o **modelo 3D** real do personagem com seis espaços de equipamento ainda **em breve**
+(cabeça, tronco, mãos, arma, costas, pés) e a ficha em papel. **Salvar ficha** guarda na escalação
+e volta ao lobby; **Voltar** volta sem guardar.
+
+- **Web:** o modelo à esquerda (arraste ou use o botão para girar) e a ficha à direita.
+- **Celular:** o modelo fica em cima, num quadrado, mostrando o agente **da cintura para cima**.
+  Tocar no quadrado faz a ficha **descer** e o modelo ocupar a tela, inteiro e girável (**Ver
+  ficha** traz a ficha de volta). Rolar a ficha faz ela **cobrir o modelo**, que fica parado no topo.
 
 - **Classe:** cada agente é **Capitão** ou **Agente**. A equipe tem **um Capitão só** (de início,
   a Ana): marcar outro como Capitão devolve o anterior para Agente. A ficha lista o que a classe dá:
@@ -59,11 +83,10 @@ equipamento ainda **em breve** (cabeça, tronco, mãos, arma, costas, pés) e a 
   agentes estão **agrupados**, cada um ganha **+1 de vigor** (movimento) e **+1 de intimidação**
   (alcance da abordagem), e mais **+1** em cada com o Capitão no grupo; separou, perdeu. Grupo e
   Liderança não somam em iniciativa nem agilidade: a perseguição é individual.
-- **Anterior / Próximo agente** passam pelas fichas; no último, **Confirmar escalação** começa a
-  partida com esses atributos (a escolha fica guardada na sessão do navegador e vale também para
-  "Recomeçar"). Com controle: L1/R1 trocam de agente, cima/baixo escolhem o atributo,
-  esquerda/direita tiram/põem o ponto, △ torna o agente Capitão, ✕ avança e ○ volta ao início.
-- Larga (≥ 900 px), a tela usa o layout "web" (abas na lateral); estreita, o de celular.
+- A escalação salva fica na sessão do navegador e vale para a partida (e para "Recomeçar"). Com
+  controle: cima/baixo escolhem o atributo, esquerda/direita tiram/põem o ponto, △ torna o agente
+  Capitão, □ abre/gira o modelo, ✕ salva e ○ volta ao lobby (ou recolhe o modelo, no celular).
+- Larga (≥ 900 px), a tela usa o layout "web"; estreita, o de celular.
 
 As regras ficam em `src/app/game/stats.ts` (`STAT_RULES`, `APPROACH_SCALING`, funções puras
 testadas); o bônus do grupo, em `GROUP_RULES` (`group.ts`); as classes (perícias, habilidades e
@@ -769,6 +792,6 @@ consentimento**: até o jogador tocar em **Aceitar** no aviso de cookies
 `localStorage['ibama.analytics']`.
 
 Como o roteamento usa hash, cada troca de tela é enviada ao `dataLayer` como o evento
-`virtual_page_view`, com `page_path` sem o `#` (ex.: `/ibama-game-open/escalacao/teste-12x12`),
+`virtual_page_view`, com `page_path` sem o `#` (ex.: `/ibama-game-open/lobby/aeroporto`),
 `page_location` e `page_title` (`src/app/game/analytics.ts`). Eventos do jogo podem ser
 enviados com `Analytics.event('nome', { ... })`.

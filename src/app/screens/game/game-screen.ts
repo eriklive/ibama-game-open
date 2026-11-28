@@ -12,15 +12,36 @@ import {
 import { ActivatedRoute, Router } from '@angular/router';
 import { Rng, rollDice, rollDie, sum } from '../../game/dice';
 import {
-  EnemyWorld,
   GameAction,
   GameState,
   Sighting,
+  World,
   applyAction,
+  approachPreview,
+  askResult,
+  approachZonesFor,
+  doorOutcome,
   firstSighting,
   initialGameState,
+  isGrouped,
+  isLed,
+  lineOf,
   planFleeAct,
+  planApproach,
+  planAsk,
+  planBreakIn,
+  planBurn,
+  planDoor,
+  planEndTalk,
+  planMove,
+  planNotice,
   planPatrolAct,
+  planRally,
+  planReline,
+  rallyFree,
+  rallyOptions,
+  sightBlockers,
+  solidOf,
   validateAction,
 } from '../../game/engine';
 import {
@@ -69,8 +90,6 @@ import {
   known,
   lineOfSight,
   onBoard,
-  resolveApproach,
-  rollEscape,
   spawnEnemy,
   stationary,
   visionHexes,
@@ -83,14 +102,10 @@ import {
   DOOR_RULES,
   Door,
   DoorAction,
-  applyDoor,
   doorChance,
   doorNeed,
   isOpen,
   nextToDoor,
-  resolveBreakIn,
-  resolveDoor,
-  roomBehind,
   rollsDie,
   spawnDoors,
 } from '../../game/door';
@@ -98,10 +113,8 @@ import { BREAK_IN_SCENE, breakInVerdict } from '../../game/break-in-scene';
 import { BURN_RULES, Burnable, burnTarget, canBurn, seeFire } from '../../game/burn';
 import {
   KEY_PANEL_ID,
-  KEY_TAKEN,
   PlaneState,
   WITNESS_LINE,
-  leftKey,
   lockedClue,
   lookInside,
   nextToPanel,
@@ -113,11 +126,9 @@ import {
   CabinState,
   INITIAL_CABIN,
   cabinBuilt,
-  cabinClutter,
   cabinItem,
   cabinItemsLeft,
   cabinStep,
-  cabinSummary,
   CABIN_NOTICE_ID,
   canEnterPlane,
   planeDoorSpot,
@@ -127,14 +138,10 @@ import { IntroTarget, STRUCTURE_TOP, introTargets } from '../../game/mission-int
 import { IntroMark, MissionIntro } from '../../ui/mission-intro/mission-intro';
 import { LESSONS, LessonId, insideScreen, lessonDue, markSeen, readSeen } from '../../game/tactical-board';
 import { TacticalBoard } from '../../ui/tactical-board/tactical-board';
-import { CLASS_INFO, CLASS_RULES, commandFree, rallyCost, skillBonus, SKILLS } from '../../game/agent-class';
+import { CLASS_INFO, CLASS_RULES, skillBonus, SKILLS } from '../../game/agent-class';
 import {
   GROUP_RULES,
   RallyPlan,
-  followLeader,
-  lineMoves,
-  lineSwapPaths,
-  rallyPoints,
   suggestedRally,
   toBack,
   toFront,
@@ -143,7 +150,7 @@ import { AIM_PATTERN, APPROACH_PATTERN, Haptics, ROLL_PATTERN, SETTLE_PATTERN } 
 import { waveArrival, waveDuration } from '../../game/approach-fx';
 import { ApproachTablet, TabletReport } from '../../ui/approach-tablet/approach-tablet';
 import { HexCoord, hexDistance, hexKey, hexToWorld, hexesInRange, pathTo, reachableHexes, rectArea, sameHex } from '../../game/hex';
-import { CHARACTERS, Character, GameMap, HexRect, MOVE_DICE, blockedHexes, findMap, inStructure, lowCoverHexes, playArea } from '../../game/maps';
+import { CHARACTERS, Character, GameMap, HexRect, MOVE_DICE, blockedHexes, findMap, lowCoverHexes, playArea } from '../../game/maps';
 import { RosterService } from '../../game/roster.service';
 import { SLOT_COUNT, SAVE_VERSION, SaveGames, SaveId, SaveState, savedAtLabel } from '../../game/save-game';
 import { TEST_CASES, TestCase, findTestCase } from '../../game/test-cases';
@@ -154,21 +161,18 @@ import {
   INTERROGATION_RULES,
   NoteKind,
   PoolUsage,
-  askQuestion,
   dialogueOptions,
   hasDialogue,
   inAura,
   hasTalked,
   itemClue,
   noteKind,
-  noticedAfter,
   openingLine,
   pickLine,
-  questionCost,
   talkTarget,
 } from '../../game/interrogation';
 import { npcClass } from '../../game/npc-dialogue';
-import { approachRulesFor, signed, statBreakdown, turnMovement } from '../../game/stats';
+import { approachRulesFor, signed, statBreakdown } from '../../game/stats';
 
 /** Turnos (rodadas) até o carro fugir — por enquanto só aparece na linha do tempo. */
 const MISSION_DEADLINE = 5;
@@ -285,7 +289,6 @@ const namesOf = (es: readonly EnemyState[]): string => {
 };
 
 /** A equipe inteira, junta (como a partida começa). */
-const wholeTeam = (): ReadonlySet<string> => new Set(CHARACTERS.map((c) => c.id));
 
 /** Teclas do Modo Corrida. */
 const RUNNER_KEYS: Record<string, 'left' | 'right' | 'up' | 'down'> = {
@@ -364,15 +367,18 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private readonly lowCover = this.map ? lowCoverHexes(this.map) : new Set<string>();
   /** Só há perseguição nos mapas com Modo Corrida; nos outros, quem corre só foge. */
   protected readonly hasChase = hasRunner(this.map?.id);
-  /** Portas comuns (ver `door.ts`): fechadas, bloqueiam passagem e visão como parede. */
-  protected readonly doors = signal<ReadonlyMap<string, Door>>(this.initialDoors());
-  private readonly closedDoors = computed(
-    () => new Set([...this.doors()].filter(([, d]) => !isOpen(d)).map(([k]) => k)),
+  /**
+   * Portas comuns (ver `door.ts`): fechadas, bloqueiam passagem e visão como parede. Vêm do
+   * motor (`engine/doors.ts`); a referência só muda quando alguma porta muda.
+   */
+  private readonly doorsRecord = computed(() => this.core().doors);
+  protected readonly doors = computed<ReadonlyMap<string, Door>>(
+    () => new Map(Object.entries(this.doorsRecord())),
   );
   /** O que bloqueia a visão: paredes e afins, mais as portas fechadas. */
-  private readonly walls = computed(() => new Set([...this.fixedWalls, ...this.closedDoors()]));
+  private readonly walls = computed(() => sightBlockers({ doors: this.doorsRecord() }, this.world()));
   /** Tudo o que ninguém atravessa (paredes, toda a carga e as portas fechadas). */
-  private readonly solid = computed(() => new Set([...this.fixedWalls, ...this.lowCover, ...this.closedDoors()]));
+  private readonly solid = computed(() => solidOf({ doors: this.doorsRecord() }, this.world()));
   /** Onde se joga: o círculo da missão (ou o retângulo do mapa de teste). */
   private readonly area = this.map ? playArea(this.map) : rectArea(0, 0);
   protected readonly diceSides = MOVE_DICE.sides;
@@ -382,8 +388,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * muda por `dispatch`: no multiplayer, é o que vai e volta pelo servidor.
    */
   private readonly core = signal<GameState>(this.initialCore());
+  // cada leitura pega a mesma referência enquanto aquela parte do estado não muda: quem depende
+  // dela (alcance, bloqueios, auras) só recalcula quando precisa
+  private readonly positionsRecord = computed(() => this.core().positions);
   protected readonly positions = computed<ReadonlyMap<string, HexCoord>>(
-    () => new Map(Object.entries(this.core().positions)),
+    () => new Map(Object.entries(this.positionsRecord())),
   );
   protected readonly activeIndex = computed(() => this.core().activeIndex);
   /** Turno global: aumenta a cada vez que um personagem começa a jogar. */
@@ -715,11 +724,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Móveis em que alguém reparou (percepção ou um suspeito que contou): os esconderijos e o
    * quadro de chaves (`KEY_PANEL_ID`). Só esses ganham o contorno e abrem o zoom.
    */
-  protected readonly noticed = signal<ReadonlySet<string>>(new Set());
-  /** Esconderijos já achados (o que havia lá foi apreendido). */
-  protected readonly found = signal<ReadonlySet<string>>(new Set());
+  private readonly noticedIds = computed(() => this.core().noticed);
+  protected readonly noticed = computed<ReadonlySet<string>>(() => new Set(this.noticedIds()));
+  /** Esconderijos já achados (o que havia lá foi apreendido). Vêm do motor (`engine/evidence.ts`). */
+  private readonly foundIds = computed(() => this.core().found);
+  protected readonly found = computed<ReadonlySet<string>>(() => new Set(this.foundIds()));
   /** Quem já rolou percepção em cada móvel (`móvel:agente`): uma vez por agente. */
-  private readonly noticeRolled = new Set<string>();
+  private readonly noticeRolledIds = computed(() => this.core().noticeRolled);
+  private readonly noticeRolled = computed<ReadonlySet<string>>(() => new Set(this.noticeRolledIds()));
 
   /** Esconderijo percebido, ainda não achado, cujo móvel está colado no agente da vez. */
   protected readonly inspectable = computed<HiddenItem | null>(() => {
@@ -740,16 +752,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Cartão destacado pelo controle (índice entre as perguntas abertas). */
   protected readonly questionPick = signal(0);
   /** Memória de cada NPC na missão: perguntas feitas e réplicas liberadas (por id do inimigo). */
-  protected readonly dialogues = signal<ReadonlyMap<string, DialogueMemory>>(new Map());
+  // memória dos suspeitos, falas usadas, pistas e caderneta: vêm do motor (`engine/talk.ts`)
+  private readonly dialoguesRecord = computed(() => this.core().dialogues);
+  protected readonly dialogues = computed<ReadonlyMap<string, DialogueMemory>>(
+    () => new Map(Object.entries(this.dialoguesRecord())),
+  );
   /** Falas já usadas dos pools compartilhados da missão (ver `LinePool`). */
-  private readonly linePools = signal<PoolUsage>(new Map());
+  private readonly linePoolsRecord = computed(() => this.core().linePools);
+  private readonly linePools = computed<PoolUsage>(() => new Map(Object.entries(this.linePoolsRecord())));
   /** Pistas registradas pelas respostas (`Outcome.clue`). */
-  private readonly clueLog = signal<ReadonlySet<string>>(new Set());
+  private readonly clueIds = computed(() => this.core().clueLog);
+  private readonly clueLog = computed<ReadonlySet<string>>(() => new Set(this.clueIds()));
   /** Pistas da missão: o que a inspeção achou (`item:<id>`) e o que as respostas registraram. */
   protected readonly clues = computed<Clues>(() => new Set([...[...this.found()].map(itemClue), ...this.clueLog()]));
   /** Caderneta de campo: o que cada suspeito disse (sai no relatório da operação). */
-  protected readonly fieldNotes = signal<readonly FieldNote[]>([]);
-  private noteSeq = 0;
+  protected readonly fieldNotes = computed<readonly FieldNote[]>(() => this.core().fieldNotes);
 
   /** Todo rendido ganha a aura (a dos que não têm diálogo fica apagada). */
   private readonly surrenderedEnemies = computed(() => this.enemies().filter((e) => e.status === 'surrendered'));
@@ -782,7 +799,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Arrombamento recente: a equipe ganha intimidação até o começo deste turno (rodada).
    * `0` = sem bônus. Ver `BREAK_IN_RULES`.
    */
-  protected readonly breakInUntil = signal(0);
+  protected readonly breakInUntil = computed(() => this.core().breakInUntil);
   /** Intimidação extra da equipe agora (o arrombamento assusta por alguns turnos). */
   protected readonly breakInBoost = computed(() =>
     this.round() < this.breakInUntil() ? BREAK_IN_RULES.intimidation : 0,
@@ -1030,7 +1047,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   protected readonly burnRules = BURN_RULES;
   /** Alvos já queimados (o fogo fica aceso até o fim). */
-  protected readonly burned = signal<ReadonlySet<string>>(new Set());
+  private readonly burnedIds = computed(() => this.core().burned);
+  protected readonly burned = computed<ReadonlySet<string>>(() => new Set(this.burnedIds()));
   /** Pré-visualizando o "Queimar" (aguardando confirmação). */
   protected readonly burning = signal(false);
   /**
@@ -1083,21 +1101,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Agentes agrupados (andam juntos e ganham movimento extra); vazio = cada um por si.
-   * A equipe chega junta: a partida começa com todos no grupo.
+   * A equipe chega junta: a partida começa com todos no grupo. Vem do motor (`engine/group.ts`).
    */
-  protected readonly group = signal<ReadonlySet<string>>(wholeTeam());
-  /**
-   * Ordem da fila do grupo, da frente para trás (ver `toFront` / `toBack`). Quem saiu do grupo
-   * não conta; quem falta entra no fim, na ordem da equipe.
-   */
-  private readonly groupLine = signal<readonly string[]>(CHARACTERS.map((c) => c.id));
+  private readonly groupIds = computed(() => this.core().group);
+  protected readonly group = computed<ReadonlySet<string>>(() => new Set(this.groupIds()));
+  /** Ordem da fila do grupo, da frente para trás (ver `toFront` / `toBack`). */
+  private readonly groupLine = computed(() => this.core().groupLine);
   /** A vez está passando (a fila do grupo se arrumando antes do próximo). */
   private passing = false;
-  private readonly line = computed(() => {
-    const group = this.group();
-    const kept = this.groupLine().filter((id) => group.has(id));
-    return [...kept, ...CHARACTERS.map((c) => c.id).filter((id) => group.has(id) && !kept.includes(id))];
-  });
+  /** Capitão e ordem da equipe, como o motor guarda. */
+  private readonly coreCaptain = computed(() => this.core().captain);
+  private readonly order = computed(() => this.core().order);
+  // fila e Liderança dependem só do grupo, da fila e do Capitão (não do resto do estado)
+  private readonly line = computed(() =>
+    lineOf({ group: this.groupIds(), groupLine: this.groupLine(), order: this.order() }),
+  );
   protected readonly groupBonus = GROUP_RULES.moveBonus;
   protected readonly groupApproachBonus = GROUP_RULES.approachBonus;
   protected readonly leaderBonus = CLASS_RULES.leadership;
@@ -1109,10 +1127,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     return c.id === this.captainId();
   }
   /** O grupo tem o Capitão: quem está nele ganha a Liderança. */
-  protected readonly led = computed(() => {
-    const id = this.captainId();
-    return !!id && this.group().has(id);
-  });
+  protected readonly led = computed(() => isLed({ captain: this.coreCaptain(), group: this.groupIds() }));
   /** Bônus de grupo de movimento e de intimidação (com a Liderança, se o Capitão estiver no grupo). */
   protected readonly groupMove = computed(() => GROUP_RULES.moveBonus + (this.led() ? CLASS_RULES.leadership.vigor : 0));
   protected readonly groupInt = computed(
@@ -1125,12 +1140,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   );
   /** Gazua do agente da vez (0 para quem não tem a perícia). */
   protected readonly pickBonus = computed(() => skillBonus(this.roster.classOf(this.active().id), 'gazua'));
-  /** Vezes que o Comando já foi usado neste turno. */
-  private readonly commandsUsed = signal(0);
   /** O Agrupar do agente da vez sai de graça (Comando do Capitão, ainda não usado no turno). */
-  protected readonly freeRally = computed(() =>
-    commandFree(this.roster.classOf(this.active().id), this.commandsUsed()),
-  );
+  protected readonly freeRally = computed(() => rallyFree(this.core()));
   protected readonly classInfo = CLASS_INFO;
 
   /** Atributos de um agente em campo (com o bônus do grupo, se ele estiver agrupado). */
@@ -1161,13 +1172,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected inGroup(c: Character): boolean {
     return this.group().has(c.id);
   }
-  protected readonly grouped = computed(() => this.group().has(this.active().id));
+  protected readonly grouped = computed(() =>
+    isGrouped({ group: this.groupIds(), order: this.order(), activeIndex: this.activeIndex() }),
+  );
 
   /** Pontos de encontro possíveis com o movimento que resta ao agente da vez. */
   private readonly rallyPlans = computed<Map<string, RallyPlan>>(() => {
     const map = this.map;
-    if (!map || this.phase() !== 'moving-choice' || this.group().size) return new Map();
-    return rallyPoints(this.active().id, this.positions(), this.movesLeft(), this.area, this.enemyWalls());
+    if (!map || this.phase() !== 'moving-choice') return new Map();
+    return rallyOptions(this.core(), this.world());
   });
   protected readonly canGroup = computed(() => CHARACTERS.length > 1 && this.rallyPlans().size > 0);
   protected readonly rallyPlan = computed(() => {
@@ -1260,17 +1273,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * intimidação, +1 enquanto estiver agrupado e +1 com o Capitão no grupo; a zona de rolagem e a
    * de fuga vêm logo depois (ver `approachRulesFor` em `stats.ts`).
    */
-  protected readonly activeApproach = computed(() =>
-    approachRulesFor(this.roster.loadout(this.active().id), this.grouped(), APPROACH_RULES, this.breakInBoost(), this.led()),
-  );
+  protected readonly activeApproach = computed(() => approachZonesFor(this.core()));
   /** Quem se renderia, quem rolaria o teste de fuga e quem correria se o agente da vez abordasse agora. */
-  protected readonly approachPlan = computed(() => {
-    const from = this.positions().get(this.active().id);
-    // só quem o agente alcança direto (sem parede nem porta fechada no meio)
-    return from
-      ? resolveApproach(from, this.enemies(), this.activeApproach(), this.walls())
-      : { surrender: [], roll: [], flee: [] };
-  });
+  // só quem o agente alcança direto (sem parede nem porta fechada no meio); vem do motor
+  protected readonly approachPlan = computed(() => approachPreview(this.core(), this.world()));
   protected readonly canApproach = computed(() => this.approachCount() > 0);
   /** Inimigos que a missão pede para render (o alvo, como o Caseiro Jô): a prévia avisa a chance deles. */
   protected readonly missionTargets = computed(
@@ -1428,7 +1434,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const active = this.active();
     // fim do turno anterior: a partida vai para o save automático da sessão
     this.autosave();
-    this.commandsUsed.set(0);
     this.closeApproach();
     this.closeGrouping();
     this.closeBurn();
@@ -1453,16 +1458,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Devolve `false` se a partida recomeçou no meio.
    */
   private async reorderLine(next: readonly string[]): Promise<boolean> {
-    const line = this.line();
     const epoch = this.epoch;
-    const moves = lineMoves(line, next, this.positions());
-    const paths = moves.size && this.board ? lineSwapPaths(moves, this.positions(), this.area, this.enemyWalls()) : null;
-    if (!paths) return true;
+    const act = this.board ? planReline(this.core(), next, this.world()) : null;
+    if (!act) return true;
     this.phase.set('walking');
-    await this.board!.moveUnits(next[0], paths);
+    await this.board!.moveUnits(next[0], new Map(Object.entries(act.paths).map(([id, p]) => [id, [...p]])));
     if (this.destroyed || this.epoch !== epoch) return false;
-    this.dispatch({ type: 'place', positions: Object.fromEntries(moves) });
-    this.groupLine.set(next);
+    this.dispatch(act);
     return true;
   }
 
@@ -1477,8 +1479,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.dieResults = [];
     // o resultado sai antes da animação: os dados só mostram o que já foi decidido
     const values = rollDice(MOVE_DICE.count, MOVE_DICE.sides, this.rng);
-    const movement = turnMovement(sum(values), this.roster.loadout(this.active().id), this.grouped(), this.led());
-    this.dispatch({ type: 'roll', dice: values, movement });
+    // o motor soma vigor, grupo e Liderança
+    this.dispatch({ type: 'roll', dice: values });
     this.rollValues.set(values);
     this.rollKeys.set(Array.from({ length: MOVE_DICE.count }, (_, i) => `${seq}-${i}`));
     // no celular, os dados "quicam" na mão (a não ser que a animação esteja reduzida)
@@ -1595,7 +1597,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Patrulha um trecho. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
   private async patrol(enemy: EnemyState, epoch: number): Promise<boolean> {
     // o motor decide o trecho inteiro (e em que passo ele avista alguém); a tela só anima
-    const act = planPatrolAct(this.core(), enemy.id, this.enemyWorld(), this.rng);
+    const act = planPatrolAct(this.core(), enemy.id, this.world(), this.rng);
     if (!this.dispatch(act)) return false;
     if (!act.path.length) {
       if (this.board!.isCovered(enemy.hex)) return false;
@@ -1612,7 +1614,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Foge para a borda. Devolve se o jogador viu alguma coisa (câmera, animação, aviso). */
   private async flee(enemy: EnemyState, epoch: number): Promise<boolean> {
-    const act = planFleeAct(this.core(), enemy.id, this.enemyWorld());
+    const act = planFleeAct(this.core(), enemy.id, this.world());
     if (!this.dispatch(act)) return false;
     const covered = this.board!.isCovered(enemy.hex);
     if (act.cornered) {
@@ -2378,7 +2380,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Se o inimigo em patrulha enxerga algum agente, entra em alerta. Devolve se avistou. */
   private checkSpotted(enemyId: string, agents: ReadonlyMap<string, HexCoord> = this.positions()): boolean {
     if (!this.map) return false;
-    const seen = firstSighting(this.core(), agents, this.enemyWorld(), enemyId);
+    const seen = firstSighting(this.core(), agents, this.world(), enemyId);
     if (!seen) return false;
     const { agent, at } = seen.sighting;
     if (!this.dispatch({ type: 'spot', enemy: enemyId, agent, at })) return false;
@@ -2704,19 +2706,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!path.length) return;
     this.sound.play('ui.confirmar');
     const id = this.active().id;
-    const paths = new Map([[id, path]]);
-    let left: string[] = [];
-    if (this.grouped()) {
-      // os companheiros seguem o rastro do líder
-      const followers = new Map([...this.positions()].filter(([o]) => o !== id && this.group().has(o)));
-      const plan = followLeader(this.positions().get(id)!, path, followers, this.area, this.enemyWalls());
-      for (const [o, p] of plan.paths) paths.set(o, p);
-      left = plan.left;
-    }
-    if (!(await this.walkUnits(id, paths, path.length))) return;
-    // a fila segue o rastro: o líder na frente, depois quem ocupou a vaga logo atrás dele…
-    if (this.grouped()) this.groupLine.set([...paths.keys()]);
-    if (left.length) this.leaveGroup(left, 'ficou para trás');
+    // agrupado, os companheiros seguem o rastro do líder e a fila fica na ordem em que andaram
+    const act = planMove(this.core(), path, this.world());
+    const paths = new Map(Object.entries(act.paths).map(([who, p]) => [who, [...p]]));
+    if (!(await this.walkUnits(id, paths, act))) return;
+    if (act.left?.length) this.sayLeft(act.left, 'ficou para trás');
     // andou até um alvo tocado: chegando colado, a ação dele já abre
     const aimed = this.aimedTarget();
     const aim = aimed && sameHex(aimed.hex, target) ? aimed : null;
@@ -2730,9 +2724,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /**
    * Anda com um ou mais agentes ao mesmo tempo, conferindo a visão dos inimigos a cada passo.
-   * Quando todos chegam, o movimento vira estado (e gasta `cost`).
+   * Quando todos chegam, a ação (`commit`, já planejada pelo motor) vira estado.
    */
-  private async walkUnits(leaderId: string, paths: ReadonlyMap<string, HexCoord[]>, cost: number): Promise<boolean> {
+  private async walkUnits(
+    leaderId: string,
+    paths: ReadonlyMap<string, HexCoord[]>,
+    commit: GameAction,
+  ): Promise<boolean> {
     const epoch = this.epoch;
     this.phase.set('walking');
     this.selected.set(null);
@@ -2747,7 +2745,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.checkAllSpotted(live);
     });
     if (this.destroyed || this.epoch !== epoch) return false;
-    return this.dispatch({ type: 'move', paths: Object.fromEntries(paths), cost });
+    return this.dispatch(commit);
   }
 
   /**
@@ -2811,13 +2809,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const id = this.active().id;
     this.closeGrouping();
     const free = this.freeRally();
-    const cost = rallyCost(plan.cost, this.roster.classOf(id), this.commandsUsed());
-    if (!(await this.walkUnits(id, plan.paths, cost))) return;
+    // o motor junta a equipe, põe quem chamou na frente da fila e decide se o Comando paga
+    const act = planRally(this.core(), plan.point, this.world());
+    if (!act || !(await this.walkUnits(id, plan.paths, act))) return;
     this.sound.play('eq.agrupar');
-    this.group.set(wholeTeam());
-    // quem chamou o grupo fica na frente da fila
-    this.groupLine.set(toFront(this.line(), id));
-    if (free) this.commandsUsed.update((n) => n + 1);
     this.say(
       `${free ? 'Comando do Capitão: agrupou sem gastar movimento! ' : 'Equipe agrupada! '}` +
         `Juntos: +${this.groupMove()} de movimento e +${this.groupInt()} de intimidação` +
@@ -2831,16 +2826,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Desfaz o grupo: cada um volta a andar por conta própria. */
   protected ungroup(): void {
     if (this.phase() !== 'moving-choice' || !this.group().size) return;
-    this.group.set(new Set());
+    if (!this.dispatch({ type: 'ungroup' })) return;
     this.sound.play('eq.desagrupar');
     this.say('Equipe desagrupada: cada um por si', 'info');
     this.refreshBoard();
   }
 
-  /** Tira agentes do grupo; com menos de dois, o grupo acaba. */
-  private leaveGroup(ids: string[], why: string): void {
-    const next = new Set([...this.group()].filter((id) => !ids.includes(id)));
-    this.group.set(next.size > 1 ? next : new Set());
+  /** Avisa quem saiu do grupo (o motor já tirou; com menos de dois, o grupo acaba). */
+  private sayLeft(ids: readonly string[], why: string): void {
     const names = ids.map((id) => CHARACTERS.find((c) => c.id === id)?.name ?? id);
     this.say(`${names.join(' e ')} ${why}`, 'info');
   }
@@ -2857,13 +2850,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const spot of this.perceivable()) {
       for (const [who, path] of paths) {
         if (this.noticed().has(spot.id)) break;
-        if (!needsNoticeRoll(spot, who, path, this.noticed(), this.noticeRolled)) continue;
-        this.noticeRolled.add(`${spot.id}:${who}`);
+        if (!needsNoticeRoll(spot, who, path, this.noticed(), this.noticeRolled())) continue;
+        // o motor sorteia o d20; a ficha cai nele e a percepção vale quando ele aparece
+        const act = planNotice(who, spot.id, this.rng);
         this.phase.set('checking');
-        const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice);
+        const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice, act.roll);
         if (pass === null) return false;
+        this.dispatch(act);
         if (!pass) continue;
-        this.noticed.update((s) => new Set([...s, spot.id]));
         this.board?.keepInView(spot.spot);
         this.say(`${this.nameOf(who)} reparou ${spot.what}!`, 'info');
         this.sound.play('eq.percebeu');
@@ -2963,15 +2957,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.8, 0.5, 220);
     if (v.kind === 'keys') {
-      this.hasKey.set(true);
+      if (!this.dispatch({ type: 'take', agent: this.active().id, item: KEY_PANEL_ID })) return;
       this.sound.play('eq.chave');
-      this.keySeenBy.set([]);
-      this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
       this.closeSpeech();
       this.patchProp({ taken: true, note: 'Chave do avião com a equipe.' });
     } else if (v.hidden) {
       const item = v.hidden;
-      this.found.update((s) => new Set([...s, item.id]));
+      if (!this.dispatch({ type: 'take', agent: this.active().id, item: item.id })) return;
       this.sound.play('eq.vasculhar');
       this.patchProp({ taken: true, note: item.seized });
     }
@@ -2985,9 +2977,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const v = this.prop();
     if (!v || this.phase() !== 'moving-choice') return;
     const id = this.active().id;
-    if (v.kind === 'keys' && !v.taken) {
-      this.keySeenBy.update((l) => leftKey({ ...this.planeState(), seenBy: l }, id).seenBy);
-    }
+    if (v.kind === 'keys' && !v.taken) this.dispatch({ type: 'leaveKey', agent: id });
     this.dropProp();
     if (v.taken && v.kind === 'keys') this.say(`${v.who} pegou a chave do avião`, 'info');
     else if (v.taken && v.hidden) this.say(`${v.who} achou a ${v.hidden.name} ${v.hidden.at}. ${v.hidden.seized}`, 'alert');
@@ -3009,9 +2999,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * O resultado fica na tela até o jogador tocar em **Continuar** (ou ✕); só então o jogo
    * segue. Devolve se passou (mais que `target`), ou `null` se a partida foi recomeçada.
    */
-  private async rollCheck(kind: 'notice' | 'find', who: string, target: number): Promise<boolean | null> {
+  private async rollCheck(
+    kind: 'notice' | 'find',
+    who: string,
+    target: number,
+    /** O d20 já sorteado (pelo motor); sem ele, o dado sorteia. */
+    value?: number,
+  ): Promise<boolean | null> {
     const r = await this.rollD20(
       {
+        value,
         kicker: kind === 'notice' ? 'Percepção' : 'Inspecionar',
         who: this.nameOf(who),
         need: `precisa de mais que ${target}`,
@@ -3130,12 +3127,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const epoch = this.epoch;
     const stale = () => this.destroyed || this.epoch !== epoch;
     const id = this.active().id;
-    const roll = rollDie(DOOR_RULES.die);
-    const out = resolveDoor(action, door, roll, gazua);
+    // o motor sorteia o d20 e decide o resultado; a tela anima e aplica quando ele aparece
+    const act = planDoor(this.core(), hexKey(door.hex), action, this.rng);
+    const out = doorOutcome(this.core(), act);
+    const roll = act.roll;
+    let committed = false;
+    const commit = () => {
+      if (committed || stale()) return;
+      committed = true;
+      this.dispatch(act);
+    };
     this.doorBusy.set(true);
-    this.dispatch({ type: 'spend', cost: out.cost });
     const settle = (mode: 'swing' | 'slam') => {
-      this.doors.update((m) => new Map(m).set(hexKey(door.hex), applyDoor(door, out)));
+      commit();
       board.setDoors(this.doors());
       board.pushDoor(door.hex, id, mode);
       this.refreshVision();
@@ -3207,7 +3211,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
             if (out.pass) settle('slam');
             else {
               // a porta aguenta, mas cede um pouco: o próximo chute precisa de menos
-              this.doors.update((m) => new Map(m).set(hexKey(door.hex), applyDoor(door, out)));
+              commit();
               board.setDoors(this.doors());
               board.pushDoor(door.hex, id, 'rattle');
             }
@@ -3231,6 +3235,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       if (stale()) return;
       await board.stepBack(id);
     } finally {
+      // o que não mudou a porta (trancada que não abriu, fechadura que não cedeu) também conta:
+      // o movimento do destrancar é gasto do mesmo jeito
+      commit();
       if (!stale()) this.doorBusy.set(false);
     }
   }
@@ -3287,18 +3294,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const map = this.map;
     const board = this.board;
     if (!map || !board) return true;
-    this.breakInUntil.set(this.round() + BREAK_IN_RULES.rounds);
-    const rect = map.structures?.find((st) => inStructure(doorHex, st.rect))?.rect;
-    const agent = this.positions().get(agentId);
-    const rolls: BreakInRoll[] =
-      rect && agent
-        ? resolveBreakIn(
-            doorHex,
-            roomBehind(doorHex, agent, rect, new Set([...map.walls.map(hexKey), ...this.closedDoors()])),
-            this.enemies(),
-            () => rollDie(DOOR_RULES.die),
-          )
-        : [];
+    // o motor acha o cômodo do outro lado, rola o d20 de cada um e aplica tudo (e o bônus da
+    // equipe); a cena abaixo só mostra, um por um
+    const { act, rolls } = planBreakIn(this.core(), hexKey(doorHex), agentId, this.world(), this.rng);
+    this.dispatch(act);
     // o estouro da porta: todo mundo do cômodo dá um passo para trás, de frente para ela
     for (const r of rolls) void board.enemyFlinch(r.enemy.id, doorHex);
     if (rolls.length) await this.wait(380);
@@ -3340,16 +3339,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
           // falhou: rende na hora
           board.setEnemyFacing(e.id, facing);
           if (!rolls.slice(0, rolls.indexOf(r)).some((o) => o.outcome === 'surrender')) this.sound.play('ini.rende', { at: e.hex });
-          this.updateEnemy(e.id, { status: 'surrendered', facing });
           board.setEnemySurrendered(e.id, true);
         } else if (r.outcome === 'flee') {
           // passou: vira de costas e fica pronto para correr (sai na vez dele)
-          this.updateEnemy(e.id, { status: 'alert', facing });
           board.setEnemyAlert(e.id, true);
           board.enemyBolt(e.id, doorHex);
         } else {
           board.setEnemyFacing(e.id, facing);
-          this.updateEnemy(e.id, { facing });
         }
         board.startleEnemy(e.id);
         this.refreshVision();
@@ -3501,6 +3497,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.say(`Sem movimento para conversar com ${e.name} agora`, 'info');
       return;
     }
+    if (!this.dispatch({ type: 'startTalk', agent: this.active().id, enemy: e.id })) return;
     const memory = this.dialogues().get(e.id) ?? EMPTY_MEMORY;
     const epoch = this.epoch;
     this.focusCharacter(this.active().id);
@@ -3596,25 +3593,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected async ask(key: string): Promise<void> {
     const iv = this.interrogation();
     if (!iv || iv.busy || this.phase() !== 'interrogating') return;
-    const before = this.dialogues().get(iv.enemyId) ?? EMPTY_MEMORY;
-    const res = askQuestion(iv.cls, before, key, {
-      die: () => rollDie(INTERROGATION_RULES.die),
-      clues: this.clues(),
-      // a intimidação do próprio agente (sem o bônus do grupo nem o do arrombamento) sobe a CD;
-      // agarrado numa perseguição, ele está abalado: +2 a favor do agente
-      intimidation: this.talkIntimidation() + (this.enemy(iv.enemyId)?.shaken ? CHASE_RULES.shakenBonus : 0),
-      pools: this.linePools(),
-    });
-    if (!res) return;
-    this.linePools.set(res.pools);
+    // o motor rola o d20 escondido e sorteia a fala; a pergunta fica feita, a nota vai para a
+    // caderneta, a pista e o esconderijo entregue valem já (a intimidação do próprio agente sobe
+    // a CD; agarrado numa perseguição, o suspeito está abalado: +2 a favor do agente)
+    const act = planAsk(this.core(), key, this.rng);
+    const res = askResult(this.core(), act);
+    if (!res || !this.dispatch(act)) return;
     const epoch = this.epoch;
     const alive = () => this.interrogating(epoch, iv.enemyId);
     const { answer } = res;
-    // a pergunta fica bloqueada para sempre, seja qual for a resposta
-    this.dialogues.update((m) => new Map(m).set(iv.enemyId, res.memory));
-    // a primeira pergunta de cada entrada gasta o movimento (como a rolagem da inspeção)
-    const cost = questionCost(iv.asked);
-    if (cost) this.dispatch({ type: 'spend', cost });
     // o cartão feito fica marcado na hora; a réplica só aparece depois da resposta
     this.patchInterrogation({
       busy: true,
@@ -3634,18 +3621,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.patchInterrogation({ agentLine: '' });
       if (!(await this.typeOut(answer.closing, 13, (t) => this.patchInterrogation({ agentLine: t }), alive))) return;
     }
-    this.fieldNotes.update((ns) => [
-      ...ns,
-      { id: ++this.noteSeq, suspect: iv.suspect, text: out.note, kind: noteKind(out), depth: answer.option.depth },
-    ]);
     this.sound.play(noteKind(out) === 'confessou' ? 'eq.confessou' : 'eq.anotar');
     // entregou alguém: aparece no mapa ao encerrar (se a missão tiver essa unidade escondida)
-    const hidden = out.reveal ? this.hiddenAccomplice(iv.enemyId) : null;
-    // entregou um esconderijo (ou o quadro de chaves): conta como percebido e ganha o contorno
-    const noticed = noticedAfter(this.noticed(), out);
-    if (noticed !== this.noticed()) this.noticed.set(noticed);
-    // pista nova: pode liberar perguntas (neste e em outros NPCs)
-    if (out.clue && !this.clueLog().has(out.clue)) this.clueLog.update((c) => new Set([...c, out.clue!]));
+    const hidden = this.core().talk?.reveal ?? null;
     const options = dialogueOptions(iv.cls, this.dialogues().get(iv.enemyId) ?? res.memory, this.clues());
     const open = options.filter((o) => !o.done);
     const pick = answer.unlocked ? open.findIndex((o) => o.key === answer.unlocked!.key) : 0;
@@ -3653,16 +3631,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.patchInterrogation({ options, busy: false, ...(hidden ? { reveal: hidden } : {}) });
   }
 
-  /** Intimidação do agente que conversa: só o ponto dele (atributo + equipamento, sem grupo). */
-  private talkIntimidation(): number {
-    return statBreakdown(this.roster.loadout(this.active().id), 'intimidacao', false).total;
-  }
-
-  /** O comparsa escondido que o suspeito pode entregar (ainda não revelado), se houver. */
-  private hiddenAccomplice(enemyId: string): string | null {
-    const id = this.enemy(enemyId)?.reveals;
-    return id && this.enemy(id)?.status === 'hidden' ? id : null;
-  }
 
   /**
    * **Encerrar**: a câmera volta e o jogo segue com o que foi anotado. Se o suspeito entregou
@@ -3671,11 +3639,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected endInterrogation(): void {
     const iv = this.interrogation();
     if (!iv || iv.busy) return;
+    // o motor fecha a conversa: o abalado passa (só vale para a primeira) e quem foi entregue
+    // aparece no hexágono livre mais perto do esconderijo
+    const end = planEndTalk(this.core(), this.world());
+    const revealId = this.core().talk?.reveal ?? null;
+    this.dispatch(end);
     this.dropInterrogation();
     this.phase.set('moving-choice');
-    // o abalado vale só para a primeira conversa
-    if (iv.asked && this.enemy(iv.enemyId)?.shaken) this.updateEnemy(iv.enemyId, { shaken: false });
-    const revealed = !!iv.reveal && this.revealAccomplice(iv.reveal, iv.suspect);
+    const revealed = !!end.revealAt && !!revealId && this.showAccomplice(revealId, iv.suspect);
     if (!revealed && iv.asked) {
       const n = this.fieldNotes().filter((note) => note.suspect === iv.suspect).length;
       this.say(`Conversa com ${iv.suspect}: ${n} ${n === 1 ? 'anotação' : 'anotações'} na caderneta`, 'info');
@@ -3692,6 +3663,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Some com o close-up do interrogatório (sem seguir a vez). */
   private dropInterrogation(): void {
+    // a conversa fecha no estado também (ninguém fica "conversando" sem a tela aberta)
+    if (this.core().talk) this.dispatch({ type: 'endTalk' });
     if (!this.interrogation()) return;
     this.interrogation.set(null);
     this.board?.endCloseUp();
@@ -3699,17 +3672,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     removeEventListener('resize', this.onInterrogationResize);
   }
 
-  /** A unidade escondida aparece no mapa (no lugar dela ou no hexágono livre mais perto). */
-  private revealAccomplice(id: string, by: string): boolean {
+  /** Mostra a unidade entregue aparecendo no mapa (o motor já a pôs no lugar). */
+  private showAccomplice(id: string, by: string): boolean {
     const e = this.enemy(id);
-    if (!e || e.status !== 'hidden') return false;
-    const taken = new Set([...this.positions().values(), ...this.onBoardEnemies().map((o) => o.hex)].map(hexKey));
-    const free = (h: HexCoord) => !taken.has(hexKey(h)) && !this.solid().has(hexKey(h));
-    let hex = e.hex;
-    for (let r = 0; r < 4 && !free(hex); r++) {
-      hex = hexesInRange(e.hex, r + 1, this.area).find(free) ?? hex;
-    }
-    this.updateEnemy(id, { status: 'patrol', hex });
+    if (!e || e.status !== 'patrol') return false;
+    const hex = e.hex;
     this.board?.revealEnemy(id, hex, e.facing);
     this.board?.focusHex(hex);
     this.refreshVision();
@@ -3789,18 +3756,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private executeApproach(): void {
     if (this.phase() !== 'moving-choice') return;
     const from = this.positions().get(this.active().id);
-    const plan = this.approachPlan();
     if (!from || this.approachCount() === 0) return;
-    const rolled = plan.roll.map((c) => rollEscape(c, () => rollDie(APPROACH_RULES.escapeDie)));
-    const surrender = [...plan.surrender, ...rolled.filter((r) => !r.passed).map((r) => r.enemy)];
-    const flee = [...rolled.filter((r) => r.passed).map((r) => r.enemy), ...plan.flee];
+    // o motor rola o teste de fuga de cada um e decide quem se rende e quem corre
+    const { act, surrender, flee } = planApproach(this.core(), this.world(), this.rng);
+    if (!this.dispatch(act)) return;
     this.approaching.set(false);
     this.board?.frameRing(null);
     this.paintApproachZones();
     this.phase.set('ending');
     const motion = !reducedMotion();
-    for (const e of surrender) this.updateEnemy(e.id, { status: 'surrendered', facing: facingBetween(e.hex, from) });
-    for (const e of flee) this.updateEnemy(e.id, { status: 'alert', facing: facingBetween(e.hex, from) });
     // voz de prisão: quem não se rendeu foge na hora, depois do auto (o mais perto de quem abordou primeiro)
     this.flight = {
       agentId: this.active().id,
@@ -3883,6 +3847,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected confirmBurn(): void {
     const target = this.burnable();
     if (!this.burning() || !target || this.phase() !== 'moving-choice') return;
+    // o motor decide quem vigia perto e vê as chamas
+    const act = planBurn(this.core(), target);
+    if (!act) return;
     const witnesses = this.burnWitnesses();
     // a câmera continua no agente e no alvo enquanto o fogo pega; volta quando a vez acaba
     this.closeBurn(true);
@@ -3892,7 +3859,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.sound.duck();
     const fx = !reducedMotion();
     if (fx) this.playMatch(target);
-    this.later(fx || this.sound.audible() ? STRIKE_SECONDS * 1000 : 0, () => this.setFire(target, witnesses));
+    this.later(fx || this.sound.audible() ? STRIKE_SECONDS * 1000 : 0, () => this.setFire(target, witnesses, act));
   }
 
   /**
@@ -3914,8 +3881,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.later((STRIKE_SECONDS - 0.3) * 1000, () => stage('drop'));
   }
 
-  private setFire(target: Burnable, witnesses: EnemyState[]): void {
-    this.burned.update((s) => new Set([...s, target.id]));
+  private setFire(target: Burnable, witnesses: EnemyState[], act: GameAction): void {
+    if (!this.dispatch(act)) return;
     this.board?.ignite(target.id, target.hexes);
     const plane = !!target.inspect;
     this.sound.ignite(target.id, target.hexes, plane);
@@ -3923,7 +3890,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!plane) this.sound.play('fogo.tambor', { at: target.hexes[0], delay: 2.5 });
     for (const e of witnesses) {
       const facing = facingBetween(e.hex, target.hexes[0]);
-      this.updateEnemy(e.id, { status: 'alert', facing });
       this.board?.setEnemyFacing(e.id, facing);
       this.board?.setEnemyAlert(e.id, true);
     }
@@ -3956,9 +3922,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   // ---------- avião trancado e quadro de chaves ----------
 
   /** A equipe pegou a chave. */
-  protected readonly hasKey = signal(false);
+  protected readonly hasKey = computed(() => this.core().hasKey);
   /** Quem viu a chave no quadro e deixou lá. */
-  private readonly keySeenBy = signal<readonly string[]>([]);
+  private readonly keySeenBy = computed(() => this.core().keySeenBy);
   /** Linha do que se vê no menu do avião ("O avião está trancado."). */
   protected readonly planeNote = signal<string | null>(null);
   /** Fala embaixo da tela, com o avatar de quem fala. */
@@ -4010,7 +3976,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Registra uma pista da missão (uma vez só); pode liberar perguntas nos interrogatórios. */
   private noteClue(clue: string | null): void {
-    if (clue && !this.clueLog().has(clue)) this.clueLog.update((c) => new Set([...c, clue]));
+    if (clue && !this.clueLog().has(clue)) this.dispatch({ type: 'noteClue', clue });
   }
 
   /**
@@ -4082,11 +4048,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly cabinInside = computed(() => cabinBuilt(this.cabinState()));
   /** Peças que ainda estão na cabine (o GPS, o rádio). */
   protected readonly cabinLeft = computed(() => cabinItemsLeft(this.found()));
-  /** O que a ficha da cabine diz do que sobrou. */
-  protected readonly cabinText = computed(() => cabinSummary(this.found()));
-  /** Última coisa vista ou pega na cabine. */
-  protected readonly cabinNote = signal<string | null>(null);
-  /** Quem está dentro (nome, para a ficha). */
+  /** Quem está dentro (nome, para o aviso ao sair). */
   protected readonly cabinWho = computed(() => {
     const id = this.cabinState().agent;
     return id ? this.nameOf(id) : '';
@@ -4111,7 +4073,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     board.releaseDoorFocus();
     removeEventListener('resize', this.onDoorResize);
     this.planeNote.set(null);
-    this.cabinNote.set(null);
     this.cabinEvent({ type: 'enter', agent: id });
     this.phase.set('cabin');
     board.focus(id);
@@ -4121,7 +4082,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const path = door && !sameHex(door, from) ? pathTo(reachableHexes(from, Number.MAX_SAFE_INTEGER, this.area, blocked), door) : [];
     if (path.length) {
       // ir até a porta do avião não gasta movimento
-      if (!(await this.walkUnits(id, new Map([[id, path]]), 0))) return;
+      if (!(await this.walkUnits(id, new Map([[id, path]]), { type: 'move', paths: { [id]: path }, cost: 0 }))) {
+        return;
+      }
       if (this.epoch !== epoch || this.phase() !== 'walking') {
         this.dropCabin();
         return;
@@ -4164,15 +4127,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.cabinLeft().length) return false;
     if (this.noticed().has(CABIN_NOTICE_ID)) return true;
     const key = `${CABIN_NOTICE_ID}:${who}`;
-    if (this.noticeRolled.has(key)) return false;
-    this.noticeRolled.add(key);
+    if (this.noticeRolled().has(key)) return false;
+    const act = planNotice(who, CABIN_NOTICE_ID, this.rng);
     this.phase.set('checking');
-    const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice);
+    const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice, act.roll);
     if (pass === null) return null;
-    if (pass) {
-      this.noticed.update((s) => new Set([...s, CABIN_NOTICE_ID]));
-      this.sound.play('eq.percebeu');
-    }
+    this.dispatch(act);
+    if (pass) this.sound.play('eq.percebeu');
     return pass;
   }
 
@@ -4184,7 +4145,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       return;
     }
     this.sound.play('ui.hex');
-    this.cabinNote.set(cabinClutter(this.cabinState()));
     this.cabinEvent({ type: 'poke' });
   }
 
@@ -4193,12 +4153,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.cabinInside()) return;
     const item = cabinItem(id, this.found());
     if (!item) return;
-    this.found.update((s) => new Set([...s, item.id]));
+    if (!this.dispatch({ type: 'take', agent: this.active().id, item: item.id })) return;
     this.board?.takeCabinItem(item.id);
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.8, 0.5, 220);
     this.sound.play('eq.vasculhar');
-    this.cabinNote.set(item.seized);
   }
 
   /** **Sair do avião**: o interior é descartado, a câmera volta, a porta fecha e a vez segue. */
@@ -4217,7 +4176,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private dropCabin(): void {
     const was = this.cabinState().stage;
     this.cabinEvent({ type: 'closed' });
-    this.cabinNote.set(null);
     removeEventListener('resize', this.onCabinResize);
     if (was === 'outside') return;
     this.board?.leavePlaneCabin();
@@ -4248,6 +4206,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Encerra a operação: nada mais anda e o relatório fica com o resultado. */
   protected confirmEnd(): void {
     if (this.debrief() !== 'confirm') return;
+    if (!this.dispatch({ type: 'endOperation' })) return;
     this.clearTimers();
     this.phase.set('over');
     this.debrief.set('over');
@@ -4286,43 +4245,29 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.resetSlow();
     this.closeApproach();
     this.core.set(this.initialCore());
-    this.group.set(wholeTeam());
-    this.groupLine.set(CHARACTERS.map((c) => c.id));
     this.passing = false;
     this.closeGrouping();
     this.board?.placeUnits(this.positions());
     this.flight = null;
     this.ranThisRound.clear();
     this.caughtThisRound.clear();
-    this.noticed.set(new Set());
-    this.found.set(new Set());
     this.seenAgents.clear();
     this.board?.setSeenAgents(this.seenAgents);
-    this.noticeRolled.clear();
     this.clearChecks();
     this.dropProp();
     this.board?.resetProps();
     this.dropInterrogation();
-    this.dialogues.set(new Map());
-    this.clueLog.set(new Set());
-    this.hasKey.set(false);
-    this.keySeenBy.set([]);
     this.planeNote.set(null);
     this.planeBurn.set(false);
     this.dropCabin();
     this.closeSpeech();
-    this.linePools.set(new Map());
-    this.fieldNotes.set([]);
     this.doorKey.set(null);
     this.doorBusy.set(false);
     this.breakInCine.set(false);
-    this.breakInUntil.set(0);
     clearTimeout(this.doorCheckTimer);
     this.board?.releaseDoorFocus();
     this.board?.setSceneSlowmo(false);
-    this.doors.set(this.initialDoors());
     this.board?.setDoors(this.doors(), true);
-    this.burned.set(new Set());
     this.closeBurn();
     this.debrief.set(null);
     this.board?.clearFires();
@@ -4361,7 +4306,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       burned: [...this.burned()],
       noticed: [...this.noticed()],
       found: [...this.found()],
-      noticeRolled: [...this.noticeRolled],
+      noticeRolled: [...this.noticeRolledIds()],
       seenAgents: [...this.seenAgents],
       ranThisRound: [...this.ranThisRound],
       caughtThisRound: [...this.caughtThisRound],
@@ -4401,10 +4346,22 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       activeIndex: Math.min(Math.max(0, s.activeIndex), CHARACTERS.length - 1),
       positions: { ...fresh.positions, ...Object.fromEntries(s.positions) },
       enemies: s.enemies,
+      group: s.group,
+      groupLine: s.groupLine,
+      doors: Object.fromEntries(s.doors),
+      breakInUntil: s.breakInUntil,
+      noticed: s.noticed,
+      noticeRolled: s.noticeRolled,
+      found: s.found,
+      hasKey: s.hasKey,
+      keySeenBy: s.keySeenBy,
+      dialogues: Object.fromEntries(s.dialogues),
+      linePools: Object.fromEntries(s.linePools),
+      clueLog: s.clueLog,
+      fieldNotes: s.fieldNotes as FieldNote[],
+      burned: s.burned,
     });
     this.board?.placeUnits(this.positions());
-    this.group.set(new Set(s.group));
-    this.groupLine.set(s.groupLine);
     this.board?.placeEnemies(
       this.enemies().map((e) => ({
         ...e,
@@ -4413,29 +4370,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         gone: e.status === 'hidden' || e.status === 'fled',
       })),
     );
-    this.doors.set(new Map(s.doors));
     this.board?.setDoors(this.doors(), true);
-    this.noticed.set(new Set(s.noticed));
-    this.found.set(new Set(s.found));
-    for (const k of s.noticeRolled) this.noticeRolled.add(k);
     for (const id of s.seenAgents) this.seenAgents.add(id);
     this.board?.setSeenAgents(this.seenAgents);
     for (const id of s.ranThisRound) this.ranThisRound.add(id);
     for (const id of s.caughtThisRound) this.caughtThisRound.add(id);
-    this.dialogues.set(new Map(s.dialogues));
-    this.linePools.set(new Map(s.linePools));
-    this.clueLog.set(new Set(s.clueLog));
-    this.fieldNotes.set(s.fieldNotes as FieldNote[]);
-    this.noteSeq = Math.max(0, ...s.fieldNotes.map((n) => n.id));
-    this.hasKey.set(s.hasKey);
-    this.keySeenBy.set(s.keySeenBy);
     this.planeNote.set(s.planeNote);
-    this.breakInUntil.set(s.breakInUntil);
     // o que já foi pego some dos móveis; o que já queimou volta a arder
     for (const h of this.map?.hidden ?? []) if (this.found().has(h.id)) this.board?.hidePropItem(h.spot);
     const panel = this.map?.keyPanel;
     if (panel && s.hasKey) this.board?.hidePropItem(panel.spot);
-    this.burned.set(new Set(s.burned));
     for (const t of this.map?.burnables ?? []) {
       if (!this.burned().has(t.id)) continue;
       this.board?.ignite(t.id, t.hexes);
@@ -4537,8 +4481,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(null);
     this.board?.setReachable([]);
     if (testCase.hasKey) {
-      this.hasKey.set(true);
-      this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
+      this.dispatch({ type: 'take', agent: this.active().id, item: KEY_PANEL_ID });
       const panel = this.map?.keyPanel;
       if (panel) this.board?.hidePropItem(panel.spot);
     }
@@ -4851,8 +4794,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   }
 
   /** O mapa como o motor precisa dele (as portas ainda vivem aqui). */
-  private enemyWorld(): EnemyWorld {
-    return { area: this.area, walls: this.walls(), lowCover: this.lowCover, solid: this.solid() };
+  /** O que é fixo no mapa, como o motor precisa (as portas vêm do estado). */
+  private worldMap?: World;
+  private world(): World {
+    return (this.worldMap ??= {
+      area: this.area,
+      blocked: this.fixedWalls,
+      lowCover: this.lowCover,
+      roomWalls: new Set((this.map?.walls ?? []).map(hexKey)),
+      structures: (this.map?.structures ?? []).map((st) => st.rect),
+    });
   }
 
   /** Paredes, carga e inimigos no tabuleiro: o que bloqueia os agentes (sem contar os outros agentes). */
@@ -4914,11 +4865,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   private initialCore(): GameState {
     const starts = CHARACTERS.map((c, i) => [c.id, { ...(this.map?.starts[i] ?? { col: 0, row: 0 }) }] as const);
-    return initialGameState(
-      CHARACTERS.map((c) => c.id),
-      Object.fromEntries(starts),
-      this.initialEnemies(),
-    );
+    return initialGameState({
+      order: CHARACTERS.map((c) => c.id),
+      positions: Object.fromEntries(starts),
+      enemies: this.initialEnemies(),
+      // a escalação da ficha: o motor calcula movimento, grupo e Comando com ela
+      loadouts: Object.fromEntries(CHARACTERS.map((c) => [c.id, this.roster.loadout(c.id)])),
+      captain: this.roster.captain(),
+      doors: Object.fromEntries(this.initialDoors()),
+    });
   }
 
   /**

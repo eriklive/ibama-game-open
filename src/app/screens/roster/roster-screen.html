@@ -1,51 +1,28 @@
-<main class="roster">
+<main class="roster" [class.expanded]="expanded()">
   <header class="head">
-    <div class="head-title">
-      <span class="kicker"
-        ><span class="wide-only">IBAMA · GEF · </span>Escalação · {{ map?.name }}</span
-      >
-      <h1>Ficha do agente</h1>
-    </div>
-    <span class="count"
-      ><span class="wide-only">Agente </span>{{ cur() + 1 }} / {{ agents.length }}</span
+    <button
+      type="button"
+      class="back"
+      data-testid="ficha-back"
+      aria-label="Voltar ao lobby"
+      (click)="back()"
     >
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+      <span class="wide-only">Lobby</span>
+      @if (pad()) {
+        <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span>
+      }
+    </button>
+    <div class="head-title">
+      <span class="kicker"><span class="wide-only">IBAMA · GEF · </span>{{ title }}</span>
+      <h1>Ficha de {{ agent().name }}</h1>
+    </div>
+    <span class="count">{{ isCaptain() ? 'Capitão' : 'Agente' }}</span>
   </header>
 
   <div class="body">
-    <!-- Abas: foto 3x4 de cada agente (amarelo = ponto livre, verde = distribuído) -->
-    <div class="tabs" role="tablist" aria-label="Agentes da equipe">
-      @for (t of tabs(); track t.c.id) {
-        <button
-          type="button"
-          role="tab"
-          class="tab"
-          [class.on]="t.selected"
-          [attr.aria-selected]="t.selected"
-          aria-controls="ficha"
-          [attr.aria-label]="t.c.name + (t.captain ? ', Capitão' : ', Agente') + (t.done ? ', ponto distribuído' : ', ponto livre')"
-          [attr.data-testid]="'tab-' + t.c.id"
-          (click)="go(t.i)"
-        >
-          <span class="tab-photo">
-            <svg viewBox="0 0 76 96" aria-hidden="true" [style.fill]="shade(t.c)">
-              <circle cx="38" cy="34" r="18" />
-              <path d="M4 96c2-24 16-36 34-36s32 12 34 36z" />
-            </svg>
-            <span class="dot" [class.done]="t.done"></span>
-            @if (t.captain) {
-              <span class="cap-mark" aria-hidden="true">Cap.</span>
-            }
-          </span>
-          <span class="tab-label" aria-hidden="true">{{ t.c.name }}</span>
-        </button>
-      }
-      @if (pad()) {
-        <span class="pad-hint" aria-hidden="true">{{ glyph('prev') }} / {{ glyph('next') }}</span>
-      }
-    </div>
-
     <!-- Modelo 3D do agente, com os espaços de equipamento (em breve) -->
-    <section class="model" aria-label="Modelo 3D do agente">
+    <section class="model" aria-label="Modelo 3D do agente" data-testid="ficha-model">
       <div class="grid-bg" aria-hidden="true"></div>
       <div class="stage" #stage></div>
       @if (viewerFailed()) {
@@ -95,6 +72,18 @@
         <span class="loading" aria-live="polite">carregando…</span>
       }
       <span class="model-label" aria-hidden="true">Modelo 3D</span>
+      <!-- celular: tocar no quadrado desce a ficha e libera girar o modelo -->
+      @if (!wide() && !expanded()) {
+        <button
+          type="button"
+          class="expand"
+          data-testid="ficha-expand"
+          aria-label="Abrir o modelo 3D para girar"
+          (click)="expand(true)"
+        >
+          <span class="expand-hint" aria-hidden="true">Toque para girar</span>
+        </button>
+      }
       <button
         type="button"
         class="turn"
@@ -112,16 +101,14 @@
       <ul class="equip left" aria-label="Equipamento (em breve)">
         @for (s of slotsLeft; track s) {
           <li class="equip-slot">
-            <span class="equip-name">{{ s }}</span
-            ><span class="equip-soon">Em breve</span>
+            <span class="equip-name">{{ s }}</span><span class="equip-soon">Em breve</span>
           </li>
         }
       </ul>
       <ul class="equip right" aria-label="Equipamento (em breve)">
         @for (s of slotsRight; track s) {
           <li class="equip-slot">
-            <span class="equip-name">{{ s }}</span
-            ><span class="equip-soon">Em breve</span>
+            <span class="equip-name">{{ s }}</span><span class="equip-soon">Em breve</span>
           </li>
         }
       </ul>
@@ -130,20 +117,29 @@
           <span class="id-name">{{ agent().name }}</span>
           <span class="id-sub">GEF · Fiscal · Mat. {{ matricula(cur()) }}</span>
         </div>
-        <span class="id-hint" aria-hidden="true">{{
-          viewerFailed() ? '' : 'arraste p/ girar'
-        }}</span>
+        @if (expanded()) {
+          <button
+            type="button"
+            class="collapse"
+            data-testid="ficha-collapse"
+            (click)="expand(false)"
+          >
+            Ver ficha
+            @if (pad()) {
+              <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span>
+            }
+          </button>
+        } @else {
+          <span class="id-hint" aria-hidden="true">{{
+            viewerFailed() || !wide() ? '' : 'arraste p/ girar'
+          }}</span>
+        }
       </div>
     </section>
 
     <div class="side">
       <!-- Ficha em papel: atributos, régua de −5 a +5 e o total em campo -->
-      <section
-        class="sheet"
-        id="ficha"
-        role="tabpanel"
-        [attr.aria-label]="'Ficha de ' + agent().name"
-      >
+      <section class="sheet" id="ficha" [attr.aria-label]="'Ficha de ' + agent().name">
         <span class="tape" aria-hidden="true"></span>
 
         <!-- Classe: Capitão (um na equipe) ou Agente -->
@@ -175,14 +171,16 @@
                   >{{ p.name }}
                   @if (p.value) {
                     <span class="perk-val">{{ p.value }}</span>
-                  }</b
-                >
+                  }
+                </b>
                 <span class="perk-text">{{ p.text }}</span>
               </li>
             }
           </ul>
           @if (pad()) {
-            <span class="pad-hint-inline" aria-hidden="true">{{ glyph('endTurn') }}: tornar Capitão</span>
+            <span class="pad-hint-inline" aria-hidden="true"
+              >{{ glyph('endTurn') }}: tornar Capitão</span
+            >
           }
         </div>
 
@@ -285,26 +283,19 @@
             </tbody>
           </table>
           <p class="note">
-            *Só enquanto estiver agrupado: +1 do grupo e +1 da Liderança do Capitão. Equipamentos terão
-            modificadores próprios.
+            *Só enquanto estiver agrupado: +1 do grupo e +1 da Liderança do Capitão. Equipamentos
+            terão modificadores próprios.
           </p>
         </div>
       </section>
 
-      <nav class="nav" aria-label="Navegação da escalação">
-        <button type="button" class="prev" aria-label="Agente anterior" (click)="prev()">
+      <nav class="nav" aria-label="Navegação da ficha">
+        <button type="button" class="prev" aria-label="Voltar ao lobby sem salvar" (click)="back()">
           <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
-          <span class="wide-only">Anterior</span>
+          <span>Voltar</span>
         </button>
-        <button
-          type="button"
-          class="next"
-          [class.confirm]="last()"
-          data-testid="roster-next"
-          (click)="next()"
-        >
-          {{ last() ? 'Confirmar escalação' : 'Próximo agente'
-          }}<span class="wide-only" aria-hidden="true">{{ last() ? '' : ' →' }}</span>
+        <button type="button" class="next confirm" data-testid="ficha-save" (click)="save()">
+          Salvar ficha
           @if (pad()) {
             <span class="pad-glyph" aria-hidden="true">{{ glyph('confirm') }}</span>
           }

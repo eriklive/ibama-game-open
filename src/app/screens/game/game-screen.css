@@ -395,22 +395,22 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
   pointer-events: none;
 }
 .aim-actions > * { pointer-events: auto; }
-.inspect-slip { width: 150px; }
+.inspect-slip { width: 176px; }
 .aim-actions .side { width: 84px; right: 100px; }
 .aim-actions .side .stencil { font-size: 13px; }
 .stamp.inspect-stamp .stamp-text { font-size: 12px; }
 .inspect-slip.pass strong { color: var(--green-ok); }
 /* zoom no móvel: sem vinheta pesada (o móvel enche a tela) */
 .prop-stage::before { background: radial-gradient(ellipse 70% 70% at 50% 45%, transparent 70%, rgba(8, 10, 8, .55) 100%); }
-.prop-slip { width: 160px; }
+.prop-slip { width: 184px; }
 .aim-actions .prop-take { position: absolute; right: 108px; bottom: 0; width: 136px; }
 .prop-take:not(:focus-visible) { opacity: 0; }
-/* dentro do avião: o bilhete da cabine e, à direita, os botões de pegar e o de sair, em pilha */
-.cabin-slip { width: 150px; bottom: 0; }
-.cabin-actions { position: absolute; right: 0; bottom: 0; width: 92px; display: flex; flex-direction: column-reverse; gap: 8px; }
+/* dentro do avião: à direita, os botões de pegar e o de sair, em pilha */
+.cabin-actions { position: absolute; right: 0; bottom: 0; width: 160px; display: flex; flex-direction: column-reverse; gap: 8px; }
 .cabin-actions .cabin-btn { position: relative; width: 92px; height: 42px; transform: rotate(2deg); }
 .cabin-actions .cabin-btn:nth-child(2) { transform: rotate(-2deg); }
-.cabin-actions .cabin-leave { order: -1; }
+/* sair do avião: o mesmo Voltar vermelho dos menus da porta e do avião */
+.cabin-actions .door-opt.cabin-leave { order: -1; width: auto; align-self: flex-end; }
 .prop-take:not(:focus) { pointer-events: none; }
 
 /* inspecionar e conversar pelo teclado: o botão só aparece quando recebe o foco */
@@ -423,17 +423,17 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 /* bilhete da abordagem: quem se rende e quem corre */
 .slip {
   position: absolute; right: 108px; bottom: 58px;
-  width: 136px;
-  padding: 8px 10px 10px;
-  background: var(--postit);
+  width: 160px;
+  padding: 10px 12px 12px;
+  background: var(--postit); color: var(--ink-paper);
   box-shadow: 2px 4px 0 rgba(0, 0, 0, 0.3);
   transform: rotate(-3deg);
-  font-family: var(--marker); font-size: 13px; line-height: 1.25;
+  font-family: var(--marker); font-size: 15px; line-height: 1.25;
   animation: slap .25s ease-out both;
 }
 .slip strong { display: block; font-weight: 400; color: var(--red-text); }
 .slip > span { display: block; }
-.slip .small { font-size: 11px; }
+.slip .small { font-size: 13px; }
 .approach-list { list-style: none; margin: 2px 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
 .approach-list li::before { content: '✓ '; }
 .approach-list li.surrender { color: var(--green-ok); }

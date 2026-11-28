@@ -17,23 +17,9 @@ import {
   planPatrol,
   spotted,
 } from '../enemies';
-import { HexArea, HexCoord, hexKey } from '../hex';
-import { GameState, findEnemy, isHex } from './state';
+import { HexCoord, hexKey } from '../hex';
+import { GameState, World, findEnemy, isHex, sightBlockers, solidOf } from './state';
 import { stepByStep } from './turn';
-
-/**
- * O mapa como o motor precisa dele. Por enquanto quem monta é o componente (as portas ainda
- * não estão no estado); no servidor, sai do mapa e do estado da sala.
- */
-export interface EnemyWorld {
-  readonly area: HexArea;
-  /** O que bloqueia a visão (paredes, carga alta, portas fechadas). */
-  readonly walls: ReadonlySet<string>;
-  /** Carga baixa: esconde quem está colado nela, do lado de lá. */
-  readonly lowCover: ReadonlySet<string>;
-  /** O que ninguém atravessa (paredes, toda a carga, portas fechadas). */
-  readonly solid: ReadonlySet<string>;
-}
 
 /** O que um inimigo avistou: o agente e onde ele estava (o inimigo vira para lá). */
 export interface Sighting {
@@ -89,9 +75,9 @@ const agentsOf = (state: GameState): Map<string, HexCoord> =>
   new Map(Object.entries(state.positions));
 
 /** Onde o inimigo `id` não pode pisar: o sólido do mapa, os agentes e os outros inimigos. */
-export function blockedFor(state: GameState, id: string, world: EnemyWorld): Set<string> {
+export function blockedFor(state: GameState, id: string, world: World): Set<string> {
   return new Set([
-    ...world.solid,
+    ...solidOf(state, world),
     ...Object.values(state.positions).map(hexKey),
     ...state.enemies.filter((e) => e.id !== id && onBoard(e)).map((e) => hexKey(e.hex)),
   ]);
@@ -111,7 +97,7 @@ function walked(enemy: EnemyState, path: readonly HexCoord[]): EnemyState {
 export function planPatrolAct(
   state: GameState,
   id: string,
-  world: EnemyWorld,
+  world: World,
   rng: () => number,
 ): Extract<EnemyAction, { type: 'enemyPatrol' }> {
   const enemy = findEnemy(state, id)!;
@@ -123,6 +109,7 @@ export function planPatrolAct(
     rng,
   );
   const agents = agentsOf(state);
+  const sight = sightBlockers(state, world);
   const base = {
     type: 'enemyPatrol' as const,
     enemy: id,
@@ -135,7 +122,7 @@ export function planPatrolAct(
   for (const hex of plan.path) {
     at = walked(at, [hex]);
     path.push({ ...hex });
-    const who = spotted(at, agents, world.area, world.walls, world.lowCover);
+    const who = spotted(at, agents, world.area, sight, world.lowCover);
     if (who) return { ...base, path, spotted: { agent: who, at: { ...agents.get(who)! } } };
   }
   return { ...base, path };
@@ -145,7 +132,7 @@ export function planPatrolAct(
 export function planFleeAct(
   state: GameState,
   id: string,
-  world: EnemyWorld,
+  world: World,
 ): Extract<EnemyAction, { type: 'enemyFlee' }> {
   const enemy = findEnemy(state, id)!;
   const agents = Object.values(state.positions);
@@ -171,12 +158,13 @@ export function planFleeAct(
 export function firstSighting(
   state: GameState,
   agents: ReadonlyMap<string, HexCoord>,
-  world: EnemyWorld,
+  world: World,
   only?: string,
 ): { enemy: string; sighting: Sighting } | null {
+  const sight = sightBlockers(state, world);
   for (const e of state.enemies) {
     if (only && e.id !== only) continue;
-    const who = spotted(e, agents, world.area, world.walls, world.lowCover);
+    const who = spotted(e, agents, world.area, sight, world.lowCover);
     if (who) return { enemy: e.id, sighting: { agent: who, at: { ...agents.get(who)! } } };
   }
   return null;

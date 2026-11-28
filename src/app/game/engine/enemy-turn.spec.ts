@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { ENEMY_RULES, EnemySpawn, spawnEnemy, spotted } from '../enemies';
 import { HexCoord, hexDistance, hexKey, hexNeighbors, rectArea } from '../hex';
 import {
-  EnemyWorld,
+  World,
   GameAction,
   GameState,
   applyAction,
@@ -15,15 +15,20 @@ import {
 } from '.';
 
 const AREA = rectArea(12, 12);
-const world = (walls: string[] = []): EnemyWorld => ({
+const world = (walls: string[] = []): World => ({
   area: AREA,
-  walls: new Set(walls),
+  blocked: new Set(walls),
   lowCover: new Set(),
-  solid: new Set(walls),
+  roomWalls: new Set(),
+  structures: [],
 });
 
 const game = (agents: Record<string, HexCoord>, ...spawns: EnemySpawn[]): GameState =>
-  initialGameState(Object.keys(agents), agents, spawns.map(spawnEnemy));
+  initialGameState({
+    order: Object.keys(agents),
+    positions: agents,
+    enemies: spawns.map(spawnEnemy),
+  });
 
 const run = (state: GameState, ...actions: GameAction[]): GameState =>
   actions.reduce((s, a) => {

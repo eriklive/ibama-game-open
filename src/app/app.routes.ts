@@ -3,13 +3,20 @@ import { CanActivateFn, Router, Routes } from '@angular/router';
 import { StartScreen } from './screens/start/start-screen';
 import { GameScreen } from './screens/game/game-screen';
 import { RosterScreen } from './screens/roster/roster-screen';
-import { findMap } from './game/maps';
+import { LobbyScreen } from './screens/lobby/lobby-screen';
+import { CHARACTERS, findMap } from './game/maps';
 import { RaceLab } from './lab/race-lab';
 import { SaveGames } from './game/save-game';
 
 /** Só entra na partida se o mapa existir e estiver disponível. */
 const mapAvailable: CanActivateFn = (route) =>
   findMap(route.paramMap.get('mapId')) ? true : inject(Router).createUrlTree(['/']);
+
+/** A ficha só abre para um agente da equipe (senão, volta ao lobby da fase). */
+const agentExists: CanActivateFn = (route) =>
+  CHARACTERS.some((c) => c.id === route.paramMap.get('agentId'))
+    ? true
+    : inject(Router).createUrlTree(['/lobby', route.paramMap.get('mapId')]);
 
 /**
  * Abrir a página (a primeira navegação do app) com um save automático na sessão: volta direto
@@ -25,12 +32,15 @@ const resumeSave: CanActivateFn = () => {
 
 export const routes: Routes = [
   { path: '', component: StartScreen, canActivate: [resumeSave], title: 'Jogo do Ibama' },
+  { path: 'lobby/:mapId', component: LobbyScreen, canActivate: [mapAvailable], title: 'Jogo do Ibama · Lobby' },
   {
-    path: 'escalacao/:mapId',
+    path: 'lobby/:mapId/ficha/:agentId',
     component: RosterScreen,
-    canActivate: [mapAvailable],
-    title: 'Jogo do Ibama · Ficha do agente',
+    canActivate: [mapAvailable, agentExists],
+    title: 'Jogo do Ibama · Ficha de personagem',
   },
+  // endereço antigo da escalação: agora a equipe se vê no lobby
+  { path: 'escalacao/:mapId', redirectTo: 'lobby/:mapId' },
   { path: 'jogo/:mapId', component: GameScreen, canActivate: [mapAvailable], title: 'Jogo do Ibama · Partida' },
   { path: 'lab', component: RaceLab },
   { path: '**', redirectTo: '' },
