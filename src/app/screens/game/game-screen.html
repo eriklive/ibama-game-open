@@ -943,4 +943,26 @@
       </article>
     </div>
   }
+
+  <!-- Fósforo em tela cheia depois do "Queimar!": três riscadas no tempo do som (ver `playMatch`) -->
+  @if (matchFx(); as fx) {
+    <div class="match-fx" [attr.data-stage]="fx.stage" data-testid="match-fx" aria-hidden="true">
+      <div class="match-flash"></div>
+      <p class="match-cap">{{ fx.caption }}</p>
+      <div class="match-box">
+        <span class="match-strip"></span>
+        <span class="match-label">Fósforos</span>
+      </div>
+      <div class="match-stick">
+        <span class="match-wood"></span>
+        <span class="match-head"></span>
+        <span class="match-flame"></span>
+      </div>
+      <div class="match-sparks">
+        @for (sp of sparkSlots; track $index) { <i [style.--dx]="sp.dx" [style.--dy]="sp.dy"></i> }
+      </div>
+      <div class="match-flood"></div>
+    </div>
+    <p class="sr-only" role="status" aria-live="polite">{{ fx.stage === 'lit' ? 'O fósforo acendeu.' : fx.caption }}</p>
+  }
 </div>

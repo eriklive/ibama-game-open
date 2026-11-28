@@ -84,6 +84,8 @@ const RING_VIEW = {
 
 /** Velocidade da transição do enquadramento de grupo (`frameGroupOn`; maior, mais rápida). */
 const GROUP_VIEW_RATE = 4;
+/** Velocidade do zoom out depois do fósforo (`setGroupClose`): uns 2 s até assentar. */
+const GROUP_CLOSE_RATE = 1.7;
 
 export const SECONDS_PER_HEX = (HEX_STEP * HEX_SIZE) / RUN_SPEED;
 /** Meia altura do disco da base: o disco apoia no hexágono e o modelo fica de pé sobre ele. */
@@ -798,6 +800,12 @@ export class HexBoard {
   private group: { target: THREE.Vector3; zoom: number } | null = null;
   private groupLast: { target: THREE.Vector3; zoom: number } | null = null;
   private groupBlend = 0;
+  /**
+   * Aproximação extra do enquadramento de grupo (1 = o quadro normal; menos = mais perto).
+   * `groupCloseGoal` volta a 1 devagar: é o zoom out do fogo pegando (ver `setGroupClose`).
+   */
+  private groupClose = 1;
+  private groupCloseGoal = 1;
   private inspectLast: CloseUpView | null = null;
   private inspectBlend = 0;
   /** Deslocamento da vista neste quadro (px): a cena da porta empurra para o lado, o close-up para cima. */
@@ -1593,6 +1601,16 @@ export class HexBoard {
     if (!f) return;
     this.group = { target: new THREE.Vector3(f.x, 0, f.z), zoom: f.zoom };
     if (reducedMotionQuery()) this.groupBlend = 1;
+  }
+
+  /**
+   * Aproxima o enquadramento de grupo (`frameGroupOn`) por um fator (`0.5` = metade da
+   * distância). `instant` pula a transição (a câmera muda por baixo de um overlay); sem ele, a
+   * câmera vai devagar até lá — voltar para 1 é o zoom out depois do fósforo.
+   */
+  setGroupClose(scale: number, instant = false): void {
+    this.groupCloseGoal = scale;
+    if (instant || reducedMotionQuery()) this.groupClose = scale;
   }
 
   /** Desloca a câmera só o necessário para o hexágono ficar longe das bordas da tela. */
@@ -4848,13 +4866,14 @@ export class HexBoard {
     const gGoal = this.group ? 1 : 0;
     this.groupBlend += (gGoal - this.groupBlend) * (1 - Math.exp(-dt * GROUP_VIEW_RATE));
     if (Math.abs(gGoal - this.groupBlend) < 0.002) this.groupBlend = gGoal;
+    this.groupClose += (this.groupCloseGoal - this.groupClose) * (1 - Math.exp(-dt * GROUP_CLOSE_RATE));
     const g = this.group ?? this.groupLast;
     let base = this.camTarget;
     let baseZoom = this.zoom;
     if (g && this.groupBlend > 0) {
       const e = easeInOutCubic(this.groupBlend);
       base = new THREE.Vector3().lerpVectors(this.camTarget, g.target, e);
-      baseZoom = THREE.MathUtils.lerp(this.zoom, g.zoom, e);
+      baseZoom = THREE.MathUtils.lerp(this.zoom, g.zoom * this.groupClose, e);
     } else this.groupLast = null;
     // vista do tablet de abordagem (ver `frameRing`): mistura os parâmetros, não as posições
     const goal = this.ring ? 1 : 0;

@@ -812,6 +812,11 @@ export type SoundId =
 
 /** Duração do "Queimar!" (gasolina, três riscadas e o sucesso) até o fogo pegar. */
 export const STRIKE_SECONDS = 3.4;
+/**
+ * Quando cada riscada do `fogo.riscar` toca (s desde o "Queimar!"): a primeira falha, a segunda
+ * solta faísca e a terceira acende. A animação do fósforo em tela cheia segue os mesmos tempos.
+ */
+export const STRIKE_BEATS = { fail: 1.9, spark: 2.35, lit: 2.8 } as const;
 
 export const SOUNDS: Readonly<Record<SoundId, (e: AudioEngine, t: number) => void>> = {
   'ui.hex': (e, t) => {
@@ -1064,9 +1069,9 @@ export const SOUNDS: Readonly<Record<SoundId, (e: AudioEngine, t: number) => voi
   },
   'fogo.riscar': (e, t) => {
     gasoline(e, t, 1.6);
-    strikeTry(e, t + 1.9, 0.2, 0.05, false);
-    strikeTry(e, t + 2.35, 0.26, 0.07, true);
-    strikeTry(e, t + 2.8, 0.32, 0.09, true);
+    strikeTry(e, t + STRIKE_BEATS.fail, 0.2, 0.05, false);
+    strikeTry(e, t + STRIKE_BEATS.spark, 0.26, 0.07, true);
+    strikeTry(e, t + STRIKE_BEATS.lit, 0.32, 0.09, true);
     e.noise({
       t: t + 2.88,
       kind: 'pink',

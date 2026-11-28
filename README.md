@@ -415,6 +415,13 @@ etiqueta **principal**.
 
 - Colado no alvo, aparece **Queimar** (□ no controle, quando não há ninguém para abordar). O bilhete
   mostra quem está vigiando a até **5 hexágonos** e vai ver o fogo; **Queimar!** confirma.
+- **O fósforo toma a tela:** depois do **Queimar!**, um overlay escuro cobre tudo ("Bruno espalha gasolina
+  no avião.") e uma caixa de fósforos aparece; o palito risca três vezes no tempo do som (a primeira falha,
+  a segunda solta faísca, a terceira acende — `STRIKE_BEATS` em `audio/sounds.ts`), cai na direção da
+  câmera e a tela inunda de laranja. Por baixo, a câmera fecha no agente e no alvo; quando o fogo pega, o
+  overlay some e ela recua devagar até o quadro normal (`HexBoard.setGroupClose`). Vale para o avião e
+  para os suprimentos. Com movimento reduzido, sem overlay (como antes). Código em `playMatch`
+  (`game-screen.ts`) e no bloco "fósforo em tela cheia" do CSS.
 - O alvo escurece, pega fogo (chamas, fumaça e clarão no chão) e continua bloqueando a passagem.
   Queimar **encerra a vez** do agente.
 - Quem estava vigiando perto vê as chamas e entra em **alerta** (vai tentar correr no turno inimigo).

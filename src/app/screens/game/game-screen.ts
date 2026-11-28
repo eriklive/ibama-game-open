@@ -51,7 +51,7 @@ import { CloseUpInsets, HexBoard, NPC_TARGET, SECONDS_PER_HEX } from '../../game
 import { Sound } from '../../game/sound.service';
 import { zoneAt } from '../../game/audio/ambience';
 import { surfaceAt } from '../../game/audio/footsteps';
-import { STRIKE_SECONDS } from '../../game/audio/sounds';
+import { STRIKE_BEATS, STRIKE_SECONDS } from '../../game/audio/sounds';
 import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
 import { MainButton } from '../../ui/main-button';
@@ -294,6 +294,11 @@ const RUNNER_KEYS: Record<string, 'left' | 'right' | 'up' | 'down'> = {
   ArrowUp: 'up', w: 'up', W: 'up', ' ': 'up',
   ArrowDown: 'down', s: 'down', S: 'down',
 };
+
+/** Etapas do fósforo em tela cheia (ver `playMatch`). */
+type MatchStage = 'pour' | 'fail' | 'spark' | 'lit' | 'drop' | 'out';
+/** Quanto a câmera fecha no agente e no alvo enquanto o fósforo cobre a tela (1 = o quadro normal). */
+const MATCH_CLOSE = 0.5;
 
 const reducedMotion = (): boolean =>
   typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -1028,6 +1033,17 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly burned = signal<ReadonlySet<string>>(new Set());
   /** Pré-visualizando o "Queimar" (aguardando confirmação). */
   protected readonly burning = signal(false);
+  /**
+   * O fósforo em tela cheia depois do "Queimar!": `pour` (gasolina), as três riscadas (`fail`,
+   * `spark`, `lit`, nos tempos do som), `drop` (o fósforo cai na direção da câmera) e `out` (o
+   * overlay some e a câmera recua para o fogo). `null` fora disso.
+   */
+  protected readonly matchFx = signal<{ stage: MatchStage; caption: string } | null>(null);
+  /** Faíscas do fósforo: para onde cada uma voa (vmin), espalhadas para cima e para os lados. */
+  protected readonly sparkSlots = Array.from({ length: 14 }, (_, i) => ({
+    dx: `${(((i * 37) % 19) - 6) * 1.4}vmin`,
+    dy: `${-(((i * 53) % 13) + 3) * 1.3}vmin`,
+  }));
 
   /** Alvo ainda inteiro colado no agente da vez. */
   protected readonly burnable = computed<Burnable | null>(() => {
@@ -3871,10 +3887,31 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // a câmera continua no agente e no alvo enquanto o fogo pega; volta quando a vez acaba
     this.closeBurn(true);
     this.phase.set('ending');
-    // com som, o fogo só pega depois da gasolina e das riscadas de fósforo
+    // o fogo só pega depois da gasolina e das riscadas de fósforo (o som e a animação andam juntos)
     this.sound.play('fogo.riscar', { at: target.hexes[0] });
     this.sound.duck();
-    this.later(this.sound.audible() ? STRIKE_SECONDS * 1000 : 0, () => this.setFire(target, witnesses));
+    const fx = !reducedMotion();
+    if (fx) this.playMatch(target);
+    this.later(fx || this.sound.audible() ? STRIKE_SECONDS * 1000 : 0, () => this.setFire(target, witnesses));
+  }
+
+  /**
+   * O fósforo toma a tela: um overlay escuro com a caixa de fósforos, três riscadas no tempo do
+   * som e o fósforo aceso caindo na direção da câmera. Por baixo, a câmera fecha no agente e no
+   * alvo; quando o fogo pega (`setFire`), o overlay some e a câmera recua (`setGroupClose`).
+   */
+  private playMatch(target: Burnable): void {
+    this.matchFx.set({ stage: 'pour', caption: `${this.active().name} espalha gasolina n${target.name}.` });
+    const stage = (s: MatchStage) => this.matchFx.update((m) => (m ? { ...m, stage: s } : m));
+    // a câmera fecha só quando o overlay já cobre a tela
+    this.later(350, () => this.board?.setGroupClose(MATCH_CLOSE, true));
+    this.later(STRIKE_BEATS.fail * 1000, () => stage('fail'));
+    this.later(STRIKE_BEATS.spark * 1000, () => stage('spark'));
+    this.later(STRIKE_BEATS.lit * 1000, () => {
+      stage('lit');
+      this.haptics.vibrate(40);
+    });
+    this.later((STRIKE_SECONDS - 0.3) * 1000, () => stage('drop'));
   }
 
   private setFire(target: Burnable, witnesses: EnemyState[]): void {
@@ -3903,7 +3940,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
         (unlocked ? ' A equipe já pode encerrar a operação.' : ''),
       'alert',
     );
-    this.later(reducedMotion() ? 400 : 2000, () => {
+    // o fósforo sai de cena e a câmera recua devagar do close até o fogo inteiro
+    const fx = !!this.matchFx();
+    if (fx) {
+      this.matchFx.update((m) => (m ? { ...m, stage: 'out' } : m));
+      this.board?.setGroupClose(1);
+      this.later(500, () => this.matchFx.set(null));
+    }
+    this.later(reducedMotion() ? 400 : fx ? 2600 : 2000, () => {
       this.board?.frameGroupOn(null);
       this.endTurn();
     });
@@ -4898,5 +4942,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   private clearTimers(): void {
     this.timers.forEach(clearTimeout);
     this.timers = [];
+    // o fósforo vive de timers: sem eles, não sobra overlay nem câmera fechada
+    this.matchFx.set(null);
+    this.board?.setGroupClose(1, true);
   }
 }
