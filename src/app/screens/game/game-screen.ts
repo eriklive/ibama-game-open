@@ -18,6 +18,7 @@ import {
   World,
   applyAction,
   approachPreview,
+  askResult,
   approachZonesFor,
   doorOutcome,
   firstSighting,
@@ -27,8 +28,10 @@ import {
   lineOf,
   planFleeAct,
   planApproach,
+  planAsk,
   planBreakIn,
   planDoor,
+  planEndTalk,
   planMove,
   planNotice,
   planPatrolAct,
@@ -109,7 +112,6 @@ import { BREAK_IN_SCENE, breakInVerdict } from '../../game/break-in-scene';
 import { BURN_RULES, Burnable, burnTarget, canBurn, seeFire } from '../../game/burn';
 import {
   KEY_PANEL_ID,
-  KEY_TAKEN,
   PlaneState,
   WITNESS_LINE,
   lockedClue,
@@ -158,7 +160,6 @@ import {
   INTERROGATION_RULES,
   NoteKind,
   PoolUsage,
-  askQuestion,
   dialogueOptions,
   hasDialogue,
   inAura,
@@ -167,7 +168,6 @@ import {
   noteKind,
   openingLine,
   pickLine,
-  questionCost,
   talkTarget,
 } from '../../game/interrogation';
 import { npcClass } from '../../game/npc-dialogue';
@@ -746,16 +746,21 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Cartão destacado pelo controle (índice entre as perguntas abertas). */
   protected readonly questionPick = signal(0);
   /** Memória de cada NPC na missão: perguntas feitas e réplicas liberadas (por id do inimigo). */
-  protected readonly dialogues = signal<ReadonlyMap<string, DialogueMemory>>(new Map());
+  // memória dos suspeitos, falas usadas, pistas e caderneta: vêm do motor (`engine/talk.ts`)
+  private readonly dialoguesRecord = computed(() => this.core().dialogues);
+  protected readonly dialogues = computed<ReadonlyMap<string, DialogueMemory>>(
+    () => new Map(Object.entries(this.dialoguesRecord())),
+  );
   /** Falas já usadas dos pools compartilhados da missão (ver `LinePool`). */
-  private readonly linePools = signal<PoolUsage>(new Map());
+  private readonly linePoolsRecord = computed(() => this.core().linePools);
+  private readonly linePools = computed<PoolUsage>(() => new Map(Object.entries(this.linePoolsRecord())));
   /** Pistas registradas pelas respostas (`Outcome.clue`). */
-  private readonly clueLog = signal<ReadonlySet<string>>(new Set());
+  private readonly clueIds = computed(() => this.core().clueLog);
+  private readonly clueLog = computed<ReadonlySet<string>>(() => new Set(this.clueIds()));
   /** Pistas da missão: o que a inspeção achou (`item:<id>`) e o que as respostas registraram. */
   protected readonly clues = computed<Clues>(() => new Set([...[...this.found()].map(itemClue), ...this.clueLog()]));
   /** Caderneta de campo: o que cada suspeito disse (sai no relatório da operação). */
-  protected readonly fieldNotes = signal<readonly FieldNote[]>([]);
-  private noteSeq = 0;
+  protected readonly fieldNotes = computed<readonly FieldNote[]>(() => this.core().fieldNotes);
 
   /** Todo rendido ganha a aura (a dos que não têm diálogo fica apagada). */
   private readonly surrenderedEnemies = computed(() => this.enemies().filter((e) => e.status === 'surrendered'));
@@ -2936,7 +2941,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (v.kind === 'keys') {
       if (!this.dispatch({ type: 'take', agent: this.active().id, item: KEY_PANEL_ID })) return;
       this.sound.play('eq.chave');
-      this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
       this.closeSpeech();
       this.patchProp({ taken: true, note: 'Chave do avião com a equipe.' });
     } else if (v.hidden) {
@@ -3475,6 +3479,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.say(`Sem movimento para conversar com ${e.name} agora`, 'info');
       return;
     }
+    if (!this.dispatch({ type: 'startTalk', agent: this.active().id, enemy: e.id })) return;
     const memory = this.dialogues().get(e.id) ?? EMPTY_MEMORY;
     const epoch = this.epoch;
     this.focusCharacter(this.active().id);
@@ -3570,25 +3575,15 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected async ask(key: string): Promise<void> {
     const iv = this.interrogation();
     if (!iv || iv.busy || this.phase() !== 'interrogating') return;
-    const before = this.dialogues().get(iv.enemyId) ?? EMPTY_MEMORY;
-    const res = askQuestion(iv.cls, before, key, {
-      die: () => rollDie(INTERROGATION_RULES.die),
-      clues: this.clues(),
-      // a intimidação do próprio agente (sem o bônus do grupo nem o do arrombamento) sobe a CD;
-      // agarrado numa perseguição, ele está abalado: +2 a favor do agente
-      intimidation: this.talkIntimidation() + (this.enemy(iv.enemyId)?.shaken ? CHASE_RULES.shakenBonus : 0),
-      pools: this.linePools(),
-    });
-    if (!res) return;
-    this.linePools.set(res.pools);
+    // o motor rola o d20 escondido e sorteia a fala; a pergunta fica feita, a nota vai para a
+    // caderneta, a pista e o esconderijo entregue valem já (a intimidação do próprio agente sobe
+    // a CD; agarrado numa perseguição, o suspeito está abalado: +2 a favor do agente)
+    const act = planAsk(this.core(), key, this.rng);
+    const res = askResult(this.core(), act);
+    if (!res || !this.dispatch(act)) return;
     const epoch = this.epoch;
     const alive = () => this.interrogating(epoch, iv.enemyId);
     const { answer } = res;
-    // a pergunta fica bloqueada para sempre, seja qual for a resposta
-    this.dialogues.update((m) => new Map(m).set(iv.enemyId, res.memory));
-    // a primeira pergunta de cada entrada gasta o movimento (como a rolagem da inspeção)
-    const cost = questionCost(iv.asked);
-    if (cost) this.dispatch({ type: 'spend', cost });
     // o cartão feito fica marcado na hora; a réplica só aparece depois da resposta
     this.patchInterrogation({
       busy: true,
@@ -3608,17 +3603,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       this.patchInterrogation({ agentLine: '' });
       if (!(await this.typeOut(answer.closing, 13, (t) => this.patchInterrogation({ agentLine: t }), alive))) return;
     }
-    this.fieldNotes.update((ns) => [
-      ...ns,
-      { id: ++this.noteSeq, suspect: iv.suspect, text: out.note, kind: noteKind(out), depth: answer.option.depth },
-    ]);
     this.sound.play(noteKind(out) === 'confessou' ? 'eq.confessou' : 'eq.anotar');
     // entregou alguém: aparece no mapa ao encerrar (se a missão tiver essa unidade escondida)
-    const hidden = out.reveal ? this.hiddenAccomplice(iv.enemyId) : null;
-    // entregou um esconderijo (ou o quadro de chaves): conta como percebido e ganha o contorno
-    if (out.notices && !this.noticed().has(out.notices)) this.dispatch({ type: 'markNoticed', spot: out.notices });
-    // pista nova: pode liberar perguntas (neste e em outros NPCs)
-    if (out.clue && !this.clueLog().has(out.clue)) this.clueLog.update((c) => new Set([...c, out.clue!]));
+    const hidden = this.core().talk?.reveal ?? null;
     const options = dialogueOptions(iv.cls, this.dialogues().get(iv.enemyId) ?? res.memory, this.clues());
     const open = options.filter((o) => !o.done);
     const pick = answer.unlocked ? open.findIndex((o) => o.key === answer.unlocked!.key) : 0;
@@ -3626,16 +3613,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.patchInterrogation({ options, busy: false, ...(hidden ? { reveal: hidden } : {}) });
   }
 
-  /** Intimidação do agente que conversa: só o ponto dele (atributo + equipamento, sem grupo). */
-  private talkIntimidation(): number {
-    return statBreakdown(this.roster.loadout(this.active().id), 'intimidacao', false).total;
-  }
-
-  /** O comparsa escondido que o suspeito pode entregar (ainda não revelado), se houver. */
-  private hiddenAccomplice(enemyId: string): string | null {
-    const id = this.enemy(enemyId)?.reveals;
-    return id && this.enemy(id)?.status === 'hidden' ? id : null;
-  }
 
   /**
    * **Encerrar**: a câmera volta e o jogo segue com o que foi anotado. Se o suspeito entregou
@@ -3644,11 +3621,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected endInterrogation(): void {
     const iv = this.interrogation();
     if (!iv || iv.busy) return;
+    // o motor fecha a conversa: o abalado passa (só vale para a primeira) e quem foi entregue
+    // aparece no hexágono livre mais perto do esconderijo
+    const end = planEndTalk(this.core(), this.world());
+    const revealId = this.core().talk?.reveal ?? null;
+    this.dispatch(end);
     this.dropInterrogation();
     this.phase.set('moving-choice');
-    // o abalado vale só para a primeira conversa
-    if (iv.asked && this.enemy(iv.enemyId)?.shaken) this.updateEnemy(iv.enemyId, { shaken: false });
-    const revealed = !!iv.reveal && this.revealAccomplice(iv.reveal, iv.suspect);
+    const revealed = !!end.revealAt && !!revealId && this.showAccomplice(revealId, iv.suspect);
     if (!revealed && iv.asked) {
       const n = this.fieldNotes().filter((note) => note.suspect === iv.suspect).length;
       this.say(`Conversa com ${iv.suspect}: ${n} ${n === 1 ? 'anotação' : 'anotações'} na caderneta`, 'info');
@@ -3665,6 +3645,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Some com o close-up do interrogatório (sem seguir a vez). */
   private dropInterrogation(): void {
+    // a conversa fecha no estado também (ninguém fica "conversando" sem a tela aberta)
+    if (this.core().talk) this.dispatch({ type: 'endTalk' });
     if (!this.interrogation()) return;
     this.interrogation.set(null);
     this.board?.endCloseUp();
@@ -3672,17 +3654,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     removeEventListener('resize', this.onInterrogationResize);
   }
 
-  /** A unidade escondida aparece no mapa (no lugar dela ou no hexágono livre mais perto). */
-  private revealAccomplice(id: string, by: string): boolean {
+  /** Mostra a unidade entregue aparecendo no mapa (o motor já a pôs no lugar). */
+  private showAccomplice(id: string, by: string): boolean {
     const e = this.enemy(id);
-    if (!e || e.status !== 'hidden') return false;
-    const taken = new Set([...this.positions().values(), ...this.onBoardEnemies().map((o) => o.hex)].map(hexKey));
-    const free = (h: HexCoord) => !taken.has(hexKey(h)) && !this.solid().has(hexKey(h));
-    let hex = e.hex;
-    for (let r = 0; r < 4 && !free(hex); r++) {
-      hex = hexesInRange(e.hex, r + 1, this.area).find(free) ?? hex;
-    }
-    this.updateEnemy(id, { status: 'patrol', hex });
+    if (!e || e.status !== 'patrol') return false;
+    const hex = e.hex;
     this.board?.revealEnemy(id, hex, e.facing);
     this.board?.focusHex(hex);
     this.refreshVision();
@@ -3952,7 +3928,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Registra uma pista da missão (uma vez só); pode liberar perguntas nos interrogatórios. */
   private noteClue(clue: string | null): void {
-    if (clue && !this.clueLog().has(clue)) this.clueLog.update((c) => new Set([...c, clue]));
+    if (clue && !this.clueLog().has(clue)) this.dispatch({ type: 'noteClue', clue });
   }
 
   /**
@@ -4232,14 +4208,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.dropProp();
     this.board?.resetProps();
     this.dropInterrogation();
-    this.dialogues.set(new Map());
-    this.clueLog.set(new Set());
     this.planeNote.set(null);
     this.planeBurn.set(false);
     this.dropCabin();
     this.closeSpeech();
-    this.linePools.set(new Map());
-    this.fieldNotes.set([]);
     this.doorKey.set(null);
     this.doorBusy.set(false);
     this.breakInCine.set(false);
@@ -4335,6 +4307,10 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       found: s.found,
       hasKey: s.hasKey,
       keySeenBy: s.keySeenBy,
+      dialogues: Object.fromEntries(s.dialogues),
+      linePools: Object.fromEntries(s.linePools),
+      clueLog: s.clueLog,
+      fieldNotes: s.fieldNotes as FieldNote[],
     });
     this.board?.placeUnits(this.positions());
     this.board?.placeEnemies(
@@ -4350,11 +4326,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSeenAgents(this.seenAgents);
     for (const id of s.ranThisRound) this.ranThisRound.add(id);
     for (const id of s.caughtThisRound) this.caughtThisRound.add(id);
-    this.dialogues.set(new Map(s.dialogues));
-    this.linePools.set(new Map(s.linePools));
-    this.clueLog.set(new Set(s.clueLog));
-    this.fieldNotes.set(s.fieldNotes as FieldNote[]);
-    this.noteSeq = Math.max(0, ...s.fieldNotes.map((n) => n.id));
     this.planeNote.set(s.planeNote);
     // o que já foi pego some dos móveis; o que já queimou volta a arder
     for (const h of this.map?.hidden ?? []) if (this.found().has(h.id)) this.board?.hidePropItem(h.spot);
@@ -4463,7 +4434,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setReachable([]);
     if (testCase.hasKey) {
       this.dispatch({ type: 'take', agent: this.active().id, item: KEY_PANEL_ID });
-      this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
       const panel = this.map?.keyPanel;
       if (panel) this.board?.hidePropItem(panel.spot);
     }
