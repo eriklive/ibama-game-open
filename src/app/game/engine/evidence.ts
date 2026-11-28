@@ -8,7 +8,7 @@
  * investigação, ela migra com o mapa para o servidor).
  */
 import { rollDie } from '../dice';
-import { KEY_PANEL_ID, leftKey } from '../plane';
+import { KEY_PANEL_ID, KEY_TAKEN, leftKey } from '../plane';
 import { SEARCH_RULES, beats } from '../search';
 import { GameState, activeAgent } from './state';
 
@@ -20,11 +20,6 @@ export type EvidenceAction =
       readonly spot: string;
       readonly roll: number;
     }
-  /**
-   * TRANSITÓRIO: a equipe passa a saber de `spot` sem rolar (um suspeito contou no
-   * interrogatório). Some quando o interrogatório migrar para o motor.
-   */
-  | { readonly type: 'markNoticed'; readonly spot: string }
   /** O agente da vez pega `item` (um achado, ou `KEY_PANEL_ID` para a chave do avião). */
   | { readonly type: 'take'; readonly agent: string; readonly item: string }
   /** O agente viu a chave no quadro e deixou lá (vai lembrar disso quando o avião estiver trancado). */
@@ -32,7 +27,6 @@ export type EvidenceAction =
 
 export const EVIDENCE_ACTIONS: ReadonlySet<string> = new Set<EvidenceAction['type']>([
   'notice',
-  'markNoticed',
   'take',
   'leaveKey',
 ]);
@@ -65,8 +59,6 @@ export function validateEvidence(state: GameState, action: EvidenceAction): stri
       if (!Number.isInteger(action.roll) || action.roll < 1 || action.roll > SEARCH_RULES.die)
         return 'd20 inválido';
       return null;
-    case 'markNoticed':
-      return null;
     case 'take':
       if (action.agent !== activeAgent(state)) return 'só quem está na vez pega';
       if (action.item === KEY_PANEL_ID) return state.hasKey ? 'a chave já está com a equipe' : null;
@@ -91,11 +83,11 @@ export function applyEvidence(state: GameState, action: EvidenceAction): GameSta
         ? { ...rolled, noticed: add(state.noticed, action.spot) }
         : rolled;
     }
-    case 'markNoticed':
-      return { ...state, noticed: add(state.noticed, action.spot) };
     case 'take':
-      // a chave vai com a equipe: ninguém mais "viu e deixou lá"
-      if (action.item === KEY_PANEL_ID) return { ...state, hasKey: true, keySeenBy: [] };
+      // a chave vai com a equipe: ninguém mais "viu e deixou lá", e as perguntas sobre ela somem
+      if (action.item === KEY_PANEL_ID) {
+        return { ...state, hasKey: true, keySeenBy: [], clueLog: add(state.clueLog, KEY_TAKEN) };
+      }
       return { ...state, found: add(state.found, action.item) };
     case 'leaveKey':
       return {

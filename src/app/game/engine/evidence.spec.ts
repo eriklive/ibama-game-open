@@ -49,10 +49,6 @@ describe('motor: percepção', () => {
       validateAction({ ...s2, noticeRolled: [] }, planNotice('ana', 'armario', d20(20))),
     ).toMatch(/já reparou/);
   });
-
-  it('um suspeito que conta marca o móvel sem rolar (transitório)', () => {
-    expect(run(team(), { type: 'markNoticed', spot: 'quadro' }).noticed).toEqual(['quadro']);
-  });
 });
 
 describe('motor: achados e a chave do avião', () => {

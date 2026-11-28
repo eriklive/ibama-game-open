@@ -8,15 +8,17 @@
  *
  * O estado cresce um sistema por vez: hoje tem o ciclo do turno (`turn.ts`), os inimigos
  * (`enemy-turn.ts`), o grupo (`group.ts`), as portas (`doors.ts`), a abordagem
- * (`approach.ts`) e a investigação (`evidence.ts`). Interrogatório, queima e perseguição ainda
- * vivem no componente.
+ * (`approach.ts`), a investigação (`evidence.ts`) e o interrogatório (`talk.ts`). Queima e
+ * perseguição ainda vivem no componente.
  */
 import { AgentClass, classOf } from '../agent-class';
 import { Door, isOpen } from '../door';
 import { EnemyState, onBoard } from '../enemies';
+import type { DialogueMemory } from '../interrogation';
 import { HexArea, HexCoord, hexKey } from '../hex';
 import type { HexRect } from '../maps';
 import { Loadout, ZERO_STATS } from '../stats';
+import type { FieldNoteData, TalkSession } from './talk';
 
 export interface GameState {
   /** Turno global: aumenta a cada vez que um agente começa a jogar. */
@@ -63,6 +65,16 @@ export interface GameState {
   readonly hasKey: boolean;
   /** Quem viu a chave no quadro e não pegou, na ordem em que viram. */
   readonly keySeenBy: readonly string[];
+  /** O que cada suspeito já respondeu e que réplicas liberou. */
+  readonly dialogues: Readonly<Record<string, DialogueMemory>>;
+  /** Falas já usadas de cada sorteio (para não repetir a mesma resposta). */
+  readonly linePools: Readonly<Record<string, readonly string[]>>;
+  /** Pistas anotadas (liberam perguntas). */
+  readonly clueLog: readonly string[];
+  /** Caderneta de campo: o que cada suspeito disse. */
+  readonly fieldNotes: readonly FieldNoteData[];
+  /** A conversa aberta agora (ou nenhuma). */
+  readonly talk: TalkSession | null;
 }
 
 export interface NewGame {
@@ -96,6 +108,11 @@ export function initialGameState(game: NewGame): GameState {
     found: [],
     hasKey: false,
     keySeenBy: [],
+    dialogues: {},
+    linePools: {},
+    clueLog: [],
+    fieldNotes: [],
+    talk: null,
   };
 }
 

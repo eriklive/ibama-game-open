@@ -33,6 +33,7 @@ Um módulo por sistema, reaproveitando as regras puras que já existiam (`enemie
 | `doors.ts` | portas: abrir, destrancar (Gazua), arrombar (com dano) e a reação do cômodo |
 | `approach.ts` | abordagem: faixas do agente, prévia e o teste de fuga de cada suspeito |
 | `evidence.ts` | investigação: percepção, achados (arma, GPS, rádio), a chave do avião |
+| `talk.ts` | interrogatório: a conversa aberta, cada pergunta, a caderneta, pistas e comparsas |
 | `index.ts` | junta tudo: `GameAction`, `validateAction`, `applyAction` |
 
 Como já funciona:
@@ -58,6 +59,11 @@ Como já funciona:
   sorteado na ação (`planNotice`) e a ficha cai nele; pegar um achado ou a chave e deixar a
   chave no quadro são ações (`take`, `leaveKey`). As etapas da cabine do avião (chegar, abrir,
   dentro, sair) são fluxo de tela de quem entrou e ficam no componente.
+- **Interrogatório:** a conversa aberta é uma sessão no estado (`talk`). Cada pergunta leva o
+  d20 escondido e o sorteio da fala (`planAsk`); a resposta sai de `askResult`, igual para
+  todos, e o motor guarda a memória do suspeito, as falas já usadas, a nota da caderneta, a
+  pista e o esconderijo entregue. Ao encerrar (`planEndTalk`), o abalado passa e o comparsa
+  entregue aparece no hexágono livre mais perto.
 - **Mapa:** o `World` que o motor recebe tem só o que é fixo no mapa (área, paredes, carga,
   estruturas). O que muda na partida (as portas fechadas) sai do estado, com `sightBlockers`
   e `solidOf`.
@@ -67,10 +73,9 @@ Como já funciona:
   (`enemyView`), não o estado.
 - **Sorteio:** quem vagueia sorteia o destino com o `rng` da partida, e o destino viaja na ação.
 
-**Transitório:** a ação `patchEnemy` muda um inimigo direto, e `markNoticed`
-marca um móvel como percebido quando um suspeito conta. Elas existem só para os sistemas
-que ainda mexem no estado por fora do motor (perseguição, interrogatório, revelar
-escondido, casos de teste) e somem quando o último deles migrar. Também fica no
+**Transitório:** a ação `patchEnemy` muda um inimigo direto. Ela existe só para o que ainda
+mexe nos inimigos por fora do motor (a queima, a perseguição e os casos de teste) e sai quando a
+perseguição migrar. Também fica no
 componente, por enquanto, o laço do turno inimigo (porque a perseguição se intercala nele).
 
 ## Ordem do trabalho
@@ -86,7 +91,7 @@ servidor vem depois, quando o jogo inteiro rodar no motor.
 5. ~~Portas (e o `World` só com o que é fixo no mapa).~~
 6. ~~Abordagem e rendição.~~
 7. ~~Percepção, móveis e avião/chaves.~~
-8. Interrogatório.
+8. ~~Interrogatório.~~
 9. Queima e fim da operação.
 10. Perseguição (o reflexo da corrida fica no cliente de quem corre); o laço do turno inimigo
     vai inteiro para o motor e `patchEnemy` sai.
