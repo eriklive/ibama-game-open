@@ -8,6 +8,7 @@ import { APPROACH_ACTIONS, ApproachAction, applyApproach, validateApproach } fro
 import { DOORS_ACTIONS, DoorsAction, applyDoors, validateDoors } from './doors';
 import { EVIDENCE_ACTIONS, EvidenceAction, applyEvidence, validateEvidence } from './evidence';
 import { TALK_ACTIONS, TalkAction, applyTalk, validateTalk } from './talk';
+import { FIRE_ACTIONS, FireAction, applyFire, validateFire } from './fire';
 import { GROUP_ACTIONS, GroupAction, applyGroup, validateGroup } from './group';
 import { GameState } from './state';
 import { TurnAction, applyTurn, validateTurn } from './turn';
@@ -19,7 +20,8 @@ export type GameAction =
   | DoorsAction
   | ApproachAction
   | EvidenceAction
-  | TalkAction;
+  | TalkAction
+  | FireAction;
 
 const isEnemyAction = (a: GameAction): a is EnemyAction => ENEMY_ACTIONS.has(a.type);
 const isGroupAction = (a: GameAction): a is GroupAction => GROUP_ACTIONS.has(a.type);
@@ -27,6 +29,7 @@ const isDoorsAction = (a: GameAction): a is DoorsAction => DOORS_ACTIONS.has(a.t
 const isApproachAction = (a: GameAction): a is ApproachAction => APPROACH_ACTIONS.has(a.type);
 const isEvidenceAction = (a: GameAction): a is EvidenceAction => EVIDENCE_ACTIONS.has(a.type);
 const isTalkAction = (a: GameAction): a is TalkAction => TALK_ACTIONS.has(a.type);
+const isFireAction = (a: GameAction): a is FireAction => FIRE_ACTIONS.has(a.type);
 
 /** Por que a ação não vale neste estado, ou `null` se vale. */
 export function validateAction(state: GameState, action: GameAction): string | null {
@@ -36,6 +39,7 @@ export function validateAction(state: GameState, action: GameAction): string | n
   if (isApproachAction(action)) return validateApproach(state, action);
   if (isEvidenceAction(action)) return validateEvidence(state, action);
   if (isTalkAction(action)) return validateTalk(state, action);
+  if (isFireAction(action)) return validateFire(state, action);
   return validateTurn(state, action);
 }
 
@@ -47,6 +51,7 @@ export function applyAction(state: GameState, action: GameAction): GameState {
   if (isApproachAction(action)) return applyApproach(state, action);
   if (isEvidenceAction(action)) return applyEvidence(state, action);
   if (isTalkAction(action)) return applyTalk(state, action);
+  if (isFireAction(action)) return applyFire(state, action);
   return applyTurn(state, action);
 }
 
@@ -72,3 +77,5 @@ export type { EvidenceAction } from './evidence';
 export { noticeKey, noticePasses, planNotice } from './evidence';
 export type { FieldNoteData, TalkAction, TalkSession } from './talk';
 export { askResult, cluesOf, memoryOf, planAsk, planEndTalk } from './talk';
+export type { FireAction } from './fire';
+export { planBurn } from './fire';

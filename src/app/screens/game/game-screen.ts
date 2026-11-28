@@ -30,6 +30,7 @@ import {
   planApproach,
   planAsk,
   planBreakIn,
+  planBurn,
   planDoor,
   planEndTalk,
   planMove,
@@ -1041,7 +1042,8 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   protected readonly burnRules = BURN_RULES;
   /** Alvos já queimados (o fogo fica aceso até o fim). */
-  protected readonly burned = signal<ReadonlySet<string>>(new Set());
+  private readonly burnedIds = computed(() => this.core().burned);
+  protected readonly burned = computed<ReadonlySet<string>>(() => new Set(this.burnedIds()));
   /** Pré-visualizando o "Queimar" (aguardando confirmação). */
   protected readonly burning = signal(false);
 
@@ -3829,6 +3831,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected confirmBurn(): void {
     const target = this.burnable();
     if (!this.burning() || !target || this.phase() !== 'moving-choice') return;
+    // o motor decide quem vigia perto e vê as chamas
+    const act = planBurn(this.core(), target);
+    if (!act) return;
     const witnesses = this.burnWitnesses();
     // a câmera continua no agente e no alvo enquanto o fogo pega; volta quando a vez acaba
     this.closeBurn(true);
@@ -3836,11 +3841,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // com som, o fogo só pega depois da gasolina e das riscadas de fósforo
     this.sound.play('fogo.riscar', { at: target.hexes[0] });
     this.sound.duck();
-    this.later(this.sound.audible() ? STRIKE_SECONDS * 1000 : 0, () => this.setFire(target, witnesses));
+    this.later(this.sound.audible() ? STRIKE_SECONDS * 1000 : 0, () => this.setFire(target, witnesses, act));
   }
 
-  private setFire(target: Burnable, witnesses: EnemyState[]): void {
-    this.burned.update((s) => new Set([...s, target.id]));
+  private setFire(target: Burnable, witnesses: EnemyState[], act: GameAction): void {
+    if (!this.dispatch(act)) return;
     this.board?.ignite(target.id, target.hexes);
     const plane = !!target.inspect;
     this.sound.ignite(target.id, target.hexes, plane);
@@ -3848,7 +3853,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!plane) this.sound.play('fogo.tambor', { at: target.hexes[0], delay: 2.5 });
     for (const e of witnesses) {
       const facing = facingBetween(e.hex, target.hexes[0]);
-      this.updateEnemy(e.id, { status: 'alert', facing });
       this.board?.setEnemyFacing(e.id, facing);
       this.board?.setEnemyAlert(e.id, true);
     }
@@ -4158,6 +4162,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   /** Encerra a operação: nada mais anda e o relatório fica com o resultado. */
   protected confirmEnd(): void {
     if (this.debrief() !== 'confirm') return;
+    if (!this.dispatch({ type: 'endOperation' })) return;
     this.clearTimers();
     this.phase.set('over');
     this.debrief.set('over');
@@ -4219,7 +4224,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.releaseDoorFocus();
     this.board?.setSceneSlowmo(false);
     this.board?.setDoors(this.doors(), true);
-    this.burned.set(new Set());
     this.closeBurn();
     this.debrief.set(null);
     this.board?.clearFires();
@@ -4311,6 +4315,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       linePools: Object.fromEntries(s.linePools),
       clueLog: s.clueLog,
       fieldNotes: s.fieldNotes as FieldNote[],
+      burned: s.burned,
     });
     this.board?.placeUnits(this.positions());
     this.board?.placeEnemies(
@@ -4331,7 +4336,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const h of this.map?.hidden ?? []) if (this.found().has(h.id)) this.board?.hidePropItem(h.spot);
     const panel = this.map?.keyPanel;
     if (panel && s.hasKey) this.board?.hidePropItem(panel.spot);
-    this.burned.set(new Set(s.burned));
     for (const t of this.map?.burnables ?? []) {
       if (!this.burned().has(t.id)) continue;
       this.board?.ignite(t.id, t.hexes);
