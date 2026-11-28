@@ -34,6 +34,7 @@ Um módulo por sistema, reaproveitando as regras puras que já existiam (`enemie
 | `approach.ts` | abordagem: faixas do agente, prévia e o teste de fuga de cada suspeito |
 | `evidence.ts` | investigação: percepção, achados (arma, GPS, rádio), a chave do avião |
 | `talk.ts` | interrogatório: a conversa aberta, cada pergunta, a caderneta, pistas e comparsas |
+| `fire.ts` | queima (quem vê o fogo entra em alerta) e o fim da operação |
 | `index.ts` | junta tudo: `GameAction`, `validateAction`, `applyAction` |
 
 Como já funciona:
@@ -64,6 +65,8 @@ Como já funciona:
   todos, e o motor guarda a memória do suspeito, as falas já usadas, a nota da caderneta, a
   pista e o esconderijo entregue. Ao encerrar (`planEndTalk`), o abalado passa e o comparsa
   entregue aparece no hexágono livre mais perto.
+- **Queima e fim:** o que já queima e se a operação acabou estão no motor; `planBurn` decide
+  quem vigia perto e vê as chamas. A confirmação e o relatório são tela.
 - **Mapa:** o `World` que o motor recebe tem só o que é fixo no mapa (área, paredes, carga,
   estruturas). O que muda na partida (as portas fechadas) sai do estado, com `sightBlockers`
   e `solidOf`.
@@ -74,7 +77,7 @@ Como já funciona:
 - **Sorteio:** quem vagueia sorteia o destino com o `rng` da partida, e o destino viaja na ação.
 
 **Transitório:** a ação `patchEnemy` muda um inimigo direto. Ela existe só para o que ainda
-mexe nos inimigos por fora do motor (a queima, a perseguição e os casos de teste) e sai quando a
+mexe nos inimigos por fora do motor (a perseguição e os casos de teste) e sai quando a
 perseguição migrar. Também fica no
 componente, por enquanto, o laço do turno inimigo (porque a perseguição se intercala nele).
 
@@ -92,7 +95,7 @@ servidor vem depois, quando o jogo inteiro rodar no motor.
 6. ~~Abordagem e rendição.~~
 7. ~~Percepção, móveis e avião/chaves.~~
 8. ~~Interrogatório.~~
-9. Queima e fim da operação.
+9. ~~Queima e fim da operação.~~
 10. Perseguição (o reflexo da corrida fica no cliente de quem corre); o laço do turno inimigo
     vai inteiro para o motor e `patchEnemy` sai.
 11. **Servidor** (`server/`): Node + `ws`, salas com código curto, dono de cada agente (o dono

@@ -8,8 +8,8 @@
  *
  * O estado cresce um sistema por vez: hoje tem o ciclo do turno (`turn.ts`), os inimigos
  * (`enemy-turn.ts`), o grupo (`group.ts`), as portas (`doors.ts`), a abordagem
- * (`approach.ts`), a investigação (`evidence.ts`) e o interrogatório (`talk.ts`). Queima e
- * perseguição ainda vivem no componente.
+ * (`approach.ts`), a investigação (`evidence.ts`), o interrogatório (`talk.ts`) e a queima
+ * (`fire.ts`). A perseguição ainda vive no componente.
  */
 import { AgentClass, classOf } from '../agent-class';
 import { Door, isOpen } from '../door';
@@ -75,6 +75,10 @@ export interface GameState {
   readonly fieldNotes: readonly FieldNoteData[];
   /** A conversa aberta agora (ou nenhuma). */
   readonly talk: TalkSession | null;
+  /** Alvos já queimados (o fogo fica aceso até o fim). */
+  readonly burned: readonly string[];
+  /** A operação foi encerrada: nada mais anda. */
+  readonly over: boolean;
 }
 
 export interface NewGame {
@@ -113,6 +117,8 @@ export function initialGameState(game: NewGame): GameState {
     clueLog: [],
     fieldNotes: [],
     talk: null,
+    burned: [],
+    over: false,
   };
 }
 
