@@ -7,8 +7,9 @@
  * - `applyAction` é puro: mesma entrada, mesma saída, sem relógio nem animação.
  *
  * O estado cresce um sistema por vez: hoje tem o ciclo do turno (`turn.ts`), os inimigos
- * (`enemy-turn.ts`), o grupo (`group.ts`) e as portas (`doors.ts`). Abordagem e o resto
- * ainda vivem no componente.
+ * (`enemy-turn.ts`), o grupo (`group.ts`), as portas (`doors.ts`), a abordagem
+ * (`approach.ts`) e a investigação (`evidence.ts`). Interrogatório, queima e perseguição ainda
+ * vivem no componente.
  */
 import { AgentClass, classOf } from '../agent-class';
 import { Door, isOpen } from '../door';
@@ -52,6 +53,16 @@ export interface GameState {
    * bônus (ver `BREAK_IN_RULES`).
    */
   readonly breakInUntil: number;
+  /** Móveis (e a cabine) em que a equipe já reparou: ganham o contorno e abrem o zoom. */
+  readonly noticed: readonly string[];
+  /** Quem já rolou percepção onde (`móvel:agente`): cada um rola uma vez por móvel. */
+  readonly noticeRolled: readonly string[];
+  /** O que a equipe já achou e pegou (a arma, o GPS, o rádio). */
+  readonly found: readonly string[];
+  /** A chave do avião está com a equipe. */
+  readonly hasKey: boolean;
+  /** Quem viu a chave no quadro e não pegou, na ordem em que viram. */
+  readonly keySeenBy: readonly string[];
 }
 
 export interface NewGame {
@@ -80,6 +91,11 @@ export function initialGameState(game: NewGame): GameState {
     commandsUsed: 0,
     doors: Object.fromEntries(Object.entries(game.doors ?? {}).map(([k, d]) => [k, { ...d }])),
     breakInUntil: 0,
+    noticed: [],
+    noticeRolled: [],
+    found: [],
+    hasKey: false,
+    keySeenBy: [],
   };
 }
 
