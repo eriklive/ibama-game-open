@@ -1,6 +1,6 @@
 /**
  * Casos de teste: situações prontas para testar uma parte do jogo sem jogar até ela. Ficam no
- * menu da partida ("Casos de teste"). Cada caso diz o mapa, onde cada um está e o que começa
+ * menu de pausa (Debug › Casos de teste). Cada caso diz o mapa, onde cada um está e o que começa
  * na hora: uma perseguição já em curso, ou o turno inimigo com dois fugindo (a escolha de alvo).
  */
 import type { EnemyStatus } from './enemies';

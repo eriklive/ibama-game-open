@@ -249,6 +249,32 @@ interface CheckView {
   side: CheckSide;
 }
 
+/** Páginas do menu de pausa (cada uma é uma lista nova). */
+type MenuPage = 'root' | 'saves' | 'settings' | 'performance' | 'sound' | 'vibration' | 'tutorials' | 'debug' | 'test-cases';
+/** "Voltar" de cada página; a raiz não tem pai (fecha o menu). */
+const MENU_PARENT: Record<MenuPage, MenuPage | null> = {
+  root: null,
+  saves: 'root',
+  settings: 'root',
+  performance: 'settings',
+  sound: 'settings',
+  vibration: 'settings',
+  tutorials: 'root',
+  debug: 'root',
+  'test-cases': 'debug',
+};
+const MENU_TITLES: Record<MenuPage, string> = {
+  root: 'Pausa',
+  saves: 'Saves',
+  settings: 'Configurações',
+  performance: 'Performance',
+  sound: 'Sons',
+  vibration: 'Vibração',
+  tutorials: 'Tutoriais',
+  debug: 'Debug',
+  'test-cases': 'Casos de teste',
+};
+
 type CheckSide = 'team' | 'enemy';
 
 /** O que quem rola informa (o resto da ficha é montado por `rollD20`). */
@@ -435,13 +461,19 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly renderStats = signal<ReturnType<HexBoard['renderStats']> | null>(null);
   private statsTicker?: ReturnType<typeof setInterval>;
 
-  /** Submenu "Casos de teste" (situações prontas, ver `test-cases.ts`). */
+  /** Casos de teste (situações prontas, ver `test-cases.ts`), em Debug › Casos de teste. */
   protected readonly testCases = TEST_CASES;
-  protected readonly testCasesOpen = signal(false);
-  /** Submenu "Tutoriais" do menu: as lições da lousa tática, para rever. */
-  protected readonly tutorialsOpen = signal(false);
-  /** Submenu "Saves" do menu: novo jogo, o automático e os slots. */
-  protected readonly savesOpen = signal(false);
+  /**
+   * Página aberta no menu de pausa: cada item abre uma lista nova (como no menu de um jogo) e
+   * "Voltar" sobe um nível (ver `MENU_PARENT`); na raiz, fecha o menu.
+   */
+  protected readonly menuPage = signal<MenuPage>('root');
+  protected readonly menuTitle = computed(() => MENU_TITLES[this.menuPage()]);
+  /** Acima do título: a página de onde se veio (na raiz, a operação). */
+  protected readonly menuKicker = computed(() => {
+    const parent = MENU_PARENT[this.menuPage()];
+    return parent ? MENU_TITLES[parent] : `Op. ${this.map?.name ?? ''}`;
+  });
   protected readonly savesSupported = this.saves.supported;
   protected readonly saveList = computed(() => this.saves.summaries());
   protected readonly savedAtLabel = savedAtLabel;
@@ -449,17 +481,72 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected readonly overwriteArmed = signal<number | null>(null);
   /** "Novo jogo" tocado uma vez: o segundo toque apaga o automático e volta ao início. */
   protected readonly newGameArmed = signal(false);
+  /** "Voltar ao menu principal" tocado uma vez: o segundo toque sai da partida. */
+  protected readonly quitArmed = signal(false);
 
   protected toggleMenu(): void {
     this.menuOpen.update((v) => !v);
-    this.overwriteArmed.set(null);
-    this.newGameArmed.set(false);
+    this.menuPage.set('root');
+    this.disarmMenu();
     clearInterval(this.statsTicker);
     if (this.menuOpen()) {
       const tick = () => this.renderStats.set(this.board?.renderStats() ?? null);
       tick();
       this.statsTicker = setInterval(tick, 250);
     }
+  }
+
+  private closeMenu(): void {
+    if (this.menuOpen()) this.toggleMenu();
+  }
+
+  private disarmMenu(): void {
+    this.overwriteArmed.set(null);
+    this.newGameArmed.set(false);
+    this.quitArmed.set(false);
+  }
+
+  /** Abre uma página do menu (um item com ›). */
+  protected openMenuPage(page: MenuPage): void {
+    this.disarmMenu();
+    this.menuPage.set(page);
+    this.sound.play('ui.hex');
+    this.focusMenu();
+  }
+
+  /** "Voltar" do menu: sobe um nível; na raiz, volta ao jogo. */
+  protected menuBack(): void {
+    const parent = MENU_PARENT[this.menuPage()];
+    if (!parent) {
+      this.closeMenu();
+      return;
+    }
+    this.disarmMenu();
+    this.menuPage.set(parent);
+    this.focusMenu();
+  }
+
+  /** Põe o foco no primeiro item da página nova (teclado e leitor de tela seguem a lista). */
+  private focusMenu(): void {
+    setTimeout(() => document.querySelector<HTMLElement>('#game-menu .menu-list button, #game-menu .menu-list input')?.focus());
+  }
+
+  /** Controle: passa o foco para o item de cima/baixo do menu (dá a volta nas pontas). */
+  private stepMenuFocus(step: 1 | -1): void {
+    const items = [...document.querySelectorAll<HTMLElement>('#game-menu button:not(:disabled), #game-menu input:not(:disabled)')];
+    if (!items.length) return;
+    const i = items.indexOf(document.activeElement as HTMLElement);
+    items[i < 0 ? (step > 0 ? 0 : items.length - 1) : (i + step + items.length) % items.length].focus();
+  }
+
+  /** Sai da partida para a tela inicial (o automático fica: "Continuar" volta aqui). */
+  protected quitToMainMenu(): void {
+    if (!this.quitArmed()) {
+      this.quitArmed.set(true);
+      return;
+    }
+    this.closeMenu();
+    this.router.navigate(['/']);
   }
 
   protected setRenderMode(mode: RenderMode): void {
@@ -1027,14 +1114,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Menu: rever uma lição da lousa. */
   protected reviewLesson(id: LessonId): void {
-    this.toggleMenu();
-    this.tutorialsOpen.set(false);
+    this.closeMenu();
     this.lesson.set(id);
   }
 
   /** Menu: rever a abertura no meio da partida (volta para quem está na vez). */
   protected replayIntro(): void {
-    this.toggleMenu();
+    this.closeMenu();
     this.playIntro(() => this.board?.focus(this.active().id));
   }
 
@@ -1627,6 +1713,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Teclado: Modo Corrida, lousa tática, abertura, escolha de alvo e perseguição (C dá o gás; Esc deixa fugir). */
   protected onKey(ev: KeyboardEvent): void {
+    // menu de pausa por cima de tudo: Esc volta um nível (na raiz, fecha)
+    if (this.menuOpen()) {
+      if (ev.key === 'Escape') {
+        ev.preventDefault();
+        this.menuBack();
+      }
+      return;
+    }
     // Modo Corrida: setas (ou WASD) trocam de faixa, pulam e deslizam
     if (this.runner && this.runnerOn()) {
       const cmd = RUNNER_KEYS[ev.key];
@@ -4367,9 +4461,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   protected loadSave(id: SaveId): void {
     const state = this.saves.read(id);
     if (!state) return;
-    this.menuOpen.set(false);
-    this.savesOpen.set(false);
-    clearInterval(this.statsTicker);
+    this.closeMenu();
     if (state.mapId === this.map?.id) {
       this.applySave(state);
       return;
@@ -4393,8 +4485,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Escolhido no menu: no mesmo mapa, carrega aqui; em outro, abre a partida lá com `?caso=`. */
   protected loadTestCase(testCase: TestCase): void {
-    this.menuOpen.set(false);
-    this.testCasesOpen.set(false);
+    this.closeMenu();
     if (testCase.mapId === this.map?.id) {
       void this.runTestCase(testCase);
       return;
@@ -4492,6 +4583,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * touchpad/R3 voltam para quem está na vez · Options mostra os comandos.
    */
   private padButton(b: PadButton): void {
+    // menu de pausa: ○ volta um nível (na raiz, fecha); ✕ aperta o item em foco
+    if (this.menuOpen()) {
+      if (b === 'circle') this.menuBack();
+      else if (b === 'cross') {
+        const el = document.activeElement as HTMLElement | null;
+        if (el?.closest('#game-menu')) el.click();
+        else this.stepMenuFocus(1);
+      }
+      return;
+    }
     // Modo Corrida: ✕ pula, ○ desliza (□ continua sendo a corrida)
     if (this.runner && this.runnerOn() && (b === 'cross' || b === 'circle')) {
       this.runner.input(b === 'cross' ? 'up' : 'down');
@@ -4642,6 +4743,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Anda o cursor um hexágono; sobre um destino alcançável, já mostra o caminho (como o 1º toque). */
   private moveCursor(dir: Stick): void {
+    // menu de pausa: o direcional anda pelos itens da lista
+    if (this.menuOpen()) {
+      if (dir.y) this.stepMenuFocus(dir.y < 0 ? -1 : 1);
+      return;
+    }
     // Modo Corrida: direcional e analógico trocam de faixa, pulam e deslizam
     if (this.runner && this.runnerOn()) {
       if (Math.abs(dir.x) > Math.abs(dir.y)) this.runner.input(dir.x < 0 ? 'left' : 'right');
@@ -4687,7 +4793,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
 
   /** Analógico direito move a câmera; R2 aproxima e L2 afasta. */
   private padFrame(dt: number, state: PadState): void {
-    if (!this.board || this.intro()) return;
+    if (!this.board || this.intro() || this.menuOpen()) return;
     const r = deadzone(state.right);
     if (r.x || r.y) this.board.panBy(r.x * dt * 9, r.y * dt * 9);
     const zoom = state.buttons.l2 - state.buttons.r2;

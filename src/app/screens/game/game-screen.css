@@ -650,89 +650,90 @@ button.stamp:active { transform: translateY(3px); box-shadow: 1px 2px 0 rgba(0, 
 .pad-help dd { margin: 0; }
 .pad-help .small { font-size: 11px; color: var(--muted-paper); }
 
-/* ---------- menu: uma ficha presa sob a fita ---------- */
+/* ---------- menu de pausa: tela cheia, fundo sólido, uma lista por página ---------- */
 .paper-btn.menu-btn { transform: rotate(-1.5deg); }
 .paper-btn.menu-btn.open { background: var(--postit); }
 .menu {
-  position: absolute;
-  top: calc(72px + var(--safe-top));
-  right: calc(14px + var(--safe-right));
-  width: min(320px, calc(100% - 28px));
-  padding: 14px 16px 16px;
-  background: var(--paper-light);
-  box-shadow: var(--drop);
-  transform: rotate(0.6deg);
-  z-index: 5;
-  max-height: calc(100% - 90px - var(--safe-top));
+  position: absolute; inset: 0;
+  z-index: 40;
+  display: flex; flex-direction: column; align-items: center;
+  padding: calc(14px + var(--safe-top)) calc(16px + var(--safe-right)) calc(20px + var(--safe-bottom)) calc(16px + var(--safe-left));
+  background: #1b2417;
+  color: var(--paper-light);
   overflow-y: auto;
-  animation: slap .2s ease-out both;
+  animation: fade-in .15s ease-out both;
 }
-.menu-title { margin: 0 0 8px; font-family: var(--stencil); font-size: 20px; font-weight: 400; text-transform: uppercase; letter-spacing: .04em; }
-.menu-group { border: 0; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.menu-group legend { padding: 0; margin-bottom: 6px; font-size: 12px; text-transform: uppercase; color: var(--muted-paper); }
-.menu-option {
-  display: flex; align-items: flex-start; gap: 10px;
-  padding: 8px 10px;
-  border: 2px solid transparent;
+.menu > * { width: min(560px, 100%); }
+.menu-head {
+  display: flex; align-items: center; gap: 14px;
+  padding-bottom: 14px; margin-bottom: 18px;
+  border-bottom: 2px solid rgba(247, 242, 228, .18);
+}
+/* "Voltar": o mesmo do lobby (seta + rótulo num botão gordo) */
+.menu-back {
+  position: relative; flex: none;
+  min-width: 52px; min-height: 48px; padding: 0 14px 0 10px;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--paper); color: var(--ink-paper);
+  box-shadow: var(--drop);
+  font-size: 16px; text-transform: uppercase;
+}
+.menu-back svg { width: 22px; height: 22px; fill: none; stroke: currentColor; stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; }
+.menu-back:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35); }
+.menu-head-title { display: flex; flex-direction: column; min-width: 0; }
+.menu-kicker { font-size: 12px; text-transform: uppercase; letter-spacing: .08em; color: rgba(247, 242, 228, .6); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.menu-title { margin: 0; font-family: var(--stencil); font-size: clamp(22px, 6vw, 28px); font-weight: 400; text-transform: uppercase; letter-spacing: .04em; line-height: 1.05; }
+
+.menu-list { list-style: none; margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 8px; }
+.menu-item, .menu-option {
+  position: relative;
+  width: 100%; min-height: 56px; padding: 10px 16px;
+  display: flex; align-items: center; gap: 12px; text-align: left;
+  background: var(--paper-light); color: var(--ink-paper);
+  border: 0; border-left: 6px solid transparent;
+  box-shadow: var(--drop);
   cursor: pointer;
+  transition: transform .08s ease-out, border-color .08s;
 }
-.menu-option.checked { border-color: var(--ink-paper); background: var(--paper); }
-.menu-option input { margin: 3px 0 0; accent-color: var(--green-ok); width: 18px; height: 18px; flex: none; }
-.menu-option input:focus-visible { outline: 3px solid var(--postit); outline-offset: 2px; }
-.menu-option-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.menu-option-label { font-family: var(--marker); font-size: 16px; }
-.menu-option-hint { font-size: 12px; color: var(--muted-paper); line-height: 1.3; }
-.menu-stats { margin: 10px 0 0; font-size: 12px; color: var(--muted-paper); }
-.menu-restart, .menu-close {
-  margin-top: 12px; width: 100%; height: 40px;
-  background: var(--paper); box-shadow: var(--drop);
-  font-size: 14px; text-transform: uppercase;
-}
-.menu-restart:active, .menu-close:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35); }
+.menu-item:hover, .menu-option:hover { border-left-color: var(--muted-paper); }
+.menu-item:focus-visible, .menu-option:focus-within { outline: none; border-left-color: var(--postit); background: #fffbe9; transform: translateX(4px); }
+.menu-item:active { transform: translateY(2px); box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35); }
+.menu-item.primary { background: var(--postit); }
+.menu-item.danger .menu-item-label { color: var(--red-text); }
+.menu-item.armed { background: var(--postit); }
+.menu-item-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; flex: 1; }
+.menu-item-label { font-family: var(--marker); font-size: 18px; line-height: 1.2; }
+.menu-item > .menu-item-label { flex: 1; }
+.menu-item-hint { font-size: 12px; color: var(--muted-paper); line-height: 1.3; }
+.menu-item-value { font-size: 13px; text-transform: uppercase; color: var(--muted-paper); white-space: nowrap; }
+.menu-item-arrow { font-size: 26px; line-height: 1; color: var(--muted-paper); }
+.menu-option.checked { border-left-color: var(--green-ok); }
+.menu-option input { margin: 0; accent-color: var(--green-ok); width: 20px; height: 20px; flex: none; }
+.menu-note { margin: 0 0 4px; font-size: 13px; color: rgba(247, 242, 228, .7); line-height: 1.4; }
+.menu-stats { margin-top: 14px; font-size: 12px; }
 
-.menu-close { margin-top: 8px; }
-
-/* submenu "Casos de teste": abre uma lista de situações prontas */
-.menu-sub { margin-top: 12px; }
-.menu-sub-toggle {
-  width: 100%; height: 40px; padding: 0 12px;
-  display: flex; align-items: center; justify-content: space-between;
-  background: var(--paper); box-shadow: var(--drop);
-  font-size: 14px; text-transform: uppercase;
-}
-.menu-sub-arrow { font-size: 20px; line-height: 1; transition: transform .15s ease-out; }
-.menu-sub-toggle.open .menu-sub-arrow { transform: rotate(90deg); }
-.menu-sub-list { list-style: none; margin: 8px 0 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
-.menu-case {
-  width: 100%; padding: 8px 10px;
-  display: flex; flex-direction: column; align-items: flex-start; gap: 2px; text-align: left;
-  border: 2px dashed var(--ink-paper); background: transparent;
-}
-.menu-case:active { transform: translateY(1px); background: var(--paper); }
-
-/* submenu "Saves": fichas de arquivo, uma por slot */
-.menu-saves-sub { margin-top: 4px; }
-.saves { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
-.saves-note { margin: 0 0 2px; font-size: 12px; color: var(--muted-paper); line-height: 1.3; }
+/* Saves: fichas de arquivo, uma por slot */
+.saves { gap: 8px; }
+.save-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
 .save-card {
   position: relative;
   display: flex; flex-direction: column; gap: 2px;
-  padding: 8px 10px;
-  border: 2px solid var(--ink-paper); background: var(--paper);
+  padding: 10px 14px;
+  border: 2px solid var(--ink-paper); background: var(--paper); color: var(--ink-paper);
 }
 .save-card.auto { border-style: double; border-width: 4px; }
-.save-card.empty { border-style: dashed; background: transparent; }
+.save-card.empty { border-style: dashed; background: var(--paper-light); }
 .save-tag { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted-paper); }
 .save-empty { color: var(--muted-paper); }
 .save-actions { display: flex; gap: 6px; margin-top: 6px; }
 .save-btn {
-  flex: 1; min-height: 34px; padding: 0 8px;
+  flex: 1; min-height: 38px; padding: 0 8px;
   background: var(--paper-light); box-shadow: var(--drop);
   font-size: 12px; text-transform: uppercase;
 }
 .save-btn:active { transform: translateY(1px); box-shadow: 1px 1px 0 rgba(0, 0, 0, 0.35); }
-.save-btn.armed, .new-game.armed { background: var(--postit); }
-.new-game { margin-top: 6px; }
+.save-btn.armed { background: var(--postit); }
+.saves > .menu-item { margin-top: 6px; }
 
 /* ---------- portas ---------- */
 /* bônus do arrombamento: anotação a caneta na fita, enquanto durar */
