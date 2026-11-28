@@ -32,6 +32,7 @@ Um módulo por sistema, reaproveitando as regras puras que já existiam (`enemie
 | `group.ts` | grupo: agrupar (com o Comando), desagrupar, andar em fila, troca de vagas |
 | `doors.ts` | portas: abrir, destrancar (Gazua), arrombar (com dano) e a reação do cômodo |
 | `approach.ts` | abordagem: faixas do agente, prévia e o teste de fuga de cada suspeito |
+| `evidence.ts` | investigação: percepção, achados (arma, GPS, rádio), a chave do avião |
 | `index.ts` | junta tudo: `GameAction`, `validateAction`, `applyAction` |
 
 Como já funciona:
@@ -52,6 +53,11 @@ Como já funciona:
   intimidação, grupo, Liderança e o bônus do arrombamento; a prévia do tablet é
   `approachPreview`, e `planApproach` rola o teste de fuga de cada um e decide quem se rende e
   quem corre. A voz de prisão (perseguição) que vem depois ainda é do componente.
+- **Investigação:** o que a equipe percebeu, quem já rolou percepção onde, o que foi achado,
+  a chave do avião e quem a viu e deixou no quadro estão no motor. O d20 da percepção vem
+  sorteado na ação (`planNotice`) e a ficha cai nele; pegar um achado ou a chave e deixar a
+  chave no quadro são ações (`take`, `leaveKey`). As etapas da cabine do avião (chegar, abrir,
+  dentro, sair) são fluxo de tela de quem entrou e ficam no componente.
 - **Mapa:** o `World` que o motor recebe tem só o que é fixo no mapa (área, paredes, carga,
   estruturas). O que muda na partida (as portas fechadas) sai do estado, com `sightBlockers`
   e `solidOf`.
@@ -61,9 +67,10 @@ Como já funciona:
   (`enemyView`), não o estado.
 - **Sorteio:** quem vagueia sorteia o destino com o `rng` da partida, e o destino viaja na ação.
 
-**Transitório:** a ação `patchEnemy` muda um inimigo direto. Ela existe só para os sistemas
-que ainda mexem nos inimigos por fora do motor (perseguição, interrogatório, revelar
-escondido, casos de teste) e some quando o último deles migrar. Também fica no
+**Transitório:** a ação `patchEnemy` muda um inimigo direto, e `markNoticed`
+marca um móvel como percebido quando um suspeito conta. Elas existem só para os sistemas
+que ainda mexem no estado por fora do motor (perseguição, interrogatório, revelar
+escondido, casos de teste) e somem quando o último deles migrar. Também fica no
 componente, por enquanto, o laço do turno inimigo (porque a perseguição se intercala nele).
 
 ## Ordem do trabalho
@@ -78,7 +85,7 @@ servidor vem depois, quando o jogo inteiro rodar no motor.
 4. ~~Grupo (agrupar, fila, Comando).~~
 5. ~~Portas (e o `World` só com o que é fixo no mapa).~~
 6. ~~Abordagem e rendição.~~
-7. Percepção, móveis e avião/chaves.
+7. ~~Percepção, móveis e avião/chaves.~~
 8. Interrogatório.
 9. Queima e fim da operação.
 10. Perseguição (o reflexo da corrida fica no cliente de quem corre); o laço do turno inimigo

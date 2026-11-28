@@ -1,5 +1,9 @@
 import { HexCoord, hexDistance } from './hex';
-import { HexRect, inStructure } from './maps';
+import type { HexRect } from './maps';
+
+/** Dentro do retângulo (colunas e fileiras, inclusive). Local para não puxar `maps.ts` (e o 3D) junto. */
+const inStructure = (h: HexCoord, rect: HexRect): boolean =>
+  h.col >= rect.cols[0] && h.col <= rect.cols[1] && h.row >= rect.rows[0] && h.row <= rect.rows[1];
 
 /**
  * Testes de dados fora do movimento: todos com 1d20, e passa quem tira **mais que** o número

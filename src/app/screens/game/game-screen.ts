@@ -30,6 +30,7 @@ import {
   planBreakIn,
   planDoor,
   planMove,
+  planNotice,
   planPatrolAct,
   planRally,
   planReline,
@@ -111,7 +112,6 @@ import {
   KEY_TAKEN,
   PlaneState,
   WITNESS_LINE,
-  leftKey,
   lockedClue,
   lookInside,
   nextToPanel,
@@ -167,7 +167,6 @@ import {
   hasTalked,
   itemClue,
   noteKind,
-  noticedAfter,
   openingLine,
   pickLine,
   questionCost,
@@ -721,11 +720,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * Móveis em que alguém reparou (percepção ou um suspeito que contou): os esconderijos e o
    * quadro de chaves (`KEY_PANEL_ID`). Só esses ganham o contorno e abrem o zoom.
    */
-  protected readonly noticed = signal<ReadonlySet<string>>(new Set());
-  /** Esconderijos já achados (o que havia lá foi apreendido). */
-  protected readonly found = signal<ReadonlySet<string>>(new Set());
+  private readonly noticedIds = computed(() => this.core().noticed);
+  protected readonly noticed = computed<ReadonlySet<string>>(() => new Set(this.noticedIds()));
+  /** Esconderijos já achados (o que havia lá foi apreendido). Vêm do motor (`engine/evidence.ts`). */
+  private readonly foundIds = computed(() => this.core().found);
+  protected readonly found = computed<ReadonlySet<string>>(() => new Set(this.foundIds()));
   /** Quem já rolou percepção em cada móvel (`móvel:agente`): uma vez por agente. */
-  private readonly noticeRolled = new Set<string>();
+  private readonly noticeRolledIds = computed(() => this.core().noticeRolled);
+  private readonly noticeRolled = computed<ReadonlySet<string>>(() => new Set(this.noticeRolledIds()));
 
   /** Esconderijo percebido, ainda não achado, cujo móvel está colado no agente da vez. */
   protected readonly inspectable = computed<HiddenItem | null>(() => {
@@ -2827,13 +2829,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     for (const spot of this.perceivable()) {
       for (const [who, path] of paths) {
         if (this.noticed().has(spot.id)) break;
-        if (!needsNoticeRoll(spot, who, path, this.noticed(), this.noticeRolled)) continue;
-        this.noticeRolled.add(`${spot.id}:${who}`);
+        if (!needsNoticeRoll(spot, who, path, this.noticed(), this.noticeRolled())) continue;
+        // o motor sorteia o d20; a ficha cai nele e a percepção vale quando ele aparece
+        const act = planNotice(who, spot.id, this.rng);
         this.phase.set('checking');
-        const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice);
+        const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice, act.roll);
         if (pass === null) return false;
+        this.dispatch(act);
         if (!pass) continue;
-        this.noticed.update((s) => new Set([...s, spot.id]));
         this.board?.keepInView(spot.spot);
         this.say(`${this.nameOf(who)} reparou ${spot.what}!`, 'info');
         this.sound.play('eq.percebeu');
@@ -2933,15 +2936,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.8, 0.5, 220);
     if (v.kind === 'keys') {
-      this.hasKey.set(true);
+      if (!this.dispatch({ type: 'take', agent: this.active().id, item: KEY_PANEL_ID })) return;
       this.sound.play('eq.chave');
-      this.keySeenBy.set([]);
       this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
       this.closeSpeech();
       this.patchProp({ taken: true, note: 'Chave do avião com a equipe.' });
     } else if (v.hidden) {
       const item = v.hidden;
-      this.found.update((s) => new Set([...s, item.id]));
+      if (!this.dispatch({ type: 'take', agent: this.active().id, item: item.id })) return;
       this.sound.play('eq.vasculhar');
       this.patchProp({ taken: true, note: item.seized });
     }
@@ -2955,9 +2957,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     const v = this.prop();
     if (!v || this.phase() !== 'moving-choice') return;
     const id = this.active().id;
-    if (v.kind === 'keys' && !v.taken) {
-      this.keySeenBy.update((l) => leftKey({ ...this.planeState(), seenBy: l }, id).seenBy);
-    }
+    if (v.kind === 'keys' && !v.taken) this.dispatch({ type: 'leaveKey', agent: id });
     this.dropProp();
     if (v.taken && v.kind === 'keys') this.say(`${v.who} pegou a chave do avião`, 'info');
     else if (v.taken && v.hidden) this.say(`${v.who} achou a ${v.hidden.name} ${v.hidden.at}. ${v.hidden.seized}`, 'alert');
@@ -2979,9 +2979,16 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * O resultado fica na tela até o jogador tocar em **Continuar** (ou ✕); só então o jogo
    * segue. Devolve se passou (mais que `target`), ou `null` se a partida foi recomeçada.
    */
-  private async rollCheck(kind: 'notice' | 'find', who: string, target: number): Promise<boolean | null> {
+  private async rollCheck(
+    kind: 'notice' | 'find',
+    who: string,
+    target: number,
+    /** O d20 já sorteado (pelo motor); sem ele, o dado sorteia. */
+    value?: number,
+  ): Promise<boolean | null> {
     const r = await this.rollD20(
       {
+        value,
         kicker: kind === 'notice' ? 'Percepção' : 'Inspecionar',
         who: this.nameOf(who),
         need: `precisa de mais que ${target}`,
@@ -3611,8 +3618,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     // entregou alguém: aparece no mapa ao encerrar (se a missão tiver essa unidade escondida)
     const hidden = out.reveal ? this.hiddenAccomplice(iv.enemyId) : null;
     // entregou um esconderijo (ou o quadro de chaves): conta como percebido e ganha o contorno
-    const noticed = noticedAfter(this.noticed(), out);
-    if (noticed !== this.noticed()) this.noticed.set(noticed);
+    if (out.notices && !this.noticed().has(out.notices)) this.dispatch({ type: 'markNoticed', spot: out.notices });
     // pista nova: pode liberar perguntas (neste e em outros NPCs)
     if (out.clue && !this.clueLog().has(out.clue)) this.clueLog.update((c) => new Set([...c, out.clue!]));
     const options = dialogueOptions(iv.cls, this.dialogues().get(iv.enemyId) ?? res.memory, this.clues());
@@ -3894,9 +3900,9 @@ export class GameScreen implements AfterViewInit, OnDestroy {
   // ---------- avião trancado e quadro de chaves ----------
 
   /** A equipe pegou a chave. */
-  protected readonly hasKey = signal(false);
+  protected readonly hasKey = computed(() => this.core().hasKey);
   /** Quem viu a chave no quadro e deixou lá. */
-  private readonly keySeenBy = signal<readonly string[]>([]);
+  private readonly keySeenBy = computed(() => this.core().keySeenBy);
   /** Linha do que se vê no menu do avião ("O avião está trancado."). */
   protected readonly planeNote = signal<string | null>(null);
   /** Fala embaixo da tela, com o avatar de quem fala. */
@@ -4104,15 +4110,13 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.cabinLeft().length) return false;
     if (this.noticed().has(CABIN_NOTICE_ID)) return true;
     const key = `${CABIN_NOTICE_ID}:${who}`;
-    if (this.noticeRolled.has(key)) return false;
-    this.noticeRolled.add(key);
+    if (this.noticeRolled().has(key)) return false;
+    const act = planNotice(who, CABIN_NOTICE_ID, this.rng);
     this.phase.set('checking');
-    const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice);
+    const pass = await this.rollCheck('notice', who, SEARCH_RULES.notice, act.roll);
     if (pass === null) return null;
-    if (pass) {
-      this.noticed.update((s) => new Set([...s, CABIN_NOTICE_ID]));
-      this.sound.play('eq.percebeu');
-    }
+    this.dispatch(act);
+    if (pass) this.sound.play('eq.percebeu');
     return pass;
   }
 
@@ -4133,7 +4137,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     if (!this.cabinInside()) return;
     const item = cabinItem(id, this.found());
     if (!item) return;
-    this.found.update((s) => new Set([...s, item.id]));
+    if (!this.dispatch({ type: 'take', agent: this.active().id, item: item.id })) return;
     this.board?.takeCabinItem(item.id);
     this.haptics.vibrate(SETTLE_PATTERN);
     this.gamepad.rumble(0.8, 0.5, 220);
@@ -4232,19 +4236,14 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.flight = null;
     this.ranThisRound.clear();
     this.caughtThisRound.clear();
-    this.noticed.set(new Set());
-    this.found.set(new Set());
     this.seenAgents.clear();
     this.board?.setSeenAgents(this.seenAgents);
-    this.noticeRolled.clear();
     this.clearChecks();
     this.dropProp();
     this.board?.resetProps();
     this.dropInterrogation();
     this.dialogues.set(new Map());
     this.clueLog.set(new Set());
-    this.hasKey.set(false);
-    this.keySeenBy.set([]);
     this.planeNote.set(null);
     this.planeBurn.set(false);
     this.dropCabin();
@@ -4297,7 +4296,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       burned: [...this.burned()],
       noticed: [...this.noticed()],
       found: [...this.found()],
-      noticeRolled: [...this.noticeRolled],
+      noticeRolled: [...this.noticeRolledIds()],
       seenAgents: [...this.seenAgents],
       ranThisRound: [...this.ranThisRound],
       caughtThisRound: [...this.caughtThisRound],
@@ -4341,6 +4340,11 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       groupLine: s.groupLine,
       doors: Object.fromEntries(s.doors),
       breakInUntil: s.breakInUntil,
+      noticed: s.noticed,
+      noticeRolled: s.noticeRolled,
+      found: s.found,
+      hasKey: s.hasKey,
+      keySeenBy: s.keySeenBy,
     });
     this.board?.placeUnits(this.positions());
     this.board?.placeEnemies(
@@ -4352,9 +4356,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
       })),
     );
     this.board?.setDoors(this.doors(), true);
-    this.noticed.set(new Set(s.noticed));
-    this.found.set(new Set(s.found));
-    for (const k of s.noticeRolled) this.noticeRolled.add(k);
     for (const id of s.seenAgents) this.seenAgents.add(id);
     this.board?.setSeenAgents(this.seenAgents);
     for (const id of s.ranThisRound) this.ranThisRound.add(id);
@@ -4364,8 +4365,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.clueLog.set(new Set(s.clueLog));
     this.fieldNotes.set(s.fieldNotes as FieldNote[]);
     this.noteSeq = Math.max(0, ...s.fieldNotes.map((n) => n.id));
-    this.hasKey.set(s.hasKey);
-    this.keySeenBy.set(s.keySeenBy);
     this.planeNote.set(s.planeNote);
     // o que já foi pego some dos móveis; o que já queimou volta a arder
     for (const h of this.map?.hidden ?? []) if (this.found().has(h.id)) this.board?.hidePropItem(h.spot);
@@ -4473,7 +4472,7 @@ export class GameScreen implements AfterViewInit, OnDestroy {
     this.board?.setSelected(null);
     this.board?.setReachable([]);
     if (testCase.hasKey) {
-      this.hasKey.set(true);
+      this.dispatch({ type: 'take', agent: this.active().id, item: KEY_PANEL_ID });
       this.clueLog.update((c) => new Set([...c, KEY_TAKEN]));
       const panel = this.map?.keyPanel;
       if (panel) this.board?.hidePropItem(panel.spot);
