@@ -73,6 +73,7 @@ import { Sound } from '../../game/sound.service';
 import { zoneAt } from '../../game/audio/ambience';
 import { surfaceAt } from '../../game/audio/footsteps';
 import { STRIKE_BEATS, STRIKE_SECONDS } from '../../game/audio/sounds';
+import { MatchFx, MatchStage } from '../../ui/match-fx/match-fx';
 import { PadAction, PadButton, PadState, Stick, deadzone, glyphFor, neighborToward } from '../../game/gamepad';
 import { GamepadService } from '../../game/gamepad.service';
 import { MainButton } from '../../ui/main-button';
@@ -324,8 +325,6 @@ const RUNNER_KEYS: Record<string, 'left' | 'right' | 'up' | 'down'> = {
   ArrowDown: 'down', s: 'down', S: 'down',
 };
 
-/** Etapas do fósforo em tela cheia (ver `playMatch`). */
-type MatchStage = 'pour' | 'fail' | 'spark' | 'lit' | 'drop' | 'out';
 /** Quanto a câmera fecha no agente e no alvo enquanto o fósforo cobre a tela (1 = o quadro normal). */
 const MATCH_CLOSE = 0.5;
 
@@ -353,7 +352,7 @@ interface TapTarget {
 
 @Component({
   selector: 'app-game-screen',
-  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel, ChaseOverlay, ApproachTablet, MissionIntro, TacticalBoard],
+  imports: [MainButton, D4, D20, TalkButton, InterrogationPanel, ChaseOverlay, ApproachTablet, MissionIntro, TacticalBoard, MatchFx],
   templateUrl: './game-screen.html',
   styleUrl: './game-screen.css',
   host: { '(document:keydown)': 'onKey($event)', '(window:resize)': 'onViewResize()' },
@@ -1143,11 +1142,6 @@ export class GameScreen implements AfterViewInit, OnDestroy {
    * overlay some e a câmera recua para o fogo). `null` fora disso.
    */
   protected readonly matchFx = signal<{ stage: MatchStage; caption: string } | null>(null);
-  /** Faíscas do fósforo: para onde cada uma voa (vmin), espalhadas para cima e para os lados. */
-  protected readonly sparkSlots = Array.from({ length: 14 }, (_, i) => ({
-    dx: `${(((i * 37) % 19) - 6) * 1.4}vmin`,
-    dy: `${-(((i * 53) % 13) + 3) * 1.3}vmin`,
-  }));
 
   /** Alvo ainda inteiro colado no agente da vez. */
   protected readonly burnable = computed<Burnable | null>(() => {

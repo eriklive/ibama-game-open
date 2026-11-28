@@ -1,0 +1,128 @@
+/* Fósforo em tela cheia (depois do "Queimar!"); etapas na classe do host: st-pour → st-fail → st-spark → st-lit → st-drop → st-out */
+/* etapas em data-stage: pour → fail → spark → lit → drop → out (tempos em STRIKE_BEATS) */
+:host {
+  --box-w: min(74vmin, 86vw);
+  position: absolute; inset: 0; z-index: 8;
+  overflow: hidden;
+  background: radial-gradient(ellipse at 50% 58%, rgba(30, 14, 4, .86), rgba(6, 3, 1, .96) 70%);
+  /* backwards, não both: o fim da animação não pode prender a opacidade (o `out` some por transição) */
+  animation: fade-in .3s ease-out backwards;
+  transition: opacity .45s ease-out;
+}
+:host(.st-out) { opacity: 0; }
+.match-cap {
+  position: absolute; left: 0; right: 0; top: calc(16% + var(--safe-top));
+  margin: 0; text-align: center;
+  font-family: var(--typed); font-size: clamp(14px, 2.6vmin, 20px); color: #f1e3c2;
+  animation: fade-in .4s .25s ease-out backwards;
+  transition: opacity .3s;
+}
+:host(:not(.st-pour):not(.st-fail)) .match-cap { opacity: 0; }
+/* a caixa: lixa no topo, rótulo de papel na frente */
+.match-box {
+  position: absolute; left: 50%; top: 52%;
+  width: var(--box-w); height: calc(var(--box-w) * .3);
+  transform: translateX(-50%) rotate(-3deg);
+  border-radius: 1.4vmin;
+  background: linear-gradient(#cf3e2d, #9e271c);
+  box-shadow: 0 1.4vmin 0 rgba(0, 0, 0, .45);
+  animation: box-in .5s .15s cubic-bezier(.2, .9, .3, 1.2) both;
+}
+.match-strip {
+  position: absolute; left: 0; right: 0; top: 0; height: 30%;
+  border-radius: 1.4vmin 1.4vmin 0 0;
+  background: repeating-linear-gradient(90deg, #4f321d 0 .7vmin, #6a432a .7vmin 1.4vmin);
+}
+:host(.st-lit) .match-strip, :host(.st-drop) .match-strip, :host(.st-out) .match-strip {
+  background: repeating-linear-gradient(90deg, #7a3b18 0 .7vmin, #b4561e .7vmin 1.4vmin);
+}
+.match-label {
+  position: absolute; left: 10%; right: 10%; top: 42%; bottom: 14%;
+  display: grid; place-items: center;
+  border: .5vmin solid #f3d36a; border-radius: .6vmin;
+  font-family: var(--stencil); font-weight: 700; font-size: clamp(16px, 5vmin, 40px);
+  letter-spacing: .12em; text-transform: uppercase; color: #f9e6a0;
+}
+@keyframes box-in { from { opacity: 0; translate: 0 12vmin; } }
+/* o palito: corre pela lixa da esquerda para a direita a cada riscada */
+.match-stick {
+  --y: calc(52% - var(--box-w) * .02);
+  position: absolute; top: var(--y); left: calc(50% - var(--box-w) * .62);
+  width: calc(var(--box-w) * .6); height: calc(var(--box-w) * .05);
+  transform-origin: 100% 50%; rotate: -12deg;
+  animation: box-in .5s .3s cubic-bezier(.2, .9, .3, 1.2) both;
+}
+.match-wood {
+  position: absolute; left: 0; right: 6%; top: 22%; bottom: 22%;
+  border-radius: .5vmin;
+  background: linear-gradient(#f6e2b4, #d6b97f);
+  box-shadow: .3vmin .5vmin 0 rgba(0, 0, 0, .4);
+}
+.match-head {
+  position: absolute; right: 0; top: 0; width: 14%; height: 100%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 38% 34%, #c23a2e, #6b1610);
+}
+:host(.st-fail) .match-stick { animation: strike-a .34s cubic-bezier(.5, 0, .2, 1) both; }
+:host(.st-spark) .match-stick { animation: strike-b .34s cubic-bezier(.5, 0, .2, 1) both; }
+:host(.st-lit) .match-stick { animation: strike-c .34s cubic-bezier(.5, 0, .2, 1) both; }
+@keyframes strike-a { from { translate: 0 0; } 70% { translate: calc(var(--box-w) * .58) 0; } to { translate: calc(var(--box-w) * .2) 0; } }
+@keyframes strike-b { from { translate: 0 0; } 70% { translate: calc(var(--box-w) * .6) 0; } to { translate: calc(var(--box-w) * .22) 0; } }
+@keyframes strike-c { from { translate: 0 0; } to { translate: calc(var(--box-w) * .64) 0; } }
+:host(.st-drop) .match-stick, :host(.st-out) .match-stick {
+  translate: calc(var(--box-w) * .64) 0;
+  animation: match-fall .4s cubic-bezier(.5, 0, .8, .4) both;
+}
+@keyframes match-fall {
+  from { translate: calc(var(--box-w) * .64) 0; }
+  to { translate: calc(var(--box-w) * .3) 60vmin; rotate: -80deg; scale: 2.2; }
+}
+/* a chama: estoura na terceira riscada e balança */
+.match-flame {
+  position: absolute; right: -14%; bottom: 40%;
+  width: calc(var(--box-w) * .14); height: calc(var(--box-w) * .2);
+  border-radius: 50% 50% 45% 45% / 60% 60% 40% 40%;
+  background: radial-gradient(circle at 50% 72%, #fff8d0 0 16%, #ffc43a 30%, #f07a1e 58%, transparent 72%);
+  transform-origin: 50% 90%;
+  rotate: 12deg;
+  opacity: 0; scale: .1;
+}
+:host(.st-lit) .match-flame, :host(.st-drop) .match-flame, :host(.st-out) .match-flame {
+  opacity: 1; scale: 1;
+  transition: scale .3s .28s cubic-bezier(.2, 1.6, .4, 1), opacity .1s .28s;
+  animation: flame-lick .2s ease-in-out .6s infinite alternate;
+}
+@keyframes flame-lick { to { scale: 1.1 1.2; } }
+/* o clarão de quando acende */
+.match-flash {
+  position: absolute; left: 50%; top: 50%; width: 160vmax; height: 160vmax; margin: -80vmax 0 0 -80vmax;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 236, 180, .55), rgba(255, 170, 70, .18) 25%, transparent 50%);
+  opacity: 0;
+}
+:host(.st-lit) .match-flash { animation: match-flash .7s .28s ease-out both; }
+@keyframes match-flash { 25% { opacity: 1; } to { opacity: .35; } }
+:host(.st-drop) .match-flash { opacity: .35; }
+/* faíscas: saem da ponta da lixa a cada riscada (poucas na que falha) */
+.match-sparks { position: absolute; left: calc(50% + var(--box-w) * .02); top: calc(52% - var(--box-w) * .02); width: 0; height: 0; }
+.match-sparks i {
+  position: absolute; width: 1vmin; height: 1vmin; border-radius: 50%;
+  background: #ffd36b; box-shadow: 0 0 1.2vmin #ffb03a;
+  opacity: 0;
+}
+:host(.st-fail) .match-sparks i:nth-child(-n + 4) { animation: spark-a .35s .2s ease-out both; }
+:host(.st-spark) .match-sparks i:nth-child(-n + 9) { animation: spark-b .45s .2s ease-out both; }
+:host(.st-lit) .match-sparks i { animation: spark-c .55s .22s ease-out both; }
+@keyframes spark-a { from { opacity: .8; translate: 0 0; } to { opacity: 0; translate: calc(var(--dx) * .5) calc(var(--dy) * .4); } }
+@keyframes spark-b { from { opacity: 1; translate: 0 0; } to { opacity: 0; translate: var(--dx) var(--dy); } }
+@keyframes spark-c { from { opacity: 1; translate: 0 0; } to { opacity: 0; translate: calc(var(--dx) * 1.4) calc(var(--dy) * 1.3); } }
+/* o fósforo cai e a tela inunda de laranja; depois tudo some e aparece o fogo de verdade */
+.match-flood {
+  position: absolute; left: 50%; bottom: -20vmin; width: 30vmin; height: 30vmin; margin-left: -15vmin;
+  border-radius: 50%;
+  background: radial-gradient(circle, #ffe08a, #f08a2c 45%, #c2431b 72%);
+  scale: 0;
+}
+:host(.st-drop) .match-flood, :host(.st-out) .match-flood { scale: 12; transition: scale .35s .12s ease-in; }
+
+@keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
