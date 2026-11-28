@@ -88,46 +88,71 @@
     </button>
   }
 
+  <!-- Menu de pausa: tela cheia, fundo sólido; cada item com › abre uma lista nova e "Voltar"
+       sobe um nível (Esc e ○ também). Raiz: Saves, Configurações (Performance, Sons, Vibração),
+       Tutoriais, Debug (Casos de teste) e a saída para o menu principal. -->
   @if (menuOpen()) {
-    <section id="game-menu" class="menu" aria-label="Menu" data-testid="menu">
-      <h2 class="menu-title">Menu</h2>
-      <!-- Saves da sessão: novo jogo, o automático (começo de cada vez) e os slots -->
-      <div class="menu-sub menu-saves-sub">
-        <button
-          type="button"
-          class="menu-sub-toggle"
-          [class.open]="savesOpen()"
-          (click)="savesOpen.set(!savesOpen()); overwriteArmed.set(null); newGameArmed.set(false)"
-          [attr.aria-expanded]="savesOpen()"
-          aria-controls="saves"
-          data-testid="saves-toggle">
-          Saves <span class="menu-sub-arrow" aria-hidden="true">›</span>
+    <section id="game-menu" class="menu" role="dialog" aria-modal="true" [attr.aria-label]="'Menu · ' + menuTitle()" [attr.data-page]="menuPage()" data-testid="menu">
+      <header class="menu-head">
+        <button type="button" class="menu-back" (click)="menuBack()" [attr.aria-label]="menuPage() === 'root' ? 'Voltar ao jogo' : 'Voltar'" data-testid="menu-back">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 5l-7 7 7 7" /></svg>
+          <span class="menu-back-label">Voltar</span>
+          @if (pad()) { <span class="pad-glyph" aria-hidden="true">{{ glyph('cancel') }}</span> }
         </button>
-        @if (savesOpen()) {
-          <div id="saves" class="saves" data-testid="saves">
+        <div class="menu-head-title">
+          <span class="menu-kicker">{{ menuKicker() }}</span>
+          <h2 class="menu-title">{{ menuTitle() }}</h2>
+        </div>
+      </header>
+
+      @switch (menuPage()) {
+        @case ('root') {
+          <ul class="menu-list" role="list">
+            <li><button type="button" class="menu-item primary" (click)="toggleMenu()" data-testid="menu-resume"><span class="menu-item-label">Continuar</span></button></li>
+            <li><button type="button" class="menu-item" (click)="openMenuPage('saves')" data-testid="saves-toggle"><span class="menu-item-label">Saves</span><span class="menu-item-arrow" aria-hidden="true">›</span></button></li>
+            <li><button type="button" class="menu-item" (click)="openMenuPage('settings')" data-testid="settings-toggle"><span class="menu-item-label">Configurações</span><span class="menu-item-arrow" aria-hidden="true">›</span></button></li>
+            @if (hasIntro()) {
+              <li><button type="button" class="menu-item" (click)="replayIntro()" data-testid="menu-intro"><span class="menu-item-label">Rever objetivos da missão</span></button></li>
+            }
+            <li><button type="button" class="menu-item" (click)="openMenuPage('tutorials')" data-testid="tutorials-toggle"><span class="menu-item-label">Tutoriais</span><span class="menu-item-arrow" aria-hidden="true">›</span></button></li>
+            <li><button type="button" class="menu-item" (click)="toggleMenu(); restart()" data-testid="menu-restart"><span class="menu-item-label">Recomeçar a partida</span></button></li>
+            <li><button type="button" class="menu-item" (click)="openMenuPage('debug')" data-testid="debug-toggle"><span class="menu-item-label">Debug</span><span class="menu-item-arrow" aria-hidden="true">›</span></button></li>
+            <li>
+              <button type="button" class="menu-item danger" [class.armed]="quitArmed()" (click)="quitToMainMenu()" data-testid="menu-quit">
+                <span class="menu-item-text">
+                  <span class="menu-item-label">{{ quitArmed() ? 'Toque de novo para sair' : 'Voltar ao menu principal' }}</span>
+                  <span class="menu-item-hint">O automático fica guardado: dá para continuar depois</span>
+                </span>
+              </button>
+            </li>
+          </ul>
+        }
+
+        @case ('saves') {
+          <div class="menu-list saves" data-testid="saves">
             @if (!savesSupported) {
-              <p class="menu-option-hint">Este navegador não guarda saves (modo privado?).</p>
+              <p class="menu-note">Este navegador não guarda saves (modo privado?).</p>
             } @else {
-              <p class="saves-note">Ficam nesta aba do navegador. Salvar guarda o começo do turno atual.</p>
+              <p class="menu-note">Ficam nesta aba do navegador. Salvar guarda o começo do turno atual.</p>
               @if (saveList().auto; as a) {
                 <div class="save-card auto" data-testid="save-auto">
                   <span class="save-tag">Automático</span>
-                  <span class="menu-option-label">{{ a.mapName }} · Turno {{ a.round }}</span>
-                  <span class="menu-option-hint">Vez de {{ a.activeName }} · {{ savedAtLabel(a.savedAt) }}</span>
+                  <span class="menu-item-label">{{ a.mapName }} · Turno {{ a.round }}</span>
+                  <span class="menu-item-hint">Vez de {{ a.activeName }} · {{ savedAtLabel(a.savedAt) }}</span>
                   <div class="save-actions">
                     <button type="button" class="save-btn" (click)="loadSave('auto')" data-testid="load-auto">Carregar</button>
                   </div>
                 </div>
               }
-              <ul class="menu-sub-list" role="list">
+              <ul class="save-list" role="list">
                 @for (row of saveList().slots; track row.slot) {
                   <li class="save-card" [class.empty]="!row.save" [attr.data-testid]="'save-slot-' + row.slot">
                     <span class="save-tag">Slot {{ row.slot }}</span>
                     @if (row.save; as sv) {
-                      <span class="menu-option-label">{{ sv.mapName }} · Turno {{ sv.round }}</span>
-                      <span class="menu-option-hint">Vez de {{ sv.activeName }} · {{ savedAtLabel(sv.savedAt) }}</span>
+                      <span class="menu-item-label">{{ sv.mapName }} · Turno {{ sv.round }}</span>
+                      <span class="menu-item-hint">Vez de {{ sv.activeName }} · {{ savedAtLabel(sv.savedAt) }}</span>
                     } @else {
-                      <span class="menu-option-label save-empty">— vazio —</span>
+                      <span class="menu-item-label save-empty">— vazio —</span>
                     }
                     <div class="save-actions">
                       <button
@@ -148,111 +173,133 @@
             }
             <button
               type="button"
-              class="menu-restart new-game"
+              class="menu-item danger"
               [class.armed]="newGameArmed()"
               (click)="newGame()"
               data-testid="new-game">
-              {{ newGameArmed() ? 'Toque de novo: descartar e começar' : 'Novo jogo' }}
+              <span class="menu-item-label">{{ newGameArmed() ? 'Toque de novo: descartar e começar' : 'Novo jogo' }}</span>
             </button>
           </div>
         }
-      </div>
-      <fieldset class="menu-group">
-        <legend>Renderização</legend>
-        @for (p of renderProfiles; track p.mode) {
-          <label class="menu-option" [class.checked]="renderMode() === p.mode" [attr.data-testid]="'render-' + p.mode">
-            <input type="radio" name="render-mode" [value]="p.mode" [checked]="renderMode() === p.mode" (change)="setRenderMode(p.mode)" />
-            <span class="menu-option-text">
-              <span class="menu-option-label">{{ p.label }}</span>
-              <span class="menu-option-hint">{{ p.hint }}</span>
-            </span>
-          </label>
-        }
-      </fieldset>
-      <fieldset class="menu-group">
-        <legend>Som</legend>
-        <label class="menu-option" [class.checked]="soundOn() && soundSupported" data-testid="sound">
-          <input type="checkbox" [checked]="soundOn()" [disabled]="!soundSupported" (change)="setSound($any($event.target).checked)" />
-          <span class="menu-option-text">
-            <span class="menu-option-label">Sons do jogo</span>
-            <span class="menu-option-hint">
-              @if (soundSupported) { Passos, portas, fogo e o ambiente da mata } @else { Este navegador não toca som }
-            </span>
-          </span>
-        </label>
-      </fieldset>
-      <fieldset class="menu-group">
-        <legend>Celular</legend>
-        <label class="menu-option" [class.checked]="vibration() && vibrationSupported" data-testid="vibration">
-          <input type="checkbox" [checked]="vibration()" [disabled]="!vibrationSupported" (change)="setVibration($any($event.target).checked)" />
-          <span class="menu-option-text">
-            <span class="menu-option-label">Vibração</span>
-            <span class="menu-option-hint">
-              @if (vibrationSupported) { Vibra ao rolar os dados } @else { Este aparelho ou navegador não vibra }
-            </span>
-          </span>
-        </label>
-      </fieldset>
-      @if (renderStats(); as st) {
-        <p class="menu-stats" data-testid="render-stats">
-          Raio {{ st.loadRadius }} · visão {{ st.viewRadius }} · {{ st.chunks }} blocos
-          @if (st.pending) { · montando {{ st.pending }}… } @else { · pronto }
-          <br />{{ st.calls }} desenhos · {{ (st.triangles / 1000).toFixed(0) }} mil triângulos
-        </p>
-      }
-      <div class="menu-sub">
-        <button
-          type="button"
-          class="menu-sub-toggle"
-          [class.open]="testCasesOpen()"
-          (click)="testCasesOpen.set(!testCasesOpen())"
-          [attr.aria-expanded]="testCasesOpen()"
-          aria-controls="test-cases"
-          data-testid="test-cases-toggle">
-          Casos de teste <span class="menu-sub-arrow" aria-hidden="true">›</span>
-        </button>
-        @if (testCasesOpen()) {
-          <ul id="test-cases" class="menu-sub-list" role="list" data-testid="test-cases">
-            @for (c of testCases; track c.id) {
-              <li>
-                <button type="button" class="menu-case" (click)="loadTestCase(c)" [attr.data-testid]="'test-case-' + c.id">
-                  <span class="menu-option-label">{{ c.name }}</span>
-                  <span class="menu-option-hint">{{ c.hint }}</span>
-                </button>
-              </li>
-            }
+
+        @case ('settings') {
+          <ul class="menu-list" role="list">
+            <li>
+              <button type="button" class="menu-item" (click)="openMenuPage('performance')" data-testid="performance-toggle">
+                <span class="menu-item-label">Performance</span>
+                <span class="menu-item-value">{{ renderProfiles.find((p) => p.mode === renderMode())?.label }}</span>
+                <span class="menu-item-arrow" aria-hidden="true">›</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="menu-item" (click)="openMenuPage('sound')" data-testid="sound-toggle">
+                <span class="menu-item-label">Sons</span>
+                <span class="menu-item-value">{{ soundSupported ? (soundOn() ? 'Ligado' : 'Desligado') : 'Sem suporte' }}</span>
+                <span class="menu-item-arrow" aria-hidden="true">›</span>
+              </button>
+            </li>
+            <li>
+              <button type="button" class="menu-item" (click)="openMenuPage('vibration')" data-testid="vibration-toggle">
+                <span class="menu-item-label">Vibração</span>
+                <span class="menu-item-value">{{ vibrationSupported ? (vibration() ? 'Ligada' : 'Desligada') : 'Sem suporte' }}</span>
+                <span class="menu-item-arrow" aria-hidden="true">›</span>
+              </button>
+            </li>
           </ul>
         }
-      </div>
-      @if (hasIntro()) {
-        <button type="button" class="menu-restart" (click)="replayIntro()" data-testid="menu-intro">Rever objetivos da missão</button>
-      }
-      <div class="menu-sub">
-        <button
-          type="button"
-          class="menu-sub-toggle"
-          [class.open]="tutorialsOpen()"
-          (click)="tutorialsOpen.set(!tutorialsOpen())"
-          [attr.aria-expanded]="tutorialsOpen()"
-          aria-controls="tutorials"
-          data-testid="tutorials-toggle">
-          Tutoriais <span class="menu-sub-arrow" aria-hidden="true">›</span>
-        </button>
-        @if (tutorialsOpen()) {
-          <ul id="tutorials" class="menu-sub-list" role="list" data-testid="tutorials">
+
+        @case ('performance') {
+          <fieldset class="menu-list menu-group">
+            <legend class="sr-only">Renderização</legend>
+            @for (p of renderProfiles; track p.mode) {
+              <label class="menu-option" [class.checked]="renderMode() === p.mode" [attr.data-testid]="'render-' + p.mode">
+                <input type="radio" name="render-mode" [value]="p.mode" [checked]="renderMode() === p.mode" (change)="setRenderMode(p.mode)" />
+                <span class="menu-item-text">
+                  <span class="menu-item-label">{{ p.label }}</span>
+                  <span class="menu-item-hint">{{ p.hint }}</span>
+                </span>
+              </label>
+            }
+          </fieldset>
+          @if (renderStats(); as st) {
+            <p class="menu-note menu-stats" data-testid="render-stats">
+              Raio {{ st.loadRadius }} · visão {{ st.viewRadius }} · {{ st.chunks }} blocos
+              @if (st.pending) { · montando {{ st.pending }}… } @else { · pronto }
+              <br />{{ st.calls }} desenhos · {{ (st.triangles / 1000).toFixed(0) }} mil triângulos
+            </p>
+          }
+        }
+
+        @case ('sound') {
+          <div class="menu-list">
+            <label class="menu-option" [class.checked]="soundOn() && soundSupported" data-testid="sound">
+              <input type="checkbox" [checked]="soundOn()" [disabled]="!soundSupported" (change)="setSound($any($event.target).checked)" />
+              <span class="menu-item-text">
+                <span class="menu-item-label">Sons do jogo</span>
+                <span class="menu-item-hint">
+                  @if (soundSupported) { Passos, portas, fogo e o ambiente da mata } @else { Este navegador não toca som }
+                </span>
+              </span>
+            </label>
+          </div>
+        }
+
+        @case ('vibration') {
+          <div class="menu-list">
+            <label class="menu-option" [class.checked]="vibration() && vibrationSupported" data-testid="vibration">
+              <input type="checkbox" [checked]="vibration()" [disabled]="!vibrationSupported" (change)="setVibration($any($event.target).checked)" />
+              <span class="menu-item-text">
+                <span class="menu-item-label">Vibração</span>
+                <span class="menu-item-hint">
+                  @if (vibrationSupported) { Vibra ao rolar os dados } @else { Este aparelho ou navegador não vibra }
+                </span>
+              </span>
+            </label>
+          </div>
+        }
+
+        @case ('tutorials') {
+          <ul id="tutorials" class="menu-list" role="list" data-testid="tutorials">
             @for (l of lessons; track l.id) {
               <li>
-                <button type="button" class="menu-case" (click)="reviewLesson(l.id)" [attr.data-testid]="'menu-lousa-' + l.id">
-                  <span class="menu-option-label">{{ l.label }}</span>
-                  <span class="menu-option-hint">Lousa tática</span>
+                <button type="button" class="menu-item" (click)="reviewLesson(l.id)" [attr.data-testid]="'menu-lousa-' + l.id">
+                  <span class="menu-item-text">
+                    <span class="menu-item-label">{{ l.label }}</span>
+                    <span class="menu-item-hint">Lousa tática</span>
+                  </span>
                 </button>
               </li>
             }
           </ul>
         }
-      </div>
-      <button type="button" class="menu-restart" (click)="toggleMenu(); restart()" data-testid="menu-restart">Recomeçar a partida</button>
-      <button type="button" class="menu-close" (click)="toggleMenu()">Fechar</button>
+
+        @case ('debug') {
+          <ul class="menu-list" role="list">
+            <li>
+              <button type="button" class="menu-item" (click)="openMenuPage('test-cases')" data-testid="test-cases-toggle">
+                <span class="menu-item-label">Casos de teste</span>
+                <span class="menu-item-value">{{ testCases.length }}</span>
+                <span class="menu-item-arrow" aria-hidden="true">›</span>
+              </button>
+            </li>
+          </ul>
+        }
+
+        @case ('test-cases') {
+          <ul id="test-cases" class="menu-list" role="list" data-testid="test-cases">
+            @for (c of testCases; track c.id) {
+              <li>
+                <button type="button" class="menu-item" (click)="loadTestCase(c)" [attr.data-testid]="'test-case-' + c.id">
+                  <span class="menu-item-text">
+                    <span class="menu-item-label">{{ c.name }}</span>
+                    <span class="menu-item-hint">{{ c.hint }}</span>
+                  </span>
+                </button>
+              </li>
+            }
+          </ul>
+        }
+      }
     </section>
   }
 

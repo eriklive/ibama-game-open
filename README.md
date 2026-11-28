@@ -530,7 +530,18 @@ centro é recalculado: o que saiu do raio é descartado e o que entrou é montad
 alguns blocos por quadro (até 4 ms), do mais perto para o mais longe — o bloco antigo só sai quando o
 novo está pronto, então não aparecem buracos. Além do raio fica só um chão liso de mata ("low poly").
 
-O botão **☰** (topo, à direita) abre o **menu**, com três modos (a escolha fica guardada no navegador):
+O botão **☰** (topo, à direita) abre o **menu de pausa**: tela cheia, fundo sólido, e cada item com
+› abre uma lista nova. **Voltar** (no alto, como no lobby; Esc ou ○ no controle) sobe um nível e, na
+raiz, volta ao jogo. No controle, cima/baixo anda pelos itens e ✕ confirma.
+
+- **Continuar**
+- **Saves** — o automático, os slots e *Novo jogo*
+- **Configurações** › **Performance** (os modos abaixo), **Sons** e **Vibração**
+- **Rever objetivos da missão**, **Tutoriais** e **Recomeçar a partida**
+- **Debug** › **Casos de teste** — as situações prontas de `game/test-cases.ts`
+- **Voltar ao menu principal** (dois toques) — sai para a tela inicial; o automático fica guardado
+
+Em **Configurações › Performance** ficam os três modos (a escolha fica guardada no navegador):
 
 | Modo | Pré-renderiza (raio) | Câmera enxerga até | Extras |
 | --- | --- | --- | --- |
@@ -542,12 +553,12 @@ No **Modo Corrida** o mapa de corrida pré-renderiza 90 e enxerga 60 hexágonos 
 (`runnerProfile`), e a névoa não fecha mais perto na câmera rasante: o horizonte inteiro da pista
 aparece e o garimpeiro nunca some na névoa. A densidade de pixels e as sombras são as do modo.
 
-O submenu **Tutoriais** reabre as lousas táticas (**Abordagem** e **Interrogatório**), que também abrem
+O item **Tutoriais** reabre as lousas táticas (**Abordagem** e **Interrogatório**), que também abrem
 sozinhas na primeira vez que a situação aparece (`game/tactical-board.ts`). A do interrogatório
 mostra o toque no rendido: um toque marca o caminho até o raio de conversa, o segundo anda até lá e
 abre a conversa.
 
-O menu também mostra quantos blocos estão carregados e se ainda há algum sendo montado. Como tudo é
+A página **Performance** também mostra quantos blocos estão carregados e se ainda há algum sendo montado. Como tudo é
 desenhado em poucas malhas instanciadas — o chão da missão (cor, brilho e flutuação por hexágono),
 e cada bloco de 12 × 12 hexágonos do mundo (chão, contornos, troncos, copas, pinheiros e sulcos) —,
 o número de chamadas de desenho fica baixo mesmo com a câmera afastada. Código: `world-stream.ts`
